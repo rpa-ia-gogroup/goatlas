@@ -1,0 +1,2 @@
+# Scripts de hook rodam em bash — CRLF os quebra ("\r: command not found").
+*.sh text eol=lf

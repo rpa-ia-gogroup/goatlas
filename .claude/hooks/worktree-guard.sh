@@ -19,9 +19,27 @@ INPUT="$(cat)"
 
 FILE="$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)"
 [ -z "$FILE" ] && exit 0
+CWD="$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
 
+# Canoniza caminho: barras normais, /c/x e C:/x na mesma forma, minúsculas
+# (Windows é case-insensitive). Só para COMPARAR — nunca para exibir.
+norm() {
+  printf '%s' "$1" | tr '\\' '/' | sed -E 's|^/([a-zA-Z])/|\1:/|' | tr 'A-Z' 'a-z'
+}
+
+# Caminho relativo → resolve contra o cwd da sessão.
+case "$(norm "$FILE")" in
+  /*|[a-z]:/*) ;;
+  *) [ -n "$CWD" ] && FILE="$CWD/$FILE" ;;
+esac
+
+# Para consultar o git precisamos de um diretório que exista: sobe até achar um.
 DIR="$(dirname "$FILE")"
-while [ ! -d "$DIR" ] && [ "$DIR" != "/" ] && [ "$DIR" != "." ]; do DIR="$(dirname "$DIR")"; done
+while [ ! -d "$DIR" ]; do
+  PARENT="$(dirname "$DIR")"
+  [ "$PARENT" = "$DIR" ] && break
+  DIR="$PARENT"
+done
 [ -d "$DIR" ] || exit 0
 
 GIT_DIR="$(git -C "$DIR" rev-parse --git-dir 2>/dev/null)" || exit 0
@@ -33,21 +51,22 @@ case "$GIT_DIR" in */worktrees/*) exit 0 ;; esac
 # Repo sem commit ainda (bootstrap) → liberado.
 git -C "$DIR" rev-parse HEAD >/dev/null 2>&1 || exit 0
 
-# Caminho relativo à raiz do repo, normalizado com barras normais.
-ABS="$(cd "$DIR" && pwd)/$(basename "$FILE")"
-REL="${ABS#"$TOPLEVEL"/}"
-REL="$(echo "$REL" | tr '\\' '/')"
+NF="$(norm "$FILE")"
+NT="$(norm "$TOPLEVEL")"
+REL="${NF#"$NT"/}"
+# Não conseguiu relativizar (arquivo fora do repo?) → não avalia.
+[ "$REL" = "$NF" ] && exit 0
 
 # Allowlist: planejamento e configuração do processo.
 case "$REL" in
-  docs/*|specs/*|.claude/*|.specify/*|.gitignore|LICENSE) exit 0 ;;
-  *.md) case "$REL" in */*) ;; *) exit 0 ;; esac ;;
+  docs/*|specs/*|.claude/*|.specify/*|.gitignore|.gitattributes|license) exit 0 ;;
+  */*) ;;
+  *.md) exit 0 ;;
 esac
 
 BRANCH="$(git -C "$DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
 
 if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
-  SLUG="$(basename "$REL" | tr -cd 'a-zA-Z0-9._-')"
   read -r -d '' REASON <<EOF || true
 Bloqueado pelo worktree-guard do goatlas (constituição, Princípio XII).
 
@@ -58,10 +77,10 @@ Regra do projeto: qualquer tarefa que edite código começa com branch nova em
 worktree isolado — outras sessões do Claude trabalham no mesmo repo e edições na
 principal atropelam as delas.
 
-Faça isto antes de editar (nomeie a branch pela tarefa, não pelo arquivo):
+Faça isto antes de editar (nomeie a branch pela TAREFA, não pelo arquivo):
   git -C "$TOPLEVEL" fetch origin
   git -C "$TOPLEVEL" worktree add .claude/worktrees/<branch> -b <branch>
-e refaça a edição sob .claude/worktrees/<branch>/$REL
+e refaça a edição em .claude/worktrees/<branch>/$REL
 
 Editando um artefato de planejamento (docs/, specs/, .claude/, .specify/, *.md da
 raiz)? Esses são liberados na principal — confira o caminho.
