@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+logs/
+
+# Worktrees das sessões do Claude (constituição, Princípio XII)
+.claude/worktrees/
+
+# Configuração local por máquina — settings.json (hooks do processo) É commitado
+.claude/settings.local.json
+
+# SQLite local de desenvolvimento
+*.db
+*.db-shm
+*.db-wal

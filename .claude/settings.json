@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\Program Files\\Git\\bin\\bash.exe\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Edit|Write|NotebookEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\Program Files\\Git\\bin\\bash.exe\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-guard.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\Program Files\\Git\\bin\\bash.exe\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/commit-pr-guard.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "GoDeploy__(createApp|updateApp)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\Program Files\\Git\\bin\\bash.exe\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/deploy-guard.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
