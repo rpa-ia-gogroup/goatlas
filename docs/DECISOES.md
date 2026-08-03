@@ -67,17 +67,86 @@ requisição seguinte.
 
 ---
 
-### D-03 · Repositório: `while-kaique/goatlas` por ora
-**Data:** 03/08/2026 · **Quem:** Kaique · **Status:** provisória
+### D-03 · Repositório: `rpa-ia-gogroup/goatlas` (privado)
+**Data:** 03/08/2026 · **Quem:** Kaique · **Status:** fechada
 
-Os requisitos pedem o repo na "organização de RPA no GitHub". A conta autenticada
-(`while-kaique`, token com escopo `read:org`) **não pertence a nenhuma organização**
-— e `godocs-main`, o app irmão, também vive na conta pessoal. O repo nasce em
-`while-kaique/goatlas`.
+Como os requisitos pediam, o repo vive na organização de RPA:
+**`rpa-ia-gogroup/goatlas`**, privado. Kaique é admin da org.
 
-**Se a org existir**, transferir depois é uma operação só
-(`gh api -X POST repos/while-kaique/goatlas/transfer -f new_owner=<org>`); o remote
-local se ajusta com `git remote set-url`. Nada no código depende disso.
+Nasceu em `while-kaique/goatlas` (a org ainda não aparecia para o token) e foi
+**transferido** no mesmo dia; o remote local aponta para a org. Nada no código
+depende do host — o app irmão `godocs-main` continua na conta pessoal.
+
+---
+
+### D-04 · Fase 1 ganha um formulário mínimo de abertura sem agente
+**Data:** 03/08/2026 · **Quem:** Kaique · **Status:** fechada
+
+Resolve a contradição encontrada no material de origem: o faseamento (§12) tirava
+`RF-27` da Fase 1, mas **RNF-18** define o formulário estruturado como *o* caminho
+de degradação quando a API de IA falha, e a **Definição de Pronto da Fase 1** (§13)
+exige explicitamente *"falha da API de IA não impede abrir chamado"*.
+
+**Decisão:** entra na Fase 1 um formulário **mínimo** — título, descrição, tipo
+vindo da allowlist (`RF-28`) e prioridade escolhida pelo usuário. **Não** entra a
+renderização dinâmica a partir do schema de campos do tipo de chamado
+(`/servicedesk/{id}/requesttype/{id}/field`), que é o que `RF-27` pede por
+inteiro: essa parte vai para a Fase 2.
+
+**Por quê:** sem caminho sem-IA, uma indisponibilidade do provedor externo derruba
+a única porta de entrada de chamados da empresa. Custo de um formulário simples é
+pequeno perto de um ponto único de falha nessa posição.
+
+**Consequência:** `RF-27` passa a ser parcialmente Fase 1 (formulário mínimo) e
+parcialmente Fase 2 (campos dinâmicos). Como o formulário abre chamado, ele passa
+pelas **mesmas** travas de servidor da criação por conversa — `RF-17`
+(confirmação), `RF-24` (idempotência), `RF-21`/`RF-22` (solicitante e vínculo),
+`RF-28` (allowlist) — **exceto** `RF-08`/`RN-01`: sem conversa não há tools a
+ordenar, e por isso todo chamado nascido do formulário é registrado como **não
+verificado pelas regras**, para não virar bypass silencioso da deflexão
+(Princípio XI). Se o formulário virar rota de fuga da Regra 1/2, isso aparece na
+métrica e o produto decide o que fazer.
+
+---
+
+### D-05 · Q6 (parcial): a camada de IA aponta para o proxy corporativo
+**Data:** 03/08/2026 · **Quem:** Kaique · **Status:** parcial — falta a parte do João
+
+**RNF-34** manda preferir o proxy de IA corporativo "se já existir". Ele existe e
+já está em produção no `godocs`: `ai-proxy.gogroupbr.com`, compatível com a API da
+OpenAI, configurado por `LLM_BASE_URL` + `API_PROXY_TOKEN`, com fallback direto ao
+provedor quando o gateway demora ou erra.
+
+**Decisão:** a camada de IA do goatlas (`RNF-23`) é planejada contra esse proxy. O
+app **não** contrata acesso novo.
+
+**Continua em aberto, e é do João:** a política de **retenção e treinamento** do
+provedor por trás do proxy — `RNF-34` exige verificar, porque conteúdo interno
+(tickets e Confluence) trafega para lá. Isso não bloqueia a arquitetura, mas
+bloqueia o rollout: é conformidade, não implementação.
+
+**Lição do godocs a herdar no plano:** o proxy pode demorar. O godocs usa timeout
+de ~25s com fallback direto ao provedor — sem isso, `RNF-12` (primeira resposta
+< 5s no p95) fica à mercê do gateway.
+
+---
+
+### D-06 · Planejar todas as fases marcando as suposições
+**Data:** 03/08/2026 · **Quem:** Kaique · **Status:** fechada, com prazo
+
+Kaique optou por planejar **as quatro fases** agora, assumindo defaults para as
+perguntas em aberto e **marcando cada suposição**, em vez de parar no `/clarify`.
+
+**Tensão declarada:** contraria o Princípio II (No Guessing) e o gate do `/plan`.
+Aceita conscientemente para ter a visão completa do trabalho antes de começar.
+
+**Condições que tornam isso seguro — e que não são opcionais:**
+1. Toda suposição aparece marcada como **`[SUPOSIÇÃO]`** no artefato, com a
+   pergunta Q de origem. Nunca dissolvida no texto como se fosse decisão.
+2. Suposição **não autoriza implementar**. Tarefa marcada `[BLOQUEADA: Qn]` não
+   entra em `/implement` antes da resposta estar aqui — o gate segue valendo.
+3. Quando a resposta chegar, o plano é **revisado**, não remendado: a suposição
+   errada pode invalidar tarefas inteiras, e isso é esperado.
 
 ---
 
@@ -93,7 +162,7 @@ implementado antes da resposta.
 | Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | RF-14 — e sem ele a Regra 2 classifica mal (é pré-requisito, não refinamento) |
 | Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | RF-21, RNF-21 (reconciliação) |
 | Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | RF-37, RF-38 e o `search_confluence` da Regra 1 |
-| Q6 | Qual API de IA — existe proxy corporativo contratado? Qual a política de retenção do provedor? | João | Toda a M2. **RNF-34** (conteúdo interno sai para IA externa) |
+| Q6 | ~~Qual API de IA?~~ Resta: qual a **política de retenção/treinamento** do provedor atrás do proxy corporativo? | João | **Provedor decidido — ver D-05.** O que resta bloqueia o *rollout* (conformidade **RNF-34**), não a arquitetura |
 | Q7 | Quais domínios de e-mail além de `@gocase.com` são válidos? | João | RF-01, RF-05 (allowlist de domínio no servidor) |
 | Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | RF-53 (custo mensal e assentos ociosos) |
 | Q9 | Como comunicar o SLA de 24h às áreas que hoje têm retorno em 2h30 sem soar como piora? | João + Produto | Não bloqueia código; bloqueia **rollout** (R-05) |

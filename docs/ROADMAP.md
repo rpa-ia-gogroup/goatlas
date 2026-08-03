@@ -8,10 +8,20 @@ worktree.
 | Fase | Spec | Escopo (IDs) | Estado | Depende de |
 |---|---|---|---|---|
 | **0 — Diagnóstico** | *não tem spec (sem código)* | Levantamento via Organizations API; rebaixamento de assentos óbvios | Pendente — **João** | Q1 (credencial de Org Admin) |
-| **1 — MVP** | [`001-mvp-chamados-e-agente`](../specs/001-mvp-chamados-e-agente/spec.md) | M1 `RF-01…06` · M2 `RF-07…26` · M3 `RF-29…33` | **spec em draft** | Q1, Q2, Q3, Q4, Q6, Q7 |
-| **2 — Conhecimento e governança** | `002-confluence-e-governanca` | M4 `RF-37…40` · M6 `RF-49…54` | Não iniciada | Fase 1 · Q5, Q8 · Fase 0 (números) |
-| **3 — SLA e notificações** | `003-sla-e-notificacoes` | M5 `RF-44…48` · `RF-55` | Não iniciada | Fase 1 · Q11 |
-| **4 — Rollout** | `004-piloto-e-rollout` | Piloto, calibragem de thresholds com dado real | Não iniciada | Fases 1–3 · Q9, Q10, Q13 |
+| **1 — MVP** | [`001-mvp-chamados-e-agente`](../specs/001-mvp-chamados-e-agente/spec.md) | M1 `RF-01…06` · M2 `RF-07…26` · `RF-27` parcial (**D-04**) · M3 `RF-29…33` · transversais `RF-58`, `RF-59` | **spec + plan + tasks em draft** — 97 tarefas, 8 bloqueadas | Q1, Q2, Q3, Q4, Q7 |
+| **2 — Conhecimento e governança** | [`002-confluence-e-governanca`](../specs/002-confluence-e-governanca/spec.md) | M4 `RF-37…43` · M6 `RF-49…54`, `RF-56`, `RF-57` · `RF-27` completo | **spec em draft** | Fase 1 · Q5, Q8 · Fase 0 (números) |
+| **3 — SLA e notificações** | [`003-sla-e-notificacoes`](../specs/003-sla-e-notificacoes/spec.md) | M5 `RF-44…48` · `RF-55`, `RF-60` · `RF-34…36` | **spec em draft** | Fase 1 · Q11 |
+| **4 — Rollout** | [`004-piloto-e-rollout`](../specs/004-piloto-e-rollout/spec.md) | Piloto, calibragem com dado real, `RF-19`, métricas O1–O7 | **spec em draft** | Fases 1–3 · Q9, Q10, Q13 |
+
+**Todas as quatro specs existem** (decisão `D-06`: planejar tudo marcando
+suposições). A profundidade é proporcional à distância — a 001 tem `plan.md` e
+`tasks.md`; as outras têm cenários e critérios, e ganham plano quando a fase
+anterior estiver em produção, porque o dado real muda o desenho.
+
+**O que dá para fazer hoje, sem nenhuma resposta:** Phase 0 e Phase 1 do
+[`tasks.md`](../specs/001-mvp-chamados-e-agente/tasks.md) inteiras e a maior parte
+da Phase 2 — fundação, fakes e **todos os testes de bypass**. Dá para chegar com as
+travas críticas provadas antes de a primeira credencial existir.
 
 **M7 (observabilidade e auditoria) não é uma fase.** `RF-58` (auditoria
 append-only), `RF-59` (health check) e `RN-10` são transversais e entram já na

@@ -3,9 +3,9 @@ feature: "MVP — agente de chamados e acompanhamento"
 id: "001"
 status: draft          # draft | clarified | planned | in-progress | done
 created: "2026-08-03"
-spec_version: 1
+spec_version: 2
 requirements: "../../docs/REQUISITOS.md"
-scope_ids: "M1 RF-01…06 · M2 RF-07…26 · M3 RF-29…33 · transversais RF-58, RF-59"
+scope_ids: "M1 RF-01…06 · M2 RF-07…26 · RF-27 parcial (D-04) · M3 RF-29…33 · transversais RF-58, RF-59"
 ---
 
 # Spec 001: MVP — agente de chamados e acompanhamento
@@ -48,7 +48,13 @@ valor sozinha (`R-11`).
 - **Nenhum vazamento**: nem chamado de outra pessoa, nem comentário interno, nem
   credencial.
 
+- Existir um caminho de abertura **sem IA**, para que a queda do provedor não
+  derrube a porta de entrada de chamados da empresa (`RNF-18`, **D-04**).
+
 **Non-Goals (fora desta fase, explicitamente)**
+- Renderização dinâmica dos campos do formulário a partir do schema do tipo de
+  chamado (a parte "completa" de `RF-27`) — Fase 2. Nesta fase o formulário é
+  **mínimo**: título, descrição, tipo da allowlist e prioridade (**D-04**).
 - Superfície própria de Confluence (busca/leitura como tela) — Fase 2. Nesta fase
   o Confluence entra **só** como `search_confluence` a serviço da Regra 1.
 - Console de governança de assentos — Fase 2.
@@ -226,6 +232,25 @@ fluxo só funcionar para quem tem conta, a fase falhou.
   - **When** ele comenta
   - **Then** o comentário é público e atribuído de forma **legível** ao solicitante real, apesar de tecnicamente partir da conta de serviço.
 
+### Formulário mínimo — caminho sem IA (D-04)
+
+- **SC-30** · `RNF-18`, `RF-27` (parcial), Princípio XI
+  - **Given** que a API de IA está indisponível
+  - **When** o colaborador quer abrir chamado
+  - **Then** o formulário mínimo está disponível — título, descrição, tipo vindo da
+    allowlist e prioridade escolhida por ele — e o chamado é criado. Mensagem do
+    tipo "não consegui abrir seu chamado" é **falha do cenário**.
+- **SC-31** **[bypass]** · `RF-21`, `RF-22`, `RF-24`, `RF-28`, **D-04**
+  - **Given** um chamado aberto pelo formulário, não pela conversa
+  - **When** ele é criado
+  - **Then** passa pelas **mesmas** travas de servidor da criação por conversa
+    (solicitante gravado, vínculo persistido, idempotência, tipo na allowlist) e é
+    registrado como **não verificado pelas regras** — para que o formulário não
+    seja rota de fuga silenciosa da deflexão. `RF-08`/`RN-01` não se aplicam aqui:
+    sem conversa não há tools a ordenar.
+  - **Verificação:** teste que confere a marcação de "não verificado" **e**
+    consulta que consiga medir quantos chamados entraram por essa via.
+
 ### Auditoria (transversal)
 
 - **SC-28** · `RF-58`, `RN-10`
@@ -252,6 +277,7 @@ escopo desta fase, e onde ele é verificado.
 | M2 Priorização | `RF-15` `RF-16` `RF-18` `RN-08` | SC-15 |
 | M2 Criação | `RF-17` `RF-20`…`RF-22` `RF-24` `RF-26` `RF-28` `RN-02` `RN-03` | SC-16 … SC-22 |
 | M3 Acompanhamento | `RF-29`…`RF-33` `RN-04` `RN-05` | SC-23 … SC-27 |
+| Caminho sem IA (D-04) | `RF-27` parcial · `RNF-18` | SC-30, SC-31 |
 | Transversais | `RF-58` `RF-59` `RN-10` | SC-28, SC-29 |
 | **P1 dentro da faixa** | `RF-19` `RF-23` `RF-25` | sem cenário nesta versão — entram após as travas P0 |
 
@@ -340,15 +366,14 @@ de a resposta estar em [`DECISOES.md`](../../docs/DECISOES.md).
       classifica mal e produz falso bloqueio (`R-04`).
 - [ ] **Q4** — O campo customizado "Solicitante" já existe no projeto do portal?
       *(João + tech)* → bloqueia `RF-21`.
-- [ ] **Q6** — Qual API de IA, e qual a política de retenção do provedor. *(João)*
-      → bloqueia toda a M2 e a conformidade de `RNF-34`.
+- [x] **Q6** — **Resolvida na parte que bloqueava** (`D-05`): a camada de IA aponta
+      para o proxy corporativo `ai-proxy.gogroupbr.com`. Resta a política de
+      retenção/treinamento do provedor *(João)* — bloqueia **rollout**
+      (`RNF-34`), não a arquitetura.
 - [ ] **Q7** — Quais domínios de e-mail além de `@gocase.com`. *(João)* →
       bloqueia `RF-01`/`RF-05`.
-- [ ] `[NEEDS CLARIFICATION: RNF-18 e a Definição de Pronto exigem que a falha da
-      API de IA não impeça abrir chamado, e o caminho de degradação previsto é o
-      formulário estruturado RF-27 — que o faseamento tira da Fase 1. Contradição
-      real. Entra um formulário mínimo na Fase 1 (recomendado), ou a degradação
-      da Fase 1 é outra coisa?]` — ver §11.
+- [x] **Contradição `RF-27` × `RNF-18` — resolvida** (`D-04`): formulário mínimo
+      entra na Fase 1 (SC-30, SC-31); campos dinâmicos ficam para a Fase 2.
 - [ ] `[NEEDS CLARIFICATION: "conta desativada no Workspace tem acesso negado na
       requisição seguinte" (RF-05) depende de como o edge OAuth do GoDeploy se
       comporta com conta desativada — se ele mantém a sessão, negar de imediato
@@ -359,33 +384,31 @@ de a resposta estar em [`DECISOES.md`](../../docs/DECISOES.md).
       corpo do comentário (visível a todos, inclusive no Jira nativo) é aceitável
       para o time de tech, ou há outro caminho?]` *(interage com R-03 e Q10)*
 
-## 11. Inconsistência encontrada no faseamento (decidir antes do `/plan`)
+## 11. Inconsistência do faseamento — **resolvida**
 
-O faseamento (§12) exclui `RF-27` (fallback de formulário estruturado) da Fase 1.
-Mas duas coisas da Fase 1 dependem dele:
+O faseamento (§12) excluía `RF-27` (fallback de formulário estruturado) da Fase 1,
+enquanto **RNF-18** o definia como *o* caminho de degradação da falha de IA e a
+**Definição de Pronto** (§13) exigia *"falha da API de IA não impede abrir
+chamado"*. Sem caminho sem-IA, uma indisponibilidade do provedor derrubaria a
+única porta de entrada de chamados da empresa.
 
-- **RNF-18** define o formulário estruturado como **o** caminho de degradação
-  quando a API de IA falha;
-- a **Definição de Pronto da Fase 1** (§13) exige explicitamente: *"Falha da API
-  de IA não impede abrir chamado"*.
-
-Sem algum caminho sem-IA, esses dois requisitos não fecham — e a consequência não
-é cosmética: uma indisponibilidade da API de IA derruba a única porta de entrada
-de chamados da empresa.
-
-**Recomendação:** entra na Fase 1 um formulário **mínimo** de abertura sem agente
-(título, descrição, tipo da allowlist, prioridade escolhida pelo usuário), sem a
-renderização dinâmica a partir do schema de campos que `RF-27` pede — essa parte
-fica para depois. Custo pequeno, e remove um ponto único de falha. Alternativa
-mais barata, se o formulário não couber: aceitar conscientemente que a Fase 1 não
-atende `RNF-18` e registrar em `DECISOES.md` — mas isso significa lançar com a
-porta de entrada dependendo da disponibilidade de um provedor de IA externo.
+**Resolvido em `D-04`:** formulário **mínimo** na Fase 1 (título, descrição, tipo
+da allowlist, prioridade), campos dinâmicos na Fase 2. Cenários SC-30 e SC-31.
 
 ---
 ## Requirement Completeness — checklist (gate antes do `/plan`)
-- [ ] Nenhum `[NEEDS CLARIFICATION]` pendente — **3 abertos** + 6 perguntas Q
+- [ ] Nenhum `[NEEDS CLARIFICATION]` pendente — **2 abertos** (comportamento do
+      edge com conta desativada; como atribuir o comentário ao solicitante real)
+      + **Q1, Q2, Q3, Q4, Q7** aguardando o João
 - [x] Todo requisito no escopo é testável e mapeia a pelo menos um cenário
 - [x] Success Criteria mensuráveis
 - [x] Non-Goals e itens P1 explícitos
 - [x] Nenhum detalhe de implementação (stack/endpoint/SQL) vazou para a spec
 - [x] Cenários de **bypass** existem para toda trava crítica (Princípio III e X)
+
+> **Nota de processo:** o gate acima **não está limpo**, e o `/plan` avançou de
+> qualquer forma por decisão registrada em `D-06` (planejar todas as fases marcando
+> suposições). Toda suposição no `plan.md` e no `tasks.md` aparece como
+> **`[SUPOSIÇÃO]`** com a pergunta de origem, e tarefa marcada **`[BLOQUEADA: Qn]`**
+> não entra em `/implement` antes da resposta. O gate segue valendo para
+> implementar — só não travou o planejar.
