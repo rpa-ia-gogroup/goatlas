@@ -1770,7 +1770,12 @@ function avaliarRegra1(paginas, thresholdScore) {
     regra: "regra1_confluence",
     motivoTecnico: `${acimaDoThreshold.length} p\xE1gina(s) com score >= ${thresholdScore}`,
     evidencia: {
-      paginas: acimaDoThreshold.map((p) => ({ titulo: p.titulo, url: p.url, score: p.score }))
+      paginas: acimaDoThreshold.map((p) => ({
+        id: p.id,
+        titulo: p.titulo,
+        url: p.url,
+        score: p.score
+      }))
     }
   };
 }
@@ -1795,10 +1800,13 @@ function avaliarRegra2(classificados, thresholdRecorrencia) {
     }
   };
 }
+function urlDeLeituraNoApp(idPagina) {
+  return `/?pagina=${encodeURIComponent(idPagina)}`;
+}
 function montarMensagemBloqueio(veredito) {
   if (veredito.regra === "regra1_confluence") {
     const ev2 = veredito.evidencia;
-    const links = ev2.paginas.slice(0, 3).map((p) => `- [${p.titulo}](${p.url})`).join("\n");
+    const links = ev2.paginas.slice(0, 3).map((p) => `- [${p.titulo}](${p.id ? urlDeLeituraNoApp(p.id) : p.url})`).join("\n");
     return [
       "Achei documenta\xE7\xE3o que parece responder exatamente isso \u2014 vale olhar antes de abrir o chamado, porque a resposta pode estar a um clique daqui:",
       "",

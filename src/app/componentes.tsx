@@ -177,7 +177,7 @@ export function Vazio({
  * ⚠️ **Não usa `dangerouslySetInnerHTML`.** O texto do agente pode conter trecho de
  * página do Confluence, que é editável por qualquer pessoa da empresa — injetar HTML
  * aí seria XSS armazenado (RNF-06). Aqui tudo vira nó de React, e link só é criado
- * quando a URL aponta para `http(s)`.
+ * quando a URL aponta para `http(s)` **ou** casa com a rota de leitura do app.
  */
 export function TextoDoAgente({ texto }: { texto: string }) {
   const linhas = texto.split('\n')
@@ -199,6 +199,17 @@ export function TextoDoAgente({ texto }: { texto: string }) {
   )
 }
 
+/**
+ * A ÚNICA forma de caminho interno que vira link — `T-118`.
+ *
+ * ⚠️ É allowlist de **forma**, não "começa com barra". Este texto carrega saída do
+ * modelo, que pode repetir conteúdo de página do Confluence editável por qualquer
+ * pessoa (`R-07`): aceitar qualquer caminho deixaria o modelo (ou a página) escolher
+ * para onde o app manda um colega clicar. O id é aceito percent-encoded porque é
+ * assim que `urlDeLeituraNoApp` o escreve.
+ */
+const ROTA_DE_LEITURA = /^\/\?pagina=(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f]{2})+$/
+
 function formatarInline(texto: string): ReactNode[] {
   const nós: ReactNode[] = []
   // Um passo só: link ou negrito, na ordem em que aparecerem.
@@ -211,8 +222,21 @@ function formatarInline(texto: string): ReactNode[] {
     if (m.index > ultimo) nós.push(texto.slice(ultimo, m.index))
     if (m[1] && m[2]) {
       const url = m[2]
-      // Só http(s). `javascript:` e afins não viram link.
-      if (/^https?:\/\//i.test(url)) {
+      // A deflexão da Regra 1 aponta para a leitura DENTRO do app (T-118).
+      //
+      // ⚠️ **Em outra aba, de propósito.** A conversa vive em estado de React: navegar
+      // na mesma aba a destrói, e com ela vai o botão "isso não resolve meu caso" —
+      // ou seja, a pessoa perderia justamente o caminho de override (RF-13) ao aceitar
+      // o convite de ler primeiro. Ler ao lado e voltar para a conversa intacta é o
+      // comportamento que a deflexão precisa.
+      if (ROTA_DE_LEITURA.test(url)) {
+        nós.push(
+          <a key={chave++} href={url} target="_blank" rel="noopener">
+            {m[1]}
+          </a>,
+        )
+      } else if (/^https?:\/\//i.test(url)) {
+        // Só http(s). `javascript:` e afins não viram link.
         nós.push(
           <a key={chave++} href={url} target="_blank" rel="noopener noreferrer">
             {m[1]}

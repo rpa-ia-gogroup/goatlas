@@ -104,11 +104,11 @@ export function apiDev(): Plugin {
       fake.estado.paginas = [
         {
           id: 'p1',
-          titulo: 'Como reprocessar o pipeline de vendas',
+          titulo: 'Como reprocessar o relatório de vendas',
           espaco: 'TECH',
           url: 'https://goengenharia.atlassian.net/wiki/spaces/TECH/pages/1',
           score: 0.92,
-          trecho: 'Para reprocessar, acesse o painel e rode a tarefa manual.',
+          trecho: 'Quando o relatório de vendas não atualiza, rode a tarefa manual no painel.',
           labels: [],
         },
         {
@@ -141,13 +141,13 @@ export function apiDev(): Plugin {
       // tela de leitura não é exercitada. Storage format de verdade, com macro não
       // suportada e tabela, para ver `RF-43` e a rolagem de tabela no celular.
       fake.estado.conteudoPaginas.set('p1', {
-        titulo: 'Como reprocessar o pipeline de vendas',
+        titulo: 'Como reprocessar o relatório de vendas',
         espaco: 'TECH',
         labels: [],
         atualizadoEm: '2026-07-28T13:20:00.000Z',
         storage: [
           '<h2>Quando usar</h2>',
-          '<p>Use este procedimento quando o relatório diário <strong>não atualizar</strong> até as 9h.</p>',
+          '<p>Use este procedimento quando o <strong>relatório de vendas</strong> não atualizar até as 9h.</p>',
           '<ol><li>Abra o painel de tarefas</li><li>Procure a rotina <code>vendas_diario</code></li><li>Execute o reprocessamento manual</li></ol>',
           '<ac:structured-macro ac:name="info"><ac:rich-text-body><p>O reprocessamento leva cerca de 10 minutos.</p></ac:rich-text-body></ac:structured-macro>',
           '<h2>Se não resolver</h2>',
@@ -165,7 +165,7 @@ export function apiDev(): Plugin {
           '<table><thead><tr><th>Sigla</th><th>Cidade</th><th>Responsável</th></tr></thead>',
           '<tbody><tr><td>GC</td><td>Fortaleza</td><td>Operações</td></tr>',
           '<tr><td>GB</td><td>São Paulo</td><td>Expansão</td></tr></tbody></table>',
-          '<p>Dúvida sobre uma sigla nova? Veja <ac:link><ri:page ri:content-title="Como reprocessar o pipeline de vendas" /></ac:link>.</p>',
+          '<p>Dúvida sobre uma sigla nova? Veja <ac:link><ri:page ri:content-title="Como reprocessar o relatório de vendas" /></ac:link>.</p>',
         ].join(''),
       })
 

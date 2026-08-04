@@ -168,7 +168,10 @@ describe('Definição de Pronto — o fluxo completo pela conversa', () => {
     // RF-12 — os três elementos: regra, motivo legível, link.
     expect(t1.bloqueado).toBe(true)
     expect(t1.regraBloqueio).toBe('regra1_confluence')
-    expect(t1.texto).toContain('wiki/spaces/TECH')
+    // T-118 — e o link leva à leitura DENTRO do app, que é o que quem não tem assento
+    // consegue abrir. Ponta a ponta: o id sai do cliente e chega na mensagem.
+    expect(t1.texto).toContain('/?pagina=p1')
+    expect(t1.texto).not.toContain('atlassian.net')
     expect(t1.texto).toContain('Como reprocessar')
     // RNF-31 — soa como ajuda, não recusa.
     expect(t1.texto).not.toMatch(/negad|recus|proibid/i)
