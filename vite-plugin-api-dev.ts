@@ -90,7 +90,13 @@ export function apiDev(): Plugin {
 
       // Dados de fake para a UI ter o que mostrar.
       const fake = inicial.atlassian as unknown as {
-        estado: { tiposChamado: unknown[]; paginas: unknown[] }
+        estado: {
+          tiposChamado: unknown[]
+          paginas: unknown[]
+          conteudoPaginas: Map<string, unknown>
+          anexos: Map<string, unknown>
+          idsRestritos: Set<string>
+        }
       }
       fake.estado.tiposChamado = [
         { id: 'rt-dev', serviceDeskId: 'sd-dev', nome: 'Suporte de tecnologia', descricao: null },
@@ -105,7 +111,63 @@ export function apiDev(): Plugin {
           trecho: 'Para reprocessar, acesse o painel e rode a tarefa manual.',
           labels: [],
         },
+        {
+          id: 'p2',
+          titulo: 'Padrão de nomes das lojas no sistema',
+          espaco: 'TECH',
+          url: 'https://goengenharia.atlassian.net/wiki/spaces/TECH/pages/2',
+          score: 0.38,
+          trecho: 'As lojas seguem o padrão SIGLA-CIDADE em todos os relatórios.',
+          labels: [],
+        },
+        // Página RESTRITA: some da busca e da leitura (RN-06). Está aqui para o dev
+        // ver a trava funcionando, não só passar nos testes.
+        {
+          id: 'p3',
+          titulo: 'Somente diretoria — planejamento',
+          espaco: 'TECH',
+          url: 'https://goengenharia.atlassian.net/wiki/spaces/TECH/pages/3',
+          score: 0.99,
+          trecho: 'não deveria aparecer',
+          labels: [],
+        },
       ]
+      fake.estado.idsRestritos = new Set(['p3'])
+      // Busca que devolve tudo para qualquer termo faz a tela parecer quebrada — em dev
+      // o fake imita o `text ~` do CQL (ver `filtrarPorTermo` no fake).
+      ;(fake.estado as unknown as { filtrarPorTermo: boolean }).filtrarPorTermo = true
+
+      // Corpo das páginas — sem isso a leitura em dev responde "não encontramos", e a
+      // tela de leitura não é exercitada. Storage format de verdade, com macro não
+      // suportada e tabela, para ver `RF-43` e a rolagem de tabela no celular.
+      fake.estado.conteudoPaginas.set('p1', {
+        titulo: 'Como reprocessar o pipeline de vendas',
+        espaco: 'TECH',
+        labels: [],
+        atualizadoEm: '2026-07-28T13:20:00.000Z',
+        storage: [
+          '<h2>Quando usar</h2>',
+          '<p>Use este procedimento quando o relatório diário <strong>não atualizar</strong> até as 9h.</p>',
+          '<ol><li>Abra o painel de tarefas</li><li>Procure a rotina <code>vendas_diario</code></li><li>Execute o reprocessamento manual</li></ol>',
+          '<ac:structured-macro ac:name="info"><ac:rich-text-body><p>O reprocessamento leva cerca de 10 minutos.</p></ac:rich-text-body></ac:structured-macro>',
+          '<h2>Se não resolver</h2>',
+          '<p>Abra chamado pelo goatlas com o horário da última execução.</p>',
+          '<ac:structured-macro ac:name="jira-chart"><ac:parameter ac:name="jql">project = EXEMPLO</ac:parameter></ac:structured-macro>',
+        ].join(''),
+      })
+      fake.estado.conteudoPaginas.set('p2', {
+        titulo: 'Padrão de nomes das lojas no sistema',
+        espaco: 'TECH',
+        labels: [],
+        atualizadoEm: '2026-06-11T09:00:00.000Z',
+        storage: [
+          '<p>As lojas seguem o padrão <code>SIGLA-CIDADE</code>.</p>',
+          '<table><thead><tr><th>Sigla</th><th>Cidade</th><th>Responsável</th></tr></thead>',
+          '<tbody><tr><td>GC</td><td>Fortaleza</td><td>Operações</td></tr>',
+          '<tr><td>GB</td><td>São Paulo</td><td>Expansão</td></tr></tbody></table>',
+          '<p>Dúvida sobre uma sigla nova? Veja <ac:link><ri:page ri:content-title="Como reprocessar o pipeline de vendas" /></ac:link>.</p>',
+        ].join(''),
+      })
 
       server.middlewares.use(async (req, res, next) => {
         if (!req.url?.startsWith('/api/')) return next()

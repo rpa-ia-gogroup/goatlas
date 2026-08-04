@@ -419,6 +419,10 @@
   text-decoration: underline;
   text-underline-offset: 3px;
   padding-inline: 8px;
+  /* Nunca esticado: dentro de `.pilha` (flex column) um botão ocupa a coluna toda, e
+     um "voltar" com a largura da página lê como faixa em vez de link. Vale para as
+     duas telas que o usam — leitura de página e detalhe do chamado. */
+  align-self: flex-start;
 }
 
 .acoes {
@@ -922,4 +926,90 @@
 }
 .doc-tabela tr:last-child td {
   border-bottom: 0;
+}
+
+/* ---------- busca de documentação (RF-37, RNF-28) ---------------------- */
+
+/**
+ * A tela de busca **empresta a espinha lime da leitura**.
+ *
+ * Em `.doc` a espinha diz "daqui para a direita o texto é do Confluence". Um
+ * resultado de busca é a prévia desse mesmo documento, então ele ganha a mesma
+ * marca — mas só ao receber foco ou mouse, para a lista em repouso continuar
+ * calma. É vocabulário reaproveitado, não um segundo idioma para a mesma ideia.
+ *
+ * Mobile-first de verdade (RNF-28): uma coluna, campo e botão empilhados, e o
+ * `grid-template-columns` só aparece quando há largura para isso.
+ */
+
+.busca-form {
+  display: grid;
+  gap: var(--space-3);
+}
+@media (min-width: 520px) {
+  .busca-form {
+    grid-template-columns: 1fr auto;
+    align-items: end;
+  }
+}
+
+.contagem-resultados {
+  font-size: var(--fs-small);
+  color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
+}
+
+.resultados {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.resultado {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  text-align: left;
+  font-family: inherit;
+  background: var(--go-white);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+  /* A espinha existe sempre, transparente: assim o texto não pula ao acender. */
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.resultado:hover,
+.resultado:focus-visible {
+  border-left-color: var(--go-lime);
+  box-shadow: var(--shadow-sm);
+}
+
+/* A chave do espaço é um código, não prosa — e é a allowlist visível na tela. */
+.resultado-espaco {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--go-text-heading) 75%, transparent);
+}
+.resultado-titulo {
+  font-size: var(--fs-h4);
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+  line-height: 1.3;
+}
+.resultado-trecho {
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--go-text-primary) 85%, transparent);
+}
+
+.pagina-meta {
+  font-size: var(--fs-small);
+  color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
 }

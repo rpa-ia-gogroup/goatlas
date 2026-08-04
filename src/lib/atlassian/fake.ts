@@ -85,6 +85,19 @@ export interface EstadoFake {
    * restrição exclui a página — não dá para avaliar "esta pessoa pode ver?".
    */
   idsRestritos: Set<string>
+  /**
+   * Imita o `text ~ "termo"` do CQL: a página só entra se **todas** as palavras do
+   * termo aparecerem no título ou no trecho.
+   *
+   * **Desligado por padrão, de propósito.** Os testes de exposição (`RN-06`) buscam
+   * com termos como `'x'` e afirmam sobre *quais páginas saem da camada* — se o termo
+   * também filtrasse, um teste de allowlist passaria por acidente, porque a página
+   * proibida teria sido excluída pelo texto e não pela regra.
+   *
+   * Ligado no dev e na demonstração, onde o oposto é o problema: busca que devolve
+   * tudo para qualquer termo faz a tela parecer quebrada.
+   */
+  filtrarPorTermo: boolean
   /** Conteúdo por id, para a leitura direta (RF-39, RF-40). */
   conteudoPaginas: Map<string, PaginaFake>
   /** Anexos por id de página — a lista é o que amarra anexo à página (T-112). */
@@ -119,6 +132,20 @@ export interface RegistroChamada {
   readonly params: unknown
 }
 
+/** Sem acento e em minúsculas — "relatório" e "relatorio" procuram a mesma coisa. */
+function normalizar(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+}
+
+function palavrasDe(termo: string): string[] {
+  return normalizar(termo)
+    .split(/[^a-z0-9]+/)
+    .filter((p) => p.length > 0)
+}
+
 export class ClienteAtlassianFake implements ClienteAtlassian {
   readonly estado: EstadoFake
   /** Chamadas registradas — permite asserção sobre a QUERY enviada (RF-32). */
@@ -132,6 +159,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       tiposChamado: inicial.tiposChamado ?? [],
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? new Set(),
+      filtrarPorTermo: inicial.filtrarPorTermo ?? false,
       conteudoPaginas: inicial.conteudoPaginas ?? new Map(),
       anexos: inicial.anexos ?? new Map(),
       limiteAnexoBytes: inicial.limiteAnexoBytes ?? MAX_ANEXO_BYTES,
@@ -246,7 +274,13 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     // confere que a decisão de exposição não depende de filtro acima da camada.
     const permitidos = new Set(params.espacosPermitidos)
     const bloqueadas = new Set(params.labelsBloqueadas)
+    const palavras = this.estado.filtrarPorTermo ? palavrasDe(params.termo) : []
     return this.estado.paginas
+      .filter((p) => {
+        if (palavras.length === 0) return true
+        const texto = normalizar(`${p.titulo} ${p.trecho}`)
+        return palavras.every((palavra) => texto.includes(palavra))
+      })
       .filter((p) => permitidos.has(p.espaco))
       .filter((p) => !p.labels.some((l) => bloqueadas.has(l)))
       // A terceira condição de RN-06: página sem restrição. Espaço liberado NÃO

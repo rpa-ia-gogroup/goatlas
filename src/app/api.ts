@@ -5,6 +5,8 @@
  * identidade vem do edge; o navegador não envia e não escolhe e-mail.
  */
 
+import type { No } from '../lib/confluence/sanitizar'
+
 export interface Identidade {
   readonly email: string
   readonly nome: string
@@ -85,6 +87,44 @@ export interface ResultadoCriacao {
   readonly prioridade: Prioridade
   readonly slaPrimeiraRespostaHoras: number
   readonly mensagem: string
+}
+
+/* ---------- Confluence (RF-37, RF-39) ---------------------------------- */
+
+export interface ResultadoBusca {
+  readonly id: string
+  readonly titulo: string
+  /** Chave do espaço — diz de qual base o texto veio, e é a allowlist em ação. */
+  readonly espaco: string
+  readonly trecho: string
+  /** Insumo da Regra 1 (RF-09). Não é exibido: número que a pessoa não pode usar é ruído. */
+  readonly score: number
+  readonly urlOriginal: string
+}
+
+export interface RespostaBusca {
+  readonly termo: string
+  /**
+   * `false` = nenhum espaço na allowlist. Zero resultados por falta de configuração
+   * e zero por falta de documentação são problemas de pessoas diferentes, e a tela
+   * **precisa** dizer qual dos dois foi.
+   */
+  readonly buscaConfigurada: boolean
+  readonly itens: readonly ResultadoBusca[]
+}
+
+export interface PaginaLida {
+  readonly id: string
+  readonly titulo: string
+  readonly espaco: string
+  readonly atualizadoEm: string
+  readonly urlOriginal: string
+  /**
+   * Árvore de nós **já sanitizada** no servidor (RNF-06). Não é HTML, e é por isso
+   * que não existe caminho em que conteúdo do Confluence vire marcação no navegador.
+   */
+  readonly nos: readonly No[]
+  readonly truncado: boolean
 }
 
 /** Espelha `ConfigValores` do servidor no que a tela de admin edita. */
@@ -212,6 +252,12 @@ export const api = {
     }),
 
   tiposChamado: () => chamar<{ itens: TipoChamado[] }>('/api/tipos-chamado'),
+
+  buscarDocumentacao: (termo: string) =>
+    chamar<RespostaBusca>(`/api/confluence/busca?q=${encodeURIComponent(termo)}`),
+
+  lerPagina: (id: string) =>
+    chamar<PaginaLida>(`/api/confluence/pagina/${encodeURIComponent(id)}`),
 
   adminConfig: () => chamar<{ config: ConfigValores }>('/api/admin/config'),
 

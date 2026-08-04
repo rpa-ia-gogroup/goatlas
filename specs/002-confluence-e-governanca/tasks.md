@@ -83,10 +83,11 @@ created: "2026-08-04"
 
 ## Phase 2 — Confluence como superfície
 
-> **Estado: T-110, T-111, T-112 e T-113 concluídos** — **293 testes** na suíte (66
-> novos), typecheck, build e bundle do worker limpos. Busca, leitura direta e proxy de
-> anexo existem, com os testes de burla escritos antes. ⚠️ **Nenhuma tela ainda os
-> consome** — T-114 é a próxima.
+> **Estado: T-110 a T-114 concluídos** — **306 testes** na suíte (79 novos), typecheck,
+> build e bundle do worker limpos. Busca, leitura e proxy de anexo existem **com tela**,
+> e os testes de burla foram escritos antes de cada rota. Falta desta fase: T-115
+> (árvore e breadcrumbs), T-116 (tabelas de busca/leitura), T-117 (lacunas) e T-118 (a
+> deflexão apontar para dentro do app).
 
 - [x] **T-110** `obterPagina` no cliente isolado (v2: `/wiki/api/v2/pages/{id}`),
       com cache. _Requirements: RF-39, RNF-13, RNF-22_
@@ -147,8 +148,34 @@ created: "2026-08-04"
         com termos que ninguém deixou de documentar.
       - Indisponibilidade responde **503**, nunca "nenhum resultado" (`RNF-18`): numa
         queda, "não achei" empurra a pessoa a abrir chamado por algo documentado.
-- [ ] **T-114** [P] Tela de busca e leitura, mobile-first, com a skill
-      `frontend-design` antes. _Requirements: RF-39, RNF-28_
+- [x] **T-114** [P] Tela de busca e leitura, mobile-first, com a skill
+      `frontend-design` antes. _Requirements: RF-39, RF-37, RF-42, RNF-02, RNF-28_
+      - Aba **"Documentação" em segundo lugar**, entre o agente e "Meus chamados": a
+        ordem das abas é a recomendação do produto, a mesma sequência que a Regra 1
+        impõe na conversa.
+      - **Direção visual:** a espinha lime de `.doc` **estendida para trás** — cada
+        resultado de busca acende a mesma espinha ao receber foco ou mouse, porque um
+        resultado é a prévia de um documento citado. Vocabulário reaproveitado em vez
+        de um segundo idioma para "isto vem do Confluence".
+      - **O `score` não aparece.** É insumo da Regra 1 (`RF-09`), não informação
+        acionável: "0,91" na tela é decoração fingindo ser dado.
+      - **Os três vazios são três telas:** não buscou · sem espaço configurado
+        (`buscaConfigurada: false`, e diz que é configuração) · nada documentado (nomeia
+        o termo, diz que virou lacuna e oferece o agente). Com teste.
+      - **Deep link sem router:** `?q=` e `?pagina=` lidos no boot, reescritos com
+        `replaceState`. Não é router (Princípio V) — é o que faz link de página
+        compartilhável e o que faz o link `ri:page` do próprio Confluence funcionar,
+        caindo na busca pelo título (a rota de leitura pede id, e o storage dá título).
+      - **Corrigido de tabela:** `.botao-discreto` não estica mais dentro de `.pilha`.
+        Um "voltar" com a largura da coluna lê como faixa, não como link — vale também
+        para o detalhe do chamado, que usava o mesmo padrão.
+      - Verificado no navegador (`npm run dev`), inclusive a página **restrita** não
+        aparecendo na busca nem abrindo por URL.
+- [ ] **T-118** [P] A mensagem de bloqueio da Regra 1 aponta para **dentro** do app.
+      Hoje `montarMensagemBloqueio` monta link para `atlassian.net` — que é uma parede
+      para quem não tem assento, exatamente o público do app. Precisa das páginas
+      (id + título) na resposta do turno, não de parse da mensagem.
+      _Requirements: RF-09, RF-13, RF-39_
 - [ ] **T-115** Árvore do espaço + breadcrumbs (`RF-41`, P1).
       _Requirements: RF-41_
 - [ ] **T-116** Tabela `buscas` + `paginas_lidas`; registrar termo, nº de

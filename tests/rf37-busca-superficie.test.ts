@@ -218,6 +218,26 @@ describe('RF-42 / RNF-18 — o que a busca REGISTRA', () => {
     expect(JSON.stringify(r.rows[0])).toContain('home office')
   })
 
+  it('com o fake reagindo ao termo, um termo sem resposta vira lacuna de verdade', async () => {
+    // Aqui a lacuna vem do TERMO não casar, não de esvaziar o acervo à mão — é o
+    // caminho que a pessoa percorre. O fake só filtra por texto quando pedido; ver
+    // `filtrarPorTermo` (desligado por padrão para não contaminar os testes de RN-06).
+    fake.estado.filtrarPorTermo = true
+    const corpo = await (await buscar('?q=politica de home office')).json()
+    expect(corpo.itens).toEqual([])
+    expect(corpo.buscaConfigurada).toBe(true)
+
+    const r = await db.query(
+      `SELECT recurso FROM auditoria WHERE detalhe_json LIKE '%lacunaDocumentacao%'`,
+      [],
+    )
+    expect(r.rows).toHaveLength(1)
+
+    // E o termo que EXISTE continua achando.
+    const achou = await (await buscar('?q=reprocessar')).json()
+    expect(achou.itens.map((i: { id: string }) => i.id)).toEqual(['reprocessar'])
+  })
+
   it('sem espaço configurado NÃO registra lacuna — a lacuna é de configuração', async () => {
     // Registrar aqui envenenaria o mapa de RF-42 com termos que ninguém deixou de
     // documentar: eles simplesmente não tinham onde ser procurados.
