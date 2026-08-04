@@ -87,7 +87,9 @@ created: "2026-08-04"
 - [ ] **T-127** [P] Exportação CSV com escape correto (vírgula e aspas em nome).
       _Requirements: RF-54_
 - [ ] **T-128** Console de assentos: inventário, custo, ocioso, recomendações — com
-      as limitações do dado visíveis. Skill `frontend-design` antes.
+      as limitações do dado visíveis. Skill `frontend-design` antes. ⚠️ A aba de admin
+      **já existe** desde a Fase 1 (`D-09`, edição de config + auditoria); isto
+      acrescenta a seção de assentos a ela, não cria tela nova.
       _Requirements: RF-51…RF-54, RNF-28_
 - [ ] **T-129** [P] `GET /api/admin/auditoria` com filtro por usuário, período e
       ação + exportação (`RF-56`). _Requirements: RF-56_
