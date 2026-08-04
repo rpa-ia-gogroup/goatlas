@@ -390,8 +390,14 @@ async function rotear(
 
   if (caminho === '/api/admin/auditoria' && req.method === 'GET') {
     if (!eu.isAdmin) return ERROS.semPermissao()
-    const alvo = url.searchParams.get('email') ?? eu.email
-    return json({ itens: await ctx.auditoria.listarPorAtor(alvo, 200) })
+    // Sem filtro, o admin vê TUDO. O default anterior era o próprio e-mail, o que
+    // fazia o console de auditoria mostrar só as ações de quem estava olhando —
+    // inútil para investigar (`RF-56`).
+    const alvo = url.searchParams.get('email')?.trim().toLowerCase()
+    const itens = alvo
+      ? await ctx.auditoria.listarPorAtor(alvo, 200)
+      : await ctx.auditoria.listarRecentes(200)
+    return json({ itens })
   }
 
   return ERROS.naoEncontrado()

@@ -215,6 +215,36 @@ Gateway" sem caminho de volta.
 
 ---
 
+### D-09 · Tela de admin antecipada da Fase 2 para a Fase 1
+**Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada
+
+`RF-49` (allowlists pela interface), `RF-50` (parâmetros das regras) e `RF-56`
+(auditoria) estavam planejados para a **Fase 2**. Vieram para a Fase 1.
+
+**Por quê:** o admin não tinha **nenhuma** superfície. "Admin vê tudo" era uma flag
+no banco — a pessoa entrava e não havia nada que a distinguisse de um colaborador,
+nem forma de saber que era admin. E `RF-50` é o que permite **calibrar a deflexão**:
+sem tela, ajustar threshold exigiria `curl`, o que na prática significa não ajustar.
+
+**O que entrou:** selo `admin` ao lado do nome · aba "Configuração" (só para admin)
+com os campos que importam, cada um explicando **o que o vazio faz** — porque o app é
+fail-closed e alguém apagaria a lista de espaços achando que "vazio = todos" ·
+auditoria de **todos** os atores, com filtro por e-mail.
+
+**Bug corrigido no caminho:** `GET /api/admin/auditoria` sem filtro usava o e-mail do
+**próprio admin** como default, então o console mostrava só as ações de quem estava
+olhando — inútil para investigar, que é a razão de `RF-56` existir. Agora sem filtro
+traz tudo.
+
+**O que NÃO veio:** o console de governança de assentos (`RF-51`…`RF-54`) segue na
+Fase 2 — depende da credencial de Org Admin (**Q1**).
+
+⚠️ **A aba escondida é conveniência, não segurança.** Quem garante o acesso é o gate
+de servidor em cada rota `/api/admin/*`, com teste de burla. Esconder no cliente
+apenas evita mostrar um botão que daria 403.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

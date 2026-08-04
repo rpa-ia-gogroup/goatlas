@@ -99,6 +99,12 @@ created: "2026-08-03"
       _Requirements: RNF-16, RNF-23, RNF-34_
 - [x] **T-028** [P] `config`: thresholds, allowlists e TTLs em banco, editáveis sem
       deploy — é o que impede o hardcode. _Requirements: RF-49, RF-50, RNF-25_
+- [x] **T-028b** Tela de admin (**antecipada da Fase 2**, `D-09`): selo `admin`, aba
+      "Configuração" com os campos que importam — cada um explicando o que o vazio faz,
+      porque o app é fail-closed — e auditoria de **todos** os atores com filtro.
+      Corrige um bug de `RF-56`: sem filtro, a rota usava o e-mail do próprio admin
+      como default e o console mostrava só quem estava olhando.
+      _Requirements: RF-49, RF-50, RF-56, D-09_
 - [x] **T-029** [P] `GET /api/health` com Atlassian, IA, banco e SSO.
       _Requirements: RF-59_
 - [x] **T-030** [P] Rate limit por usuário. _Requirements: RNF-11_

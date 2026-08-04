@@ -1012,6 +1012,14 @@ var AuditoriaBanco = class {
       ]
     );
   }
+  async listarRecentes(limite) {
+    const r = await this.db.query(
+      `SELECT id, ator_email, acao, recurso, resultado, detalhe_json, criado_em
+         FROM auditoria ORDER BY criado_em DESC, rowid DESC LIMIT ?`,
+      [limite]
+    );
+    return linhasComoObjetos(r);
+  }
   async listarPorAtor(email, limite) {
     const r = await this.db.query(
       `SELECT id, ator_email, acao, recurso, resultado, detalhe_json, criado_em
@@ -2897,8 +2905,9 @@ async function rotear(req, ctx, eu, caminho, url) {
   }
   if (caminho === "/api/admin/auditoria" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();
-    const alvo = url.searchParams.get("email") ?? eu.email;
-    return json({ itens: await ctx.auditoria.listarPorAtor(alvo, 200) });
+    const alvo = url.searchParams.get("email")?.trim().toLowerCase();
+    const itens = alvo ? await ctx.auditoria.listarPorAtor(alvo, 200) : await ctx.auditoria.listarRecentes(200);
+    return json({ itens });
   }
   return ERROS.naoEncontrado();
 }

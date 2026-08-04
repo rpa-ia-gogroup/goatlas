@@ -83,6 +83,12 @@ export function redigirSensiveis(
 export interface Auditoria {
   registrar(entrada: EntradaAuditoria): Promise<void>
   listarPorAtor(email: string, limite: number): Promise<readonly RegistroAuditoria[]>
+  /**
+   * Registros recentes de **todos** os atores — a leitura do console de admin
+   * (`RF-56`). Separada de `listarPorAtor` de propósito: o nome diz que ela não
+   * filtra, então usá-la numa rota de colaborador é bug visível na revisão.
+   */
+  listarRecentes(limite: number): Promise<readonly RegistroAuditoria[]>
 }
 
 export class AuditoriaBanco implements Auditoria {
@@ -107,6 +113,15 @@ export class AuditoriaBanco implements Auditoria {
         this.agora(),
       ],
     )
+  }
+
+  async listarRecentes(limite: number): Promise<readonly RegistroAuditoria[]> {
+    const r = await this.db.query(
+      `SELECT id, ator_email, acao, recurso, resultado, detalhe_json, criado_em
+         FROM auditoria ORDER BY criado_em DESC, rowid DESC LIMIT ?`,
+      [limite],
+    )
+    return linhasComoObjetos<RegistroAuditoria>(r)
   }
 
   async listarPorAtor(email: string, limite: number): Promise<readonly RegistroAuditoria[]> {

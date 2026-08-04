@@ -82,6 +82,21 @@
   }
 }
 
+/* Selo de admin ao lado do nome: responde "eu sou admin?" sem abrir nada. */
+.selo-admin {
+  display: inline-block;
+  margin-left: var(--space-2);
+  background: var(--go-lime);
+  color: var(--go-blue);
+  font-size: 0.625rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  vertical-align: middle;
+}
+
 /* ---------- tarja de modo demonstração --------------------------------- */
 
 /**
