@@ -1,0 +1,208 @@
+/**
+ * Cliente Atlassian FAKE — habilita testar todo o produto sem rede e sem
+ * credencial (que não existe ainda: Q1).
+ *
+ * Ele existe porque a camada é isolada (RNF-22): é o retorno concreto daquela
+ * exigência, não um extra de teste. Os modos de falha injetáveis são o que torna
+ * RNF-18 e RNF-17 verificáveis — "degradação graciosa" que ninguém consegue
+ * testar é só uma frase no documento.
+ */
+
+import {
+  ErroAtlassian,
+  type BuscaConfluenceParams,
+  type Chamado,
+  type ChamadoCriado,
+  type ClienteAtlassian,
+  type ComentarioPublico,
+  type HistoricoParams,
+  type NovoChamado,
+  type PaginaConfluence,
+  type TicketHistorico,
+  type TipoChamado,
+} from './tipos'
+
+/** Comentário como o JSM devolve: com a flag `public` que RF-32 obriga a filtrar. */
+export interface ComentarioBruto {
+  readonly id: string
+  readonly corpo: string
+  readonly autorNome: string
+  readonly criadoEm: string
+  readonly publico: boolean
+}
+
+export type ModoFalha = 'nenhum' | 'indisponivel' | 'rate_limit' | 'timeout'
+
+export interface EstadoFake {
+  tiposChamado: TipoChamado[]
+  paginas: PaginaConfluence[]
+  historico: TicketHistorico[]
+  comentarios: Map<string, ComentarioBruto[]>
+  chamados: Map<string, Chamado>
+  /** Falha por operação, para derrubar UMA dependência de cada vez. */
+  falhas: {
+    criarChamado: ModoFalha
+    buscarConfluence: ModoFalha
+    buscarHistorico: ModoFalha
+    listarComentarios: ModoFalha
+  }
+}
+
+export interface RegistroChamada {
+  readonly operacao: string
+  readonly params: unknown
+}
+
+export class ClienteAtlassianFake implements ClienteAtlassian {
+  readonly estado: EstadoFake
+  /** Chamadas registradas — permite asserção sobre a QUERY enviada (RF-32). */
+  readonly chamadas: RegistroChamada[] = []
+  private contadorIssue = 0
+  /** `chaveIdempotencia` → chamado, para o teste de RF-24 e a reconciliação. */
+  private readonly porChave = new Map<string, ChamadoCriado>()
+
+  constructor(inicial: Partial<EstadoFake> = {}) {
+    this.estado = {
+      tiposChamado: inicial.tiposChamado ?? [],
+      paginas: inicial.paginas ?? [],
+      historico: inicial.historico ?? [],
+      comentarios: inicial.comentarios ?? new Map(),
+      chamados: inicial.chamados ?? new Map(),
+      falhas: {
+        criarChamado: 'nenhum',
+        buscarConfluence: 'nenhum',
+        buscarHistorico: 'nenhum',
+        listarComentarios: 'nenhum',
+        ...inicial.falhas,
+      },
+    }
+  }
+
+  private checar(modo: ModoFalha, recurso: string): void {
+    if (modo === 'nenhum') return
+    const transitorio = modo !== 'indisponivel'
+    const status = modo === 'rate_limit' ? 429 : modo === 'timeout' ? 504 : 503
+    throw new ErroAtlassian(`fake: ${modo}`, { status, transitorio, recurso })
+  }
+
+  async listarTiposChamado(): Promise<readonly TipoChamado[]> {
+    this.chamadas.push({ operacao: 'listarTiposChamado', params: null })
+    return this.estado.tiposChamado
+  }
+
+  async criarChamado(dados: NovoChamado): Promise<ChamadoCriado> {
+    this.chamadas.push({ operacao: 'criarChamado', params: dados })
+    this.checar(this.estado.falhas.criarChamado, 'criarChamado')
+
+    // O fake honra a idempotência do lado do Jira: a mesma chave devolve o mesmo
+    // chamado. Sem isso, o teste de RF-24 mediria só a trava local e não veria o
+    // caso "criou no JSM e o vínculo se perdeu" (RNF-21).
+    const existente = this.porChave.get(dados.chaveIdempotencia)
+    if (existente) return existente
+
+    this.contadorIssue += 1
+    const criado: ChamadoCriado = {
+      issueKey: `GOATLAS-${this.contadorIssue}`,
+      issueId: String(10000 + this.contadorIssue),
+    }
+    this.porChave.set(dados.chaveIdempotencia, criado)
+    this.estado.chamados.set(criado.issueKey, {
+      issueKey: criado.issueKey,
+      titulo: dados.titulo,
+      descricao: dados.descricao,
+      status: 'Aberto',
+      prioridade: dados.prioridade,
+      criadoEm: new Date(0).toISOString(),
+      atualizadoEm: new Date(0).toISOString(),
+      slaPrimeiraResposta: { prazo: null, cumprido: null },
+    })
+    return criado
+  }
+
+  async obterChamado(issueKey: string): Promise<Chamado> {
+    this.chamadas.push({ operacao: 'obterChamado', params: issueKey })
+    const c = this.estado.chamados.get(issueKey)
+    if (!c) {
+      throw new ErroAtlassian('chamado não encontrado', {
+        status: 404,
+        transitorio: false,
+        recurso: issueKey,
+      })
+    }
+    return c
+  }
+
+  async listarComentariosPublicos(issueKey: string): Promise<readonly ComentarioPublico[]> {
+    this.chamadas.push({ operacao: 'listarComentariosPublicos', params: issueKey })
+    this.checar(this.estado.falhas.listarComentarios, 'listarComentariosPublicos')
+    const todos = this.estado.comentarios.get(issueKey) ?? []
+    // O FAKE devolve o bruto filtrado, imitando o que o cliente real precisa
+    // fazer. O teste de RF-32 confere as duas camadas no cliente real.
+    return todos
+      .filter((c) => c.publico)
+      .map(({ id, corpo, autorNome, criadoEm }) => ({ id, corpo, autorNome, criadoEm }))
+  }
+
+  /** Só para teste: devolve TUDO, inclusive interno — para provar que não vazou. */
+  comentariosBrutos(issueKey: string): readonly ComentarioBruto[] {
+    return this.estado.comentarios.get(issueKey) ?? []
+  }
+
+  async comentar(issueKey: string, corpo: string, autorEmail: string): Promise<void> {
+    this.chamadas.push({ operacao: 'comentar', params: { issueKey, corpo, autorEmail } })
+    const atuais = this.estado.comentarios.get(issueKey) ?? []
+    this.estado.comentarios.set(issueKey, [
+      ...atuais,
+      {
+        id: `c${atuais.length + 1}`,
+        corpo,
+        autorNome: autorEmail,
+        criadoEm: new Date(0).toISOString(),
+        publico: true,
+      },
+    ])
+  }
+
+  async buscarConfluence(
+    params: BuscaConfluenceParams,
+  ): Promise<readonly PaginaConfluence[]> {
+    this.chamadas.push({ operacao: 'buscarConfluence', params })
+    this.checar(this.estado.falhas.buscarConfluence, 'buscarConfluence')
+
+    // Imita o comportamento CORRETO: a restrição de espaço é aplicada na busca.
+    // Página restrita e label bloqueada também não saem daqui — o teste de RN-06
+    // confere que a decisão de exposição não depende de filtro acima da camada.
+    const permitidos = new Set(params.espacosPermitidos)
+    const bloqueadas = new Set(params.labelsBloqueadas)
+    return this.estado.paginas
+      .filter((p) => permitidos.has(p.espaco))
+      .filter((p) => !p.labels.some((l) => bloqueadas.has(l)))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, params.limite)
+  }
+
+  async buscarHistoricoTickets(
+    params: HistoricoParams,
+  ): Promise<readonly TicketHistorico[]> {
+    this.chamadas.push({ operacao: 'buscarHistoricoTickets', params })
+    this.checar(this.estado.falhas.buscarHistorico, 'buscarHistoricoTickets')
+    return this.estado.historico
+      .filter((t) => t.chaveAgrupamento === params.chaveAgrupamento)
+      .slice(0, params.limite)
+  }
+
+  async buscarChamadosPorChaveIdempotencia(
+    chave: string,
+  ): Promise<readonly ChamadoCriado[]> {
+    this.chamadas.push({ operacao: 'buscarChamadosPorChaveIdempotencia', params: chave })
+    const c = this.porChave.get(chave)
+    return c ? [c] : []
+  }
+
+  async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {
+    const algumaFalha = Object.values(this.estado.falhas).some((f) => f !== 'nenhum')
+    return algumaFalha
+      ? { ok: false, detalhe: 'fake com falha injetada' }
+      : { ok: true, detalhe: 'fake' }
+  }
+}
