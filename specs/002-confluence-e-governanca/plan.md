@@ -77,7 +77,9 @@ Duas coisas que esta rota não pode fazer:
 - **Devolver `Content-Type` vindo da Atlassian sem conferir.** Anexo com
   `text/html` servido do nosso domínio é XSS de novo. Tipos de imagem e PDF
   passam; o resto vira download (`Content-Disposition: attachment`) com
-  `X-Content-Type-Options: nosniff`.
+  `X-Content-Type-Options: nosniff`. **`image/svg+xml` não passa** apesar de ser
+  imagem — SVG é XML com `<script>` (`D-11`). E o **nome do arquivo** vem de quem
+  edita a página e entra num cabeçalho: CRLF nele é injeção de cabeçalho.
 
 ### 3.3 Governança: a credencial que dá medo
 
@@ -179,7 +181,10 @@ Métodos de domínio, como na Fase 1. `orgId` vem de config (`RNF-25`).
 1. `src/lib/confluence/sanitizar.ts` — allowlist, árvore de nós, funções puras
 2. **Testes de burla da sanitização** — vermelhos primeiro
 3. `src/lib/confluence/renderizar.tsx` — árvore → React, sem `innerHTML`
-4. `src/lib/atlassian/cliente.ts` — `obterPagina`, `listarArvore`, `obterAnexo`
+4. `src/lib/atlassian/cliente.ts` — `obterMetadadosPagina` + `obterCorpoStorage`
+   (o "obterPagina" do plano, partido em dois: metadados → decidir → conteúdo, para
+   que o corpo de página negada não entre na memória do app), `obterAnexo`,
+   `listarArvore`
 5. Rotas de Confluence + proxy de anexo
 6. `src/lib/atlassian/organizacao.ts` + fake
 7. `src/lib/governanca/` — custo, ocioso, recomendações, CSV (puros)

@@ -21,6 +21,8 @@ import { verificarLimite } from './limite'
 import { CriacaoRecusada, MENSAGEM_RECUSA } from '../agent/gate'
 import { SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos'
 import type { PropostaChamado } from '../agent/estado'
+import { lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
+import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
 
 export interface EnvCron {
   readonly GODEPLOY_CRON_KEY?: string
@@ -75,7 +77,12 @@ export async function tratarRequisicao(
   }
 
   // RNF-11 — rate limit por usuário, antes de qualquer trabalho caro.
-  if (req.method === 'POST') {
+  //
+  // Vale para POST **e** para as leituras de Confluence: cada leitura de página
+  // dispara três a quatro chamadas à Atlassian (metadados, espaço, labels,
+  // restrição), e um laço sobre IDs consome o orçamento da credencial única (R-02)
+  // do mesmo jeito que um POST — só sem criar nada, o que faz parecer inofensivo.
+  if (req.method === 'POST' || caminho.startsWith('/api/confluence/')) {
     const limite = await verificarLimite(
       ctx.db,
       eu.email,
@@ -356,6 +363,120 @@ async function rotear(
     return json({ ok: true }, 201)
   }
 
+  // --- Confluence como superfície (RF-39, RF-40, RN-06) ---------------------
+  //
+  // As duas rotas passam pelo MESMO gate (`confluence/acesso.ts`), e nenhuma delas
+  // toca o cliente Atlassian antes dele. Toda recusa devolve a mesma resposta: um
+  // corpo por motivo confirmaria que a página existe e insinuaria por que está
+  // fechada (é o mesmo raciocínio do 404-em-vez-de-403 de `RF-30`).
+  const paginaConfluence = caminho.match(/^\/api\/confluence\/pagina\/([^/]+)$/)
+  if (paginaConfluence && req.method === 'GET') {
+    const id = decodificar(paginaConfluence[1]!)
+    const r = id === null
+      ? ({ ok: false, motivo: 'id_invalido' } as const)
+      : await lerPaginaAutorizada(ctx.atlassian, ctx.valores, id)
+
+    if (!r.ok) {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'pagina_confluence_lida',
+        recurso: id,
+        resultado: r.motivo === 'indisponivel' ? 'falha' : 'negado',
+        detalhe: { motivo: r.motivo },
+      })
+      return r.motivo === 'indisponivel' ? ERROS.conteudoIndisponivel() : ERROS.naoEncontrado()
+    }
+
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'pagina_confluence_lida',
+      recurso: r.metadados.id,
+      resultado: 'sucesso',
+      // Contagem de descartes, não a lista: ela nomeia tag e atributo da página, o
+      // que é diagnóstico útil no agregado e ruído no registro por leitura.
+      detalhe: { espaco: r.metadados.espaco, descartes: r.conteudo.descartes.length },
+    })
+    // Só a ÁRVORE. Nenhum campo com HTML: se existisse, existiria caminho para o
+    // navegador renderizar string (RNF-06).
+    return json({
+      id: r.metadados.id,
+      titulo: r.metadados.titulo,
+      espaco: r.metadados.espaco,
+      atualizadoEm: r.metadados.atualizadoEm,
+      urlOriginal: r.metadados.url,
+      nos: r.conteudo.nos,
+      truncado: r.conteudo.truncado,
+    })
+  }
+
+  // Proxy de anexo — RNF-02: o navegador não tem credencial e não fala com a
+  // Atlassian. O `(.+)` no nome é intencional: nome de arquivo tem ponto, espaço e
+  // acento. Nada de perigoso vem daí, porque o nome é casado contra a lista de
+  // anexos DAQUELA página, não usado para montar caminho.
+  const anexoConfluence = caminho.match(/^\/api\/confluence\/anexo\/([^/]+)\/(.+)$/)
+  if (anexoConfluence && req.method === 'GET') {
+    const id = decodificar(anexoConfluence[1]!)
+    const nome = decodificar(anexoConfluence[2]!)
+
+    const negar = async (motivo: string, resposta: Response) => {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'anexo_servido',
+        recurso: id,
+        resultado: motivo === 'indisponivel' ? 'falha' : 'negado',
+        detalhe: { motivo },
+      })
+      return resposta
+    }
+
+    if (id === null || nome === null) return await negar('id_invalido', ERROS.naoEncontrado())
+
+    const exposicao = await verificarExposicao(ctx.atlassian, ctx.valores, id)
+    if (!exposicao.ok) {
+      return await negar(
+        exposicao.motivo,
+        exposicao.motivo === 'indisponivel'
+          ? ERROS.conteudoIndisponivel()
+          : ERROS.naoEncontrado(),
+      )
+    }
+
+    let resultado
+    try {
+      resultado = await ctx.atlassian.obterAnexo(id, nome)
+    } catch {
+      // Indisponibilidade não vira 404: o anexo existe, só não deu para buscar.
+      return await negar('indisponivel', ERROS.conteudoIndisponivel())
+    }
+    if (resultado.estado === 'nao_encontrado') {
+      return await negar('anexo_nao_encontrado', ERROS.naoEncontrado())
+    }
+    if (resultado.estado === 'grande_demais') {
+      return await negar('anexo_grande_demais', ERROS.anexoGrandeDemais())
+    }
+
+    // ⚠️ O tipo declarado pela Atlassian NÃO é repassado — ele é decidido aqui.
+    const entrega = decidirEntrega(resultado.anexo.tipoDeclarado)
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'anexo_servido',
+      recurso: id,
+      resultado: 'sucesso',
+      detalhe: { tipoServido: entrega.contentType, disposicao: entrega.disposicao },
+    })
+    return new Response(resultado.anexo.bytes, {
+      status: 200,
+      headers: {
+        ...CABECALHOS_ANEXO,
+        'Content-Type': entrega.contentType,
+        'Content-Disposition': cabecalhoContentDisposition(
+          resultado.anexo.nomeArquivo,
+          entrega.disposicao,
+        ),
+      },
+    })
+  }
+
   // --- tipos de chamado disponíveis (RF-28) ---------------------------------
   if (caminho === '/api/tipos-chamado' && req.method === 'GET') {
     const permitidos = new Set(ctx.valores.tipos_chamado_permitidos)
@@ -401,6 +522,20 @@ async function rotear(
   }
 
   return ERROS.naoEncontrado()
+}
+
+/**
+ * Decodifica um pedaço de caminho sem explodir com `%` solto.
+ *
+ * `decodeURIComponent('%zz')` lança, e um `URIError` subindo até o roteador viraria
+ * 500 numa entrada que é só malformada. `null` = trate como não encontrado.
+ */
+function decodificar(bruto: string): string | null {
+  try {
+    return decodeURIComponent(bruto)
+  } catch {
+    return null
+  }
 }
 
 function estadoVerificacao(

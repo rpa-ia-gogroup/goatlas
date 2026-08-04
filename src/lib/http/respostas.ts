@@ -49,6 +49,23 @@ export const ERROS = {
     erro('Não encontramos esse chamado entre os seus.', 'nao_encontrado', 404),
   dadosInvalidos: (detalhe: string) =>
     erro(detalhe, 'dados_invalidos', 400),
+  /**
+   * Dependência fora do ar numa LEITURA. Diferente de `naoEncontrado()` de
+   * propósito: responder "não encontramos" quando a página existe manda a pessoa
+   * abrir chamado por uma documentação que estava lá (RNF-18, RNF-19).
+   */
+  conteudoIndisponivel: () =>
+    erro(
+      'Não conseguimos carregar este conteúdo agora. Tente de novo em instantes.',
+      'conteudo_indisponivel',
+      503,
+    ),
+  anexoGrandeDemais: () =>
+    erro(
+      'Este anexo é grande demais para abrir por aqui. Peça o arquivo ao time de tech.',
+      'anexo_grande_demais',
+      413,
+    ),
   limiteRequisicoes: () =>
     erro(
       'Você fez muitas solicitações em pouco tempo. Aguarde um instante e tente novamente.',

@@ -69,6 +69,33 @@ export function semearAtlassianDemo(fake: ClienteAtlassianFake): void {
       labels: [],
     },
   ]
+  // Conteúdo das mesmas páginas, para a leitura direta (RF-39) responder na
+  // demonstração em vez de dar "não encontramos". Storage format de verdade,
+  // inclusive uma macro que o renderizador não suporta — é assim que a degradação
+  // visível de RF-43 aparece na demo em vez de só no teste.
+  fake.estado.conteudoPaginas.set('demo-1', {
+    titulo: 'Como reprocessar o relatório de vendas',
+    espaco: 'TECH',
+    labels: [],
+    storage: [
+      '<h2>Quando usar</h2>',
+      '<p>Use este procedimento quando o relatório diário <strong>não atualizar</strong> até as 9h.</p>',
+      '<ol><li>Abra o painel de tarefas</li><li>Procure a rotina <code>vendas_diario</code></li>',
+      '<li>Execute o reprocessamento manual</li></ol>',
+      '<ac:structured-macro ac:name="info"><ac:rich-text-body><p>O reprocessamento leva cerca de 10 minutos.</p></ac:rich-text-body></ac:structured-macro>',
+      '<ac:structured-macro ac:name="jira-chart"><ac:parameter ac:name="jql">project = EXEMPLO</ac:parameter></ac:structured-macro>',
+    ].join(''),
+  })
+  fake.estado.conteudoPaginas.set('demo-2', {
+    titulo: 'Padrão de nomes das lojas no sistema',
+    espaco: 'TECH',
+    labels: [],
+    storage: [
+      '<p>As lojas seguem o padrão <code>SIGLA-CIDADE</code>.</p>',
+      '<table><thead><tr><th>Sigla</th><th>Cidade</th></tr></thead>',
+      '<tbody><tr><td>GC</td><td>Fortaleza</td></tr><tr><td>GB</td><td>São Paulo</td></tr></tbody></table>',
+    ].join(''),
+  })
   fake.estado.historico = [
     {
       issueKey: 'DEMO-101',

@@ -22,6 +22,7 @@ import { prefixarAutoria, filtrarPublicos, montarQueryComentarios } from './come
 import { CacheTtl, TransporteAtlassian, type OpcoesHttp } from './http'
 import {
   ErroAtlassian,
+  MAX_ANEXO_BYTES,
   SLA_PRIMEIRA_RESPOSTA_HORAS,
   type BuscaConfluenceParams,
   type Chamado,
@@ -29,9 +30,11 @@ import {
   type ClienteAtlassian,
   type ComentarioPublico,
   type HistoricoParams,
+  type MetadadosPagina,
   type NovoChamado,
   type PaginaConfluence,
   type Prioridade,
+  type ResultadoAnexo,
   type TicketHistorico,
   type TipoChamado,
 } from './tipos'
@@ -340,6 +343,162 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
       // Não cacheia a falha: indisponibilidade momentânea não deve esconder a
       // página pelo TTL inteiro.
       return true
+    }
+  }
+
+  /**
+   * Metadados de página — **v2** (`/wiki/api/v2/pages/{id}`), T-110.
+   *
+   * ⚠️ **A v2 devolve `spaceId` numérico; a allowlist é por CHAVE de espaço**
+   * (`TECH`). Comparar a allowlist com o id não dá erro visível: dá negação
+   * silenciosa de tudo hoje e, se alguém "consertar" invertendo a comparação, uma
+   * condição de `RN-06` que nunca reprova. Daí `chaveDoEspaco`, cacheada nos
+   * metadados (chave de espaço não muda).
+   *
+   * ⚠️ Labels vêm em requisição separada (a v2 não as embute) e **não** têm
+   * `try/catch`: sem a lista de labels não há como avaliar a segunda condição de
+   * `RN-06`, e ausência de informação é negar. Quem trata a recusa é o gate em
+   * `confluence/acesso.ts`.
+   */
+  async obterMetadadosPagina(idPagina: string): Promise<MetadadosPagina> {
+    if (!idPagina) {
+      throw new ErroAtlassian('página sem id', {
+        transitorio: false,
+        recurso: 'obterMetadadosPagina',
+      })
+    }
+    const chave = `metadados:${idPagina}`
+    const cacheado = this.cacheConteudo.obter(chave)
+    if (cacheado) return cacheado as MetadadosPagina
+
+    const dados = (await this.transporte.requisitar(
+      `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}`,
+    )) as {
+      id?: unknown
+      title?: unknown
+      spaceId?: unknown
+      status?: unknown
+      version?: { number?: unknown; createdAt?: unknown }
+      _links?: { webui?: unknown }
+    }
+
+    const metadados: MetadadosPagina = {
+      id: String(dados?.id ?? idPagina),
+      titulo: String(dados?.title ?? ''),
+      espaco: await this.chaveDoEspaco(String(dados?.spaceId ?? '')),
+      labels: await this.labelsDaPagina(idPagina),
+      atual: String(dados?.status ?? '') === 'current',
+      versao: Number(dados?.version?.number ?? 0),
+      atualizadoEm: String(dados?.version?.createdAt ?? ''),
+      url: `${this.opcoes.baseUrl}/wiki${String(dados?._links?.webui ?? '')}`,
+    }
+    this.cacheConteudo.definir(chave, metadados, this.opcoes.ttlConteudoSeg)
+    return metadados
+  }
+
+  /** `spaceId` (v2) → chave do espaço, que é o que a allowlist usa (`RN-06`). */
+  private async chaveDoEspaco(spaceId: string): Promise<string> {
+    if (!spaceId) {
+      throw new ErroAtlassian('página sem espaço', {
+        transitorio: false,
+        recurso: 'obterMetadadosPagina',
+      })
+    }
+    const chave = `espaco:${spaceId}`
+    const cacheado = this.cacheMetadados.obter(chave)
+    if (typeof cacheado === 'string') return cacheado
+
+    const dados = (await this.transporte.requisitar(
+      `/wiki/api/v2/spaces/${encodeURIComponent(spaceId)}`,
+    )) as { key?: unknown }
+    const chaveEspaco = String(dados?.key ?? '')
+    if (!chaveEspaco) {
+      // Sem chave não há como avaliar a allowlist. Lançar, para o gate negar.
+      throw new ErroAtlassian('espaço sem chave', {
+        transitorio: false,
+        recurso: 'obterMetadadosPagina',
+      })
+    }
+    this.cacheMetadados.definir(chave, chaveEspaco, this.opcoes.ttlMetadadosSeg)
+    return chaveEspaco
+  }
+
+  private async labelsDaPagina(idPagina: string): Promise<readonly string[]> {
+    const dados = (await this.transporte.requisitar(
+      `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}/labels?limit=250`,
+    )) as { results?: { name?: unknown }[] }
+    return (dados?.results ?? []).map((l) => String(l.name ?? '')).filter((n) => n !== '')
+  }
+
+  /**
+   * Storage format cru da página — **não sanitizado** (ver o contrato em `tipos.ts`).
+   *
+   * Cacheado no cache de conteúdo (`RNF-13`): a leitura repetida da mesma página é o
+   * caso comum quando alguém é bloqueado pela Regra 1 e volta para reler.
+   */
+  async obterCorpoStorage(idPagina: string): Promise<string> {
+    const chave = `storage:${idPagina}`
+    const cacheado = this.cacheConteudo.obter(chave)
+    if (typeof cacheado === 'string') return cacheado
+
+    const dados = (await this.transporte.requisitar(
+      `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}?body-format=storage`,
+    )) as { body?: { storage?: { value?: unknown } } }
+    const storage = typeof dados?.body?.storage?.value === 'string' ? dados.body.storage.value : ''
+    this.cacheConteudo.definir(chave, storage, this.opcoes.ttlConteudoSeg)
+    return storage
+  }
+
+  /**
+   * Anexo da página, por nome exato — T-112.
+   *
+   * Duas coisas que parecem detalhe e são a trava:
+   *
+   * 1. **O nome é casado contra a lista de anexos DAQUELA página.** Não existe
+   *    "baixar anexo por caminho": o caminho vem da URL, e um caminho montado à mão
+   *    alcançaria anexo de página restrita (`RF-40`).
+   * 2. **`downloadLink` vem da Atlassian e só é aceito como caminho absoluto do
+   *    próprio site.** Link absoluto para outro host faria o app buscar, **com a
+   *    credencial**, onde a resposta mandasse.
+   */
+  async obterAnexo(idPagina: string, nomeArquivo: string): Promise<ResultadoAnexo> {
+    if (!idPagina || !nomeArquivo) return { estado: 'nao_encontrado' }
+
+    const lista = (await this.transporte.requisitar(
+      `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}/attachments?limit=250`,
+    )) as {
+      results?: { title?: unknown; mediaType?: unknown; fileSize?: unknown; downloadLink?: unknown }[]
+    }
+
+    const achado = (lista?.results ?? []).find((a) => String(a.title ?? '') === nomeArquivo)
+    if (!achado) return { estado: 'nao_encontrado' }
+
+    const tamanho = Number(achado.fileSize ?? 0)
+    if (Number.isFinite(tamanho) && tamanho > MAX_ANEXO_BYTES) {
+      // O tamanho anunciado já reprova: não vale gastar a requisição de download.
+      return { estado: 'grande_demais', tamanhoBytes: tamanho }
+    }
+
+    const link = String(achado.downloadLink ?? '')
+    if (!link.startsWith('/') || link.startsWith('//')) return { estado: 'nao_encontrado' }
+    // [SUPOSIÇÃO — verificável só com credencial (Q1)] a v2 devolve o link relativo
+    // ao contexto `/wiki`. Aceitar as duas formas evita `/wiki/wiki/...`.
+    const caminho = link.startsWith('/wiki/') ? link : `/wiki${link}`
+
+    const baixado = await this.transporte.requisitarBinario(caminho, MAX_ANEXO_BYTES)
+    if (baixado.estado === 'grande_demais') return baixado
+
+    return {
+      estado: 'ok',
+      anexo: {
+        nomeArquivo,
+        // O tipo do corpo manda; o `mediaType` da listagem é o fallback. Nenhum dos
+        // dois é confiável — quem decide o que sai é `confluence/anexo.ts`.
+        tipoDeclarado:
+          baixado.tipoDeclarado ??
+          (typeof achado.mediaType === 'string' ? achado.mediaType : null),
+        bytes: baixado.bytes,
+      },
     }
   }
 

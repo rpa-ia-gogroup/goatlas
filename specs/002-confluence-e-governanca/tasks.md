@@ -17,9 +17,9 @@ created: "2026-08-04"
 > e passa a ser a trava principal — tratada como as seis da Fase 1.
 
 > **Estado: a trava está fechada.** T-101, T-105, T-106 e T-107 concluídos —
-> **227 testes** na suíte (58 novos), typecheck e build limpos. T-102, T-103 e T-104
-> testam **rotas que ainda não existem** (T-111, T-112 e a governança da Phase 3);
-> vêm com elas, ainda antes da implementação de cada uma.
+> **227 testes** na suíte (58 novos), typecheck e build limpos. T-102 e T-103 vieram
+> com as rotas que testam (Phase 2), escritos antes delas. T-104 testa a governança
+> da Phase 3 e vem com ela, pelo mesmo motivo.
 
 - [x] **T-101** Teste de burla da sanitização: `<script>`, `onerror`/`onclick`,
       `javascript:`, `data:`, `<iframe>`, `<object>`, tag malformada, atributo com
@@ -30,10 +30,20 @@ created: "2026-08-04"
       Cobre além do pedido: dupla codificação (`&amp;lt;script&amp;gt;`), `//`
       protocolo-relativo, `java\tscript:`, CDATA sem expansão de entidade, e limites
       de profundidade/tamanho. _Requirements: RNF-06_
-- [ ] **T-102** [P] Teste de burla do proxy de anexo: anexo de página restrita;
-      `Content-Type: text/html` vindo da Atlassian. _Requirements: RNF-06, RN-06_
-- [ ] **T-103** [P] Teste de burla de leitura direta: URL de página restrita e de
-      espaço fora da allowlist. _Requirements: RF-40, RN-06, RNF-09_
+- [x] **T-102** [P] Teste de burla do proxy de anexo: anexo de página restrita;
+      `Content-Type: text/html` vindo da Atlassian.
+      → `tests/anexo-proxy.test.ts`, **19 casos**. Além do pedido: SVG não inline,
+      tipo com CRLF, **nome de arquivo com CRLF e aspas** (ele entra num cabeçalho
+      HTTP e é escolhido por quem edita a página), anexo de outra página, teto de
+      tamanho, `Cache-Control` privado. _Requirements: RNF-06, RN-06_
+- [x] **T-103** [P] Teste de burla de leitura direta: URL de página restrita e de
+      espaço fora da allowlist.
+      → `tests/rf40-leitura-direta.test.ts`, **17 casos**. Além do pedido: as
+      recusas são **indistinguíveis entre si** (`D-12`), o **corpo da página negada
+      nunca é buscado**, allowlist vazia não gasta requisição, indisponibilidade não
+      vira 404, e um teste **estrutural** garantindo que só `confluence/acesso.ts`
+      chama `obterCorpoStorage` — o gate só é trava se não houver desvio.
+      _Requirements: RF-40, RN-06, RNF-09_
 - [ ] **T-104** [P] Teste de burla do gate de admin em **todas** as rotas de
       governança. _Requirements: RN-09, RNF-04_
 - [x] **T-105** `confluence/sanitizar.ts`: **allowlist** de tags e atributos (nunca
@@ -73,14 +83,52 @@ created: "2026-08-04"
 
 ## Phase 2 — Confluence como superfície
 
-- [ ] **T-110** `obterPagina` no cliente isolado (v2: `/wiki/api/v2/pages/{id}`),
+> **Estado: T-110, T-111 e T-112 concluídos** — **276 testes** na suíte (49 novos),
+> typecheck, build e bundle do worker limpos. A leitura direta e o proxy de anexo
+> existem, com os testes de burla escritos antes.
+
+- [x] **T-110** `obterPagina` no cliente isolado (v2: `/wiki/api/v2/pages/{id}`),
       com cache. _Requirements: RF-39, RNF-13, RNF-22_
-- [ ] **T-111** `GET /api/confluence/pagina/:id` repassando as **três** condições de
+      - **Virou dois métodos, de propósito:** `obterMetadadosPagina` (o que basta
+        para DECIDIR exposição) e `obterCorpoStorage` (o conteúdo). A ordem
+        metadados → decidir → conteúdo é o que impede o corpo de página negada de
+        entrar na memória do app. `obterAnexo` veio com T-112.
+      - ⚠️ **A v2 devolve `spaceId` numérico; a allowlist de `RN-06` é por CHAVE de
+        espaço.** O cliente resolve id → chave (`/wiki/api/v2/spaces/{id}`, cacheado
+        nos metadados) e **lança** se não resolver. Comparar a allowlist com o id não
+        dá erro visível — dá uma condição que nunca reprova.
+      - Labels vêm em requisição separada (a v2 não as embute) e **sem `try/catch`**:
+        sem elas não há como avaliar a segunda condição, e ausência de informação é
+        negar.
+      - Cache de metadados, espaço e corpo (`RNF-13`) — sem ele cada leitura são
+        quatro chamadas, e o app vira amplificador (`R-02`).
+- [x] **T-111** `GET /api/confluence/pagina/:id` repassando as **três** condições de
       `RN-06` — a mesma verificação da busca, restrição de página incluída. Faz
       T-103 passar. _Requirements: RF-40, RN-06_
-- [ ] **T-112** Proxy de anexo: as três condições + `Content-Type` conferido
+      - As três condições moram em `confluence/acesso.ts`, **um lugar só**, usado
+        também pelo anexo. Reimplementar por rota faria "esta rota checou as três?"
+        virar uma pergunta que se responde lendo três arquivos.
+      - `lerPaginaAutorizada` **sanitiza antes de devolver**: nenhuma rota recebe
+        storage cru, então `RNF-06` não depende de cada rota lembrar. A resposta é só
+        a **árvore** — não existe campo com HTML.
+      - Toda recusa devolve a **mesma** 404; indisponibilidade devolve 503 (`D-12`).
+        Página em lixeira/rascunho não é exposta.
+      - A leitura entra no rate limit de `RNF-11` (antes só `POST` entrava): quatro
+        chamadas à Atlassian por leitura consomem o orçamento da credencial única
+        igual a um `POST`, só sem criar nada — o que faz parecer inofensivo.
+- [x] **T-112** Proxy de anexo: as três condições + `Content-Type` conferido
       (imagem/PDF passam, resto vira download com `nosniff`). Faz T-102 passar.
       _Requirements: RNF-02, RNF-06_
+      - O tipo da Atlassian **nunca é repassado**: allowlist decide (`D-11`), e
+        `image/svg+xml` fica fora — SVG é documento com script.
+      - O **nome do arquivo** é entrada não confiável num cabeçalho HTTP: `filename`
+        ASCII saneado + `filename*=UTF-8''…` para o acento.
+      - O anexo é casado por nome **na lista de anexos daquela página**, e
+        `downloadLink` só é seguido se for caminho absoluto do próprio site — link
+        para outro host faria o app buscar **com a credencial** onde a resposta
+        mandasse.
+      - Teto de tamanho em duas conferências (tamanho anunciado e `Content-Length`),
+        porque o Worker não tem streaming aqui e o arquivo passa inteiro pela memória.
 - [ ] **T-113** [P] `GET /api/confluence/busca` como superfície própria (reusa o que
       a Regra 1 já usa). **[BLOQUEADA: Q5 para a allowlist real — desenvolvível]**
       _Requirements: RF-37, RF-38_
@@ -146,8 +194,9 @@ created: "2026-08-04"
 - [x] Todo RF/RNF no escopo da spec aparece em ao menos uma tarefa
 - [x] Toda tarefa referencia requisito
 - [x] Os testes de burla (T-101 a T-104) vêm **antes** da implementação
-      — T-101 escrito e vermelho antes de T-105/T-106 existirem; T-102/T-103/T-104
-      acompanham as rotas que testam, pelo mesmo motivo
+      — T-101 escrito e vermelho antes de T-105/T-106 existirem; T-102 e T-103
+      escritos e vermelhos (36 casos) antes de T-110/T-111/T-112 existirem; T-104
+      acompanha a governança da Phase 3, pelo mesmo motivo
 - [ ] **Nenhuma `[BLOQUEADA]`** — há **5**: T-113 (Q5), T-122/T-123/T-131 (Q1),
       T-125 (Q8)
 

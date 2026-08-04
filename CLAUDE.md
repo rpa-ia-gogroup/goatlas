@@ -146,6 +146,28 @@ destes reabre um vazamento que já foi fechado.
   avaliar "esta pessoa pode ver?" quando a identidade perante a Atlassian é sempre
   a conta de serviço, e usar a permissão dela como proxy da permissão da pessoa é
   o vazamento que `RNF-09` proíbe.
+- **A ordem é metadados → decidir → conteúdo** (`confluence/acesso.ts`).
+  `verificarExposicao` avalia as três condições de `RN-06` **sem** trazer o corpo da
+  página, e `lerPaginaAutorizada` é o **único** caminho até ele — sanitizando antes de
+  devolver. Nenhuma rota chama `obterCorpoStorage`, e há teste estrutural cobrando
+  isso: gate que se pode contornar é documentação, não trava. Trazer o corpo antes de
+  decidir funciona hoje e vaza no dia em que um caminho esquecer o filtro.
+- ⚠️ **A API v2 do Confluence devolve `spaceId` numérico; a allowlist é por CHAVE de
+  espaço.** O cliente resolve id → chave e **lança** se não conseguir. Comparar a
+  allowlist com o id não dá erro visível: dá uma condição de `RN-06` que nunca
+  reprova (ou que reprova tudo, até alguém "consertar" na direção errada). Labels
+  também vêm em requisição separada, e **sem `try/catch`** — sem a lista não há como
+  avaliar a segunda condição.
+- **O proxy de anexo AFIRMA o `Content-Type`; nunca repassa o da Atlassian** (`D-11`).
+  Allowlist de tipos exibíveis, e **`image/svg+xml` fica fora** (SVG é documento XML
+  com script). O resto vira `application/octet-stream` + `attachment`, sempre com
+  `nosniff` e CSP `sandbox`. E o **nome do arquivo** é entrada não confiável dentro de
+  um cabeçalho HTTP: `filename` ASCII saneado + `filename*=UTF-8''…` para o acento.
+- **Recusa de leitura é sempre a MESMA 404** (`D-12`) — espaço fora da allowlist,
+  label, restrição, lixeira e página inexistente respondem igual, e o motivo fica na
+  auditoria. Corpo diferente por motivo é oráculo, como o 403 seria em `RF-30`. Só
+  indisponibilidade é distinguida (503): 404 mentiroso manda a pessoa abrir chamado
+  por uma página que estava lá.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -282,18 +304,22 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**227 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**276 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
-`RF-43`), com os testes de burla escritos antes.
+`RF-43`) — e o **Confluence como superfície de leitura**: `obterMetadadosPagina` /
+`obterCorpoStorage` / `obterAnexo` no cliente isolado, `GET
+/api/confluence/pagina/:id` e o proxy de anexo, ambos passando pelo gate das três
+condições de `RN-06`. Todos com os testes de burla escritos antes.
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), campo customizado "Solicitante" (**Q4**), formato do
 comentário atribuído (alinhamento com o time de tech), deploy em staging/prod e o
-fechamento da Definição de Pronto. Da Fase 2, o próximo passo é `obterPagina` no
-cliente isolado e a rota de leitura com as **três** condições de `RN-06` (T-110 e
-T-111), cada uma com o teste de burla antes.
+fechamento da Definição de Pronto. Da Fase 2, o próximo passo é a rota de busca como
+superfície própria (T-113, allowlist real depende de **Q5**) e a **tela** de busca e
+leitura (T-114, skill `frontend-design` antes) — hoje as rotas existem sem interface
+que as consuma.
 
 ### Como testar sem credencial
 As duas camadas isoladas têm **fake** (`src/lib/atlassian/fake.ts`,
