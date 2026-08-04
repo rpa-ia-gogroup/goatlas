@@ -43,7 +43,7 @@ created: "2026-08-04"
 - [ ] **T-111** `GET /api/confluence/pagina/:id` repassando as **três** condições de
       `RN-06` — a mesma verificação da busca, restrição de página incluída. Faz
       T-103 passar. _Requirements: RF-40, RN-06_
-- [ ] **T-112** Proxy de anexo: three condições + `Content-Type` conferido
+- [ ] **T-112** Proxy de anexo: as três condições + `Content-Type` conferido
       (imagem/PDF passam, resto vira download com `nosniff`). Faz T-102 passar.
       _Requirements: RNF-02, RNF-06_
 - [ ] **T-113** [P] `GET /api/confluence/busca` como superfície própria (reusa o que
@@ -91,8 +91,9 @@ created: "2026-08-04"
       **já existe** desde a Fase 1 (`D-09`, edição de config + auditoria); isto
       acrescenta a seção de assentos a ela, não cria tela nova.
       _Requirements: RF-51…RF-54, RNF-28_
-- [ ] **T-129** [P] `GET /api/admin/auditoria` com filtro por usuário, período e
-      ação + exportação (`RF-56`). _Requirements: RF-56_
+- [~] **T-129** [P] `GET /api/admin/auditoria` com filtro por usuário, período e
+      ação + exportação (`RF-56`). **Filtro por usuário e a tela já vieram na Fase 1**
+      (`D-09`); faltam **período**, **ação** e **exportação**. _Requirements: RF-56_
 
 ## Phase 4 — Fechamento
 
