@@ -8,7 +8,7 @@ worktree.
 | Fase | Spec | Escopo (IDs) | Estado | Depende de |
 |---|---|---|---|---|
 | **0 — Diagnóstico** | *não tem spec (sem código)* | Levantamento via Organizations API; rebaixamento de assentos óbvios | Pendente — **João** | Q1 (credencial de Org Admin) |
-| **1 — MVP** | [`001-mvp-chamados-e-agente`](../specs/001-mvp-chamados-e-agente/spec.md) | M1 `RF-01…06` · M2 `RF-07…26` · `RF-27` parcial (**D-04**) · M3 `RF-29…33` · transversais `RF-58`, `RF-59` | **spec + plan + tasks em draft** — 97 tarefas, 8 bloqueadas | Q1, Q2, Q3, Q4, Q7 |
+| **1 — MVP** | [`001-mvp-chamados-e-agente`](../specs/001-mvp-chamados-e-agente/spec.md) | M1 `RF-01…06` · M2 `RF-07…26` · `RF-27` parcial (**D-04**) · M3 `RF-29…33` · transversais `RF-58`, `RF-59` | **49 de 58 tarefas · 166 testes · no ar em demo** | Q1, Q2, Q3, Q4, Q7 |
 | **2 — Conhecimento e governança** | [`002-confluence-e-governanca`](../specs/002-confluence-e-governanca/spec.md) | M4 `RF-37…43` · M6 `RF-49…54`, `RF-56`, `RF-57` · `RF-27` completo | **spec + plan + tasks** — 32 tarefas, 5 bloqueadas | Fase 1 · Q5, Q8 · Fase 0 (números) |
 | **3 — SLA e notificações** | [`003-sla-e-notificacoes`](../specs/003-sla-e-notificacoes/spec.md) | M5 `RF-44…48` · `RF-55`, `RF-60` · `RF-34…36` | **spec + plan + tasks** — 25 tarefas, 5 bloqueadas | Fase 1 · Q11 |
 | **4 — Rollout** | [`004-piloto-e-rollout`](../specs/004-piloto-e-rollout/spec.md) | Piloto, calibragem com dado real, `RF-19`, métricas O1–O7 | **spec + plan + tasks** — 12 de código, **7 `[HUMANO]`** | Fases 1–3 · Q9, Q10, Q13 |
@@ -68,15 +68,21 @@ access de quem não usa. Duas consequências para o roadmap:
 
 ## Ordem sugerida de trabalho
 
-1. **Responder Q1, Q6 e Q7** — sem conta de serviço, sem API de IA e sem lista de
-   domínios não existe Fase 1. São bloqueio duro.
-2. **Fase 0 em paralelo** (João) — não depende de código e dá o baseline de O2.
-3. **`/clarify` na spec 001**, depois `/plan` e `/tasks`.
-4. **Q2, Q3 e Q4 antes da Regra 2 e do campo "Solicitante"** — dá para começar a
-   Fase 1 por M1 e pela casca de M2/M3 enquanto elas não voltam, mas
-   `check_jira_history` (`RF-10`, `RF-11`) e `RF-21` param sem elas. **Q3 em
-   especial**: exemplos reais de "ajuste operacional" da Gocase são
-   pré-requisito de implementação, não refinamento posterior (`RF-14`).
+1. **Mergear os PRs #1 a #5**, nesta ordem — estão empilhados.
+2. **Q1 (conta de serviço)** — é o único bloqueio que destrava *muita* coisa de uma
+   vez: `criarChamado` real, a Fase 0, a governança da Fase 2 e o deploy com
+   credencial. Vale antecipar a credencial de **Org Admin** junto, porque a Fase 0
+   e a Fase 2 dependem dela.
+3. **Q3 (exemplos reais de "ajuste operacional")** — é a que mais afeta *qualidade*.
+   Hoje a Regra 2 se declara indisponível sem eles, o que é o comportamento certo,
+   mas significa que metade da deflexão está desligada. Exemplos inventados
+   produziriam falso bloqueio (`R-04`), que é pior.
+4. **Q7, Q2, Q4, Q5, Q8** — todas entram como **configuração**, não como código.
+   Responder é preencher um campo no console.
+5. **Fase 0 em paralelo** (João) — não depende de nada nosso e dá o baseline de `O2`.
+6. **Antes do primeiro deploy com credencial real: criar o app de staging** (regra
+   10 do `CLAUDE.md`, pendência de `D-07`). O app atual tem o slug bom e vira
+   produção.
 
 ## Riscos que mudam o roadmap, não só o código
 
