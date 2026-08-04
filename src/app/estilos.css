@@ -82,6 +82,39 @@
   }
 }
 
+/* Selo de admin ao lado do nome: responde "eu sou admin?" sem abrir nada. */
+.selo-admin {
+  display: inline-block;
+  margin-left: var(--space-2);
+  background: var(--go-lime);
+  color: var(--go-blue);
+  font-size: 0.625rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  vertical-align: middle;
+}
+
+/* ---------- tarja de modo demonstração --------------------------------- */
+
+/**
+ * Permanente e impossível de confundir com conteúdo. Lime sobre azul é o contraste
+ * mais forte da paleta, e é usado aqui justamente porque este é o único aviso do
+ * app que não pode passar batido: sem ele alguém acredita que o chamado chegou ao
+ * time de tech e espera uma resposta que nunca vem.
+ */
+.tarja-demo {
+  background: var(--go-lime);
+  color: var(--go-blue);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  line-height: 1.45;
+  padding: var(--space-3) var(--space-5);
+  text-align: center;
+}
+
 /* ---------- navegação: pílulas, o formato da marca ---------------------- */
 
 .abas {

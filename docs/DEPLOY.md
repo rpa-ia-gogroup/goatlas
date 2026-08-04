@@ -36,8 +36,19 @@ navegador**, para não existir caminho em que a identidade venha do cliente
 
 | Ambiente | appId | Uso |
 |---|---|---|
-| **staging** | *(a criar)* | Valida toda mudança de código antes de prod |
-| **produção** | *(a criar)* | `visibility: authenticated` — o edge faz o OAuth |
+| **demo / futura produção** | **`9c47f42f`** — https://goatlas.devgogroup.com | No ar em **modo demonstração** (`D-07`). Vira produção quando as credenciais reais entrarem |
+| **staging** | *(a criar)* | ⚠️ **Criar ANTES do primeiro deploy com credencial real** — regra 10 |
+
+### Secrets já configurados em `9c47f42f`
+
+| Secret | Valor | Por quê |
+|---|---|---|
+| `GOATLAS_MODO_DEMO` | `1` | Fakes + tarja de aviso. **Remover ao virar produção.** |
+| `GOATLAS_DOMINIOS` | `gocase.com` | Bootstrap — sem ele o app nega todo mundo (`RNF-07`). **[SUPOSIÇÃO: Q7]** |
+| `GOATLAS_ADMINS` | `kaique.breno@gocase.com` | Bootstrap do primeiro admin (`RF-02`) |
+
+O env é **bootstrap**: vale enquanto a chave não existe no banco. Assim que um admin
+salva pelo console, o banco manda (`RF-49`).
 
 Ambos precisam de `visibility: authenticated`: é isso que faz o edge injetar
 `x-godeploy-user-email`. Um app `public` **não** recebe o header, e o goatlas
@@ -59,12 +70,30 @@ npm run test && npm run build && npm run build:worker
 #      assetConfig → { "not_found_handling": "single-page-application" }
 ```
 
-**Armadilhas que já custaram bug em outro app da casa:**
+**Armadilhas — as duas primeiras já morderam neste app:**
+
+- **⚠️ O nome do campo no upload é o CAMINHO SERVIDO, e não pode ter o prefixo
+  `dist/`.** Subir `-F "dist/index.html=@./dist/index.html"` faz a SPA ser servida em
+  `/dist/index.html`, e a raiz dá **404** — foi exatamente o que aconteceu na
+  primeira publicação. O certo:
+
+  ```bash
+  curl -X POST "$UPLOAD_URL" -H "Authorization: Bearer $TOKEN"     -F "worker.js=@./worker.js"     -F "index.html=@./dist/index.html"     -F "assets/index-abc123.js=@./dist/assets/index-abc123.js"
+  #    ^^^^^^ caminho SERVIDO           ^^^^^^^^^^ arquivo LOCAL
+  ```
+
+  Sintoma de diagnóstico: nos logs, `GET /` aparece com `source: worker`. Isso
+  significa que a plataforma **não achou asset** para `/` e caiu no worker, que
+  devolve 404 para o que não é `/api/`.
+
+- **⚠️ `updateApp` MESCLA os assets, não substitui.** Passar a lista certa **não**
+  remove a errada — o manifest fica com as duas. Para limpar, são dois deploys:
+  primeiro `assets: []` (zera), depois a lista correta. Confira o resultado com
+  `getApp` + `include: ["manifest"]`; se houver caminho a mais ali, o próximo deploy
+  vai confundir quem for depurar.
 
 - **Nunca reaproveite a lista de assets.** O Vite gera hash novo a cada build;
-  lista antiga → tela branca. E varrer só `assets/*` deixa o `favicon` de fora, e
-  o SPA fallback devolve HTML no lugar dele.
-- **Assets sem o prefixo `dist/`** na lista.
+  lista antiga → tela branca. Derive do `dist/` real, na hora.
 - **`uploadId` é single-use** — um por deploy.
 - **SPA fallback é obrigatório**, senão qualquer rota que não seja `/` dá 404.
 
@@ -179,5 +208,7 @@ houver, revogue de todo modo.
 - [ ] `GET /api/health` com todas as dependências `ok` e `usandoFakes: false`.
 - [ ] Varredura confirmando que nenhuma das três credenciais aparece em log,
       resposta ou bundle (`RNF-01`).
+- [ ] **`RF-03` decidido com o João**: o app não tem logout (`D-08`), e o requisito
+      pede logout explícito. Enquanto não houver aval, é divergência aberta.
 - [ ] Time de tech avisado de que o reporter muda (`R-03`, **Q10**) — é
       pré-condição de rollout, não detalhe.

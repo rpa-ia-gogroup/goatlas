@@ -449,3 +449,38 @@ describe('RNF-25 — sem service desk configurado, não se inventa um', () => {
     expect((await r.json()).erro).toMatch(/não foi configurada/i)
   })
 })
+
+describe('RF-56 — auditoria do admin mostra TUDO, não só as ações dele', () => {
+  it('sem filtro, traz ações de todos os atores', async () => {
+    // O default anterior era o próprio e-mail do admin, o que tornava o console
+    // inútil para investigar: ele só via a si mesmo.
+    await chamar(req('/api/chamados', { email: ANA }))
+    await chamar(req('/api/chamados', { email: BRUNO }))
+
+    const r = await chamar(req('/api/admin/auditoria', { email: CHEFE }))
+    const atores = new Set(
+      (await r.json()).itens.map((i: { ator_email: string }) => i.ator_email),
+    )
+    expect(atores.has(ANA)).toBe(true)
+    expect(atores.has(BRUNO)).toBe(true)
+  })
+
+  it('com filtro, traz só o ator pedido', async () => {
+    await chamar(req('/api/chamados', { email: ANA }))
+    await chamar(req('/api/chamados', { email: BRUNO }))
+
+    const r = await chamar(req(`/api/admin/auditoria?email=${encodeURIComponent(ANA)}`, { email: CHEFE }))
+    const atores = new Set(
+      (await r.json()).itens.map((i: { ator_email: string }) => i.ator_email),
+    )
+    expect([...atores]).toEqual([ANA])
+  })
+
+  it('BURLA — colaborador não alcança a auditoria, com ou sem filtro', async () => {
+    expect((await chamar(req('/api/admin/auditoria', { email: ANA }))).status).toBe(403)
+    expect(
+      (await chamar(req(`/api/admin/auditoria?email=${encodeURIComponent(BRUNO)}`, { email: ANA })))
+        .status,
+    ).toBe(403)
+  })
+})

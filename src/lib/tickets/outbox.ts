@@ -146,6 +146,22 @@ export class Outbox {
     return linha ? daLinha(linha) : null
   }
 
+  /**
+   * Submissão pelo `issueKey`.
+   *
+   * É o que permite mostrar título e prioridade **do nosso próprio registro**
+   * quando a Atlassian não responde (`RNF-19`): a pessoa vê seus chamados com
+   * conteúdo em vez de "título indisponível". O dado já estava aqui; faltava usá-lo.
+   */
+  async obterPorIssueKey(issueKey: string): Promise<Submissao | null> {
+    const r = await this.db.query(
+      `SELECT ${COLUNAS} FROM submissoes WHERE issue_key = ? LIMIT 1`,
+      [issueKey],
+    )
+    const linha = primeiraLinha<LinhaSubmissao>(r)
+    return linha ? daLinha(linha) : null
+  }
+
   async marcarCriado(id: string, issueKey: string): Promise<void> {
     await this.db.exec(
       `UPDATE submissoes SET estado = 'criado', issue_key = ?, ultimo_erro = NULL, atualizado_em = ?

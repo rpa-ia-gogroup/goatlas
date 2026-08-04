@@ -150,6 +150,101 @@ Aceita conscientemente para ter a visão completa do trabalho antes de começar.
 
 ---
 
+### D-07 - Publicar em modo demonstracao antes de existir credencial
+**Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada
+
+O app está no ar em **https://goatlas.devgogroup.com** (`appId 9c47f42f`,
+`visibility: authenticated`) rodando em **modo demonstração**: fakes semeados com
+dados fictícios, nenhuma chamada à Atlassian ou a provedor de IA. Publicado antes
+de **Q1** de propósito — dá para mostrar o produto funcionando (login, deflexão,
+override, recibo, acompanhamento) enquanto a conta de serviço não existe.
+
+**A tarja de aviso é parte da decisão, não enfeite.** Sem ela alguém abre um
+"chamado", vê a chave na tela e acredita que o pedido chegou ao time de tech —
+espera uma resposta que nunca vem, e o problema fica sem tratamento. Isso é pior
+que o app não existir. Por isso `modoDemo` é exposto em `/api/auth/me` e
+`/api/health`, e a interface mostra o aviso de forma permanente.
+
+**Bootstrap por env, porque o app é fail-closed.** Toda allowlist nasce vazia e
+vazio significa negar (`RNF-07`), então um app recém-deployado negaria **todo
+mundo** — inclusive quem entraria para configurá-lo. `GOATLAS_DOMINIOS` e
+`GOATLAS_ADMINS` resolvem o ovo e a galinha: valem enquanto a chave **não existe**
+no banco; no instante em que um admin salva pelo console, o banco manda (`RF-49`).
+Isso **não** afrouxa o fail-closed — env vazio e banco vazio continua negando, e há
+teste para as duas metades.
+
+Configurado hoje: domínio `gocase.com` **[SUPOSIÇÃO: Q7]** · admin
+`kaique.breno@gocase.com`. Ambos mudam por secret ou pelo console, sem deploy.
+
+**Pendência que esta decisão cria:** quando as credenciais reais entrarem, este app
+passa a ser **produção** (é ele que tem o slug bom). A regra 10 do `CLAUDE.md` exige
+staging antes de prod, então **antes do primeiro deploy com credencial real** é
+preciso criar o app de staging. Não deixar isso para a hora do deploy.
+
+---
+
+### D-08 · Sem botão de sair: a conta fica setada enquanto durar
+**Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada — **precisa do aval do João**
+
+A interface **não tem logout**. A pessoa entra uma vez pelo Google e a conta
+permanece; o canto superior mostra nome e e-mail apenas para ela saber **com qual
+conta** está.
+
+**Racional:** trocar de conta não é caso de uso desta ferramenta. Quem tem duas
+contas corporativas é exceção, e resolve limpando os cookies. Botão de sair em
+computador compartilhado de loja ou expedição convida mais confusão do que resolve —
+alguém sai sem querer e a próxima pessoa acha que o app quebrou.
+
+**⚠️ Isto contraria `RF-03`**, que pede "sessão com expiração configurável e
+**logout explícito**" e é **P0**. A divergência está registrada aqui de propósito, e
+não é esquecimento:
+
+- A **expiração de sessão** continua existindo — é do edge do GoDeploy (`D-02`), não
+  nossa.
+- O que sai é só o **logout explícito** na interface.
+- **`RF-03` é requisito do João.** Como ele escreveu o documento, esta decisão precisa
+  do aval dele para virar alteração de `REQUISITOS.md`. Até lá, `RF-03` fica marcado
+  como **parcialmente atendido**, não como cumprido.
+
+**Como voltar atrás, se ele quiser o botão:** a implementação existiu e está no
+histórico (commit do PR #5). O achado técnico que vale reaproveitar é que o logout do
+edge **ignora parâmetro de redirect** (testado com `redirect`, `next`, `returnTo`,
+`return_to`, `r`, `continue`, `redirect_uri`, `callback`) e sempre leva ao domínio da
+plataforma — que foi exatamente o problema: quem saía caía numa tela "GoDeploy
+Gateway" sem caminho de volta.
+
+---
+
+### D-09 · Tela de admin antecipada da Fase 2 para a Fase 1
+**Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada
+
+`RF-49` (allowlists pela interface), `RF-50` (parâmetros das regras) e `RF-56`
+(auditoria) estavam planejados para a **Fase 2**. Vieram para a Fase 1.
+
+**Por quê:** o admin não tinha **nenhuma** superfície. "Admin vê tudo" era uma flag
+no banco — a pessoa entrava e não havia nada que a distinguisse de um colaborador,
+nem forma de saber que era admin. E `RF-50` é o que permite **calibrar a deflexão**:
+sem tela, ajustar threshold exigiria `curl`, o que na prática significa não ajustar.
+
+**O que entrou:** selo `admin` ao lado do nome · aba "Configuração" (só para admin)
+com os campos que importam, cada um explicando **o que o vazio faz** — porque o app é
+fail-closed e alguém apagaria a lista de espaços achando que "vazio = todos" ·
+auditoria de **todos** os atores, com filtro por e-mail.
+
+**Bug corrigido no caminho:** `GET /api/admin/auditoria` sem filtro usava o e-mail do
+**próprio admin** como default, então o console mostrava só as ações de quem estava
+olhando — inútil para investigar, que é a razão de `RF-56` existir. Agora sem filtro
+traz tudo.
+
+**O que NÃO veio:** o console de governança de assentos (`RF-51`…`RF-54`) segue na
+Fase 2 — depende da credencial de Org Admin (**Q1**).
+
+⚠️ **A aba escondida é conveniência, não segurança.** Quem garante o acesso é o gate
+de servidor em cada rota `/api/admin/*`, com teste de burla. Esconder no cliente
+apenas evita mostrar um botão que daria 403.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

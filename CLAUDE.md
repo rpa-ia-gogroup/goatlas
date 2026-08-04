@@ -99,6 +99,11 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
 - **Falha de tool não silencia a regra** (**RNF-18**) — informa e marca o ticket
   como não verificado. Indisponibilidade nunca vira bypass.
 - **N8N está descartado.** Não propor voltar a ele.
+- **Não existe botão de sair** (`D-08`). A pessoa loga uma vez e a conta fica; o canto
+  superior mostra o e-mail só para ela saber com qual conta está. Trocar de conta não
+  é caso de uso, e quem tem duas limpa os cookies. ⚠️ Isso **contraria `RF-03`** (P0,
+  pede logout explícito) e está registrado como divergência consciente, aguardando o
+  aval do João — não reintroduzir o botão sem passar por `D-08`.
 
 ## Padrões de código que sustentam as travas
 
@@ -222,6 +227,17 @@ persistente.
 - **Deploy:** `getUploadToken` → upload dos arquivos → `updateApp` com
   `entrypoint`, `assets` (lista derivada do `dist/` **real** — hashes mudam a cada
   build) e `assetConfig.not_found_handling: "single-page-application"`.
+- ⚠️ **O nome do campo no upload é o caminho SERVIDO, sem o prefixo `dist/`.**
+  `-F "dist/index.html=@..."` serve a SPA em `/dist/index.html` e a raiz dá **404**.
+  Diagnóstico: nos logs, `GET /` com `source: worker` = a plataforma não achou asset
+  e caiu no worker. Já aconteceu neste app.
+- ⚠️ **`updateApp` MESCLA assets, não substitui.** Para limpar caminho errado são
+  dois deploys: `assets: []` e depois a lista certa. Confira com `getApp` +
+  `include: ["manifest"]`.
+- **Logout é do edge** (`https://<dominio-base>/auth/logout`) e **ignora parâmetro de
+  redirect** — testado com `redirect`, `next`, `returnTo`, `return_to`, `r`,
+  `continue`, `redirect_uri` e `callback`. Sempre leva ao domínio da plataforma; a UI
+  avisa para onde a pessoa vai. A URL é derivada do próprio host, não hardcoded.
 
 ## Estado do projeto
 
@@ -230,7 +246,11 @@ Fase 0 diagnóstico (João, sem código) → **Fase 1 MVP** → Fase 2 conhecime
 governança → Fase 3 SLA e notificações → Fase 4 rollout. Progresso tarefa por
 tarefa em [`specs/001-mvp-chamados-e-agente/tasks.md`](specs/001-mvp-chamados-e-agente/tasks.md).
 
-**49 de 58 tarefas concluídas · 152 testes · typecheck limpo · fluxo validado no
+**No ar em modo demonstração: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
+ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
+chega ao time de tech.
+
+**49 de 58 tarefas concluídas · 166 testes · typecheck limpo · fluxo validado no
 navegador**, tudo sem credencial e sem rede. Pronto: fundação, as seis travas
 críticas, clientes de Atlassian e IA, runtime do agente, rotas, worker, frontend e
 `docs/DEPLOY.md`.

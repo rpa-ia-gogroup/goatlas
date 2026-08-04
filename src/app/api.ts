@@ -9,6 +9,8 @@ export interface Identidade {
   readonly email: string
   readonly nome: string
   readonly isAdmin: boolean
+  /** App publicado em modo demonstração: nada é criado no Jira. */
+  readonly modoDemo: boolean
 }
 
 export type EstadoVerificacao = 'pendente' | 'ok' | 'falhou'
@@ -83,6 +85,35 @@ export interface ResultadoCriacao {
   readonly prioridade: Prioridade
   readonly slaPrimeiraRespostaHoras: number
   readonly mensagem: string
+}
+
+/** Espelha `ConfigValores` do servidor no que a tela de admin edita. */
+export interface ConfigValores {
+  readonly dominios_permitidos: string[]
+  readonly admins: string[]
+  readonly espacos_confluence: string[]
+  readonly labels_bloqueadas: string[]
+  readonly tipos_chamado_permitidos: string[]
+  readonly service_desk_id: string | null
+  readonly regra1_threshold_score: number
+  readonly regra2_threshold_recorrencia: number
+  readonly regra2_janela_dias: number
+  readonly regra2_campo_agrupamento: string
+  readonly regra2_exemplos_ajuste_operacional: string[]
+  readonly regra2_limite_tickets: number
+  readonly ttl_metadados_seg: number
+  readonly ttl_conteudo_seg: number
+  readonly limite_requisicoes_por_minuto: number
+  readonly teto_custo_conversa_usd: number
+}
+
+export interface RegistroAuditoria {
+  readonly id: string
+  readonly ator_email: string
+  readonly acao: string
+  readonly recurso: string | null
+  readonly resultado: 'sucesso' | 'falha' | 'negado'
+  readonly criado_em: string
 }
 
 /** Erro com a mensagem que o backend escreveu — já em linguagem de negócio (RNF-30). */
@@ -181,6 +212,19 @@ export const api = {
     }),
 
   tiposChamado: () => chamar<{ itens: TipoChamado[] }>('/api/tipos-chamado'),
+
+  adminConfig: () => chamar<{ config: ConfigValores }>('/api/admin/config'),
+
+  adminSalvarConfig: (chave: keyof ConfigValores, valor: unknown) =>
+    chamar<{ ok: true }>('/api/admin/config', {
+      method: 'PUT',
+      body: JSON.stringify({ chave, valor }),
+    }),
+
+  adminAuditoria: (email?: string) =>
+    chamar<{ itens: RegistroAuditoria[] }>(
+      email ? `/api/admin/auditoria?email=${encodeURIComponent(email)}` : '/api/admin/auditoria',
+    ),
 }
 
 /** Rótulos de prioridade com o SLA de PRIMEIRA RESPOSTA explícito (RN-08). */

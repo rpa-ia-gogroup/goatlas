@@ -79,8 +79,12 @@ created: "2026-08-03"
       Registrar em `D-02`. _Requirements: RF-05, RF-06_
 - [x] **T-022** [P] Perfil admin por allowlist explícita, configurável sem deploy.
       _Requirements: RF-02, RN-09_
-- [x] **T-023** [P] Sessão com expiração configurável e logout explícito.
-      _Requirements: RF-03_
+- [~] **T-023** [P] Sessão com expiração configurável e logout explícito.
+      **Parcialmente atendida, por decisão `D-08`:** a expiração existe (é do edge do
+      GoDeploy), mas **não há logout na interface** — trocar de conta não é caso de uso,
+      e botão de sair em computador compartilhado convida confusão. ⚠️ `RF-03` é P0 e
+      pede logout explícito, então **falta o aval do João** para isso virar alteração
+      de `REQUISITOS.md`. Fica `[~]`, não `[x]`. _Requirements: RF-03, D-08_
 - [x] **T-024** `audit/` append-only (sem UPDATE/DELETE no código), registrando
       também as ações que falham. _Requirements: RF-58, RN-10_
 - [x] **T-025** `atlassian/cliente.ts`: cache com TTL configurável, `Retry-After`,
@@ -95,6 +99,12 @@ created: "2026-08-03"
       _Requirements: RNF-16, RNF-23, RNF-34_
 - [x] **T-028** [P] `config`: thresholds, allowlists e TTLs em banco, editáveis sem
       deploy — é o que impede o hardcode. _Requirements: RF-49, RF-50, RNF-25_
+- [x] **T-028b** Tela de admin (**antecipada da Fase 2**, `D-09`): selo `admin`, aba
+      "Configuração" com os campos que importam — cada um explicando o que o vazio faz,
+      porque o app é fail-closed — e auditoria de **todos** os atores com filtro.
+      Corrige um bug de `RF-56`: sem filtro, a rota usava o e-mail do próprio admin
+      como default e o console mostrava só quem estava olhando.
+      _Requirements: RF-49, RF-50, RF-56, D-09_
 - [x] **T-029** [P] `GET /api/health` com Atlassian, IA, banco e SSO.
       _Requirements: RF-59_
 - [x] **T-030** [P] Rate limit por usuário. _Requirements: RNF-11_

@@ -31,7 +31,7 @@ export interface TurnoRoteirizado {
 }
 
 export class ClienteIAFake implements ClienteIA {
-  private readonly roteiro: TurnoRoteirizado[]
+  private roteiro: TurnoRoteirizado[]
   private indice = 0
   /** Registra o que o SERVIDOR permitiu em cada turno (asserção de RF-08). */
   readonly permissoesRecebidas: string[][] = []
@@ -48,6 +48,12 @@ export class ClienteIAFake implements ClienteIA {
 
   constructor(roteiro: TurnoRoteirizado[] = []) {
     this.roteiro = roteiro
+  }
+
+  /** Troca o roteiro e reinicia o índice — usado pelo modo demonstração. */
+  definirRoteiro(roteiro: readonly TurnoRoteirizado[]): void {
+    this.roteiro = [...roteiro]
+    this.indice = 0
   }
 
   async chat(params: ParametrosChat): Promise<RespostaIA> {

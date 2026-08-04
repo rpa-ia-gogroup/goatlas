@@ -64,7 +64,14 @@ export async function tratarRequisicao(
   const eu = auth.identidade
 
   if (caminho === '/api/auth/me' && req.method === 'GET') {
-    return json({ email: eu.email, nome: eu.nome, isAdmin: eu.isAdmin })
+    // `modoDemo` vai para a UI porque ela precisa avisar de forma permanente que
+    // nada chega ao time de tech (ver `demo.ts`).
+    return json({
+      email: eu.email,
+      nome: eu.nome,
+      isAdmin: eu.isAdmin,
+      modoDemo: ctx.modoDemo,
+    })
   }
 
   // RNF-11 — rate limit por usuário, antes de qualquer trabalho caro.
@@ -296,13 +303,16 @@ async function rotear(
           verificadoRegras: v.verificadoRegras,
         })
       } catch {
-        // RNF-19: um chamado ilegível não derruba a lista inteira. A pessoa vê o
-        // que der para ver, com o estado explícito no que não deu.
+        // RNF-19: um chamado ilegível não derruba a lista. E em vez de mostrar
+        // "título indisponível", usa o que NÓS gravamos no outbox — o dado já
+        // estava lá. A pessoa vê seus chamados com conteúdo mesmo com a Atlassian
+        // fora; só o status é que fica honestamente marcado como indisponível.
+        const submissao = await ctx.outbox.obterPorIssueKey(v.issueKey)
         itens.push({
           issueKey: v.issueKey,
-          titulo: null,
+          titulo: submissao?.payload.titulo ?? null,
           status: 'indisponivel',
-          prioridade: null,
+          prioridade: submissao?.payload.prioridade ?? null,
           atualizadoEm: null,
           via: v.via,
           verificadoRegras: v.verificadoRegras,
@@ -380,8 +390,14 @@ async function rotear(
 
   if (caminho === '/api/admin/auditoria' && req.method === 'GET') {
     if (!eu.isAdmin) return ERROS.semPermissao()
-    const alvo = url.searchParams.get('email') ?? eu.email
-    return json({ itens: await ctx.auditoria.listarPorAtor(alvo, 200) })
+    // Sem filtro, o admin vê TUDO. O default anterior era o próprio e-mail, o que
+    // fazia o console de auditoria mostrar só as ações de quem estava olhando —
+    // inútil para investigar (`RF-56`).
+    const alvo = url.searchParams.get('email')?.trim().toLowerCase()
+    const itens = alvo
+      ? await ctx.auditoria.listarPorAtor(alvo, 200)
+      : await ctx.auditoria.listarRecentes(200)
+    return json({ itens })
   }
 
   return ERROS.naoEncontrado()
@@ -472,6 +488,7 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
     {
       ok,
       usandoFakes: ctx.usandoFakes,
+      modoDemo: ctx.modoDemo,
       dependencias: { atlassian, ia, banco, sso: { ok: true, detalhe: 'edge GoDeploy' } },
     },
     ok ? 200 : 503,

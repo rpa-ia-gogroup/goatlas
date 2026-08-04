@@ -11,17 +11,22 @@ import { useEffect, useState } from 'react'
 import { api, ErroApi, type Identidade } from './api'
 import { Aviso } from './componentes'
 import { TelaConversa, TelaDetalhe, TelaFormulario, TelaMeusChamados } from './telas'
+import { TelaAdmin } from './admin'
 
 type Tela =
   | { nome: 'conversa' }
   | { nome: 'chamados' }
   | { nome: 'formulario' }
+  | { nome: 'admin' }
   | { nome: 'detalhe'; issueKey: string }
 
-const ABAS: readonly { nome: Tela['nome']; rotulo: string }[] = [
+const ABAS: readonly { nome: Tela['nome']; rotulo: string; soAdmin?: boolean }[] = [
   { nome: 'conversa', rotulo: 'Falar com o agente' },
   { nome: 'chamados', rotulo: 'Meus chamados' },
   { nome: 'formulario', rotulo: 'Abrir direto' },
+  // A aba só aparece para admin — mas quem garante o acesso é o gate do SERVIDOR
+  // em cada rota `/api/admin/*`. Esconder no cliente é conveniência, não segurança.
+  { nome: 'admin', rotulo: 'Configuração', soAdmin: true },
 ]
 
 export function App() {
@@ -46,14 +51,27 @@ export function App() {
         <span className="marca">
           go<span>atlas</span>
         </span>
+        {/*
+          A identidade no canto existe só para a pessoa saber COM QUAL CONTA está
+          logada. Não há botão de sair — decisão D-08: trocar de conta não é caso de
+          uso desta ferramenta, e quem tem duas contas limpa os cookies.
+        */}
         {eu && (
           <span className="identidade">
             {eu.nome}
+            {eu.isAdmin && <span className="selo-admin">admin</span>}
             <br />
             {eu.email}
           </span>
         )}
       </header>
+
+      {eu?.modoDemo && (
+        <p className="tarja-demo" role="status">
+          <strong>Modo demonstração.</strong> Os dados são fictícios e nada é criado no Jira —
+          chamados abertos aqui <strong>não chegam ao time de tech</strong>.
+        </p>
+      )}
 
       <main className="painel">
         {erroAuth ? (
@@ -62,7 +80,7 @@ export function App() {
           <>
             {tela.nome !== 'detalhe' && (
               <nav className="abas" aria-label="Seções do app">
-                {ABAS.map((a) => (
+                {ABAS.filter((a) => !a.soAdmin || eu?.isAdmin).map((a) => (
                   <button
                     key={a.nome}
                     type="button"
@@ -88,6 +106,7 @@ export function App() {
             {tela.nome === 'formulario' && (
               <TelaFormulario aoAbrirChamado={() => setTela({ nome: 'chamados' })} />
             )}
+            {tela.nome === 'admin' && <TelaAdmin />}
             {tela.nome === 'detalhe' && (
               <TelaDetalhe
                 issueKey={tela.issueKey}
