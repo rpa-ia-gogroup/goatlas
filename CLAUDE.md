@@ -157,7 +157,24 @@ persistente.
 
 ## Estado do projeto
 
-**Nada implementado ainda.** Fase de planejamento (SDD). Faseamento em
-`docs/REQUISITOS.md` seção 12: Fase 0 diagnóstico (João, sem código) → Fase 1 MVP
-(M1+M2+M3) → Fase 2 conhecimento e governança → Fase 3 SLA e notificações →
-Fase 4 rollout.
+**Fase 1 em implementação.** Faseamento em `docs/REQUISITOS.md` seção 12:
+Fase 0 diagnóstico (João, sem código) → **Fase 1 MVP** → Fase 2 conhecimento e
+governança → Fase 3 SLA e notificações → Fase 4 rollout. Progresso tarefa por
+tarefa em [`specs/001-mvp-chamados-e-agente/tasks.md`](specs/001-mvp-chamados-e-agente/tasks.md).
+
+Pronto: fundação (scaffold, schema, contratos das camadas isoladas, fakes).
+**8 tarefas seguem `[BLOQUEADA]`** aguardando Q1/Q2/Q3/Q4 — ver `docs/DECISOES.md`.
+
+### Como testar sem credencial
+As duas camadas isoladas têm **fake** (`src/lib/atlassian/fake.ts`,
+`src/lib/ia/fake.ts`), com falha injetável por operação. O fake de IA é
+**roteirizável**: é assim que os testes de bypass encenam um modelo hostil
+(tentando `create_ticket` fora de ordem, inventando nome de tool, obedecendo a
+instrução vinda de conteúdo do Confluence) de forma determinística. Nenhum teste
+precisa de rede, credencial ou provedor de IA.
+
+Banco nos testes: `node:sqlite` via `src/lib/db/sqlite-local.ts` — SQLite real, do
+runtime, sem dependência nova. É de propósito: as invariantes que importam são
+constraints do schema (`UNIQUE` de `vinculos.issue_key` e de
+`submissoes.chave_idempotencia`), e um dublê que não as aplica deixaria RF-24 e
+RN-03 verdes enquanto produção duplica chamado.

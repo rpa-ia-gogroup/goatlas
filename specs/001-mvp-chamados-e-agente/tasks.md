@@ -25,20 +25,21 @@ created: "2026-08-03"
 
 ## Phase 0 — Fundação do repo (nada depende de resposta)
 
-- [ ] **T-001** Scaffold do app: Vite 7 + React 19 + TS strict + TanStack Router +
-      Tailwind v4 + shadcn/ui + Vitest; `npm run dev/test/build/lint`.
-      _Requirements: RNF-32_
-- [ ] **T-002** [P] Tokens da identidade visual em CSS/Tailwind (Poppins, `--go-*`,
+- [x] **T-001** Scaffold do app: Vite 7 + React 19 + TS strict + Tailwind v4 +
+      Vitest; `npm run dev/test/build/typecheck`. **TanStack Router e shadcn/ui
+      adiados para a Phase 6** — instalar router antes de existir rota é abstração
+      prematura (Princípio V). _Requirements: RNF-32_
+- [x] **T-002** [P] Tokens da identidade visual em CSS/Tailwind (Poppins, `--go-*`,
       radius, sombras) a partir de `identidade_visual_gogroup.md`; invocar a skill
       `frontend-design` antes. _Requirements: RNF-28, RNF-29_
-- [ ] **T-003** [P] Schema em `env.DB` (idempotente): `vinculos`, `submissoes`,
+- [x] **T-003** [P] Schema em `env.DB` (idempotente): `vinculos`, `submissoes`,
       `conversas`, `mensagens`, `bloqueios`, `classificacoes_ticket`, `auditoria`,
       `config`. Unicidade de `vinculos.issue_key` e `submissoes.chave_idempotencia`
       **no banco**. _Requirements: RF-22, RF-24, RN-03, RF-58_
-- [ ] **T-004** [P] Contratos (só tipos, sem implementação): `atlassian/tipos.ts`
+- [x] **T-004** [P] Contratos (só tipos, sem implementação): `atlassian/tipos.ts`
       com métodos de **domínio**, `ia/tipos.ts` com chat-com-tools e classificação.
       _Requirements: RNF-22, RNF-23_
-- [ ] **T-005** Fakes de Atlassian e IA, com modos de falha injetáveis (indisponível,
+- [x] **T-005** Fakes de Atlassian e IA, com modos de falha injetáveis (indisponível,
       429, timeout). É o que permite testar tudo sem rede. _Requirements: RNF-18_
 - [ ] **T-006** [P] `docs/DEPLOY.md`: app de staging + prod, deploy pelo MCP,
       variáveis, privilégios de cada credencial e **rotação sem downtime**.
