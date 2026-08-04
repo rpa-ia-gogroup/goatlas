@@ -113,6 +113,30 @@ export interface RespostaBusca {
   readonly itens: readonly ResultadoBusca[]
 }
 
+export interface NoDaArvore {
+  readonly id: string
+  readonly titulo: string
+}
+
+export interface Ancestral {
+  readonly id: string
+  readonly titulo: string
+}
+
+export interface EspacoNavegavel {
+  readonly chave: string
+  readonly nome: string
+  /** Página inicial — é por ela que a navegação começa. */
+  readonly homepageId: string
+}
+
+export interface NivelDaArvore {
+  readonly espaco: { readonly chave: string; readonly nome: string }
+  readonly pai: NoDaArvore
+  readonly ancestrais: readonly Ancestral[]
+  readonly itens: readonly NoDaArvore[]
+}
+
 export interface PaginaLida {
   readonly id: string
   readonly titulo: string
@@ -123,6 +147,12 @@ export interface PaginaLida {
    * Árvore de nós **já sanitizada** no servidor (RNF-06). Não é HTML, e é por isso
    * que não existe caminho em que conteúdo do Confluence vire marcação no navegador.
    */
+  /**
+   * Caminho até a página (`RF-41`), já filtrado por `RN-06`: ele **para** no primeiro
+   * ancestral não exposto, então pode vir curto ou vazio — e isso é correto, não um bug
+   * de dado faltando.
+   */
+  readonly ancestrais: readonly Ancestral[]
   readonly nos: readonly No[]
   readonly truncado: boolean
 }
@@ -258,6 +288,14 @@ export const api = {
 
   lerPagina: (id: string) =>
     chamar<PaginaLida>(`/api/confluence/pagina/${encodeURIComponent(id)}`),
+
+  espacos: () => chamar<{ itens: EspacoNavegavel[] }>('/api/confluence/espacos'),
+
+  arvore: (espaco: string, pai?: string) =>
+    chamar<NivelDaArvore>(
+      `/api/confluence/arvore?espaco=${encodeURIComponent(espaco)}` +
+        (pai ? `&pai=${encodeURIComponent(pai)}` : ''),
+    ),
 
   adminConfig: () => chamar<{ config: ConfigValores }>('/api/admin/config'),
 

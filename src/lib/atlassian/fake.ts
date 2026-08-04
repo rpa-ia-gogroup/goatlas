@@ -16,6 +16,8 @@ import {
   type ChamadoCriado,
   type ClienteAtlassian,
   type ComentarioPublico,
+  type EspacoConfluence,
+  type FilhosParams,
   type HistoricoParams,
   type MetadadosPagina,
   type NovoChamado,
@@ -65,6 +67,8 @@ export interface PaginaFake {
   readonly espaco: string
   readonly labels: readonly string[]
   readonly storage: string
+  /** Mãe na árvore do espaço (`RF-41`). `null`/ausente = raiz. */
+  readonly idPai?: string | null
   /** `false` = lixeira ou rascunho. Default `true`. */
   readonly atual?: boolean
   readonly atualizadoEm?: string
@@ -100,6 +104,8 @@ export interface EstadoFake {
   filtrarPorTermo: boolean
   /** Conteúdo por id, para a leitura direta (RF-39, RF-40). */
   conteudoPaginas: Map<string, PaginaFake>
+  /** Espaços por chave, com a homepage que serve de raiz da árvore (`RF-41`). */
+  espacos: Map<string, { nome: string; homepageId: string | null }>
   /** Anexos por id de página — a lista é o que amarra anexo à página (T-112). */
   anexos: Map<string, AnexoFake[]>
   /**
@@ -161,6 +167,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       idsRestritos: inicial.idsRestritos ?? new Set(),
       filtrarPorTermo: inicial.filtrarPorTermo ?? false,
       conteudoPaginas: inicial.conteudoPaginas ?? new Map(),
+      espacos: inicial.espacos ?? new Map(),
       anexos: inicial.anexos ?? new Map(),
       limiteAnexoBytes: inicial.limiteAnexoBytes ?? MAX_ANEXO_BYTES,
       historico: inicial.historico ?? [],
@@ -303,6 +310,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     }
     return {
       id: idPagina,
+      idPai: p.idPai ?? null,
       titulo: p.titulo,
       espaco: p.espaco,
       labels: p.labels,
@@ -318,6 +326,49 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     this.checar(this.estado.falhas.paginaRestrita, 'paginaRestrita')
     if (!idPagina) return true
     return this.estado.idsRestritos.has(idPagina)
+  }
+
+  async obterEspaco(chaveEspaco: string): Promise<EspacoConfluence> {
+    this.chamadas.push({ operacao: 'obterEspaco', params: chaveEspaco })
+    this.checar(this.estado.falhas.obterPagina, 'obterEspaco')
+    const e = this.estado.espacos.get(chaveEspaco)
+    if (!e) {
+      throw new ErroAtlassian('espaço não encontrado', {
+        status: 404,
+        transitorio: false,
+        recurso: 'obterEspaco',
+      })
+    }
+    return { chave: chaveEspaco, nome: e.nome, homepageId: e.homepageId }
+  }
+
+  async listarFilhosDaPagina(params: FilhosParams): Promise<readonly PaginaConfluence[]> {
+    this.chamadas.push({ operacao: 'listarFilhosDaPagina', params })
+    this.checar(this.estado.falhas.buscarConfluence, 'listarFilhosDaPagina')
+    if (params.espacosPermitidos.length === 0) return []
+
+    const permitidos = new Set(params.espacosPermitidos)
+    const bloqueadas = new Set(params.labelsBloqueadas.map((l) => l.toLowerCase()))
+    const filhos: PaginaConfluence[] = []
+    for (const [id, p] of this.estado.conteudoPaginas) {
+      if ((p.idPai ?? null) !== params.idPai) continue
+      // As mesmas três condições, na mesma ordem em que o cliente real as aplica.
+      if (!permitidos.has(p.espaco)) continue
+      if (p.labels.some((l) => bloqueadas.has(l.toLowerCase()))) continue
+      if (this.estado.idsRestritos.has(id)) continue
+      filhos.push({
+        id,
+        titulo: p.titulo,
+        espaco: p.espaco,
+        url: `https://exemplo.invalid/wiki/pages/${id}`,
+        score: 0,
+        trecho: '',
+        labels: [...p.labels],
+      })
+    }
+    return filhos
+      .sort((a, b) => a.titulo.localeCompare(b.titulo, 'pt-BR'))
+      .slice(0, params.limite)
   }
 
   async obterCorpoStorage(idPagina: string): Promise<string> {

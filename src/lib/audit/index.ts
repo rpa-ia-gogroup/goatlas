@@ -29,6 +29,8 @@ export type AcaoAuditada =
   | 'pagina_confluence_lida'
   /** Anexo servido pelo proxy (RNF-02) — mesma razão. */
   | 'anexo_servido'
+  /** Navegação pela árvore do espaço (RF-41) — expõe títulos, então é auditada. */
+  | 'arvore_navegada'
   | 'consulta_historico'
   | 'bloqueio_disparado'
   | 'override_registrado'

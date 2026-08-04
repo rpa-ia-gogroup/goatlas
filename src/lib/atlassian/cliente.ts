@@ -29,6 +29,8 @@ import {
   type ChamadoCriado,
   type ClienteAtlassian,
   type ComentarioPublico,
+  type EspacoConfluence,
+  type FilhosParams,
   type HistoricoParams,
   type MetadadosPagina,
   type NovoChamado,
@@ -98,6 +100,26 @@ export function montarCql(params: BuscaConfluenceParams): string {
     partes.push(`label != "${escaparCql(label)}"`)
   }
   return partes.join(' AND ')
+}
+
+/**
+ * CQL de um nível da árvore — `RF-41`.
+ *
+ * ⚠️ Mesma disciplina de `montarCql`: a allowlist entra na **query**, não num filtro
+ * posterior. E o `idPai` vem do cliente HTTP, então ele é escapado — sem isso um
+ * `pai` com `"` fecharia a string e reescreveria `space in (...)`, que é a allowlist.
+ */
+export function montarCqlFilhos(params: FilhosParams): string {
+  const espacos = params.espacosPermitidos.map((e) => `"${escaparCql(e)}"`).join(', ')
+  const partes = [
+    `type = page`,
+    `space in (${espacos})`,
+    `parent = "${escaparCql(params.idPai)}"`,
+  ]
+  for (const label of params.labelsBloqueadas) {
+    partes.push(`label != "${escaparCql(label)}"`)
+  }
+  return `${partes.join(' AND ')} ORDER BY title ASC`
 }
 
 /**
@@ -376,6 +398,7 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     )) as {
       id?: unknown
       title?: unknown
+      parentId?: unknown
       spaceId?: unknown
       status?: unknown
       version?: { number?: unknown; createdAt?: unknown }
@@ -384,6 +407,9 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
 
     const metadados: MetadadosPagina = {
       id: String(dados?.id ?? idPagina),
+      idPai: dados?.parentId === undefined || dados?.parentId === null
+        ? null
+        : String(dados.parentId),
       titulo: String(dados?.title ?? ''),
       espaco: await this.chaveDoEspaco(String(dados?.spaceId ?? '')),
       labels: await this.labelsDaPagina(idPagina),
@@ -394,6 +420,79 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     }
     this.cacheConteudo.definir(chave, metadados, this.opcoes.ttlConteudoSeg)
     return metadados
+  }
+
+  /** Espaço por chave — v2 (`/wiki/api/v2/spaces?keys=`). Cacheado como metadado. */
+  async obterEspaco(chaveEspaco: string): Promise<EspacoConfluence> {
+    const chave = `espacoPorChave:${chaveEspaco}`
+    const cacheado = this.cacheMetadados.obter(chave)
+    if (cacheado) return cacheado as EspacoConfluence
+
+    const dados = (await this.transporte.requisitar(
+      `/wiki/api/v2/spaces?keys=${encodeURIComponent(chaveEspaco)}&limit=1`,
+    )) as { results?: { id?: unknown; key?: unknown; name?: unknown; homepageId?: unknown }[] }
+
+    const bruto = (dados?.results ?? [])[0]
+    if (!bruto) {
+      throw new ErroAtlassian('espaço não encontrado', {
+        status: 404,
+        transitorio: false,
+        recurso: 'obterEspaco',
+      })
+    }
+    const espaco: EspacoConfluence = {
+      chave: String(bruto.key ?? chaveEspaco),
+      nome: String(bruto.name ?? chaveEspaco),
+      homepageId: bruto.homepageId === undefined || bruto.homepageId === null
+        ? null
+        : String(bruto.homepageId),
+    }
+    // O id numérico → chave também serve para `obterMetadadosPagina`; preencher os dois
+    // sentidos aqui evita uma chamada extra na primeira leitura de página do espaço.
+    if (bruto.id !== undefined && bruto.id !== null) {
+      this.cacheMetadados.definir(`espaco:${String(bruto.id)}`, espaco.chave, this.opcoes.ttlMetadadosSeg)
+    }
+    this.cacheMetadados.definir(chave, espaco, this.opcoes.ttlMetadadosSeg)
+    return espaco
+  }
+
+  /**
+   * Um nível da árvore (`RF-41`), pelo CQL — v1, como a busca (`R-09`).
+   *
+   * A terceira condição de `RN-06` (restrição por página) é aplicada **item por
+   * item**, igual em `buscarConfluence`: o CQL não sabe filtrar restrição, e título de
+   * página restrita numa lista de navegação é o mesmo vazamento que já apareceu na
+   * mensagem de bloqueio uma vez.
+   */
+  async listarFilhosDaPagina(params: FilhosParams): Promise<readonly PaginaConfluence[]> {
+    if (params.espacosPermitidos.length === 0 || !params.idPai) return []
+
+    const cql = montarCqlFilhos(params)
+    const chave = `filhos:${cql}:${params.limite}`
+    const cacheado = this.cacheConteudo.obter(chave)
+    if (cacheado) return cacheado as PaginaConfluence[]
+
+    const dados = (await this.transporte.requisitar(
+      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}`,
+    )) as RespostaBusca
+
+    const candidatas: PaginaConfluence[] = (dados?.results ?? []).map((r) => ({
+      id: String(r.content?.id ?? ''),
+      titulo: String(r.content?.title ?? r.title ?? ''),
+      espaco: String(r.content?.space?.key ?? ''),
+      url: `${this.opcoes.baseUrl}/wiki${String(r.url ?? '')}`,
+      score: typeof r.score === 'number' ? r.score : 0,
+      trecho: '',
+      labels: [],
+    }))
+
+    const filhos: PaginaConfluence[] = []
+    for (const p of candidatas) {
+      if (await this.paginaRestrita(p.id)) continue
+      filhos.push(p)
+    }
+    this.cacheConteudo.definir(chave, filhos, this.opcoes.ttlConteudoSeg)
+    return filhos
   }
 
   /** `spaceId` (v2) → chave do espaço, que é o que a allowlist usa (`RN-06`). */

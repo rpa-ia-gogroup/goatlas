@@ -83,11 +83,11 @@ created: "2026-08-04"
 
 ## Phase 2 — Confluence como superfície
 
-> **Estado: T-110 a T-114 e T-118 concluídos** — **313 testes** na suíte (86 novos),
-> typecheck, build e bundle do worker limpos. Busca, leitura e proxy de anexo existem
-> **com tela**, a deflexão da Regra 1 abre a página **dentro do app**, e os testes de
-> burla foram escritos antes de cada rota. Falta desta fase: T-115 (árvore e
-> breadcrumbs), T-116 (tabelas de busca/leitura) e T-117 (lacunas).
+> **Estado: T-110 a T-115 e T-118 concluídos** — **335 testes** na suíte (108 novos),
+> typecheck, build e bundle do worker limpos. Busca, leitura, proxy de anexo e árvore do
+> espaço existem **com tela**, a deflexão da Regra 1 abre a página **dentro do app**, e
+> os testes de burla foram escritos antes de cada rota. Falta desta fase: T-116 (tabelas
+> de busca/leitura) e T-117 (mapa de lacunas).
 
 - [x] **T-110** `obterPagina` no cliente isolado (v2: `/wiki/api/v2/pages/{id}`),
       com cache. _Requirements: RF-39, RNF-13, RNF-22_
@@ -190,8 +190,25 @@ created: "2026-08-04"
         pessoa que aceitou o convite de ler primeiro. Descoberto clicando, não lendo.
       - Fallback: página sem id mantém o link externo — informação vale mais que
         estética, e mostrar título sem forma de abrir seria pior.
-- [ ] **T-115** Árvore do espaço + breadcrumbs (`RF-41`, P1).
-      _Requirements: RF-41_
+- [x] **T-115** Árvore do espaço + breadcrumbs (`RF-41`, P1).
+      _Requirements: RF-41, RN-06, RNF-13_
+      - **Um nível por vez, não a árvore inteira.** A árvore completa exigiria uma
+        consulta de restrição por página: um clique viraria dezenas de chamadas com a
+        credencial única (`R-02`). Espaço e label entram no **CQL** (`parent = "id"`),
+        como na busca; só a restrição sobra por item, presa a um teto de 50.
+      - **O `pai` também passa pela verificação de exposição.** Listar os filhos de uma
+        seção restrita entregaria a estrutura de dentro dela, mesmo que cada filho
+        isolado fosse legítimo — e responde a mesma 404 de sempre (`D-12`), nem "lista
+        vazia", que confirmaria o id.
+      - **O breadcrumb PARA no primeiro ancestral não exposto.** Nomeá-lo vazaria o
+        título; continuar acima dele entregaria a posição da página dentro de uma seção
+        fechada. A tela não sinaliza o corte — marcador de "nível oculto" contaria
+        justamente o que o corte evita.
+      - `GET /api/confluence/espacos` é a **porta de entrada**: sem ela a árvore só
+        seria alcançável por acidente, a partir de uma página que a busca achou. Espaço
+        configurado que não resolve é omitido, não derruba a lista.
+      - `MetadadosPagina` ganhou `idPai` (v2: `parentId`), e o teto de subida é 5 —
+        cobre hierarquia real e protege de ciclo de `parentId`.
 - [ ] **T-116** Tabela `buscas` + `paginas_lidas`; registrar termo, nº de
       resultados e se houve clique. É o insumo de `O6` e de `RF-42`.
       _Requirements: RF-42, RF-58_
