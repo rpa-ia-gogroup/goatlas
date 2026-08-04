@@ -133,6 +133,48 @@ export const TABELAS = [
   `CREATE INDEX IF NOT EXISTS idx_auditoria_acao ON auditoria (acao, criado_em)`,
 
   /**
+   * Buscas na documentação (RF-42, T-116) — o insumo do mapa de lacunas e de `O6`.
+   *
+   * ⚠️ `houve_clique` é o campo que faz a diferença entre "não existe documentação"
+   * e "existe e não convence". Sem ele, o mapa só veria busca vazia — e o caso mais
+   * interessante (a página apareceu, a pessoa leu o título e foi abrir chamado) ficaria
+   * invisível.
+   *
+   * `termo_normalizado` existe para agrupar: "política" e "politica" são a mesma
+   * pergunta, e agrupar no `SELECT` com função de normalização impediria o índice.
+   */
+  `CREATE TABLE IF NOT EXISTS buscas (
+     id                TEXT PRIMARY KEY,
+     solicitante_email TEXT NOT NULL,
+     termo             TEXT NOT NULL,
+     termo_normalizado TEXT NOT NULL,
+     resultados        INTEGER NOT NULL,
+     houve_clique      INTEGER NOT NULL DEFAULT 0,
+     criado_em         TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_buscas_termo ON buscas (termo_normalizado, criado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_buscas_solicitante ON buscas (solicitante_email, criado_em)`,
+
+  /**
+   * Páginas lidas (RF-58, T-116) — quem leu o quê e por qual caminho.
+   *
+   * É o que mede `O6` (uso da documentação por quem **não tem assento**) e o que
+   * permite dizer se a busca resolveu. `via` é derivado no servidor, não recebido do
+   * cliente: `busca` só quando o `?de=` aponta para uma busca **daquela pessoa**.
+   */
+  `CREATE TABLE IF NOT EXISTS paginas_lidas (
+     id                TEXT PRIMARY KEY,
+     solicitante_email TEXT NOT NULL,
+     pagina_id         TEXT NOT NULL,
+     titulo            TEXT NOT NULL,
+     espaco            TEXT NOT NULL,
+     via               TEXT NOT NULL,
+     criado_em         TEXT NOT NULL,
+     CHECK (via IN ('busca', 'direto'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_paginas_lidas_pagina ON paginas_lidas (pagina_id, criado_em)`,
+
+  /**
    * Configuração em banco (RF-49, RF-50) — thresholds, allowlists e TTLs mudam
    * SEM DEPLOY. É também o que impede o hardcode de IDs proibido por RNF-25.
    */

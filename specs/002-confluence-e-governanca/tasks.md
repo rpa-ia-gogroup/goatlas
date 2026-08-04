@@ -83,11 +83,11 @@ created: "2026-08-04"
 
 ## Phase 2 — Confluence como superfície
 
-> **Estado: T-110 a T-115 e T-118 concluídos** — **335 testes** na suíte (108 novos),
-> typecheck, build e bundle do worker limpos. Busca, leitura, proxy de anexo e árvore do
-> espaço existem **com tela**, a deflexão da Regra 1 abre a página **dentro do app**, e
-> os testes de burla foram escritos antes de cada rota. Falta desta fase: T-116 (tabelas
-> de busca/leitura) e T-117 (mapa de lacunas).
+> **Estado: Phase 2 COMPLETA** (T-110 a T-118) — **348 testes** na suíte (121 novos),
+> typecheck, build e bundle do worker limpos. Busca, leitura, proxy de anexo, árvore do
+> espaço e o mapa de lacunas existem **com tela**, a deflexão da Regra 1 abre a página
+> **dentro do app**, e os testes de burla foram escritos antes de cada rota. O que resta
+> da spec 002 é a **Phase 3 (governança de assentos)**, que depende de **Q1**.
 
 - [x] **T-110** `obterPagina` no cliente isolado (v2: `/wiki/api/v2/pages/{id}`),
       com cache. _Requirements: RF-39, RNF-13, RNF-22_
@@ -209,11 +209,31 @@ created: "2026-08-04"
         configurado que não resolve é omitido, não derruba a lista.
       - `MetadadosPagina` ganhou `idPai` (v2: `parentId`), e o teto de subida é 5 —
         cobre hierarquia real e protege de ciclo de `parentId`.
-- [ ] **T-116** Tabela `buscas` + `paginas_lidas`; registrar termo, nº de
+- [x] **T-116** Tabela `buscas` + `paginas_lidas`; registrar termo, nº de
       resultados e se houve clique. É o insumo de `O6` e de `RF-42`.
       _Requirements: RF-42, RF-58_
-- [ ] **T-117** `GET /api/admin/lacunas`: buscas sem resultado + overrides da Fase 1,
-      como backlog de documentação. _Requirements: RF-42_
+      - **`houve_clique` é o campo que muda o requisito de lugar.** Sem ele o mapa só
+        veria busca vazia; com ele aparece o caso interessante — documentação que
+        existe, aparece na busca e ninguém abre. É o "sem resultado **útil**" de
+        `RF-42`, que uma contagem de buscas vazias nunca mostraria.
+      - O clique chega por `?de=<buscaId>` e o **e-mail está no `WHERE`**: id de outra
+        pessoa não marca nada. `via` é derivado disso no servidor, nunca recebido.
+      - `termo_normalizado` em coluna própria (sem acento, sem caixa): normalizar no
+        `SELECT` impediria o índice e o mapa pioraria com o uso.
+      - Busca que não pôde procurar (sem espaço configurado) **não é registrada**.
+- [x] **T-117** `GET /api/admin/lacunas`: buscas sem resultado + overrides da Fase 1,
+      como backlog de documentação. _Requirements: RF-42, RN-09_
+      - Três sinais numa resposta: **ninguém documentou** · **documentado e ninguém
+        abriu** · **o que disseram ao insistir** (o motivo do override, que já vem
+        escrito em linguagem humana).
+      - **Conta pessoas, não as nomeia.** É backlog de escrita; nomear quem procurou
+        transformaria a lista em cobrança de gente, e o histórico por pessoa já existe
+        na auditoria — para investigação, que é outro propósito.
+      - `agregarLacunas_apenasAdmin` carrega o sufixo no nome como
+        `obterSemIsolamento_apenasReconciliacao`: é o único método do registro que
+        atravessa o isolamento por e-mail, e usá-lo numa rota de colaborador precisa
+        ser bug visível na revisão.
+      - Aparece na **aba de admin** que já existia (`D-09`), acima da auditoria.
 
 ## Phase 3 — Governança de assentos
 
