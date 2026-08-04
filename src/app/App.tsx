@@ -12,16 +12,21 @@ import { api, ErroApi, type Identidade } from './api'
 import { Aviso } from './componentes'
 import { TelaConversa, TelaDetalhe, TelaFormulario, TelaMeusChamados } from './telas'
 import { TelaAdmin } from './admin'
+import { entradaDaUrl, TelaDocumentacao, type EntradaDocumentacao } from './confluence'
 
 type Tela =
   | { nome: 'conversa' }
+  | { nome: 'documentacao' }
   | { nome: 'chamados' }
   | { nome: 'formulario' }
   | { nome: 'admin' }
   | { nome: 'detalhe'; issueKey: string }
 
+// A ORDEM é recomendação: ler a documentação vem antes de acompanhar chamado, e muito
+// antes de abrir um direto. É a mesma sequência que a Regra 1 impõe na conversa.
 const ABAS: readonly { nome: Tela['nome']; rotulo: string; soAdmin?: boolean }[] = [
   { nome: 'conversa', rotulo: 'Falar com o agente' },
+  { nome: 'documentacao', rotulo: 'Documentação' },
   { nome: 'chamados', rotulo: 'Meus chamados' },
   { nome: 'formulario', rotulo: 'Abrir direto' },
   // A aba só aparece para admin — mas quem garante o acesso é o gate do SERVIDOR
@@ -30,7 +35,15 @@ const ABAS: readonly { nome: Tela['nome']; rotulo: string; soAdmin?: boolean }[]
 ]
 
 export function App() {
-  const [tela, setTela] = useState<Tela>({ nome: 'conversa' })
+  // A URL pode pedir a documentação direto (`?q=` ou `?pagina=`): é como um colega
+  // compartilha uma página, e é como o link `ri:page` do próprio Confluence chega.
+  // Não é router — é leitura única no boot, ver `confluence.tsx`.
+  const [entrada] = useState<EntradaDocumentacao>(() =>
+    typeof window === 'undefined' ? {} : entradaDaUrl(window.location.search),
+  )
+  const [tela, setTela] = useState<Tela>(() =>
+    entrada.pagina || entrada.termo ? { nome: 'documentacao' } : { nome: 'conversa' },
+  )
   const [eu, setEu] = useState<Identidade | null>(null)
   const [erroAuth, setErroAuth] = useState<string | null>(null)
 
@@ -96,6 +109,12 @@ export function App() {
 
             {tela.nome === 'conversa' && (
               <TelaConversa aoAbrirChamado={() => setTela({ nome: 'chamados' })} />
+            )}
+            {tela.nome === 'documentacao' && (
+              <TelaDocumentacao
+                inicial={entrada}
+                aoConversar={() => setTela({ nome: 'conversa' })}
+              />
             )}
             {tela.nome === 'chamados' && (
               <TelaMeusChamados

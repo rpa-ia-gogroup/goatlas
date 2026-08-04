@@ -69,6 +69,10 @@ export function semearAtlassianDemo(fake: ClienteAtlassianFake): void {
       labels: [],
     },
   ]
+  // Na demonstração a busca precisa REAGIR ao termo: devolver tudo para qualquer
+  // palavra faria a tela parecer quebrada justamente para quem está vendo o produto.
+  fake.estado.filtrarPorTermo = true
+
   // Conteúdo das mesmas páginas, para a leitura direta (RF-39) responder na
   // demonstração em vez de dar "não encontramos". Storage format de verdade,
   // inclusive uma macro que o renderizador não suporta — é assim que a degradação

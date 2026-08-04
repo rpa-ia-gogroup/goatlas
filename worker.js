@@ -564,6 +564,12 @@ var FALHAS = Object.freeze({
   timeout: { status: 504, transitorio: true },
   rejeitado: { status: 400, transitorio: false }
 });
+function normalizar(texto) {
+  return texto.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+}
+function palavrasDe(termo) {
+  return normalizar(termo).split(/[^a-z0-9]+/).filter((p) => p.length > 0);
+}
 var ClienteAtlassianFake = class {
   estado;
   /** Chamadas registradas — permite asserção sobre a QUERY enviada (RF-32). */
@@ -576,6 +582,7 @@ var ClienteAtlassianFake = class {
       tiposChamado: inicial.tiposChamado ?? [],
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? /* @__PURE__ */ new Set(),
+      filtrarPorTermo: inicial.filtrarPorTermo ?? false,
       conteudoPaginas: inicial.conteudoPaginas ?? /* @__PURE__ */ new Map(),
       anexos: inicial.anexos ?? /* @__PURE__ */ new Map(),
       limiteAnexoBytes: inicial.limiteAnexoBytes ?? MAX_ANEXO_BYTES,
@@ -667,7 +674,12 @@ var ClienteAtlassianFake = class {
     this.checar(this.estado.falhas.buscarConfluence, "buscarConfluence");
     const permitidos = new Set(params.espacosPermitidos);
     const bloqueadas = new Set(params.labelsBloqueadas);
-    return this.estado.paginas.filter((p) => permitidos.has(p.espaco)).filter((p) => !p.labels.some((l) => bloqueadas.has(l))).filter((p) => !this.estado.idsRestritos.has(p.id)).sort((a, b) => b.score - a.score).slice(0, params.limite);
+    const palavras = this.estado.filtrarPorTermo ? palavrasDe(params.termo) : [];
+    return this.estado.paginas.filter((p) => {
+      if (palavras.length === 0) return true;
+      const texto = normalizar(`${p.titulo} ${p.trecho}`);
+      return palavras.every((palavra) => texto.includes(palavra));
+    }).filter((p) => permitidos.has(p.espaco)).filter((p) => !p.labels.some((l) => bloqueadas.has(l))).filter((p) => !this.estado.idsRestritos.has(p.id)).sort((a, b) => b.score - a.score).slice(0, params.limite);
   }
   async obterMetadadosPagina(idPagina) {
     this.chamadas.push({ operacao: "obterMetadadosPagina", params: idPagina });
@@ -1375,6 +1387,7 @@ function semearAtlassianDemo(fake) {
       labels: []
     }
   ];
+  fake.estado.filtrarPorTermo = true;
   fake.estado.conteudoPaginas.set("demo-1", {
     titulo: "Como reprocessar o relat\xF3rio de vendas",
     espaco: "TECH",
