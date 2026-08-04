@@ -1,0 +1,123 @@
+/**
+ * Tokens da identidade visual GoGroup — transcrição de
+ * `identidade_visual_gogroup.md`. Fonte única: mudou lá, muda aqui.
+ *
+ * Isto é transcrição mecânica, não decisão de design. As telas (Phase 6 do
+ * tasks.md) invocam a skill `frontend-design` antes de serem construídas, como
+ * manda a regra 9 do CLAUDE.md.
+ *
+ * A identidade não tem dark mode (§1.4 do documento). Não inventar um.
+ */
+
+@import 'tailwindcss';
+
+:root {
+  /* Primárias */
+  --go-blue: #0059a9;
+  --go-lime: #d7db00;
+
+  /* Superfícies */
+  --go-cream: #fbf4ee;
+  --go-light-blue: #c7e9fd;
+  --go-white: #ffffff;
+
+  /* Texto — parágrafo NUNCA em preto puro (§2.2) */
+  --go-text-primary: #333333;
+  --go-text-dark: #000000;
+  --go-text-on-blue: #ffffff;
+  --go-text-heading: #0059a9;
+
+  /* Semânticas */
+  --go-bg-page: var(--go-cream);
+  --go-bg-section-alt: var(--go-light-blue);
+  --go-bg-hero: var(--go-blue);
+  --go-accent: var(--go-lime);
+  --go-border: var(--go-blue);
+
+  /* Tipografia — Poppins e nada mais (§2) */
+  --font-family: 'Poppins', sans-serif;
+  --fw-regular: 400;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-extrabold: 800;
+  --fw-black: 900;
+
+  --fs-display: clamp(2rem, 5vw, 4rem);
+  --fs-h1: clamp(1.75rem, 4vw, 3rem);
+  --fs-h2: clamp(1.375rem, 3vw, 2.25rem);
+  --fs-h3: clamp(1.125rem, 2vw, 1.5rem);
+  --fs-h4: clamp(0.9375rem, 1.5vw, 1.125rem);
+  --fs-body: clamp(0.9375rem, 1.2vw, 1rem);
+  --fs-small: clamp(0.8125rem, 1vw, 0.875rem);
+  --fs-caption: clamp(0.6875rem, 0.8vw, 0.75rem);
+
+  /* Espaçamento base 8 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+  --space-10: 128px;
+
+  /* Cantos generosos em tudo (§4.1) */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 9999px;
+
+  /* Sombras suaves, com moderação (§5) */
+  --shadow-sm: 0 2px 8px rgb(0 89 169 / 0.06);
+  --shadow-md: 0 4px 16px rgb(0 89 169 / 0.08);
+  --shadow-lg: 0 8px 32px rgb(0 89 169 / 0.1);
+  --shadow-lime-glow: 0 4px 20px rgb(215 219 0 / 0.3);
+}
+
+@theme inline {
+  --color-go-blue: var(--go-blue);
+  --color-go-lime: var(--go-lime);
+  --color-go-cream: var(--go-cream);
+  --color-go-light-blue: var(--go-light-blue);
+  --color-go-text-primary: var(--go-text-primary);
+  --color-go-text-heading: var(--go-text-heading);
+
+  --font-poppins: var(--font-family);
+
+  --radius-go-sm: var(--radius-sm);
+  --radius-go-md: var(--radius-md);
+  --radius-go-lg: var(--radius-lg);
+  --radius-go-xl: var(--radius-xl);
+
+  --shadow-go-sm: var(--shadow-sm);
+  --shadow-go-md: var(--shadow-md);
+  --shadow-go-lg: var(--shadow-lg);
+}
+
+body {
+  background: var(--go-bg-page);
+  color: var(--go-text-primary);
+  font-family: var(--font-family);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+}
+
+/* Piso de acessibilidade (CLAUDE.md, regra 9) — não é opcional. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--go-blue);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
