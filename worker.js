@@ -3962,6 +3962,62 @@ async function rotear(req, ctx, eu, caminho, url) {
     });
     return json({ ok: true }, 201);
   }
+  if (caminho === "/api/confluence/busca" && req.method === "GET") {
+    const termo = (url.searchParams.get("q") ?? "").trim().slice(0, MAX_TERMO_BUSCA);
+    if (termo.length < MIN_TERMO_BUSCA) {
+      return ERROS.dadosInvalidos(
+        "Escreva ao menos duas letras do que voc\xEA procura."
+      );
+    }
+    const configurada = ctx.valores.espacos_confluence.length > 0;
+    let paginas;
+    try {
+      paginas = await ctx.atlassian.buscarConfluence({
+        termo,
+        espacosPermitidos: ctx.valores.espacos_confluence,
+        labelsBloqueadas: ctx.valores.labels_bloqueadas,
+        limite: limiteDeBusca(url.searchParams.get("limite"))
+      });
+    } catch {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "busca_confluence",
+        recurso: termo,
+        resultado: "falha",
+        detalhe: { motivo: "indisponivel", via: "superficie" }
+      });
+      return ERROS.conteudoIndisponivel();
+    }
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "busca_confluence",
+      recurso: termo,
+      resultado: "sucesso",
+      detalhe: { encontradas: paginas.length, via: "superficie" }
+    });
+    if (configurada && paginas.length === 0) {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "busca_confluence",
+        recurso: termo,
+        resultado: "falha",
+        detalhe: { motivo: "sem_resultado_util", lacunaDocumentacao: true, via: "superficie" }
+      });
+    }
+    return json({
+      termo,
+      buscaConfigurada: configurada,
+      itens: paginas.map((p) => ({
+        id: p.id,
+        titulo: p.titulo,
+        espaco: p.espaco,
+        trecho: p.trecho,
+        // O score é o mesmo insumo da Regra 1 (RF-09), não ordenação visual.
+        score: p.score,
+        urlOriginal: p.url
+      }))
+    });
+  }
   const paginaConfluence = caminho.match(/^\/api\/confluence\/pagina\/([^/]+)$/);
   if (paginaConfluence && req.method === "GET") {
     const id = decodificar(paginaConfluence[1]);
@@ -4083,6 +4139,15 @@ async function rotear(req, ctx, eu, caminho, url) {
     return json({ itens });
   }
   return ERROS.naoEncontrado();
+}
+var MIN_TERMO_BUSCA = 2;
+var MAX_TERMO_BUSCA = 200;
+var LIMITE_BUSCA_PADRAO = 10;
+var LIMITE_BUSCA_MAXIMO = 25;
+function limiteDeBusca(bruto) {
+  const n = Number.parseInt(bruto ?? "", 10);
+  if (!Number.isInteger(n) || n < 1) return LIMITE_BUSCA_PADRAO;
+  return Math.min(n, LIMITE_BUSCA_MAXIMO);
 }
 function decodificar(bruto) {
   try {

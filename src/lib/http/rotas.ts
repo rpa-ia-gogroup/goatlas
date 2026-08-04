@@ -363,7 +363,81 @@ async function rotear(
     return json({ ok: true }, 201)
   }
 
-  // --- Confluence como superfície (RF-39, RF-40, RN-06) ---------------------
+  // --- Confluence como superfície (RF-37 a RF-40, RN-06) --------------------
+  //
+  // A busca é a MESMA que a Regra 1 usa (`RF-37`), agora exposta. O que muda ao
+  // expor é que o termo e os parâmetros passam a vir do cliente — e a allowlist
+  // **não** é um deles. Ela vem da config, sempre: `?espacos=RH` respeitado seria o
+  // caminho mais curto para o espaço do RH (`RN-06`, `RNF-07`).
+  if (caminho === '/api/confluence/busca' && req.method === 'GET') {
+    const termo = (url.searchParams.get('q') ?? '').trim().slice(0, MAX_TERMO_BUSCA)
+    if (termo.length < MIN_TERMO_BUSCA) {
+      return ERROS.dadosInvalidos(
+        'Escreva ao menos duas letras do que você procura.',
+      )
+    }
+    // Allowlist vazia = nada exposto. A camada isolada é que se recusa a montar
+    // query aberta; aqui só distinguimos os dois zeros para a tela poder explicar
+    // qual dos dois aconteceu.
+    const configurada = ctx.valores.espacos_confluence.length > 0
+
+    let paginas
+    try {
+      paginas = await ctx.atlassian.buscarConfluence({
+        termo,
+        espacosPermitidos: ctx.valores.espacos_confluence,
+        labelsBloqueadas: ctx.valores.labels_bloqueadas,
+        limite: limiteDeBusca(url.searchParams.get('limite')),
+      })
+    } catch {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'busca_confluence',
+        recurso: termo,
+        resultado: 'falha',
+        detalhe: { motivo: 'indisponivel', via: 'superficie' },
+      })
+      // Nunca "nenhum resultado": numa queda isso empurra a pessoa a abrir chamado
+      // por algo que está documentado, e registraria uma lacuna que não existe.
+      return ERROS.conteudoIndisponivel()
+    }
+
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'busca_confluence',
+      recurso: termo,
+      resultado: 'sucesso',
+      detalhe: { encontradas: paginas.length, via: 'superficie' },
+    })
+    // Busca sem resultado é o mapa das lacunas de documentação (RF-42) — na MESMA
+    // forma que a Regra 1 grava, para T-117 ler uma coisa só. Mas só quando havia
+    // onde procurar: sem espaço configurado a lacuna é de configuração, e registrar
+    // envenenaria o mapa com termos que ninguém deixou de documentar.
+    if (configurada && paginas.length === 0) {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'busca_confluence',
+        recurso: termo,
+        resultado: 'falha',
+        detalhe: { motivo: 'sem_resultado_util', lacunaDocumentacao: true, via: 'superficie' },
+      })
+    }
+
+    return json({
+      termo,
+      buscaConfigurada: configurada,
+      itens: paginas.map((p) => ({
+        id: p.id,
+        titulo: p.titulo,
+        espaco: p.espaco,
+        trecho: p.trecho,
+        // O score é o mesmo insumo da Regra 1 (RF-09), não ordenação visual.
+        score: p.score,
+        urlOriginal: p.url,
+      })),
+    })
+  }
+
   //
   // As duas rotas passam pelo MESMO gate (`confluence/acesso.ts`), e nenhuma delas
   // toca o cliente Atlassian antes dele. Toda recusa devolve a mesma resposta: um
@@ -522,6 +596,29 @@ async function rotear(
   }
 
   return ERROS.naoEncontrado()
+}
+
+/**
+ * Limites do termo de busca.
+ *
+ * O mínimo evita que uma letra vire consulta ao site inteiro; o máximo evita que um
+ * termo de 5 KB vire CQL. Os dois protegem a credencial única (`R-02`) de virar
+ * amplificador — e nenhum deles é allowlist, então não há decisão de exposição aqui.
+ */
+const MIN_TERMO_BUSCA = 2
+const MAX_TERMO_BUSCA = 200
+const LIMITE_BUSCA_PADRAO = 10
+const LIMITE_BUSCA_MAXIMO = 25
+
+/**
+ * Quantos resultados pedir. Vem do cliente, então é **clampado**: cada resultado
+ * custa uma consulta de restrição de página (`RN-06`), e `?limite=9999` seria uma
+ * varredura do site pagando por página.
+ */
+function limiteDeBusca(bruto: string | null): number {
+  const n = Number.parseInt(bruto ?? '', 10)
+  if (!Number.isInteger(n) || n < 1) return LIMITE_BUSCA_PADRAO
+  return Math.min(n, LIMITE_BUSCA_MAXIMO)
 }
 
 /**

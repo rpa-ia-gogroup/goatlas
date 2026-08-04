@@ -173,6 +173,15 @@ destes reabre um vazamento que já foi fechado.
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
   lendo `env.ATLASSIAN_API_TOKEN` faz `RNF-01` depender de disciplina em vez de
   estrutura.
+- **A allowlist nunca vem do cliente.** Na busca (`RF-37`), `espacosPermitidos` e
+  `labelsBloqueadas` saem de `ctx.valores`, e `?espacos=`/`?labelsBloqueadas=` são
+  ignorados — é o mesmo raciocínio da identidade: quem consulta não escolhe o próprio
+  escopo. Um `?espacos=RH` respeitado seria o caminho mais curto para o espaço do RH.
+  `?limite=` é clampado, porque cada resultado custa uma consulta de restrição.
+- **Zero por falta de config ≠ zero por falta de documentação.** A busca devolve
+  `buscaConfigurada: false` no primeiro caso e **não** registra lacuna de `RF-42` —
+  registrar envenenaria o mapa de T-117 com termos que ninguém deixou de documentar, e
+  a tela mandaria a pessoa procurar de novo com outras palavras para sempre.
 - **A identidade é resolvida no roteador e passada como tipo.** Nenhum handler
   recebe e-mail de corpo, query ou header customizado — eles recebem `Identidade`
   já validada, então um handler **não tem como** ler um e-mail que não chegou
@@ -304,22 +313,22 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**276 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**293 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
-`RF-43`) — e o **Confluence como superfície de leitura**: `obterMetadadosPagina` /
-`obterCorpoStorage` / `obterAnexo` no cliente isolado, `GET
-/api/confluence/pagina/:id` e o proxy de anexo, ambos passando pelo gate das três
-condições de `RN-06`. Todos com os testes de burla escritos antes.
+`RF-43`) — e o **Confluence como superfície**: `obterMetadadosPagina` /
+`obterCorpoStorage` / `obterAnexo` no cliente isolado, `GET /api/confluence/busca`,
+`GET /api/confluence/pagina/:id` e o proxy de anexo — os três passando pelas três
+condições de `RN-06`, com os testes de burla escritos antes.
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), campo customizado "Solicitante" (**Q4**), formato do
 comentário atribuído (alinhamento com o time de tech), deploy em staging/prod e o
-fechamento da Definição de Pronto. Da Fase 2, o próximo passo é a rota de busca como
-superfície própria (T-113, allowlist real depende de **Q5**) e a **tela** de busca e
-leitura (T-114, skill `frontend-design` antes) — hoje as rotas existem sem interface
-que as consuma.
+fechamento da Definição de Pronto. Da Fase 2, ⚠️ **as três rotas existem sem tela que
+as consuma**: T-114 (busca e leitura, mobile-first, skill `frontend-design` antes) é o
+próximo passo, e depois T-115 a T-117. **Q5** não trava mais código — só o dado de
+`espacos_confluence`, sem o qual a busca devolve zero e diz `buscaConfigurada: false`.
 
 ### Como testar sem credencial
 As duas camadas isoladas têm **fake** (`src/lib/atlassian/fake.ts`,
