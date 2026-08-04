@@ -16,25 +16,60 @@ created: "2026-08-04"
 > **renderizado** no navegador de um colega. `RNF-06` deixa de ser um item de lista
 > e passa a ser a trava principal — tratada como as seis da Fase 1.
 
-- [ ] **T-101** Teste de burla da sanitização: `<script>`, `onerror`/`onclick`,
+> **Estado: a trava está fechada.** T-101, T-105, T-106 e T-107 concluídos —
+> **227 testes** na suíte (58 novos), typecheck e build limpos. T-102, T-103 e T-104
+> testam **rotas que ainda não existem** (T-111, T-112 e a governança da Phase 3);
+> vêm com elas, ainda antes da implementação de cada uma.
+
+- [x] **T-101** Teste de burla da sanitização: `<script>`, `onerror`/`onclick`,
       `javascript:`, `data:`, `<iframe>`, `<object>`, tag malformada, atributo com
       maiúsculas e espaços (`ON ERROR =`), entidade HTML disfarçando `<`.
-      _Requirements: RNF-06_
+      → `tests/rnf06-sanitizacao.test.ts`, **58 casos**. Testa o caminho **inteiro**
+      (`sanitizarStorage` **+** `renderizarNos` + `renderToStaticMarkup`), não só o
+      sanitizador: árvore limpa que o renderizador reinjeta como HTML não vale nada.
+      Cobre além do pedido: dupla codificação (`&amp;lt;script&amp;gt;`), `//`
+      protocolo-relativo, `java\tscript:`, CDATA sem expansão de entidade, e limites
+      de profundidade/tamanho. _Requirements: RNF-06_
 - [ ] **T-102** [P] Teste de burla do proxy de anexo: anexo de página restrita;
       `Content-Type: text/html` vindo da Atlassian. _Requirements: RNF-06, RN-06_
 - [ ] **T-103** [P] Teste de burla de leitura direta: URL de página restrita e de
       espaço fora da allowlist. _Requirements: RF-40, RN-06, RNF-09_
 - [ ] **T-104** [P] Teste de burla do gate de admin em **todas** as rotas de
       governança. _Requirements: RN-09, RNF-04_
-- [ ] **T-105** `confluence/sanitizar.ts`: **allowlist** de tags e atributos (nunca
+- [x] **T-105** `confluence/sanitizar.ts`: **allowlist** de tags e atributos (nunca
       blocklist), storage format → **árvore de nós tipada**, `href`/`src` só
       `http(s)`. Faz T-101 passar. _Requirements: RNF-06_
-- [ ] **T-106** `confluence/renderizar.tsx`: árvore → elementos React. **Zero
+      - **Duas passagens**, de propósito: tokenizar + árvore bruta (malformado e
+        limites) → converter (allowlist). Misturar as duas espalha a checagem por
+        cima do tratamento de erro de parse, e aí um caminho de recuperação vira um
+        caminho sem checagem. A árvore bruta não é exportada.
+      - `urlSegura`: **decodificar entidade → limpar controle/espaço → exigir
+        `^https?://`**. Nessa ordem, e como allowlist — não se pergunta "é
+        `javascript:`?".
+      - `decodificarEntidades` é **uma passagem só**: `&amp;lt;` para em `&lt;`. Laço
+        "decodifica até não mudar" é o bug clássico que transforma dupla codificação
+        em tag.
+      - Imagem externa recusada (**D-10**), e limites de entrada/profundidade/nós —
+        conteúdo hostil não precisa de script para derrubar o Worker.
+- [x] **T-106** `confluence/renderizar.tsx`: árvore → elementos React. **Zero
       `dangerouslySetInnerHTML`** — não deve existir caminho em que string vira
       HTML. _Requirements: RNF-06, RF-39_
-- [ ] **T-107** Macro não suportada → placeholder **visível** (`RF-43`). Macro que
+      - É a **segunda camada**: revalida toda URL ao virar `href`/`src`, inclusive as
+        que já chegam prontas na árvore. Nó construído à mão (cache, importação,
+        migração) não é nó confiável.
+      - Nenhum nó de `No` carrega saco de atributos — não existe onde um `onerror`
+        viajar. O `switch` é exaustivo e o tipo é união fechada.
+      - Teste estrutural na suíte: **nenhum arquivo de `src/` usa**
+        `dangerouslySetInnerHTML`. A regra não depende de alguém lembrar.
+      - Visual em `estilos.css` (`.doc*`): conteúdo como **citação**, com a espinha
+        lime; painel e placeholder com rótulo textual, nunca só cor.
+- [x] **T-107** Macro não suportada → placeholder **visível** (`RF-43`). Macro que
       desaparece em silêncio faz o leitor decidir com informação faltando sem saber
       que falta. _Requirements: RF-43_
+      - O placeholder diz três coisas: que falta algo, **qual** bloco, e que o resto
+        do texto está inteiro. Só o **nome** da macro — parâmetro (JQL, id de filtro,
+        chave de espaço) descreve estrutura interna. Tem teste para isso.
+      - Reaproveita o tracejado que a trilha já usa para "não foi possível".
 
 ## Phase 2 — Confluence como superfície
 
@@ -111,6 +146,8 @@ created: "2026-08-04"
 - [x] Todo RF/RNF no escopo da spec aparece em ao menos uma tarefa
 - [x] Toda tarefa referencia requisito
 - [x] Os testes de burla (T-101 a T-104) vêm **antes** da implementação
+      — T-101 escrito e vermelho antes de T-105/T-106 existirem; T-102/T-103/T-104
+      acompanham as rotas que testam, pelo mesmo motivo
 - [ ] **Nenhuma `[BLOQUEADA]`** — há **5**: T-113 (Q5), T-122/T-123/T-131 (Q1),
       T-125 (Q8)
 
