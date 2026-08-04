@@ -150,6 +150,16 @@ export class Orquestrador {
       if (bloqueio) break
     }
 
+    // RF-15 / RF-18 — a proposta é montada pelo SERVIDOR, deterministicamente:
+    // as duas verificações já aconteceram, nada bloqueou, e ainda não há proposta.
+    // Não é o modelo que decide QUANDO propor; ele só preenche o conteúdo. E o que
+    // sai daqui é sugestão: exibida e editável antes de criar (RF-16).
+    if (!bloqueio && !atual.proposta && this.verificacoesConcluidas(atual)) {
+      custoTurno += await this.tentarMontarProposta(atual, config)
+      const relido = await this.conversas.obter(atual.id)
+      if (relido) atual = relido
+    }
+
     await this.conversas.somarCusto(atual.id, custoTurno)
 
     const textoFinal = bloqueio?.texto ?? ultimoTexto
@@ -170,6 +180,60 @@ export class Orquestrador {
       toolsRecusadas: recusadas,
       custoUsd: custoTurno,
       tetoCustoAtingido: false,
+    }
+  }
+
+  /**
+   * Monta a proposta imediatamente — usado depois do override (RF-13).
+   *
+   * Sem isso, o agente diz "vamos seguir com o chamado" e nada acontece até a
+   * pessoa digitar outra mensagem: um beco sem saída logo depois de ela ter
+   * insistido. O override É o sinal de seguir.
+   */
+  async montarPropostaAgora(conversa: Conversa, config: ConfigValores): Promise<boolean> {
+    if (conversa.proposta) return true
+    if (!this.verificacoesConcluidas(conversa)) return false
+    const custo = await this.tentarMontarProposta(conversa, config)
+    if (custo > 0) await this.conversas.somarCusto(conversa.id, custo)
+    return Boolean((await this.conversas.obter(conversa.id))?.proposta)
+  }
+
+  /** Ambas as tools foram TENTADAS — verificada ou falhada (RNF-18). */
+  private verificacoesConcluidas(c: Conversa): boolean {
+    return (
+      (c.confluenceVerificado || c.confluenceFalhou) &&
+      (c.historicoVerificado || c.historicoFalhou)
+    )
+  }
+
+  /**
+   * Tenta extrair a proposta. Falha ou contexto insuficiente **não é erro**: o
+   * agente segue conversando, que é o comportamento certo quando ainda falta
+   * informação — inventar campos para poder propor seria pior.
+   */
+  private async tentarMontarProposta(
+    conversa: Conversa,
+    config: ConfigValores,
+  ): Promise<number> {
+    if (config.tipos_chamado_permitidos.length === 0) return 0
+    try {
+      const r = await this.ia.extrairProposta({
+        mensagens: await this.conversas.listarMensagens(conversa.id),
+        tiposPermitidos: config.tipos_chamado_permitidos.map((id) => ({ id, nome: id })),
+      })
+      if (r.proposta) {
+        await this.conversas.definirProposta(conversa.id, {
+          titulo: r.proposta.titulo,
+          descricao: r.proposta.descricao,
+          tipoChamadoId: r.proposta.tipoChamadoId,
+          prioridade: r.proposta.prioridade,
+          area: r.proposta.area,
+          componente: null,
+        })
+      }
+      return r.custoEstimadoUsd
+    } catch {
+      return 0
     }
   }
 

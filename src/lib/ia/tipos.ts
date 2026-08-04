@@ -88,9 +88,45 @@ export class ErroIA extends Error {
   }
 }
 
+/** Prioridade proposta pela IA — RF-15. Editável pelo usuário depois (RF-16). */
+export type PrioridadeSugerida = 'critica' | 'alta' | 'normal'
+
+export interface PropostaSugerida {
+  readonly titulo: string
+  readonly descricao: string
+  readonly prioridade: PrioridadeSugerida
+  /** Id do tipo de chamado, escolhido ENTRE OS PERMITIDOS (RF-28). */
+  readonly tipoChamadoId: string
+  readonly area: string | null
+}
+
+export interface ParametrosExtracao {
+  readonly mensagens: readonly MensagemIA[]
+  /**
+   * Tipos que o admin liberou (RF-28). A extração escolhe entre estes; um id fora
+   * da lista é descartado por quem chama — o modelo não amplia a allowlist.
+   */
+  readonly tiposPermitidos: readonly { readonly id: string; readonly nome: string }[]
+}
+
+export interface ResultadoExtracao {
+  /** `null` quando ainda não há contexto suficiente — o agente segue perguntando. */
+  readonly proposta: PropostaSugerida | null
+  readonly custoEstimadoUsd: number
+}
+
 export interface ClienteIA {
   chat(params: ParametrosChat): Promise<RespostaIA>
   classificarResolucao(params: ParametrosClassificacao): Promise<ResultadoClassificacao>
+  /**
+   * Extrai a proposta de chamado da conversa — RF-15, RF-18.
+   *
+   * Chamada **pelo servidor**, deterministicamente, quando as duas verificações já
+   * aconteceram e nada bloqueou. Não é decisão do modelo *quando* propor: ele só
+   * preenche o conteúdo. E a prioridade que sai daqui é **sugestão**, exibida e
+   * editável antes de criar (RF-16) — priorização automática sem revisão vira jogo.
+   */
+  extrairProposta(params: ParametrosExtracao): Promise<ResultadoExtracao>
   verificarSaude(): Promise<{ readonly ok: boolean; readonly detalhe: string }>
 }
 

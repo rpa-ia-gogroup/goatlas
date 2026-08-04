@@ -10,7 +10,11 @@
  * servidor com teste, não este arquivo.
  */
 
-import { delimitarConteudoNaoConfiavel, type ParametrosClassificacao } from './tipos'
+import {
+  delimitarConteudoNaoConfiavel,
+  type ParametrosClassificacao,
+  type ParametrosExtracao,
+} from './tipos'
 
 /**
  * System prompt do agente de chamados.
@@ -129,4 +133,43 @@ export function montarResultadoHistoricoParaModelo(
     .map((t) => `- ${t.issueKey} "${t.titulo}" → resolução classificada como ${t.classe}`)
     .join('\n')
   return `Chamados anteriores do mesmo tipo:\n${itens}`
+}
+
+/**
+ * Prompt de extração da proposta de chamado — RF-15, RF-18.
+ *
+ * Separado do chat de propósito: a extração é uma chamada com saída estruturada,
+ * disparada pelo SERVIDOR quando as verificações já rodaram. O modelo não decide
+ * *quando* propor, só *o que* propor.
+ */
+export const PROMPT_EXTRACAO = `Você lê uma conversa entre um colaborador e o assistente de chamados, e extrai os campos do chamado a ser aberto.
+
+Devolva **apenas** JSON:
+{"pronto": true|false, "titulo": "...", "descricao": "...", "prioridade": "critica"|"alta"|"normal", "tipoChamadoId": "...", "area": "..."|null}
+
+Regras:
+- \`pronto: false\` quando ainda falta informação essencial (o que aconteceu, desde quando, qual sistema). Nesse caso os outros campos são ignorados. Não invente contexto para poder responder \`true\`.
+- **titulo**: uma linha, específica, sem "urgente" nem "por favor". Descreve o problema, não o pedido de socorro.
+- **descricao**: o que a pessoa esperava, o que aconteceu, desde quando, e qualquer identificador que ela deu (número de pedido, nome de relatório, loja). Escreva em português, terceira pessoa, sem repetir a conversa inteira.
+- **prioridade**: siga o impacto DESCRITO, não a urgência sentida.
+  - \`critica\`: sistema fora do ar, impacto direto em vendas ou operação parada.
+  - \`alta\`: funcionalidade comprometida, existe contorno temporário.
+  - \`normal\`: melhoria, ajuste pontual, dúvida, sugestão.
+- **tipoChamadoId**: escolha um id EXATAMENTE da lista fornecida. Nunca invente id.
+- **area**: a área do solicitante, se ela apareceu na conversa. Senão, null.`
+
+/** Monta o prompt de usuário da extração, com os tipos permitidos (RF-28). */
+export function montarPromptExtracao(params: ParametrosExtracao): string {
+  const tipos = params.tiposPermitidos.map((t) => `- ${t.id}: ${t.nome}`).join('\n')
+  const conversa = params.mensagens
+    .filter((m) => m.papel === 'user' || m.papel === 'assistant')
+    .map((m) => `${m.papel === 'user' ? 'Colaborador' : 'Assistente'}: ${m.conteudo}`)
+    .join('\n')
+  return [
+    'Tipos de chamado disponíveis:',
+    tipos.length > 0 ? tipos : '(nenhum)',
+    '',
+    'Conversa:',
+    conversa,
+  ].join('\n')
 }

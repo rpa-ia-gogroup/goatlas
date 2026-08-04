@@ -15,6 +15,9 @@ import {
   type ParametrosClassificacao,
   type RespostaIA,
   type ResultadoClassificacao,
+  type ParametrosExtracao,
+  type ResultadoExtracao,
+  type PropostaSugerida,
 } from './tipos'
 
 export interface TurnoRoteirizado {
@@ -36,6 +39,8 @@ export class ClienteIAFake implements ClienteIA {
   readonly classificacoesRecebidas: ParametrosClassificacao[] = []
 
   falharChat = false
+  /** Reinicia o roteiro quando ele acaba — só para desenvolvimento. */
+  repetirRoteiro = false
   falharClassificacao = false
   classePadrao: ClasseResolucao = 'resolucao_real'
   /** Classe por título de ticket, para montar histórico misto na Regra 2. */
@@ -50,6 +55,12 @@ export class ClienteIAFake implements ClienteIA {
     this.permissoesRecebidas.push(params.toolsPermitidas.map((t) => t.nome))
     if (this.falharChat) {
       throw new ErroIA('fake: IA indisponível', { transitorio: true, etapa: 'chat' })
+    }
+    // `repetirRoteiro` existe para o shim de desenvolvimento: sem ele, o roteiro se
+    // esgota na primeira conversa e a segunda recebe "(fim do roteiro)". Fica
+    // DESLIGADO por padrão porque vários testes dependem justamente do esgotamento.
+    if (this.repetirRoteiro && this.roteiro.length > 0 && this.indice >= this.roteiro.length) {
+      this.indice = 0
     }
     const turno = this.roteiro[this.indice]
     this.indice += 1
@@ -81,6 +92,30 @@ export class ClienteIAFake implements ClienteIA {
       justificativa: 'fake',
       custoEstimadoUsd: 0.0005,
     }
+  }
+
+  /**
+   * Proposta que o fake devolve. `null` simula "ainda falta informação", que é o
+   * caso a testar tanto quanto o caminho pronto.
+   */
+  propostaSugerida: PropostaSugerida | null = {
+    titulo: 'Pipeline de vendas não atualizou',
+    descricao: 'O relatório diário de vendas não trouxe os dados de ontem.',
+    prioridade: 'alta',
+    tipoChamadoId: 'rt-1',
+    area: null,
+  }
+  readonly extracoesRecebidas: ParametrosExtracao[] = []
+
+  async extrairProposta(params: ParametrosExtracao): Promise<ResultadoExtracao> {
+    this.extracoesRecebidas.push(params)
+    if (this.falharChat) {
+      throw new ErroIA('fake: extração indisponível', { transitorio: true, etapa: 'extracao' })
+    }
+    const p = this.propostaSugerida
+    // Respeita a allowlist como o cliente real: id fora da lista descarta.
+    const permitido = p && params.tiposPermitidos.some((t) => t.id === p.tipoChamadoId)
+    return { proposta: permitido ? p : null, custoEstimadoUsd: 0.0002 }
   }
 
   async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {
