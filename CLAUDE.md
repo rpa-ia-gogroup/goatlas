@@ -100,6 +100,41 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   como não verificado. Indisponibilidade nunca vira bypass.
 - **N8N está descartado.** Não propor voltar a ele.
 
+## Padrões de código que sustentam as travas
+
+Não são estilo — são o que faz a trava ser garantia em vez de intenção. Quebrar um
+destes reabre um vazamento que já foi fechado.
+
+- **Trava crítica tem DUAS camadas.** `agent/gate.ts`: (1) `toolsPermitidas()` não
+  oferece a tool; (2) `autorizarCriacao()` recusa se ela vier. A camada 1 sozinha é
+  teatro — quem chama a rota HTTP direto nunca viu a lista de tools. A camada 2
+  sozinha basta para a segurança, mas deixa o modelo tropeçar à toa.
+- **Não existe leitura sem e-mail** (`tickets/vinculos.ts`). Toda consulta exige o
+  e-mail do solicitante e o filtro está no `WHERE`, não num `.filter()` posterior.
+  Um método `obterPorIssueKey(issueKey)` sem e-mail seria a porta de RF-30 — por
+  isso ele **não existe**. A via de reconciliação chama-se
+  `obterSemIsolamento_apenasReconciliacao`, para que usá-la numa rota de usuário
+  seja um bug visível na revisão.
+- **Idempotência vem da constraint, não de `SELECT` antes do `INSERT`.** Um
+  check-then-insert tem janela de corrida: dois cliques simultâneos passam os dois
+  pelo `SELECT`. `UNIQUE` + tratar a colisão como "já registrei" é o desenho.
+- **Ausência de informação = negar** (fail-closed). Allowlist vazia não expõe nada;
+  `dominios_permitidos` vazio nega todo mundo (nunca "libera todos"); comentário
+  sem o campo `public` é tratado como interno. O atalho oposto passa em todo teste
+  de caminho feliz e abre o app em produção no dia em que alguém esquecer de
+  configurar.
+- **`indisponivel` (503), `rate_limit` (429) e `timeout` (504) são TRANSITÓRIOS;
+  só `rejeitado` (400/403) é definitivo.** Classificar indisponibilidade como
+  definitiva marca a submissão como `falha` e ela **nunca é reprocessada** — é
+  perder o chamado de alguém numa queda de 30 segundos, exatamente o que RNF-17
+  proíbe. Foi um bug real, pego pelo teste `rf24-outbox-degradacao`.
+- **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
+  conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
+- **Tool que FALHOU ≠ tool que não rodou.** Falha satisfaz a ordem (a conversa
+  tentou) mas o chamado nasce `verificadoRegras: false`. Não rodar continua
+  recusando. É a diferença entre "indisponibilidade não vira bypass" e
+  "indisponibilidade vira parede" — o requisito pede o primeiro.
+
 ## Automação do processo (hooks)
 
 Configurados em [`.claude/settings.json`](.claude/settings.json), scripts em
