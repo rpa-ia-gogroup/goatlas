@@ -637,3 +637,289 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* ---------- conteúdo do Confluence (RNF-06, RF-39, RF-43) --------------- */
+
+/**
+ * O conteúdo é **citação**, não página nativa do goatlas: veio de outro lugar e
+ * está aqui para a pessoa decidir se resolve o problema dela antes de abrir
+ * chamado. Daí a **espinha lime** — um traço só, à esquerda da coluna, dizendo
+ * "daqui para a direita o texto é do Confluence". É o mesmo lime de
+ * `.cartao-deflexao`, agora como estrutura em vez de moldura.
+ *
+ * Tudo aqui é prefixado `doc-` porque o conteúdo é editável por qualquer pessoa da
+ * empresa: um nome de classe genérico colidindo com o app seria a página do
+ * Confluence redesenhando a interface. (`.dica` do formulário e a `.dica` de painel
+ * do Confluence são coisas diferentes — a segunda é `[data-variante='dica']`.)
+ */
+
+.doc {
+  --doc-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  max-width: 68ch;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-left: var(--space-4);
+  border-left: 3px solid var(--go-lime);
+}
+
+.doc h1,
+.doc h2,
+.doc h3,
+.doc h4,
+.doc h5,
+.doc h6 {
+  color: var(--go-text-heading);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  margin-top: var(--space-2);
+}
+.doc h1 {
+  font-size: var(--fs-h2);
+  font-weight: var(--fw-extrabold);
+}
+.doc h2 {
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-extrabold);
+}
+.doc h3 {
+  font-size: var(--fs-h4);
+  font-weight: var(--fw-bold);
+}
+.doc h4,
+.doc h5,
+.doc h6 {
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
+}
+
+.doc p {
+  line-height: 1.65;
+}
+
+.doc ul,
+.doc ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: var(--space-5);
+}
+.doc ul {
+  list-style: disc;
+}
+.doc ol {
+  list-style: decimal;
+}
+.doc li {
+  line-height: 1.6;
+}
+
+.doc blockquote {
+  padding: var(--space-3) var(--space-4);
+  background: var(--go-white);
+  border-radius: var(--radius-md);
+  font-style: italic;
+  color: color-mix(in srgb, var(--go-text-primary) 85%, transparent);
+}
+
+.doc hr {
+  border: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--go-blue) 15%, transparent);
+  border-radius: var(--radius-pill);
+}
+
+.doc-link {
+  color: var(--go-text-heading);
+  font-weight: var(--fw-semibold);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--go-lime);
+}
+.doc-link:hover {
+  text-decoration-color: var(--go-blue);
+}
+
+.doc-imagem {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+}
+
+.doc-imagem-ausente,
+.doc-truncado {
+  font-size: var(--fs-small);
+  font-style: italic;
+  color: color-mix(in srgb, var(--go-text-primary) 65%, transparent);
+}
+
+/* Código: a única exceção a "Poppins e nada mais" (§2 da identidade). Não é
+   escolha estética — alinhamento de coluna é o que faz código ser legível. A
+   superfície azul é a moldura da identidade (§6.2), não um tema escuro inventado. */
+.doc-codigo {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--go-blue);
+}
+.doc-codigo-linguagem {
+  padding: var(--space-2) var(--space-4) 0;
+  font-size: 0.6875rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--go-lime);
+}
+.doc-codigo pre {
+  margin: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  overflow-x: auto;
+}
+.doc-codigo code {
+  font-family: var(--doc-mono);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  color: var(--go-text-on-blue);
+  white-space: pre;
+}
+
+.doc-codigo-inline {
+  font-family: var(--doc-mono);
+  font-size: 0.9em;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--go-white);
+  color: var(--go-text-heading);
+  overflow-wrap: break-word;
+}
+
+/* Painéis: a identidade não tem vermelho nem verde (§1.3), então a variante NUNCA
+   é comunicada por cor — cada painel tem rótulo textual e marca. Cor só reforça. */
+.doc-painel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border-left: 4px solid var(--go-blue);
+  background: var(--go-white);
+}
+.doc-painel[data-variante='info'] {
+  background: var(--go-light-blue);
+}
+.doc-painel[data-variante='nota'] {
+  background: var(--go-white);
+  border-left-style: dashed;
+}
+.doc-painel[data-variante='dica'] {
+  border-left-color: var(--go-lime);
+}
+.doc-painel[data-variante='aviso'] {
+  border-left-width: 6px;
+  border-left-color: var(--go-lime);
+  box-shadow: var(--shadow-lime-glow);
+}
+
+.doc-painel-rotulo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.6875rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--go-text-heading);
+}
+.doc-painel-marca {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  line-height: 1;
+  background: var(--go-cream);
+  border: 2px solid var(--go-blue);
+}
+.doc-painel[data-variante='aviso'] .doc-painel-marca,
+.doc-painel[data-variante='dica'] .doc-painel-marca {
+  background: var(--go-lime);
+  border-color: var(--go-lime);
+}
+.doc-painel-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/**
+ * RF-43 — o placeholder de macro não suportada.
+ *
+ * Tracejado de propósito: é o mesmo vocabulário que a trilha usa para "não foi
+ * possível" (`.trilha-passo[data-estado='falhou']`). Reaproveitar o sinal que já
+ * existe é o que faz a interface ser aprendida uma vez só.
+ */
+.doc-macro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 2px dashed color-mix(in srgb, var(--go-blue) 45%, transparent);
+  background: var(--go-cream);
+}
+.doc-macro-rotulo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.6875rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--go-text-heading);
+}
+.doc-macro-marca {
+  font-size: 14px;
+  line-height: 1;
+}
+.doc-macro-texto {
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--go-text-primary) 82%, transparent);
+}
+
+/* Tabela: rolagem própria é obrigatória, não enfeite — boa parte das
+   solicitações nasce no celular (RNF-28) e tabela de documentação não cabe em
+   360px. O `body` nunca rola na horizontal por causa do conteúdo. */
+.doc-tabela-rolagem {
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+  background: var(--go-white);
+}
+.doc-tabela {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fs-small);
+}
+.doc-tabela th,
+.doc-tabela td {
+  padding: var(--space-3);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, var(--go-blue) 10%, transparent);
+}
+.doc-tabela th {
+  background: var(--go-cream);
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+  white-space: nowrap;
+}
+.doc-tabela tr:last-child td {
+  border-bottom: 0;
+}

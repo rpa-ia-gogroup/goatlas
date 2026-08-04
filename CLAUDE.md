@@ -99,6 +99,11 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
 - **Falha de tool não silencia a regra** (**RNF-18**) — informa e marca o ticket
   como não verificado. Indisponibilidade nunca vira bypass.
 - **N8N está descartado.** Não propor voltar a ele.
+- **Imagem em URL externa não é renderizada** (`D-10`) — só anexo da página, e
+  sempre pelo proxy. Não é (só) XSS: imagem externa numa página que qualquer pessoa
+  edita é rastreador de leitura, e o IP de cada colega vaza para um terceiro sem
+  nada na tela indicando. Reabrir em `D-10` antes de mexer em
+  `IMAGEM_EXTERNA_PERMITIDA`.
 - **Não existe botão de sair** (`D-08`). A pessoa loga uma vez e a conta fica; o canto
   superior mostra o e-mail só para ela saber com qual conta está. Trocar de conta não
   é caso de uso, e quem tem duas limpa os cookies. ⚠️ Isso **contraria `RF-03`** (P0,
@@ -165,6 +170,31 @@ destes reabre um vazamento que já foi fechado.
   tentou) mas o chamado nasce `verificadoRegras: false`. Não rodar continua
   recusando. É a diferença entre "indisponibilidade não vira bypass" e
   "indisponibilidade vira parede" — o requisito pede o primeiro.
+- **A sanitização devolve ÁRVORE TIPADA, não string de HTML** (`confluence/`).
+  Nenhum nó de `No` carrega saco de atributos, então não existe onde um `onerror`
+  viajar: o pior caso é um nó que o renderizador não conhece. É isto que torna
+  `dangerouslySetInnerHTML` desnecessário **por construção** — e a suíte tem um
+  teste estrutural varrendo `src/` para garantir que ninguém o reintroduza. String
+  sanitizada dependeria de o sanitizador estar certo; árvore fechada depende de o
+  renderizador não inventar.
+- **`urlSegura` pergunta "é `http(s)://`?", nunca "é `javascript:`?"** — e na ordem
+  **decodificar entidade → limpar controle e espaço → verificar esquema**. Verificar
+  antes de decodificar deixa passar `&#106;avascript:`; antes de limpar deixa passar
+  `java\tscript:`. Blocklist de esquema perde a corrida contra o vetor novo.
+- **Entidade é decodificada em UMA passagem.** `&amp;lt;` para em `&lt;`. Um laço
+  "decodifica até não mudar" transformaria dupla codificação em tag — é o bug
+  clássico de sanitizador. E o resultado **nunca** é reparseado.
+- **A sanitização tem DUAS passagens e a bruta não sai do arquivo.** Tokenizar +
+  árvore bruta (malformado, profundidade, tamanho) → converter (allowlist).
+  Misturar as duas espalha a checagem por cima do tratamento de erro de parse, e um
+  caminho de recuperação passa a ser um caminho sem checagem.
+- **Descartar o conteúdo de `<script>` é cosmético, não a garantia.** A garantia é a
+  allowlist não transformar `script` em nó nenhum. A lista de "tags com conteúdo
+  descartado" existe para `alert(1)` não aparecer como texto visível — inerte, mas
+  ruído que faz quem lê duvidar do que está lendo.
+- **Limite é parte da trava.** Página editável por qualquer pessoa é entrada não
+  confiável **inclusive no tamanho**: há teto de entrada, de profundidade, de nós e
+  de descartes. Conteúdo hostil não precisa de script para derrubar o Worker.
 
 ## Automação do processo (hooks)
 
@@ -241,24 +271,29 @@ persistente.
 
 ## Estado do projeto
 
-**Fase 1 em implementação.** Faseamento em `docs/REQUISITOS.md` seção 12:
-Fase 0 diagnóstico (João, sem código) → **Fase 1 MVP** → Fase 2 conhecimento e
-governança → Fase 3 SLA e notificações → Fase 4 rollout. Progresso tarefa por
-tarefa em [`specs/001-mvp-chamados-e-agente/tasks.md`](specs/001-mvp-chamados-e-agente/tasks.md).
+**Fase 1 mergeada na `main`; Fase 2 começada.** Faseamento em
+`docs/REQUISITOS.md` seção 12: Fase 0 diagnóstico (João, sem código) → Fase 1 MVP →
+**Fase 2 conhecimento e governança** → Fase 3 SLA e notificações → Fase 4 rollout.
+Progresso tarefa por tarefa em
+[`specs/001-mvp-chamados-e-agente/tasks.md`](specs/001-mvp-chamados-e-agente/tasks.md)
+e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governanca/tasks.md).
 
 **No ar em modo demonstração: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**49 de 58 tarefas concluídas · 166 testes · typecheck limpo · fluxo validado no
-navegador**, tudo sem credencial e sem rede. Pronto: fundação, as seis travas
-críticas, clientes de Atlassian e IA, runtime do agente, rotas, worker, frontend e
-`docs/DEPLOY.md`.
+**227 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
+runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
+**trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
+`RF-43`), com os testes de burla escritos antes.
 
-O que falta depende de resposta ou de deploy: `criarChamado` contra a Atlassian real
-(**Q1**), campo customizado "Solicitante" (**Q4**), formato do comentário atribuído
-(alinhamento com o time de tech), deploy em staging/prod e o fechamento da Definição
-de Pronto. Detalhe em `specs/001-mvp-chamados-e-agente/tasks.md`.
+O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
+Atlassian real (**Q1**), campo customizado "Solicitante" (**Q4**), formato do
+comentário atribuído (alinhamento com o time de tech), deploy em staging/prod e o
+fechamento da Definição de Pronto. Da Fase 2, o próximo passo é `obterPagina` no
+cliente isolado e a rota de leitura com as **três** condições de `RN-06` (T-110 e
+T-111), cada uma com o teste de burla antes.
 
 ### Como testar sem credencial
 As duas camadas isoladas têm **fake** (`src/lib/atlassian/fake.ts`,

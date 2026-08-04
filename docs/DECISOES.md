@@ -245,6 +245,35 @@ apenas evita mostrar um botão que daria 403.
 
 ---
 
+### D-10 · Imagem em URL externa não é renderizada: toda imagem vem pelo proxy de anexo
+**Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada
+
+O sanitizador (`RNF-06`) **descarta** `<img src="https://...">` e
+`<ac:image><ri:url .../></ac:image>`. Só imagem de **anexo da página** é renderizada,
+e sempre pela rota de proxy do app.
+
+**Por quê:** não é (só) XSS. Uma imagem externa numa página que **qualquer pessoa da
+empresa pode editar** é um rastreador de leitura: o IP e o horário de cada colega que
+abre a página vazam para um domínio de terceiro, e nada na tela indica isso. Quem
+edita a página não precisa de intenção má — basta colar a imagem de um site
+qualquer. Sob proxy total (`D-01`) o app é a única superfície de leitura de quem não
+tem assento, então o que ele decide buscar é o que vaza.
+
+**Custo aceito:** ilustração legítima hospedada fora do Confluence não aparece. O
+sanitizador registra o descarte (`imagem_externa_recusada`), e o alinhamento
+esperado é "suba a imagem como anexo da página".
+
+**Onde reverter, se um dia fizer sentido:** `IMAGEM_EXTERNA_PERMITIDA` em
+`src/lib/confluence/sanitizar.ts`. É uma constante só, e o nó `origem.tipo:
+'externa'` já existe — o renderizador **revalida a URL** de qualquer forma, então
+ligar a constante não abre caminho para `data:` nem `javascript:`. Reabrir a decisão
+aqui antes de mexer.
+
+⚠️ Isto **não** contraria `RF-39` (que já manda servir imagem e anexo pelo proxy);
+apenas fecha o caso que `RF-39` não nomeava.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
