@@ -31,7 +31,29 @@ export interface ComentarioBruto {
   readonly publico: boolean
 }
 
-export type ModoFalha = 'nenhum' | 'indisponivel' | 'rate_limit' | 'timeout'
+/**
+ * Modos de falha do fake.
+ *
+ * ⚠️ A distinção **transitório × definitivo** não é cosmética: ela decide se a
+ * submissão fica `pendente` (o cron tenta de novo) ou vira `falha` (chamado
+ * perdido). Marcar indisponibilidade como definitiva é perder o chamado de alguém
+ * numa queda de 30 segundos — exatamente o que RNF-17 proíbe.
+ *
+ * Transitórios (o cron reprocessa): `indisponivel` (503), `rate_limit` (429),
+ * `timeout` (504).
+ * Definitivo (reprocessar não resolve, e insistir esconde o problema real):
+ * `rejeitado` (400/403 — payload inválido, campo obrigatório faltando, permissão
+ * negada).
+ */
+export type ModoFalha = 'nenhum' | 'indisponivel' | 'rate_limit' | 'timeout' | 'rejeitado'
+
+const FALHAS: Readonly<Record<Exclude<ModoFalha, 'nenhum'>, { status: number; transitorio: boolean }>> =
+  Object.freeze({
+    indisponivel: { status: 503, transitorio: true },
+    rate_limit: { status: 429, transitorio: true },
+    timeout: { status: 504, transitorio: true },
+    rejeitado: { status: 400, transitorio: false },
+  })
 
 export interface EstadoFake {
   tiposChamado: TipoChamado[]
@@ -80,8 +102,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
 
   private checar(modo: ModoFalha, recurso: string): void {
     if (modo === 'nenhum') return
-    const transitorio = modo !== 'indisponivel'
-    const status = modo === 'rate_limit' ? 429 : modo === 'timeout' ? 504 : 503
+    const { status, transitorio } = FALHAS[modo]
     throw new ErroAtlassian(`fake: ${modo}`, { status, transitorio, recurso })
   }
 

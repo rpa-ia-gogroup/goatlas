@@ -50,50 +50,50 @@ created: "2026-08-03"
 > Esta fase existe antes das features de propósito: são os cenários **[bypass]** da
 > spec, e a Definição de Pronto exige que sejam comprovados, não presumidos.
 
-- [ ] **T-010** Teste de bypass `RF-08`: handler chamado direto sem estado; conversa
+- [x] **T-010** Teste de bypass `RF-08`: handler chamado direto sem estado; conversa
       adversarial ("ignore as regras"); conteúdo do Confluence instruindo a criar.
       _Requirements: RF-08, RN-01, RNF-08_
-- [ ] **T-011** [P] Teste de bypass `RF-17`: criar sem passar por `/confirmar`.
+- [x] **T-011** [P] Teste de bypass `RF-17`: criar sem passar por `/confirmar`.
       _Requirements: RF-17, RN-02_
-- [ ] **T-012** [P] Teste de bypass `RF-30`: acessar chamado de outro por URL e por
+- [x] **T-012** [P] Teste de bypass `RF-30`: acessar chamado de outro por URL e por
       parâmetro. _Requirements: RF-30, RN-04_
-- [ ] **T-013** [P] Teste `RF-32`: query com `internal=false` **e** filtro
+- [x] **T-013** [P] Teste `RF-32`: query com `internal=false` **e** filtro
       server-side; fixture com comentário interno. _Requirements: RF-32, RN-05_
-- [ ] **T-014** [P] Teste `RF-04`/`RF-05`: e-mail vindo do cliente é ignorado; conta
+- [x] **T-014** [P] Teste `RF-04`/`RF-05`: e-mail vindo do cliente é ignorado; conta
       fora do domínio e desativada são negadas. _Requirements: RF-04, RF-05, RNF-05_
-- [ ] **T-015** [P] Teste `RN-06`: espaço fora da allowlist, página restrita e label
+- [x] **T-015** [P] Teste `RN-06`: espaço fora da allowlist, página restrita e label
       de bloqueio — as três, simultâneas. _Requirements: RN-06, RNF-09_
-- [ ] **T-016** [P] Teste `RF-24`: submissão duplicada concorrente → 1 chamado.
+- [x] **T-016** [P] Teste `RF-24`: submissão duplicada concorrente → 1 chamado.
       _Requirements: RF-24_
-- [ ] **T-017** [P] Teste `RNF-17`: Atlassian falhando → submissão sobrevive e
+- [x] **T-017** [P] Teste `RNF-17`: Atlassian falhando → submissão sobrevive e
       reprocessa; e o caso "criou no JSM, falhou o vínculo". _Requirements: RNF-17, RNF-21_
 
 ## Phase 2 — Identidade, auditoria e camadas isoladas
 
-- [ ] **T-020** `auth/`: identidade do header do edge, allowlist de domínio
+- [x] **T-020** `auth/`: identidade do header do edge, allowlist de domínio
       revalidada a cada requisição, negação de conta inativa. Nenhum identificador
       do cliente aceito. **[SUPOSIÇÃO: só `@gocase.com` — Q7]**
       _Requirements: RF-01, RF-04, RF-05, RNF-05_
 - [ ] **T-021** Verificar no GoDeploy: o edge restringe login ao Workspace
       corporativo? existe header de nome? o que acontece com conta desativada?
       Registrar em `D-02`. _Requirements: RF-05, RF-06_
-- [ ] **T-022** [P] Perfil admin por allowlist explícita, configurável sem deploy.
+- [x] **T-022** [P] Perfil admin por allowlist explícita, configurável sem deploy.
       _Requirements: RF-02, RN-09_
 - [ ] **T-023** [P] Sessão com expiração configurável e logout explícito.
       _Requirements: RF-03_
-- [ ] **T-024** `audit/` append-only (sem UPDATE/DELETE no código), registrando
+- [x] **T-024** `audit/` append-only (sem UPDATE/DELETE no código), registrando
       também as ações que falham. _Requirements: RF-58, RN-10_
-- [ ] **T-025** `atlassian/cliente.ts`: cache com TTL configurável, `Retry-After`,
+- [~] **T-025** `atlassian/cliente.ts`: cache com TTL configurável, `Retry-After`,
       backoff exponencial com jitter (base 2s, teto ~30s, ~4 tentativas), contagem
       de 429. Nenhuma URL da Atlassian fora desta pasta.
       _Requirements: RNF-13, RNF-14, RNF-15, RNF-22_
-- [ ] **T-026** `listarComentariosPublicos` encapsulando a pegadinha do `internal`
+- [x] **T-026** `listarComentariosPublicos` encapsulando a pegadinha do `internal`
       (default `true`) + filtro pelo campo `public`. Faz T-013 passar.
       _Requirements: RF-32, RN-05_
 - [ ] **T-027** `ia/cliente.ts`: proxy corporativo, timeout com fallback direto,
       contabilidade de custo por conversa e teto configurável.
       _Requirements: RNF-16, RNF-23, RNF-34_
-- [ ] **T-028** [P] `config`: thresholds, allowlists e TTLs em banco, editáveis sem
+- [x] **T-028** [P] `config`: thresholds, allowlists e TTLs em banco, editáveis sem
       deploy — é o que impede o hardcode. _Requirements: RF-49, RF-50, RNF-25_
 - [ ] **T-029** [P] `GET /api/health` com Atlassian, IA, banco e SSO.
       _Requirements: RF-59_
@@ -105,7 +105,7 @@ created: "2026-08-03"
       com score; exclusão por label e por restrição de página. Faz T-015 passar.
       **[BLOQUEADA: Q5 para a allowlist real — desenvolvível com espaço de teste]**
       _Requirements: RF-37, RF-38, RF-40, RN-06_
-- [ ] **T-041** Regra 1 como **função pura**: melhor score × threshold → decisão.
+- [x] **T-041** Regra 1 como **função pura**: melhor score × threshold → decisão.
       _Requirements: RF-09_
 - [ ] **T-042** `check_jira_history`: agrupamento pelo campo configurado, leitura dos
       comentários de resolução, janela limitada. **[BLOQUEADA: Q2]**
@@ -114,14 +114,14 @@ created: "2026-08-03"
       por `issue_key` + hash do comentário** (contém `R-08`). Prompt versionado em
       arquivo. **[BLOQUEADA: Q3 — sem exemplos reais da Gocase a classificação erra
       e gera falso bloqueio]** _Requirements: RF-10, RF-14, RNF-16, RNF-24_
-- [ ] **T-044** Regra 2 como **função pura**: recorrência × threshold → decisão.
+- [x] **T-044** Regra 2 como **função pura**: recorrência × threshold → decisão.
       **[SUPOSIÇÃO: 3+ em 90 dias]** _Requirements: RF-10, RF-11_
-- [ ] **T-045** Orquestrador: state machine em banco; monta o conjunto de tools
+- [x] **T-045** Orquestrador: state machine em banco; monta o conjunto de tools
       permitidas por turno **e** recusa `create_ticket` fora de ordem. As duas
       camadas. Faz T-010 passar. _Requirements: RF-08, RN-01, RNF-08_
-- [ ] **T-046** Conteúdo recuperado entra no contexto do LLM como **dado**, delimitado
+- [x] **T-046** Conteúdo recuperado entra no contexto do LLM como **dado**, delimitado
       e nunca como instrução. _Requirements: RNF-08, RNF-09_
-- [ ] **T-047** Mensagem de bloqueio com os **três** elementos (regra, motivo
+- [x] **T-047** Mensagem de bloqueio com os **três** elementos (regra, motivo
       legível, link). A redação define a percepção do produto — soa como ajuda, não
       recusa. _Requirements: RF-12, RNF-30, RNF-31_
 - [ ] **T-048** Override: prossegue, registra tentativa **e** override, alimenta o
@@ -133,7 +133,7 @@ created: "2026-08-03"
 
 ## Phase 4 — Criação de chamado
 
-- [ ] **T-060** Outbox: persistir submissão **antes** da chamada; estados; chave de
+- [x] **T-060** Outbox: persistir submissão **antes** da chamada; estados; chave de
       idempotência única no banco. Faz T-016 e T-017 passarem.
       _Requirements: RF-24, RNF-17_
 - [ ] **T-061** `POST /api/conversas/:id/confirmar` — a **única** transição que
@@ -147,7 +147,7 @@ created: "2026-08-03"
 - [ ] **T-064** Gravar solicitante real no campo customizado "Solicitante" e como
       request participant quando aplicável. **[BLOQUEADA: Q4]**
       _Requirements: RF-21, R-03_
-- [ ] **T-065** Persistir vínculo `issueKey ↔ e-mail ↔ timestamp` na mesma transação
+- [x] **T-065** Persistir vínculo `issueKey ↔ e-mail ↔ timestamp` na mesma transação
       lógica da conclusão da submissão. _Requirements: RF-22, RN-03_
 - [ ] **T-066** Allowlist de tipos de chamado: só o que o admin liberou é oferecido.
       _Requirements: RF-28, RNF-07_
@@ -155,10 +155,10 @@ created: "2026-08-03"
       link de acompanhamento **interno**. _Requirements: RF-26_
 - [ ] **T-068** Cron `POST /api/cron/reprocessar-submissoes` (valida
       `X-Godeploy-Cron`) + job no GoDeploy. _Requirements: RNF-17_
-- [ ] **T-069** Cron `POST /api/cron/reconciliar-vinculos`: varre o Jira pelo campo
+- [~] **T-069** Cron `POST /api/cron/reconciliar-vinculos`: varre o Jira pelo campo
       "Solicitante" e reconstrói vínculo órfão. **[BLOQUEADA: Q4]**
       _Requirements: RNF-21_
-- [ ] **T-070** Formulário mínimo sem IA (`D-04`): mesmas travas de servidor, marcado
+- [x] **T-070** Formulário mínimo sem IA (`D-04`): mesmas travas de servidor, marcado
       como **não verificado pelas regras**, e mensurável. Faz parte de T-017/`RNF-18`.
       _Requirements: RF-27 (parcial), RNF-18_
 
@@ -190,6 +190,29 @@ created: "2026-08-03"
       _Requirements: CLAUDE.md regra 10_
 - [ ] **T-097** Fechar a Definição de Pronto da Fase 1 (§13 dos requisitos) item por
       item, incluindo os testes de burla. _Requirements: todos_
+
+---
+## Estado da implementação (03/08/2026)
+
+**26 concluídas · 2 em andamento · 30 pendentes.** 82 testes passando, typecheck
+limpo, sem nenhuma credencial e sem rede.
+
+As **seis travas críticas estão implementadas e com teste de burla**:
+
+| Trava | Onde mora | Teste |
+|---|---|---|
+| `RF-08` ordem das tools | `agent/gate.ts` — duas camadas: não oferecer + recusar se vier | `rf08-ordem-tools.test.ts` (6 burlas) |
+| `RF-17` confirmação | `agent/gate.ts` + carimbo só por rota do usuário | idem |
+| `RF-30` isolamento | `tickets/vinculos.ts` — não existe leitura sem e-mail | `rf30-isolamento.test.ts` |
+| `RF-32` comentário interno | `atlassian/comentarios.ts` — query + filtro | `rf32-comentarios.test.ts` |
+| `RF-24` idempotência | `UNIQUE` no banco, detectado pela constraint | `rf24-outbox-degradacao.test.ts` |
+| `RNF-17` não perder chamado | `tickets/outbox.ts` — persiste antes de chamar | idem |
+
+**Em andamento (`[~]`)** — a parte feita não depende de resposta; a que falta depende:
+- **T-025** transporte HTTP pronto (backoff, `Retry-After`, jitter, contagem de 429,
+  cache TTL). Faltam as operações reais contra a Atlassian: **`[BLOQUEADA: Q1]`**.
+- **T-069** `reconciliarVinculos` implementado e testado contra o outbox local. A
+  varredura pelo campo "Solicitante" no Jira é **`[BLOQUEADA: Q4]`**.
 
 ---
 ## Coverage check (gate antes do `/implement`)
