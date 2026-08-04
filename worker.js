@@ -2630,8 +2630,7 @@ async function tratarRequisicao(req, ctx, env) {
       email: eu.email,
       nome: eu.nome,
       isAdmin: eu.isAdmin,
-      modoDemo: ctx.modoDemo,
-      urlLogout: urlLogoutDoEdge(url.hostname)
+      modoDemo: ctx.modoDemo
     });
   }
   if (req.method === "POST") {
@@ -2902,14 +2901,6 @@ async function rotear(req, ctx, eu, caminho, url) {
     return json({ itens: await ctx.auditoria.listarPorAtor(alvo, 200) });
   }
   return ERROS.naoEncontrado();
-}
-function urlLogoutDoEdge(hostname) {
-  if (/^\d+(\.\d+)*$/.test(hostname)) return null;
-  const partes = hostname.split(".");
-  if (partes.length < 3) return null;
-  const base = partes.slice(1).join(".");
-  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(base)) return null;
-  return `https://${base}/auth/logout`;
 }
 function estadoVerificacao(verificado, falhou) {
   if (falhou) return "falhou";

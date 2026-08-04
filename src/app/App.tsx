@@ -46,23 +46,17 @@ export function App() {
         <span className="marca">
           go<span>atlas</span>
         </span>
+        {/*
+          A identidade no canto existe só para a pessoa saber COM QUAL CONTA está
+          logada. Não há botão de sair — decisão D-08: trocar de conta não é caso de
+          uso desta ferramenta, e quem tem duas contas limpa os cookies.
+        */}
         {eu && (
-          <div className="conta">
-            <span className="identidade">
-              {eu.nome}
-              <br />
-              {eu.email}
-            </span>
-            {eu.urlLogout && (
-              <a
-                className="botao-sair"
-                href={eu.urlLogout}
-                title="Encerra sua sessão. Você volta para o painel do GoDeploy e precisa entrar de novo para usar o goatlas."
-              >
-                Sair
-              </a>
-            )}
-          </div>
+          <span className="identidade">
+            {eu.nome}
+            <br />
+            {eu.email}
+          </span>
         )}
       </header>
 

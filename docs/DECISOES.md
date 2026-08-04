@@ -183,6 +183,38 @@ preciso criar o app de staging. Não deixar isso para a hora do deploy.
 
 ---
 
+### D-08 · Sem botão de sair: a conta fica setada enquanto durar
+**Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada — **precisa do aval do João**
+
+A interface **não tem logout**. A pessoa entra uma vez pelo Google e a conta
+permanece; o canto superior mostra nome e e-mail apenas para ela saber **com qual
+conta** está.
+
+**Racional:** trocar de conta não é caso de uso desta ferramenta. Quem tem duas
+contas corporativas é exceção, e resolve limpando os cookies. Botão de sair em
+computador compartilhado de loja ou expedição convida mais confusão do que resolve —
+alguém sai sem querer e a próxima pessoa acha que o app quebrou.
+
+**⚠️ Isto contraria `RF-03`**, que pede "sessão com expiração configurável e
+**logout explícito**" e é **P0**. A divergência está registrada aqui de propósito, e
+não é esquecimento:
+
+- A **expiração de sessão** continua existindo — é do edge do GoDeploy (`D-02`), não
+  nossa.
+- O que sai é só o **logout explícito** na interface.
+- **`RF-03` é requisito do João.** Como ele escreveu o documento, esta decisão precisa
+  do aval dele para virar alteração de `REQUISITOS.md`. Até lá, `RF-03` fica marcado
+  como **parcialmente atendido**, não como cumprido.
+
+**Como voltar atrás, se ele quiser o botão:** a implementação existiu e está no
+histórico (commit do PR #5). O achado técnico que vale reaproveitar é que o logout do
+edge **ignora parâmetro de redirect** (testado com `redirect`, `next`, `returnTo`,
+`return_to`, `r`, `continue`, `redirect_uri`, `callback`) e sempre leva ao domínio da
+plataforma — que foi exatamente o problema: quem saía caía numa tela "GoDeploy
+Gateway" sem caminho de volta.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

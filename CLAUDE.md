@@ -99,6 +99,11 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
 - **Falha de tool não silencia a regra** (**RNF-18**) — informa e marca o ticket
   como não verificado. Indisponibilidade nunca vira bypass.
 - **N8N está descartado.** Não propor voltar a ele.
+- **Não existe botão de sair** (`D-08`). A pessoa loga uma vez e a conta fica; o canto
+  superior mostra o e-mail só para ela saber com qual conta está. Trocar de conta não
+  é caso de uso, e quem tem duas limpa os cookies. ⚠️ Isso **contraria `RF-03`** (P0,
+  pede logout explícito) e está registrado como divergência consciente, aguardando o
+  aval do João — não reintroduzir o botão sem passar por `D-08`.
 
 ## Padrões de código que sustentam as travas
 

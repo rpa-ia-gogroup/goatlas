@@ -15,7 +15,7 @@ import { SqliteLocal } from '@/lib/db/sqlite-local'
 import { migrar } from '@/lib/db/schema'
 import { Config, valoresDoBootstrap } from '@/lib/config'
 import { montarContexto } from '@/lib/contexto'
-import { tratarRequisicao, urlLogoutDoEdge } from '@/lib/http/rotas'
+import { tratarRequisicao } from '@/lib/http/rotas'
 import { HEADER_EMAIL } from '@/lib/auth'
 import { AVISO_DEMO, TIPO_CHAMADO_DEMO } from '@/lib/demo'
 
@@ -195,33 +195,3 @@ describe('RNF-19 — Atlassian fora, a lista ainda mostra conteúdo', () => {
   })
 })
 
-describe('RF-03 — logout explícito', () => {
-  it('a URL vem do próprio host, sem hardcode de domínio', () => {
-    expect(urlLogoutDoEdge('goatlas.devgogroup.com')).toBe('https://devgogroup.com/auth/logout')
-    expect(urlLogoutDoEdge('9c47f42f.devgogroup.com')).toBe('https://devgogroup.com/auth/logout')
-    // Domínio diferente: continua funcionando, porque nada está fixo no código.
-    expect(urlLogoutDoEdge('app.outraplataforma.com.br')).toBe(
-      'https://outraplataforma.com.br/auth/logout',
-    )
-  })
-
-  it('em dev não existe sessão do edge — devolve null, e a UI esconde o botão', () => {
-    // Um botão que finge sair é pior que botão nenhum: em computador compartilhado
-    // a pessoa acredita que encerrou a sessão e não encerrou.
-    expect(urlLogoutDoEdge('localhost')).toBeNull()
-    // IP tem 4 rótulos: uma checagem só de contagem produziria
-    // "https://0.0.1/auth/logout" — lixo que a pessoa clicaria achando que sai.
-    expect(urlLogoutDoEdge('127.0.0.1')).toBeNull()
-    expect(urlLogoutDoEdge('192.168.0.10')).toBeNull()
-    // Domínio sem TLD plausível também não vira URL.
-    expect(urlLogoutDoEdge('a.b.c1')).toBeNull()
-  })
-
-  it('a identidade carrega a URL de logout', async () => {
-    const r = await chamar('/api/auth/me')
-    // No teste o host é goatlas.devgogroup.com (ver helper `chamar`).
-    expect((r.corpo as { urlLogout: string }).urlLogout).toBe(
-      'https://devgogroup.com/auth/logout',
-    )
-  })
-})

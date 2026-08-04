@@ -79,11 +79,12 @@ created: "2026-08-03"
       Registrar em `D-02`. _Requirements: RF-05, RF-06_
 - [x] **T-022** [P] Perfil admin por allowlist explícita, configurável sem deploy.
       _Requirements: RF-02, RN-09_
-- [x] **T-023** [P] Sessão com expiração configurável e **logout explícito**.
-      ⚠️ Estava marcada como concluída **indevidamente**: a expiração é do edge, mas
-      a interface não tinha botão de sair, e `RF-03` pede logout explícito. Corrigido
-      depois de o usuário apontar. O logout do edge ignora parâmetro de redirect, e a
-      URL é derivada do próprio host (`RNF-25`). _Requirements: RF-03_
+- [~] **T-023** [P] Sessão com expiração configurável e logout explícito.
+      **Parcialmente atendida, por decisão `D-08`:** a expiração existe (é do edge do
+      GoDeploy), mas **não há logout na interface** — trocar de conta não é caso de uso,
+      e botão de sair em computador compartilhado convida confusão. ⚠️ `RF-03` é P0 e
+      pede logout explícito, então **falta o aval do João** para isso virar alteração
+      de `REQUISITOS.md`. Fica `[~]`, não `[x]`. _Requirements: RF-03, D-08_
 - [x] **T-024** `audit/` append-only (sem UPDATE/DELETE no código), registrando
       também as ações que falham. _Requirements: RF-58, RN-10_
 - [x] **T-025** `atlassian/cliente.ts`: cache com TTL configurável, `Retry-After`,

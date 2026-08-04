@@ -208,5 +208,7 @@ houver, revogue de todo modo.
 - [ ] `GET /api/health` com todas as dependências `ok` e `usandoFakes: false`.
 - [ ] Varredura confirmando que nenhuma das três credenciais aparece em log,
       resposta ou bundle (`RNF-01`).
+- [ ] **`RF-03` decidido com o João**: o app não tem logout (`D-08`), e o requisito
+      pede logout explícito. Enquanto não houver aval, é divergência aberta.
 - [ ] Time de tech avisado de que o reporter muda (`R-03`, **Q10**) — é
       pré-condição de rollout, não detalhe.
