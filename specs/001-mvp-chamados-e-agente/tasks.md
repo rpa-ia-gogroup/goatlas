@@ -83,14 +83,14 @@ created: "2026-08-03"
       _Requirements: RF-03_
 - [x] **T-024** `audit/` append-only (sem UPDATE/DELETE no código), registrando
       também as ações que falham. _Requirements: RF-58, RN-10_
-- [~] **T-025** `atlassian/cliente.ts`: cache com TTL configurável, `Retry-After`,
+- [x] **T-025** `atlassian/cliente.ts`: cache com TTL configurável, `Retry-After`,
       backoff exponencial com jitter (base 2s, teto ~30s, ~4 tentativas), contagem
       de 429. Nenhuma URL da Atlassian fora desta pasta.
       _Requirements: RNF-13, RNF-14, RNF-15, RNF-22_
 - [x] **T-026** `listarComentariosPublicos` encapsulando a pegadinha do `internal`
       (default `true`) + filtro pelo campo `public`. Faz T-013 passar.
       _Requirements: RF-32, RN-05_
-- [ ] **T-027** `ia/cliente.ts`: proxy corporativo, timeout com fallback direto,
+- [x] **T-027** `ia/cliente.ts`: proxy corporativo, timeout com fallback direto,
       contabilidade de custo por conversa e teto configurável.
       _Requirements: RNF-16, RNF-23, RNF-34_
 - [x] **T-028** [P] `config`: thresholds, allowlists e TTLs em banco, editáveis sem
@@ -101,19 +101,26 @@ created: "2026-08-03"
 
 ## Phase 3 — Regras (funções puras) e orquestrador
 
-- [ ] **T-040** `search_confluence`: busca por CQL **restrita na query** à allowlist,
-      com score; exclusão por label e por restrição de página. Faz T-015 passar.
-      **[BLOQUEADA: Q5 para a allowlist real — desenvolvível com espaço de teste]**
-      _Requirements: RF-37, RF-38, RF-40, RN-06_
+- [x] **T-040** `search_confluence`: busca por CQL **restrita na query** à allowlist,
+      com score; exclusão por label; **e verificação de restrição de página**
+      (`/restriction/byOperation/read`) por candidata, com cache. As **três**
+      condições de `RN-06`. Sob proxy total, QUALQUER restrição exclui a página, e
+      falha ao consultar também exclui (fail-closed). Allowlist real depende de
+      **Q5** (entra como config, não como código).
+      _Requirements: RF-37, RF-38, RF-40, RN-06, RNF-09_
 - [x] **T-041** Regra 1 como **função pura**: melhor score × threshold → decisão.
       _Requirements: RF-09_
-- [ ] **T-042** `check_jira_history`: agrupamento pelo campo configurado, leitura dos
-      comentários de resolução, janela limitada. **[BLOQUEADA: Q2]**
-      **[SUPOSIÇÃO: label]** _Requirements: RF-10, RF-11_
-- [ ] **T-043** Classificador "ajuste operacional" × "resolução real", com **cache
+- [x] **T-042** `check_jira_history`: agrupamento pelo campo configurado, leitura dos
+      comentários de resolução, janela limitada. **Implementada sem responder Q2**: o
+      campo de agrupamento é lido de `config`, então a resposta de Q2 entra como
+      **dado**, não como mudança de código (`RNF-25`) — nenhum valor foi chutado.
+      **Falta verificar contra um Jira real (Q1).** _Requirements: RF-10, RF-11, RNF-25_
+- [x] **T-043** Classificador "ajuste operacional" × "resolução real", com **cache
       por `issue_key` + hash do comentário** (contém `R-08`). Prompt versionado em
-      arquivo. **[BLOQUEADA: Q3 — sem exemplos reais da Gocase a classificação erra
-      e gera falso bloqueio]** _Requirements: RF-10, RF-14, RNF-16, RNF-24_
+      `ia/prompts.ts` (`RNF-24`). **Q3 continua obrigatória em tempo de execução:** sem
+      exemplos configurados, a Regra 2 se declara **indisponível** (`regra2Disponivel`)
+      em vez de classificar com exemplo inventado — a trava de `RF-14` está no código,
+      testada. _Requirements: RF-10, RF-14, RNF-16, RNF-24_
 - [x] **T-044** Regra 2 como **função pura**: recorrência × threshold → decisão.
       **[SUPOSIÇÃO: 3+ em 90 dias]** _Requirements: RF-10, RF-11_
 - [x] **T-045** Orquestrador: state machine em banco; monta o conjunto de tools
@@ -124,11 +131,11 @@ created: "2026-08-03"
 - [x] **T-047** Mensagem de bloqueio com os **três** elementos (regra, motivo
       legível, link). A redação define a percepção do produto — soa como ajuda, não
       recusa. _Requirements: RF-12, RNF-30, RNF-31_
-- [ ] **T-048** Override: prossegue, registra tentativa **e** override, alimenta o
+- [x] **T-048** Override: prossegue, registra tentativa **e** override, alimenta o
       backlog de documentação. _Requirements: RF-13, RN-07, RF-42_
-- [ ] **T-049** Falha de tool → informa e marca ticket como **não verificado**;
+- [x] **T-049** Falha de tool → informa e marca ticket como **não verificado**;
       nunca silencia a regra. _Requirements: RNF-18, RNF-19_
-- [ ] **T-050** Priorização automática em 3 níveis com SLA de **primeira resposta**
+- [x] **T-050** Priorização automática em 3 níveis com SLA de **primeira resposta**
       correspondente. _Requirements: RF-15, RN-08_
 
 ## Phase 4 — Criação de chamado

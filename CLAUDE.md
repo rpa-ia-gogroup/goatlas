@@ -128,6 +128,14 @@ destes reabre um vazamento que já foi fechado.
   definitiva marca a submissão como `falha` e ela **nunca é reprocessada** — é
   perder o chamado de alguém numa queda de 30 segundos, exatamente o que RNF-17
   proíbe. Foi um bug real, pego pelo teste `rf24-outbox-degradacao`.
+- **`RN-06` tem TRÊS condições, não duas.** Espaço na allowlist **E** sem label
+  bloqueada **E** página sem restrição. O CQL cobre as duas primeiras; a terceira
+  exige `/restriction/byOperation/read` por página. Sem ela, página restrita
+  aparece na mensagem de bloqueio da Regra 1 **com título, trecho e link** — foi um
+  furo real. Sob proxy total (`D-01`), **qualquer** restrição exclui: não dá para
+  avaliar "esta pessoa pode ver?" quando a identidade perante a Atlassian é sempre
+  a conta de serviço, e usar a permissão dela como proxy da permissão da pessoa é
+  o vazamento que `RNF-09` proíbe.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Tool que FALHOU ≠ tool que não rodou.** Falha satisfaz a ordem (a conversa
