@@ -83,9 +83,10 @@ created: "2026-08-04"
 
 ## Phase 2 — Confluence como superfície
 
-> **Estado: T-110, T-111 e T-112 concluídos** — **276 testes** na suíte (49 novos),
-> typecheck, build e bundle do worker limpos. A leitura direta e o proxy de anexo
-> existem, com os testes de burla escritos antes.
+> **Estado: T-110, T-111, T-112 e T-113 concluídos** — **293 testes** na suíte (66
+> novos), typecheck, build e bundle do worker limpos. Busca, leitura direta e proxy de
+> anexo existem, com os testes de burla escritos antes. ⚠️ **Nenhuma tela ainda os
+> consome** — T-114 é a próxima.
 
 - [x] **T-110** `obterPagina` no cliente isolado (v2: `/wiki/api/v2/pages/{id}`),
       com cache. _Requirements: RF-39, RNF-13, RNF-22_
@@ -129,9 +130,23 @@ created: "2026-08-04"
         mandasse.
       - Teto de tamanho em duas conferências (tamanho anunciado e `Content-Length`),
         porque o Worker não tem streaming aqui e o arquivo passa inteiro pela memória.
-- [ ] **T-113** [P] `GET /api/confluence/busca` como superfície própria (reusa o que
-      a Regra 1 já usa). **[BLOQUEADA: Q5 para a allowlist real — desenvolvível]**
-      _Requirements: RF-37, RF-38_
+- [x] **T-113** [P] `GET /api/confluence/busca` como superfície própria (reusa o que
+      a Regra 1 já usa). **Código pronto; o que falta de Q5 é DADO de config
+      (`espacos_confluence`), não implementação.** _Requirements: RF-37, RF-38_
+      - **A allowlist não é parâmetro.** `?espacos=`, `?espacosPermitidos=` e
+        `?labelsBloqueadas=` são ignorados — ela vem da config, sempre. É o mesmo
+        raciocínio de `RF-04`/`RNF-05` para a identidade: o cliente não escolhe o
+        próprio escopo. Tem teste de burla.
+      - `q` tem mínimo e máximo, e `?limite=` é **clampado**: cada resultado custa uma
+        consulta de restrição de página, então `limite=9999` seria varredura do site
+        pagando por página (`R-02`).
+      - **Os dois zeros são distinguidos.** Zero por falta de espaço configurado
+        devolve `buscaConfigurada: false`; zero por falta de documentação registra a
+        lacuna de `RF-42` — na **mesma forma** que a Regra 1 grava, para T-117 ler uma
+        coisa só. Registrar lacuna quando não havia onde procurar envenenaria o mapa
+        com termos que ninguém deixou de documentar.
+      - Indisponibilidade responde **503**, nunca "nenhum resultado" (`RNF-18`): numa
+        queda, "não achei" empurra a pessoa a abrir chamado por algo documentado.
 - [ ] **T-114** [P] Tela de busca e leitura, mobile-first, com a skill
       `frontend-design` antes. _Requirements: RF-39, RNF-28_
 - [ ] **T-115** Árvore do espaço + breadcrumbs (`RF-41`, P1).
@@ -197,8 +212,10 @@ created: "2026-08-04"
       — T-101 escrito e vermelho antes de T-105/T-106 existirem; T-102 e T-103
       escritos e vermelhos (36 casos) antes de T-110/T-111/T-112 existirem; T-104
       acompanha a governança da Phase 3, pelo mesmo motivo
-- [ ] **Nenhuma `[BLOQUEADA]`** — há **5**: T-113 (Q5), T-122/T-123/T-131 (Q1),
-      T-125 (Q8)
+- [ ] **Nenhuma `[BLOQUEADA]`** — há **4**: T-122/T-123/T-131 (Q1), T-125 (Q8).
+      T-113 saiu da lista: o código está pronto e o que falta de **Q5** é **dado de
+      config**, não implementação — com `espacos_confluence` vazio a busca devolve
+      zero e diz `buscaConfigurada: false`, que é o fail-closed correto
 
 > **Caminho livre hoje:** Phase 1 inteira (a trava da fase) e quase toda a Phase 2
 > — sanitização, renderização, proxy de anexo e telas rodam contra o fake. A
