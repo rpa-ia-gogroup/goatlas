@@ -29,6 +29,7 @@ var SLA_PRIMEIRA_RESPOSTA_HORAS = {
   alta: 12,
   normal: 24
 };
+var MAX_ANEXO_BYTES = 12 * 1024 * 1024;
 var ErroAtlassian = class extends Error {
   constructor(message, detalhe) {
     super(message);
@@ -77,6 +78,44 @@ var TransporteAtlassian = class {
     return `Basic ${btoa(cred)}`;
   }
   async requisitar(caminho, init = {}) {
+    const resposta = await this.enviar(caminho, init, "application/json");
+    const texto = await resposta.text();
+    return texto.length > 0 ? JSON.parse(texto) : null;
+  }
+  /**
+   * Baixa **bytes**, não JSON — anexo de página (`RNF-02`: o navegador não fala com
+   * a Atlassian, então o app re-serve).
+   *
+   * ⚠️ O teto de tamanho é conferido **antes** de ler o corpo, pelo `Content-Length`,
+   * e **de novo** depois: com `Transfer-Encoding: chunked` não há `Content-Length`
+   * para conferir, e ler primeiro para medir depois é exatamente o jeito de o Worker
+   * morrer de memória. Estourar o teto não é erro — é um resultado previsto, e quem
+   * chama transforma em mensagem de negócio.
+   */
+  async requisitarBinario(caminho, maxBytes) {
+    const resposta = await this.enviar(caminho, {}, "*/*");
+    const declarado = Number(resposta.headers.get("Content-Length"));
+    if (Number.isFinite(declarado) && declarado > maxBytes) {
+      return { estado: "grande_demais", tamanhoBytes: declarado };
+    }
+    const bytes = await resposta.arrayBuffer();
+    if (bytes.byteLength > maxBytes) {
+      return { estado: "grande_demais", tamanhoBytes: bytes.byteLength };
+    }
+    return {
+      estado: "ok",
+      bytes,
+      tipoDeclarado: resposta.headers.get("Content-Type")
+    };
+  }
+  /**
+   * O laço de retentativa, compartilhado por JSON e binário.
+   *
+   * Compartilhar não é economia de linhas: um segundo caminho de rede com backoff
+   * próprio (ou sem backoff) faria `RNF-14` valer para uma parte do tráfego só, e a
+   * contagem de 429 de `RF-60` mediria menos do que acontece.
+   */
+  async enviar(caminho, init, aceitar) {
     const url = `${this.opcoes.baseUrl}${caminho}`;
     let ultimoErro = null;
     for (let tentativa = 1; tentativa <= this.maxTentativas; tentativa += 1) {
@@ -85,16 +124,13 @@ var TransporteAtlassian = class {
         method: init.method ?? "GET",
         headers: {
           Authorization: this.cabecalhoAuth(),
-          Accept: "application/json",
+          Accept: aceitar,
           ...init.body ? { "Content-Type": "application/json" } : {},
           ...init.headers
         },
         ...init.body === void 0 ? {} : { body: init.body }
       });
-      if (resposta.ok) {
-        const texto = await resposta.text();
-        return texto.length > 0 ? JSON.parse(texto) : null;
-      }
+      if (resposta.ok) return resposta;
       if (resposta.status === 429) this._total429 += 1;
       const transitorio = resposta.status === 429 || resposta.status >= 500;
       ultimoErro = new ErroAtlassian(`Atlassian respondeu ${resposta.status}`, {
@@ -355,6 +391,132 @@ var ClienteAtlassianHttp = class {
       return true;
     }
   }
+  /**
+   * Metadados de página — **v2** (`/wiki/api/v2/pages/{id}`), T-110.
+   *
+   * ⚠️ **A v2 devolve `spaceId` numérico; a allowlist é por CHAVE de espaço**
+   * (`TECH`). Comparar a allowlist com o id não dá erro visível: dá negação
+   * silenciosa de tudo hoje e, se alguém "consertar" invertendo a comparação, uma
+   * condição de `RN-06` que nunca reprova. Daí `chaveDoEspaco`, cacheada nos
+   * metadados (chave de espaço não muda).
+   *
+   * ⚠️ Labels vêm em requisição separada (a v2 não as embute) e **não** têm
+   * `try/catch`: sem a lista de labels não há como avaliar a segunda condição de
+   * `RN-06`, e ausência de informação é negar. Quem trata a recusa é o gate em
+   * `confluence/acesso.ts`.
+   */
+  async obterMetadadosPagina(idPagina) {
+    if (!idPagina) {
+      throw new ErroAtlassian("p\xE1gina sem id", {
+        transitorio: false,
+        recurso: "obterMetadadosPagina"
+      });
+    }
+    const chave = `metadados:${idPagina}`;
+    const cacheado = this.cacheConteudo.obter(chave);
+    if (cacheado) return cacheado;
+    const dados = await this.transporte.requisitar(
+      `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}`
+    );
+    const metadados = {
+      id: String(dados?.id ?? idPagina),
+      titulo: String(dados?.title ?? ""),
+      espaco: await this.chaveDoEspaco(String(dados?.spaceId ?? "")),
+      labels: await this.labelsDaPagina(idPagina),
+      atual: String(dados?.status ?? "") === "current",
+      versao: Number(dados?.version?.number ?? 0),
+      atualizadoEm: String(dados?.version?.createdAt ?? ""),
+      url: `${this.opcoes.baseUrl}/wiki${String(dados?._links?.webui ?? "")}`
+    };
+    this.cacheConteudo.definir(chave, metadados, this.opcoes.ttlConteudoSeg);
+    return metadados;
+  }
+  /** `spaceId` (v2) → chave do espaço, que é o que a allowlist usa (`RN-06`). */
+  async chaveDoEspaco(spaceId) {
+    if (!spaceId) {
+      throw new ErroAtlassian("p\xE1gina sem espa\xE7o", {
+        transitorio: false,
+        recurso: "obterMetadadosPagina"
+      });
+    }
+    const chave = `espaco:${spaceId}`;
+    const cacheado = this.cacheMetadados.obter(chave);
+    if (typeof cacheado === "string") return cacheado;
+    const dados = await this.transporte.requisitar(
+      `/wiki/api/v2/spaces/${encodeURIComponent(spaceId)}`
+    );
+    const chaveEspaco = String(dados?.key ?? "");
+    if (!chaveEspaco) {
+      throw new ErroAtlassian("espa\xE7o sem chave", {
+        transitorio: false,
+        recurso: "obterMetadadosPagina"
+      });
+    }
+    this.cacheMetadados.definir(chave, chaveEspaco, this.opcoes.ttlMetadadosSeg);
+    return chaveEspaco;
+  }
+  async labelsDaPagina(idPagina) {
+    const dados = await this.transporte.requisitar(
+      `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}/labels?limit=250`
+    );
+    return (dados?.results ?? []).map((l) => String(l.name ?? "")).filter((n) => n !== "");
+  }
+  /**
+   * Storage format cru da página — **não sanitizado** (ver o contrato em `tipos.ts`).
+   *
+   * Cacheado no cache de conteúdo (`RNF-13`): a leitura repetida da mesma página é o
+   * caso comum quando alguém é bloqueado pela Regra 1 e volta para reler.
+   */
+  async obterCorpoStorage(idPagina) {
+    const chave = `storage:${idPagina}`;
+    const cacheado = this.cacheConteudo.obter(chave);
+    if (typeof cacheado === "string") return cacheado;
+    const dados = await this.transporte.requisitar(
+      `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}?body-format=storage`
+    );
+    const storage = typeof dados?.body?.storage?.value === "string" ? dados.body.storage.value : "";
+    this.cacheConteudo.definir(chave, storage, this.opcoes.ttlConteudoSeg);
+    return storage;
+  }
+  /**
+   * Anexo da página, por nome exato — T-112.
+   *
+   * Duas coisas que parecem detalhe e são a trava:
+   *
+   * 1. **O nome é casado contra a lista de anexos DAQUELA página.** Não existe
+   *    "baixar anexo por caminho": o caminho vem da URL, e um caminho montado à mão
+   *    alcançaria anexo de página restrita (`RF-40`).
+   * 2. **`downloadLink` vem da Atlassian e só é aceito como caminho absoluto do
+   *    próprio site.** Link absoluto para outro host faria o app buscar, **com a
+   *    credencial**, onde a resposta mandasse.
+   */
+  async obterAnexo(idPagina, nomeArquivo) {
+    if (!idPagina || !nomeArquivo) return { estado: "nao_encontrado" };
+    const lista2 = await this.transporte.requisitar(
+      `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}/attachments?limit=250`
+    );
+    const achado = (lista2?.results ?? []).find((a) => String(a.title ?? "") === nomeArquivo);
+    if (!achado) return { estado: "nao_encontrado" };
+    const tamanho = Number(achado.fileSize ?? 0);
+    if (Number.isFinite(tamanho) && tamanho > MAX_ANEXO_BYTES) {
+      return { estado: "grande_demais", tamanhoBytes: tamanho };
+    }
+    const link = String(achado.downloadLink ?? "");
+    if (!link.startsWith("/") || link.startsWith("//")) return { estado: "nao_encontrado" };
+    const caminho = link.startsWith("/wiki/") ? link : `/wiki${link}`;
+    const baixado = await this.transporte.requisitarBinario(caminho, MAX_ANEXO_BYTES);
+    if (baixado.estado === "grande_demais") return baixado;
+    return {
+      estado: "ok",
+      anexo: {
+        nomeArquivo,
+        // O tipo do corpo manda; o `mediaType` da listagem é o fallback. Nenhum dos
+        // dois é confiável — quem decide o que sai é `confluence/anexo.ts`.
+        tipoDeclarado: baixado.tipoDeclarado ?? (typeof achado.mediaType === "string" ? achado.mediaType : null),
+        bytes: baixado.bytes
+      }
+    };
+  }
   async buscarHistoricoTickets(params) {
     const jql = montarJql(params);
     const dados = await this.transporte.requisitar(
@@ -414,6 +576,9 @@ var ClienteAtlassianFake = class {
       tiposChamado: inicial.tiposChamado ?? [],
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? /* @__PURE__ */ new Set(),
+      conteudoPaginas: inicial.conteudoPaginas ?? /* @__PURE__ */ new Map(),
+      anexos: inicial.anexos ?? /* @__PURE__ */ new Map(),
+      limiteAnexoBytes: inicial.limiteAnexoBytes ?? MAX_ANEXO_BYTES,
       historico: inicial.historico ?? [],
       comentarios: inicial.comentarios ?? /* @__PURE__ */ new Map(),
       chamados: inicial.chamados ?? /* @__PURE__ */ new Map(),
@@ -422,6 +587,9 @@ var ClienteAtlassianFake = class {
         buscarConfluence: "nenhum",
         buscarHistorico: "nenhum",
         listarComentarios: "nenhum",
+        obterPagina: "nenhum",
+        paginaRestrita: "nenhum",
+        obterAnexo: "nenhum",
         ...inicial.falhas
       }
     };
@@ -500,6 +668,58 @@ var ClienteAtlassianFake = class {
     const permitidos = new Set(params.espacosPermitidos);
     const bloqueadas = new Set(params.labelsBloqueadas);
     return this.estado.paginas.filter((p) => permitidos.has(p.espaco)).filter((p) => !p.labels.some((l) => bloqueadas.has(l))).filter((p) => !this.estado.idsRestritos.has(p.id)).sort((a, b) => b.score - a.score).slice(0, params.limite);
+  }
+  async obterMetadadosPagina(idPagina) {
+    this.chamadas.push({ operacao: "obterMetadadosPagina", params: idPagina });
+    this.checar(this.estado.falhas.obterPagina, "obterMetadadosPagina");
+    const p = this.estado.conteudoPaginas.get(idPagina);
+    if (!p) {
+      throw new ErroAtlassian("p\xE1gina n\xE3o encontrada", {
+        status: 404,
+        transitorio: false,
+        recurso: "obterMetadadosPagina"
+      });
+    }
+    return {
+      id: idPagina,
+      titulo: p.titulo,
+      espaco: p.espaco,
+      labels: p.labels,
+      atual: p.atual ?? true,
+      versao: 1,
+      atualizadoEm: p.atualizadoEm ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+      url: `https://exemplo.invalid/wiki/pages/${idPagina}`
+    };
+  }
+  async paginaRestrita(idPagina) {
+    this.chamadas.push({ operacao: "paginaRestrita", params: idPagina });
+    this.checar(this.estado.falhas.paginaRestrita, "paginaRestrita");
+    if (!idPagina) return true;
+    return this.estado.idsRestritos.has(idPagina);
+  }
+  async obterCorpoStorage(idPagina) {
+    this.chamadas.push({ operacao: "obterCorpoStorage", params: idPagina });
+    this.checar(this.estado.falhas.obterPagina, "obterCorpoStorage");
+    const p = this.estado.conteudoPaginas.get(idPagina);
+    if (!p) {
+      throw new ErroAtlassian("p\xE1gina n\xE3o encontrada", {
+        status: 404,
+        transitorio: false,
+        recurso: "obterCorpoStorage"
+      });
+    }
+    return p.storage;
+  }
+  async obterAnexo(idPagina, nomeArquivo) {
+    this.chamadas.push({ operacao: "obterAnexo", params: { idPagina, nomeArquivo } });
+    this.checar(this.estado.falhas.obterAnexo, "obterAnexo");
+    const daPagina = this.estado.anexos.get(idPagina) ?? [];
+    const achado = daPagina.find((a) => a.nomeArquivo === nomeArquivo);
+    if (!achado) return { estado: "nao_encontrado" };
+    if (achado.bytes.byteLength > this.estado.limiteAnexoBytes) {
+      return { estado: "grande_demais", tamanhoBytes: achado.bytes.byteLength };
+    }
+    return { estado: "ok", anexo: achado };
   }
   async buscarHistoricoTickets(params) {
     this.chamadas.push({ operacao: "buscarHistoricoTickets", params });
@@ -1155,6 +1375,29 @@ function semearAtlassianDemo(fake) {
       labels: []
     }
   ];
+  fake.estado.conteudoPaginas.set("demo-1", {
+    titulo: "Como reprocessar o relat\xF3rio de vendas",
+    espaco: "TECH",
+    labels: [],
+    storage: [
+      "<h2>Quando usar</h2>",
+      "<p>Use este procedimento quando o relat\xF3rio di\xE1rio <strong>n\xE3o atualizar</strong> at\xE9 as 9h.</p>",
+      "<ol><li>Abra o painel de tarefas</li><li>Procure a rotina <code>vendas_diario</code></li>",
+      "<li>Execute o reprocessamento manual</li></ol>",
+      '<ac:structured-macro ac:name="info"><ac:rich-text-body><p>O reprocessamento leva cerca de 10 minutos.</p></ac:rich-text-body></ac:structured-macro>',
+      '<ac:structured-macro ac:name="jira-chart"><ac:parameter ac:name="jql">project = EXEMPLO</ac:parameter></ac:structured-macro>'
+    ].join("")
+  });
+  fake.estado.conteudoPaginas.set("demo-2", {
+    titulo: "Padr\xE3o de nomes das lojas no sistema",
+    espaco: "TECH",
+    labels: [],
+    storage: [
+      "<p>As lojas seguem o padr\xE3o <code>SIGLA-CIDADE</code>.</p>",
+      "<table><thead><tr><th>Sigla</th><th>Cidade</th></tr></thead>",
+      "<tbody><tr><td>GC</td><td>Fortaleza</td></tr><tr><td>GB</td><td>S\xE3o Paulo</td></tr></tbody></table>"
+    ].join("")
+  });
   fake.estado.historico = [
     {
       issueKey: "DEMO-101",
@@ -2573,6 +2816,21 @@ var ERROS = {
    */
   chamadoNaoSeu: () => erro("N\xE3o encontramos esse chamado entre os seus.", "nao_encontrado", 404),
   dadosInvalidos: (detalhe) => erro(detalhe, "dados_invalidos", 400),
+  /**
+   * Dependência fora do ar numa LEITURA. Diferente de `naoEncontrado()` de
+   * propósito: responder "não encontramos" quando a página existe manda a pessoa
+   * abrir chamado por uma documentação que estava lá (RNF-18, RNF-19).
+   */
+  conteudoIndisponivel: () => erro(
+    "N\xE3o conseguimos carregar este conte\xFAdo agora. Tente de novo em instantes.",
+    "conteudo_indisponivel",
+    503
+  ),
+  anexoGrandeDemais: () => erro(
+    "Este anexo \xE9 grande demais para abrir por aqui. Pe\xE7a o arquivo ao time de tech.",
+    "anexo_grande_demais",
+    413
+  ),
   limiteRequisicoes: () => erro(
     "Voc\xEA fez muitas solicita\xE7\xF5es em pouco tempo. Aguarde um instante e tente novamente.",
     "limite_requisicoes",
@@ -2603,12 +2861,840 @@ async function verificarLimite(db, email, limitePorMinuto, agoraMs) {
   const r = await db.query(
     `SELECT COUNT(*) AS n FROM auditoria
       WHERE ator_email = ? AND criado_em >= ?
-        AND acao IN ('mensagem_enviada', 'busca_confluence', 'consulta_historico', 'chamado_criado', 'comentario_criado')`,
+        AND acao IN ('mensagem_enviada', 'busca_confluence', 'pagina_confluence_lida',
+                     'anexo_servido', 'consulta_historico', 'chamado_criado', 'comentario_criado')`,
     [email, inicioJanela]
   );
   const usadas = Number(primeiraLinha(r)?.n ?? 0);
   return { permitido: usadas < limitePorMinuto, usadas, limite: limitePorMinuto };
 }
+
+// src/lib/confluence/sanitizar.ts
+var MAX_ENTRADA = 4e5;
+var MAX_PROFUNDIDADE = 64;
+var MAX_NOS = 2e4;
+var MAX_DESCARTES = 64;
+var MAX_SPAN_CELULA = 64;
+var IMAGEM_EXTERNA_PERMITIDA = false;
+var ENTIDADES_NOMEADAS = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: "\xA0",
+  ndash: "\u2013",
+  mdash: "\u2014",
+  hellip: "\u2026",
+  bull: "\u2022",
+  middot: "\xB7",
+  laquo: "\xAB",
+  raquo: "\xBB",
+  lsquo: "\u2018",
+  rsquo: "\u2019",
+  ldquo: "\u201C",
+  rdquo: "\u201D",
+  copy: "\xA9",
+  reg: "\xAE",
+  trade: "\u2122",
+  deg: "\xB0",
+  plusmn: "\xB1",
+  times: "\xD7",
+  divide: "\xF7",
+  euro: "\u20AC",
+  pound: "\xA3",
+  sect: "\xA7",
+  para: "\xB6",
+  larr: "\u2190",
+  rarr: "\u2192",
+  harr: "\u2194",
+  check: "\u2713"
+};
+function decodificarEntidades(entrada) {
+  if (!entrada.includes("&")) return entrada;
+  return entrada.replace(
+    /&(?:#([0-9]{1,8});?|#[xX]([0-9a-fA-F]{1,6});?|([a-zA-Z][a-zA-Z0-9]{1,31});)/g,
+    (todo, decimal, hexa, nome) => {
+      if (decimal !== void 0) return doPontoDeCodigo(Number.parseInt(decimal, 10)) ?? todo;
+      if (hexa !== void 0) return doPontoDeCodigo(Number.parseInt(hexa, 16)) ?? todo;
+      if (nome !== void 0) return ENTIDADES_NOMEADAS[nome.toLowerCase()] ?? todo;
+      return todo;
+    }
+  );
+}
+function doPontoDeCodigo(codigo) {
+  if (!Number.isFinite(codigo) || codigo <= 0 || codigo > 1114111) return null;
+  if (codigo >= 55296 && codigo <= 57343) return null;
+  try {
+    return String.fromCodePoint(codigo);
+  } catch {
+    return null;
+  }
+}
+function urlSegura(bruta) {
+  const decodificada = decodificarEntidades(bruta);
+  const limpa = decodificada.replace(
+    /[\u0000-\u0020\u007f-\u00a0\u00ad\u1680\u180e\u2000-\u200f\u2028-\u202f\u205f-\u2060\u3000\ufeff]/g,
+    ""
+  );
+  if (!/^https?:\/\/[^/]/i.test(limpa)) return null;
+  if (/["'<>`\\]/.test(limpa)) return null;
+  return limpa;
+}
+var TAGS_VAZIAS = /* @__PURE__ */ new Set([
+  "br",
+  "hr",
+  "img",
+  "wbr",
+  "col",
+  "area",
+  "base",
+  "embed",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "ri:attachment",
+  "ri:url",
+  "ri:page",
+  "ri:space",
+  "ri:user",
+  "ri:blog-post",
+  "ri:card-appearance",
+  "ac:emoticon",
+  "ac:placeholder"
+]);
+var TAGS_COM_CONTEUDO_DESCARTADO = /* @__PURE__ */ new Set([
+  "script",
+  "style",
+  "iframe",
+  "object",
+  "embed",
+  "applet",
+  "param",
+  "frame",
+  "frameset",
+  "noframes",
+  "noscript",
+  "template",
+  "slot",
+  "portal",
+  "svg",
+  "math",
+  "form",
+  "input",
+  "button",
+  "select",
+  "textarea",
+  "option",
+  "optgroup",
+  "fieldset",
+  "legend",
+  "label",
+  "base",
+  "link",
+  "meta",
+  "audio",
+  "video",
+  "source",
+  "track",
+  "canvas",
+  "map",
+  "area",
+  "dialog",
+  "marquee",
+  // Legado de texto cru: no navegador estas engolem o resto do documento.
+  "xmp",
+  "plaintext",
+  "listing"
+]);
+var INICIO_NOME = /[A-Za-z]/;
+var CORPO_NOME = /[A-Za-z0-9:_.\-À-ɏ]/;
+function anotar(coletor, motivo, detalhe) {
+  if (coletor.descartes.length >= MAX_DESCARTES) return;
+  coletor.descartes.push({ motivo, detalhe });
+}
+function tokenizar(entrada, coletor) {
+  const tokens = [];
+  let i = 0;
+  let texto = "";
+  const despejarTexto = () => {
+    if (texto !== "") {
+      tokens.push({ t: "texto", valor: decodificarEntidades(texto) });
+      texto = "";
+    }
+  };
+  while (i < entrada.length) {
+    const c = entrada[i];
+    if (c !== "<") {
+      texto += c;
+      i += 1;
+      continue;
+    }
+    if (entrada.startsWith("<!--", i)) {
+      const fim = entrada.indexOf("-->", i + 4);
+      i = fim === -1 ? entrada.length : fim + 3;
+      continue;
+    }
+    if (entrada.startsWith("<![CDATA[", i)) {
+      const fim = entrada.indexOf("]]>", i + 9);
+      const bruto = entrada.slice(i + 9, fim === -1 ? entrada.length : fim);
+      despejarTexto();
+      if (bruto !== "") tokens.push({ t: "texto", valor: bruto });
+      i = fim === -1 ? entrada.length : fim + 3;
+      continue;
+    }
+    if (entrada.startsWith("<!", i) || entrada.startsWith("<?", i)) {
+      const fim = entrada.indexOf(">", i);
+      i = fim === -1 ? entrada.length : fim + 1;
+      continue;
+    }
+    if (entrada.startsWith("</", i)) {
+      const nome2 = lerNome(entrada, i + 2);
+      if (nome2 === null) {
+        texto += c;
+        i += 1;
+        continue;
+      }
+      const fim = entrada.indexOf(">", nome2.fim);
+      despejarTexto();
+      tokens.push({ t: "fecha", nome: nome2.valor });
+      i = fim === -1 ? entrada.length : fim + 1;
+      continue;
+    }
+    const nome = lerNome(entrada, i + 1);
+    if (nome === null) {
+      texto += c;
+      i += 1;
+      continue;
+    }
+    const tag = lerAtributos(entrada, nome.fim);
+    if (tag === null) {
+      anotar(coletor, "tag_nao_terminada", nome.valor);
+      despejarTexto();
+      break;
+    }
+    despejarTexto();
+    tokens.push({
+      t: "abre",
+      nome: nome.valor,
+      atributos: tag.atributos,
+      vazia: tag.autoFechada || TAGS_VAZIAS.has(nome.valor)
+    });
+    i = tag.fim;
+  }
+  despejarTexto();
+  return tokens;
+}
+function lerNome(entrada, inicio) {
+  const primeiro = entrada[inicio];
+  if (primeiro === void 0 || !INICIO_NOME.test(primeiro)) return null;
+  let j = inicio + 1;
+  while (j < entrada.length) {
+    const c = entrada[j];
+    if (c === void 0 || !CORPO_NOME.test(c)) break;
+    j += 1;
+  }
+  return { valor: entrada.slice(inicio, j).toLowerCase(), fim: j };
+}
+function lerAtributos(entrada, inicio) {
+  const atributos = /* @__PURE__ */ new Map();
+  let j = inicio;
+  let autoFechada = false;
+  while (j < entrada.length) {
+    while (j < entrada.length && /\s/.test(entrada[j] ?? "")) j += 1;
+    const c = entrada[j];
+    if (c === void 0) return null;
+    if (c === ">") return { atributos, autoFechada, fim: j + 1 };
+    if (c === "/") {
+      autoFechada = true;
+      j += 1;
+      continue;
+    }
+    let inicioNome = j;
+    while (j < entrada.length && !/[\s=>/]/.test(entrada[j] ?? "")) j += 1;
+    if (j === inicioNome) {
+      j += 1;
+      continue;
+    }
+    const nome = entrada.slice(inicioNome, j).toLowerCase();
+    while (j < entrada.length && /\s/.test(entrada[j] ?? "")) j += 1;
+    let valor = "";
+    if (entrada[j] === "=") {
+      j += 1;
+      while (j < entrada.length && /\s/.test(entrada[j] ?? "")) j += 1;
+      const aspa = entrada[j];
+      if (aspa === '"' || aspa === "'") {
+        const fim = entrada.indexOf(aspa, j + 1);
+        if (fim === -1) return null;
+        valor = entrada.slice(j + 1, fim);
+        j = fim + 1;
+      } else {
+        inicioNome = j;
+        while (j < entrada.length && !/[\s>]/.test(entrada[j] ?? "")) j += 1;
+        valor = entrada.slice(inicioNome, j);
+      }
+    }
+    if (!atributos.has(nome)) atributos.set(nome, valor);
+  }
+  return null;
+}
+function montarArvoreBruta(tokens, coletor) {
+  const raiz = [];
+  const pilha = [{ nome: "#raiz", destino: raiz }];
+  let nos = 0;
+  let suprimindo = null;
+  let profundidadeSupressao = 0;
+  const atual = () => pilha[pilha.length - 1];
+  for (const token of tokens) {
+    if (suprimindo !== null) {
+      if (token.t === "abre" && token.nome === suprimindo && !token.vazia) {
+        profundidadeSupressao += 1;
+      } else if (token.t === "fecha" && token.nome === suprimindo) {
+        profundidadeSupressao -= 1;
+        if (profundidadeSupressao === 0) suprimindo = null;
+      }
+      continue;
+    }
+    if (nos >= MAX_NOS) {
+      coletor.truncado = true;
+      break;
+    }
+    if (token.t === "texto") {
+      atual().destino.push({ tipo: "texto", texto: token.valor });
+      nos += 1;
+      continue;
+    }
+    if (token.t === "fecha") {
+      const indice = pilha.findIndex((q) => q.nome === token.nome);
+      if (indice > 0) pilha.length = indice;
+      continue;
+    }
+    if (TAGS_COM_CONTEUDO_DESCARTADO.has(token.nome)) {
+      anotar(coletor, "tag_proibida", token.nome);
+      if (!token.vazia) {
+        suprimindo = token.nome;
+        profundidadeSupressao = 1;
+      }
+      continue;
+    }
+    if (pilha.length > MAX_PROFUNDIDADE) {
+      anotar(coletor, "profundidade", token.nome);
+      if (!token.vazia) pilha.push({ nome: token.nome, destino: atual().destino });
+      continue;
+    }
+    const elemento = {
+      tipo: "elemento",
+      nome: token.nome,
+      atributos: token.atributos,
+      filhos: []
+    };
+    atual().destino.push(elemento);
+    nos += 1;
+    if (!token.vazia) pilha.push({ nome: token.nome, destino: elemento.filhos });
+  }
+  return raiz;
+}
+var TAGS_TRANSPARENTES = /* @__PURE__ */ new Set([
+  "html",
+  "body",
+  "head",
+  "title",
+  "div",
+  "span",
+  "section",
+  "article",
+  "main",
+  "header",
+  "footer",
+  "aside",
+  "nav",
+  "figure",
+  "figcaption",
+  "center",
+  "font",
+  "tt",
+  "small",
+  "big",
+  "sup",
+  "sub",
+  "abbr",
+  "cite",
+  "dfn",
+  "kbd",
+  "samp",
+  "var",
+  "time",
+  "mark",
+  "ruby",
+  "rt",
+  "rp",
+  "bdi",
+  "bdo",
+  "dl",
+  "dt",
+  "dd",
+  "caption",
+  "colgroup",
+  "address",
+  "details",
+  "summary",
+  // Andaime do Confluence: layout, tarefas e marcador de comentário inline.
+  "ac:layout",
+  "ac:layout-section",
+  "ac:layout-cell",
+  "ac:task-list",
+  "ac:task",
+  "ac:task-body",
+  "ac:task-status",
+  "ac:task-id",
+  "ac:inline-comment-marker",
+  "ac:rich-text-body",
+  "ac:plain-text-body",
+  "ac:link-body",
+  "ac:plain-text-link-body"
+]);
+var ATRIBUTOS_PERMITIDOS = {
+  a: ["href"],
+  img: ["src", "alt"],
+  td: ["colspan", "rowspan"],
+  th: ["colspan", "rowspan"],
+  "ac:structured-macro": ["ac:name"],
+  "ac:parameter": ["ac:name"],
+  "ac:image": ["ac:alt"],
+  "ri:attachment": ["ri:filename"],
+  "ri:url": ["ri:value"],
+  "ri:page": ["ri:content-title", "ri:space-key"]
+};
+var PAINEL_POR_MACRO = {
+  info: "info",
+  note: "nota",
+  panel: "nota",
+  warning: "aviso",
+  tip: "dica"
+};
+var ENFASE_POR_TAG = {
+  strong: "forte",
+  b: "forte",
+  em: "italico",
+  i: "italico",
+  u: "sublinhado",
+  ins: "sublinhado",
+  del: "riscado",
+  s: "riscado",
+  strike: "riscado",
+  code: "codigo"
+};
+function sanitizarStorage(storage) {
+  const coletor = { descartes: [], truncado: false };
+  let entrada = storage;
+  if (entrada.length > MAX_ENTRADA) {
+    entrada = entrada.slice(0, MAX_ENTRADA);
+    coletor.truncado = true;
+  }
+  const bruta = montarArvoreBruta(tokenizar(entrada, coletor), coletor);
+  const nos = converterLista(bruta, coletor);
+  return { nos, descartes: coletor.descartes, truncado: coletor.truncado };
+}
+function converterLista(brutos, coletor) {
+  const saida = [];
+  for (const bruto of brutos) saida.push(...converter(bruto, coletor));
+  return saida;
+}
+function converter(bruto, coletor) {
+  if (bruto.tipo === "texto") {
+    return bruto.texto === "" ? [] : [{ tipo: "texto", texto: bruto.texto }];
+  }
+  conferirAtributos(bruto, coletor);
+  const nome = bruto.nome;
+  const filhos = () => converterLista(bruto.filhos, coletor);
+  const enfase = ENFASE_POR_TAG[nome];
+  if (enfase !== void 0) {
+    const dentro = filhos();
+    return dentro.length === 0 ? [] : [{ tipo: "enfase", variante: enfase, filhos: dentro }];
+  }
+  switch (nome) {
+    case "p": {
+      const dentro = filhos();
+      return dentro.length === 0 ? [] : [{ tipo: "paragrafo", filhos: dentro }];
+    }
+    case "h1":
+    case "h2":
+    case "h3":
+    case "h4":
+    case "h5":
+    case "h6": {
+      const dentro = filhos();
+      const nivel = Number.parseInt(nome.slice(1), 10);
+      return dentro.length === 0 ? [] : [{ tipo: "titulo", nivel, filhos: dentro }];
+    }
+    case "br":
+      return [{ tipo: "quebra" }];
+    case "hr":
+      return [{ tipo: "separador" }];
+    case "blockquote": {
+      const dentro = filhos();
+      return dentro.length === 0 ? [] : [{ tipo: "citacao", filhos: dentro }];
+    }
+    case "pre": {
+      const conteudo = textoDe(filhos());
+      return conteudo.trim() === "" ? [] : [{ tipo: "codigo", linguagem: null, conteudo }];
+    }
+    case "ul":
+    case "ol":
+      return [converterListaHtml(bruto, nome === "ol", coletor)];
+    case "li": {
+      const dentro = filhos();
+      return dentro.length === 0 ? [] : [{ tipo: "paragrafo", filhos: dentro }];
+    }
+    case "table":
+      return converterTabela(bruto, coletor);
+    case "a":
+      return converterAncora(bruto, coletor);
+    case "img":
+      return converterImg(bruto, coletor);
+    case "ac:image":
+      return converterAcImage(bruto, coletor);
+    case "ac:link":
+      return converterAcLink(bruto, coletor);
+    case "ac:structured-macro":
+      return converterMacro(bruto, coletor);
+    case "ac:parameter":
+      return [];
+    case "ac:emoticon":
+    case "ac:placeholder":
+      return [];
+    default:
+      break;
+  }
+  if (!TAGS_TRANSPARENTES.has(nome)) anotar(coletor, "tag_desconhecida", nome);
+  return filhos();
+}
+function conferirAtributos(bruto, coletor) {
+  const permitidos = ATRIBUTOS_PERMITIDOS[bruto.nome] ?? [];
+  for (const nome of bruto.atributos.keys()) {
+    if (!permitidos.includes(nome)) anotar(coletor, "atributo_descartado", nome);
+  }
+}
+function atributo(bruto, nome) {
+  const permitidos = ATRIBUTOS_PERMITIDOS[bruto.nome] ?? [];
+  if (!permitidos.includes(nome)) return null;
+  const valor = bruto.atributos.get(nome);
+  return valor === void 0 ? null : decodificarEntidades(valor);
+}
+function atributoCru(bruto, nome) {
+  const permitidos = ATRIBUTOS_PERMITIDOS[bruto.nome] ?? [];
+  if (!permitidos.includes(nome)) return null;
+  return bruto.atributos.get(nome) ?? null;
+}
+function converterListaHtml(bruto, ordenada, coletor) {
+  const itens = [];
+  for (const filho of bruto.filhos) {
+    if (filho.tipo === "elemento" && filho.nome === "li") {
+      conferirAtributos(filho, coletor);
+      itens.push(converterLista(filho.filhos, coletor));
+      continue;
+    }
+    const convertido = converter(filho, coletor);
+    if (convertido.length === 0) continue;
+    const ultimo = itens[itens.length - 1];
+    if (ultimo === void 0) itens.push(convertido);
+    else ultimo.push(...convertido);
+  }
+  return { tipo: "lista", ordenada, itens: itens.filter((i) => i.length > 0) };
+}
+function converterTabela(bruto, coletor) {
+  const linhas = [];
+  const percorrer = (nos, dentroDeCabecalho) => {
+    for (const no of nos) {
+      if (no.tipo !== "elemento") continue;
+      if (no.nome === "thead") {
+        conferirAtributos(no, coletor);
+        percorrer(no.filhos, true);
+      } else if (no.nome === "tbody" || no.nome === "tfoot") {
+        conferirAtributos(no, coletor);
+        percorrer(no.filhos, false);
+      } else if (no.nome === "tr") {
+        conferirAtributos(no, coletor);
+        linhas.push(converterLinha(no, dentroDeCabecalho, coletor));
+      } else {
+        converter(no, coletor);
+      }
+    }
+  };
+  percorrer(bruto.filhos, false);
+  const comCelulas = linhas.filter((l) => l.celulas.length > 0);
+  return comCelulas.length === 0 ? [] : [{ tipo: "tabela", linhas: comCelulas }];
+}
+function converterLinha(bruto, dentroDeCabecalho, coletor) {
+  const celulas = [];
+  for (const no of bruto.filhos) {
+    if (no.tipo !== "elemento" || no.nome !== "td" && no.nome !== "th") continue;
+    conferirAtributos(no, coletor);
+    celulas.push({
+      filhos: converterLista(no.filhos, coletor),
+      colunas: span(atributo(no, "colspan")),
+      linhas: span(atributo(no, "rowspan")),
+      cabecalho: dentroDeCabecalho || no.nome === "th"
+    });
+  }
+  const todasCabecalho = celulas.length > 0 && celulas.every((c) => c.cabecalho);
+  return { cabecalho: dentroDeCabecalho || todasCabecalho, celulas };
+}
+function span(valor) {
+  const n = valor === null ? 1 : Number.parseInt(valor, 10);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(n, MAX_SPAN_CELULA);
+}
+function converterAncora(bruto, coletor) {
+  const dentro = converterLista(bruto.filhos, coletor);
+  const cru = atributoCru(bruto, "href");
+  const url = cru === null ? null : urlSegura(cru);
+  if (url === null) {
+    if (cru !== null) anotar(coletor, "url_recusada", "a/href");
+    return dentro;
+  }
+  return dentro.length === 0 ? [] : [{ tipo: "link", destino: { tipo: "externo", url }, filhos: dentro }];
+}
+function converterImg(bruto, coletor) {
+  const cru = atributoCru(bruto, "src");
+  const url = cru === null ? null : urlSegura(cru);
+  if (url === null) {
+    anotar(coletor, "url_recusada", "img/src");
+    return [];
+  }
+  if (!IMAGEM_EXTERNA_PERMITIDA) {
+    anotar(coletor, "imagem_externa_recusada", "img/src");
+    return [];
+  }
+  return [{ tipo: "imagem", origem: { tipo: "externa", url }, alt: atributo(bruto, "alt") ?? "" }];
+}
+function converterAcImage(bruto, coletor) {
+  const alt = atributo(bruto, "ac:alt") ?? "";
+  const anexo = primeiroFilho(bruto, "ri:attachment");
+  if (anexo !== null) {
+    conferirAtributos(anexo, coletor);
+    const nomeArquivo = atributo(anexo, "ri:filename");
+    if (nomeArquivo !== null && nomeArquivo !== "") {
+      return [{ tipo: "imagem", origem: { tipo: "anexo", nomeArquivo }, alt }];
+    }
+  }
+  const externa = primeiroFilho(bruto, "ri:url");
+  if (externa !== null) {
+    conferirAtributos(externa, coletor);
+    anotar(coletor, "imagem_externa_recusada", "ac:image/ri:url");
+  }
+  return [];
+}
+function converterAcLink(bruto, coletor) {
+  const corpo = converterLista(bruto.filhos.filter(ehCorpoDeLink), coletor);
+  const pagina = primeiroFilho(bruto, "ri:page");
+  if (pagina !== null) {
+    conferirAtributos(pagina, coletor);
+    const titulo = atributo(pagina, "ri:content-title");
+    if (titulo !== null && titulo !== "") {
+      const filhos = corpo.length > 0 ? corpo : [{ tipo: "texto", texto: titulo }];
+      return [
+        {
+          tipo: "link",
+          destino: { tipo: "paginaConfluence", titulo, espaco: atributo(pagina, "ri:space-key") },
+          filhos
+        }
+      ];
+    }
+  }
+  const externa = primeiroFilho(bruto, "ri:url");
+  if (externa !== null) {
+    conferirAtributos(externa, coletor);
+    const cru = atributoCru(externa, "ri:value");
+    const url = cru === null ? null : urlSegura(cru);
+    if (url !== null && corpo.length > 0) {
+      return [{ tipo: "link", destino: { tipo: "externo", url }, filhos: corpo }];
+    }
+    if (url === null) anotar(coletor, "url_recusada", "ac:link/ri:url");
+  }
+  return corpo;
+}
+function ehCorpoDeLink(no) {
+  if (no.tipo === "texto") return true;
+  return no.nome === "ac:plain-text-link-body" || no.nome === "ac:link-body";
+}
+function converterMacro(bruto, coletor) {
+  const nome = (atributo(bruto, "ac:name") ?? "").trim().toLowerCase();
+  if (nome === "code" || nome === "noformat") {
+    const corpo = bruto.filhos.find((f) => f.tipo === "elemento" && f.nome === "ac:plain-text-body");
+    const conteudo = corpo === void 0 ? "" : textoDe(converter(corpo, coletor));
+    const linguagem = nome === "code" ? parametroDaMacro(bruto, "language") : null;
+    return conteudo.trim() === "" ? [] : [{ tipo: "codigo", linguagem, conteudo }];
+  }
+  const painel = PAINEL_POR_MACRO[nome];
+  if (painel !== void 0) {
+    const dentro = converterLista(
+      bruto.filhos.filter((f) => f.tipo === "elemento" && f.nome === "ac:rich-text-body"),
+      coletor
+    );
+    return dentro.length === 0 ? [] : [{ tipo: "painel", variante: painel, filhos: dentro }];
+  }
+  if (nome === "expand" || nome === "section" || nome === "column" || nome === "div") {
+    return converterLista(
+      bruto.filhos.filter((f) => f.tipo === "elemento" && f.nome === "ac:rich-text-body"),
+      coletor
+    );
+  }
+  anotar(coletor, "macro_nao_suportada", nome === "" ? "sem nome" : nome);
+  return [{ tipo: "macroNaoSuportada", nome: nome === "" ? "sem nome" : nome }];
+}
+function parametroDaMacro(bruto, nomeParametro) {
+  for (const filho of bruto.filhos) {
+    if (filho.tipo !== "elemento" || filho.nome !== "ac:parameter") continue;
+    if (atributo(filho, "ac:name") !== nomeParametro) continue;
+    const valor = textoBrutoDe(filho).trim();
+    return valor === "" ? null : valor;
+  }
+  return null;
+}
+function primeiroFilho(bruto, nome) {
+  for (const filho of bruto.filhos) {
+    if (filho.tipo === "elemento" && filho.nome === nome) return filho;
+  }
+  return null;
+}
+function textoBrutoDe(bruto) {
+  if (bruto.tipo === "texto") return bruto.texto;
+  return bruto.filhos.map(textoBrutoDe).join("");
+}
+function textoDe(nos) {
+  let saida = "";
+  for (const no of nos) {
+    switch (no.tipo) {
+      case "texto":
+        saida += no.texto;
+        break;
+      case "codigo":
+        saida += no.conteudo;
+        break;
+      case "macroNaoSuportada":
+        break;
+      case "quebra":
+      case "separador":
+        saida += "\n";
+        break;
+      case "lista":
+        for (const item of no.itens) saida += `${textoDe(item)}
+`;
+        break;
+      case "tabela":
+        for (const linha of no.linhas) {
+          saida += `${linha.celulas.map((c) => textoDe(c.filhos)).join(" | ")}
+`;
+        }
+        break;
+      case "imagem":
+        saida += no.alt;
+        break;
+      case "paragrafo":
+      case "titulo":
+      case "citacao":
+      case "painel":
+        saida += `${textoDe(no.filhos)}
+`;
+        break;
+      case "enfase":
+      case "link":
+        saida += textoDe(no.filhos);
+        break;
+    }
+  }
+  return saida;
+}
+
+// src/lib/confluence/acesso.ts
+var FORMATO_ID = /^[A-Za-z0-9_-]{1,64}$/;
+async function verificarExposicao(atlassian, allowlist, idPagina) {
+  if (allowlist.espacos_confluence.length === 0) {
+    return { ok: false, motivo: "espaco_fora_da_allowlist" };
+  }
+  if (!FORMATO_ID.test(idPagina)) return { ok: false, motivo: "id_invalido" };
+  let metadados;
+  try {
+    metadados = await atlassian.obterMetadadosPagina(idPagina);
+  } catch (erro2) {
+    return { ok: false, motivo: ehTransitorio(erro2) ? "indisponivel" : "nao_encontrada" };
+  }
+  if (!allowlist.espacos_confluence.includes(metadados.espaco)) {
+    return { ok: false, motivo: "espaco_fora_da_allowlist" };
+  }
+  const bloqueadas = allowlist.labels_bloqueadas.map((l) => l.toLowerCase());
+  if (metadados.labels.some((l) => bloqueadas.includes(l.toLowerCase()))) {
+    return { ok: false, motivo: "label_bloqueada" };
+  }
+  if (!metadados.atual) return { ok: false, motivo: "pagina_nao_atual" };
+  let restrita = true;
+  try {
+    restrita = await atlassian.paginaRestrita(idPagina);
+  } catch {
+    restrita = true;
+  }
+  if (restrita) return { ok: false, motivo: "pagina_restrita" };
+  return { ok: true, metadados };
+}
+async function lerPaginaAutorizada(atlassian, allowlist, idPagina) {
+  const exposicao = await verificarExposicao(atlassian, allowlist, idPagina);
+  if (!exposicao.ok) return exposicao;
+  let storage;
+  try {
+    storage = await atlassian.obterCorpoStorage(idPagina);
+  } catch (erro2) {
+    return { ok: false, motivo: ehTransitorio(erro2) ? "indisponivel" : "nao_encontrada" };
+  }
+  return { ok: true, metadados: exposicao.metadados, conteudo: sanitizarStorage(storage) };
+}
+function ehTransitorio(erro2) {
+  return erro2 instanceof ErroAtlassian && erro2.detalhe.transitorio;
+}
+
+// src/lib/confluence/anexo.ts
+var TIPOS_INLINE = /* @__PURE__ */ new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/bmp",
+  // PDF é o formato de procedimento anexado — exibir inline é metade do valor do
+  // proxy. Ele roda no visualizador do navegador, não no DOM da página.
+  "application/pdf"
+]);
+var TIPO_OPACO = "application/octet-stream";
+var TOKEN_MIDIA = /^[a-z0-9!#$%&'*+.^_`|~-]+\/[a-z0-9!#$%&'*+.^_`|~-]+$/;
+function decidirEntrega(tipoDeclarado) {
+  const base = (tipoDeclarado ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  if (!TOKEN_MIDIA.test(base) || !TIPOS_INLINE.has(base)) {
+    return { contentType: TIPO_OPACO, disposicao: "attachment" };
+  }
+  return { contentType: base, disposicao: "inline" };
+}
+var MAX_NOME = 120;
+function cabecalhoContentDisposition(nomeArquivo, disposicao) {
+  const cortado = nomeArquivo.slice(0, MAX_NOME);
+  const ascii = cortado.replace(/[^\x20-\x7e]/g, "_").replace(/["\\;]/g, "_");
+  const seguro = ascii.trim() === "" ? "anexo" : ascii;
+  const utf8 = encodeURIComponent(cortado).replace(
+    /['()!*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+  return `${disposicao}; filename="${seguro}"; filename*=UTF-8''${utf8}`;
+}
+var CABECALHOS_ANEXO = Object.freeze({
+  "X-Content-Type-Options": "nosniff",
+  "Content-Security-Policy": "default-src 'none'; sandbox",
+  "Referrer-Policy": "same-origin",
+  // Privado, nunca `public`: um cache compartilhado serviria o anexo a quem a
+  // verificação de RN-06 negaria.
+  "Cache-Control": "private, max-age=300"
+});
 
 // src/lib/http/rotas.ts
 var PRIORIDADES = ["critica", "alta", "normal"];
@@ -2641,7 +3727,7 @@ async function tratarRequisicao(req, ctx, env) {
       modoDemo: ctx.modoDemo
     });
   }
-  if (req.method === "POST") {
+  if (req.method === "POST" || caminho.startsWith("/api/confluence/")) {
     const limite = await verificarLimite(
       ctx.db,
       eu.email,
@@ -2876,6 +3962,93 @@ async function rotear(req, ctx, eu, caminho, url) {
     });
     return json({ ok: true }, 201);
   }
+  const paginaConfluence = caminho.match(/^\/api\/confluence\/pagina\/([^/]+)$/);
+  if (paginaConfluence && req.method === "GET") {
+    const id = decodificar(paginaConfluence[1]);
+    const r = id === null ? { ok: false, motivo: "id_invalido" } : await lerPaginaAutorizada(ctx.atlassian, ctx.valores, id);
+    if (!r.ok) {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "pagina_confluence_lida",
+        recurso: id,
+        resultado: r.motivo === "indisponivel" ? "falha" : "negado",
+        detalhe: { motivo: r.motivo }
+      });
+      return r.motivo === "indisponivel" ? ERROS.conteudoIndisponivel() : ERROS.naoEncontrado();
+    }
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "pagina_confluence_lida",
+      recurso: r.metadados.id,
+      resultado: "sucesso",
+      // Contagem de descartes, não a lista: ela nomeia tag e atributo da página, o
+      // que é diagnóstico útil no agregado e ruído no registro por leitura.
+      detalhe: { espaco: r.metadados.espaco, descartes: r.conteudo.descartes.length }
+    });
+    return json({
+      id: r.metadados.id,
+      titulo: r.metadados.titulo,
+      espaco: r.metadados.espaco,
+      atualizadoEm: r.metadados.atualizadoEm,
+      urlOriginal: r.metadados.url,
+      nos: r.conteudo.nos,
+      truncado: r.conteudo.truncado
+    });
+  }
+  const anexoConfluence = caminho.match(/^\/api\/confluence\/anexo\/([^/]+)\/(.+)$/);
+  if (anexoConfluence && req.method === "GET") {
+    const id = decodificar(anexoConfluence[1]);
+    const nome = decodificar(anexoConfluence[2]);
+    const negar = async (motivo, resposta) => {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "anexo_servido",
+        recurso: id,
+        resultado: motivo === "indisponivel" ? "falha" : "negado",
+        detalhe: { motivo }
+      });
+      return resposta;
+    };
+    if (id === null || nome === null) return await negar("id_invalido", ERROS.naoEncontrado());
+    const exposicao = await verificarExposicao(ctx.atlassian, ctx.valores, id);
+    if (!exposicao.ok) {
+      return await negar(
+        exposicao.motivo,
+        exposicao.motivo === "indisponivel" ? ERROS.conteudoIndisponivel() : ERROS.naoEncontrado()
+      );
+    }
+    let resultado;
+    try {
+      resultado = await ctx.atlassian.obterAnexo(id, nome);
+    } catch {
+      return await negar("indisponivel", ERROS.conteudoIndisponivel());
+    }
+    if (resultado.estado === "nao_encontrado") {
+      return await negar("anexo_nao_encontrado", ERROS.naoEncontrado());
+    }
+    if (resultado.estado === "grande_demais") {
+      return await negar("anexo_grande_demais", ERROS.anexoGrandeDemais());
+    }
+    const entrega = decidirEntrega(resultado.anexo.tipoDeclarado);
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "anexo_servido",
+      recurso: id,
+      resultado: "sucesso",
+      detalhe: { tipoServido: entrega.contentType, disposicao: entrega.disposicao }
+    });
+    return new Response(resultado.anexo.bytes, {
+      status: 200,
+      headers: {
+        ...CABECALHOS_ANEXO,
+        "Content-Type": entrega.contentType,
+        "Content-Disposition": cabecalhoContentDisposition(
+          resultado.anexo.nomeArquivo,
+          entrega.disposicao
+        )
+      }
+    });
+  }
   if (caminho === "/api/tipos-chamado" && req.method === "GET") {
     const permitidos = new Set(ctx.valores.tipos_chamado_permitidos);
     const todos = await ctx.atlassian.listarTiposChamado();
@@ -2910,6 +4083,13 @@ async function rotear(req, ctx, eu, caminho, url) {
     return json({ itens });
   }
   return ERROS.naoEncontrado();
+}
+function decodificar(bruto) {
+  try {
+    return decodeURIComponent(bruto);
+  } catch {
+    return null;
+  }
 }
 function estadoVerificacao(verificado, falhou) {
   if (falhou) return "falhou";

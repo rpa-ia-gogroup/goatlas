@@ -25,6 +25,10 @@ export type AcaoAuditada =
   | 'conversa_iniciada'
   | 'mensagem_enviada'
   | 'busca_confluence'
+  /** Leitura direta de página (RF-39) — toca a Atlassian, e a recusa é o registro de burla. */
+  | 'pagina_confluence_lida'
+  /** Anexo servido pelo proxy (RNF-02) — mesma razão. */
+  | 'anexo_servido'
   | 'consulta_historico'
   | 'bloqueio_disparado'
   | 'override_registrado'

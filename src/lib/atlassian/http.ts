@@ -80,6 +80,58 @@ export class TransporteAtlassian {
     caminho: string,
     init: { method?: string; body?: string; headers?: Record<string, string> } = {},
   ): Promise<unknown> {
+    const resposta = await this.enviar(caminho, init, 'application/json')
+    const texto = await resposta.text()
+    return texto.length > 0 ? (JSON.parse(texto) as unknown) : null
+  }
+
+  /**
+   * Baixa **bytes**, não JSON — anexo de página (`RNF-02`: o navegador não fala com
+   * a Atlassian, então o app re-serve).
+   *
+   * ⚠️ O teto de tamanho é conferido **antes** de ler o corpo, pelo `Content-Length`,
+   * e **de novo** depois: com `Transfer-Encoding: chunked` não há `Content-Length`
+   * para conferir, e ler primeiro para medir depois é exatamente o jeito de o Worker
+   * morrer de memória. Estourar o teto não é erro — é um resultado previsto, e quem
+   * chama transforma em mensagem de negócio.
+   */
+  async requisitarBinario(
+    caminho: string,
+    maxBytes: number,
+  ): Promise<
+    | { readonly estado: 'ok'; readonly bytes: ArrayBuffer; readonly tipoDeclarado: string | null }
+    | { readonly estado: 'grande_demais'; readonly tamanhoBytes: number }
+  > {
+    const resposta = await this.enviar(caminho, {}, '*/*')
+
+    const declarado = Number(resposta.headers.get('Content-Length'))
+    if (Number.isFinite(declarado) && declarado > maxBytes) {
+      return { estado: 'grande_demais', tamanhoBytes: declarado }
+    }
+
+    const bytes = await resposta.arrayBuffer()
+    if (bytes.byteLength > maxBytes) {
+      return { estado: 'grande_demais', tamanhoBytes: bytes.byteLength }
+    }
+    return {
+      estado: 'ok',
+      bytes,
+      tipoDeclarado: resposta.headers.get('Content-Type'),
+    }
+  }
+
+  /**
+   * O laço de retentativa, compartilhado por JSON e binário.
+   *
+   * Compartilhar não é economia de linhas: um segundo caminho de rede com backoff
+   * próprio (ou sem backoff) faria `RNF-14` valer para uma parte do tráfego só, e a
+   * contagem de 429 de `RF-60` mediria menos do que acontece.
+   */
+  private async enviar(
+    caminho: string,
+    init: { method?: string; body?: string; headers?: Record<string, string> },
+    aceitar: string,
+  ): Promise<Response> {
     const url = `${this.opcoes.baseUrl}${caminho}`
     let ultimoErro: ErroAtlassian | null = null
 
@@ -89,17 +141,14 @@ export class TransporteAtlassian {
         method: init.method ?? 'GET',
         headers: {
           Authorization: this.cabecalhoAuth(),
-          Accept: 'application/json',
+          Accept: aceitar,
           ...(init.body ? { 'Content-Type': 'application/json' } : {}),
           ...init.headers,
         },
         ...(init.body === undefined ? {} : { body: init.body }),
       })
 
-      if (resposta.ok) {
-        const texto = await resposta.text()
-        return texto.length > 0 ? (JSON.parse(texto) as unknown) : null
-      }
+      if (resposta.ok) return resposta
 
       if (resposta.status === 429) this._total429 += 1
 

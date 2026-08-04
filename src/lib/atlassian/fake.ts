@@ -10,14 +10,17 @@
 
 import {
   ErroAtlassian,
+  MAX_ANEXO_BYTES,
   type BuscaConfluenceParams,
   type Chamado,
   type ChamadoCriado,
   type ClienteAtlassian,
   type ComentarioPublico,
   type HistoricoParams,
+  type MetadadosPagina,
   type NovoChamado,
   type PaginaConfluence,
+  type ResultadoAnexo,
   type TicketHistorico,
   type TipoChamado,
 } from './tipos'
@@ -55,6 +58,25 @@ const FALHAS: Readonly<Record<Exclude<ModoFalha, 'nenhum'>, { status: number; tr
     rejeitado: { status: 400, transitorio: false },
   })
 
+/** Página como o Confluence a guarda: metadados + storage cru. */
+export interface PaginaFake {
+  readonly titulo: string
+  /** CHAVE do espaço — o fake já entrega resolvido, como o cliente real faz. */
+  readonly espaco: string
+  readonly labels: readonly string[]
+  readonly storage: string
+  /** `false` = lixeira ou rascunho. Default `true`. */
+  readonly atual?: boolean
+  readonly atualizadoEm?: string
+}
+
+/** Anexo do fake. `tipoDeclarado` imita o que a Atlassian repete do upload. */
+export interface AnexoFake {
+  readonly nomeArquivo: string
+  readonly tipoDeclarado: string | null
+  readonly bytes: ArrayBuffer
+}
+
 export interface EstadoFake {
   tiposChamado: TipoChamado[]
   paginas: PaginaConfluence[]
@@ -63,6 +85,15 @@ export interface EstadoFake {
    * restrição exclui a página — não dá para avaliar "esta pessoa pode ver?".
    */
   idsRestritos: Set<string>
+  /** Conteúdo por id, para a leitura direta (RF-39, RF-40). */
+  conteudoPaginas: Map<string, PaginaFake>
+  /** Anexos por id de página — a lista é o que amarra anexo à página (T-112). */
+  anexos: Map<string, AnexoFake[]>
+  /**
+   * Teto de bytes do fake, separado de `MAX_ANEXO_BYTES` só para que o teste do
+   * limite não precise alocar 12 MB.
+   */
+  limiteAnexoBytes: number
   historico: TicketHistorico[]
   comentarios: Map<string, ComentarioBruto[]>
   chamados: Map<string, Chamado>
@@ -72,6 +103,14 @@ export interface EstadoFake {
     buscarConfluence: ModoFalha
     buscarHistorico: ModoFalha
     listarComentarios: ModoFalha
+    obterPagina: ModoFalha
+    /**
+     * Falha ao consultar restrição. No cliente real ela é engolida e vira
+     * "restrita"; aqui ela **lança**, para provar que o gate de exposição também
+     * fail-closed por conta própria — duas camadas, não uma.
+     */
+    paginaRestrita: ModoFalha
+    obterAnexo: ModoFalha
   }
 }
 
@@ -93,6 +132,9 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       tiposChamado: inicial.tiposChamado ?? [],
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? new Set(),
+      conteudoPaginas: inicial.conteudoPaginas ?? new Map(),
+      anexos: inicial.anexos ?? new Map(),
+      limiteAnexoBytes: inicial.limiteAnexoBytes ?? MAX_ANEXO_BYTES,
       historico: inicial.historico ?? [],
       comentarios: inicial.comentarios ?? new Map(),
       chamados: inicial.chamados ?? new Map(),
@@ -101,6 +143,9 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
         buscarConfluence: 'nenhum',
         buscarHistorico: 'nenhum',
         listarComentarios: 'nenhum',
+        obterPagina: 'nenhum',
+        paginaRestrita: 'nenhum',
+        obterAnexo: 'nenhum',
         ...inicial.falhas,
       },
     }
@@ -209,6 +254,64 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       .filter((p) => !this.estado.idsRestritos.has(p.id))
       .sort((a, b) => b.score - a.score)
       .slice(0, params.limite)
+  }
+
+  async obterMetadadosPagina(idPagina: string): Promise<MetadadosPagina> {
+    this.chamadas.push({ operacao: 'obterMetadadosPagina', params: idPagina })
+    this.checar(this.estado.falhas.obterPagina, 'obterMetadadosPagina')
+    const p = this.estado.conteudoPaginas.get(idPagina)
+    if (!p) {
+      throw new ErroAtlassian('página não encontrada', {
+        status: 404,
+        transitorio: false,
+        recurso: 'obterMetadadosPagina',
+      })
+    }
+    return {
+      id: idPagina,
+      titulo: p.titulo,
+      espaco: p.espaco,
+      labels: p.labels,
+      atual: p.atual ?? true,
+      versao: 1,
+      atualizadoEm: p.atualizadoEm ?? new Date(0).toISOString(),
+      url: `https://exemplo.invalid/wiki/pages/${idPagina}`,
+    }
+  }
+
+  async paginaRestrita(idPagina: string): Promise<boolean> {
+    this.chamadas.push({ operacao: 'paginaRestrita', params: idPagina })
+    this.checar(this.estado.falhas.paginaRestrita, 'paginaRestrita')
+    if (!idPagina) return true
+    return this.estado.idsRestritos.has(idPagina)
+  }
+
+  async obterCorpoStorage(idPagina: string): Promise<string> {
+    this.chamadas.push({ operacao: 'obterCorpoStorage', params: idPagina })
+    this.checar(this.estado.falhas.obterPagina, 'obterCorpoStorage')
+    const p = this.estado.conteudoPaginas.get(idPagina)
+    if (!p) {
+      throw new ErroAtlassian('página não encontrada', {
+        status: 404,
+        transitorio: false,
+        recurso: 'obterCorpoStorage',
+      })
+    }
+    return p.storage
+  }
+
+  async obterAnexo(idPagina: string, nomeArquivo: string): Promise<ResultadoAnexo> {
+    this.chamadas.push({ operacao: 'obterAnexo', params: { idPagina, nomeArquivo } })
+    this.checar(this.estado.falhas.obterAnexo, 'obterAnexo')
+    // Casa por nome exato DENTRO da página, como o cliente real: é isso que impede
+    // um nome montado à mão de alcançar anexo de outra página (RF-40).
+    const daPagina = this.estado.anexos.get(idPagina) ?? []
+    const achado = daPagina.find((a) => a.nomeArquivo === nomeArquivo)
+    if (!achado) return { estado: 'nao_encontrado' }
+    if (achado.bytes.byteLength > this.estado.limiteAnexoBytes) {
+      return { estado: 'grande_demais', tamanhoBytes: achado.bytes.byteLength }
+    }
+    return { estado: 'ok', anexo: achado }
   }
 
   async buscarHistoricoTickets(

@@ -274,6 +274,64 @@ apenas fecha o caso que `RF-39` não nomeava.
 
 ---
 
+### D-11 · O proxy de anexo AFIRMA o `Content-Type`; ele nunca repassa o da Atlassian
+**Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada
+
+`GET /api/confluence/anexo/:id/:nome` decide o tipo por **allowlist**
+(`confluence/anexo.ts`): PNG, JPEG, GIF, WebP, AVIF, BMP e PDF saem `inline` com o
+próprio tipo; **todo o resto** sai `application/octet-stream` + `Content-Disposition:
+attachment`, sempre com `nosniff` e `Content-Security-Policy: default-src 'none';
+sandbox`. **`image/svg+xml` fica de fora de propósito.**
+
+**Por quê:** a sanitização (`RNF-06`) fecha o XSS do **corpo** da página; o anexo é a
+outra porta da mesma sala. Um arquivo cujo tipo de upload é `text/html`, servido do
+**nosso** domínio, roda com a sessão do app — e o tipo vem da Atlassian, que só
+repete o que alguém escolheu no upload. SVG é o caso que parece exceção injusta e não
+é: SVG é documento XML com `<script>` e handlers de evento, então exibi-lo inline é o
+mesmo vazamento com outro nome.
+
+**Custo aceito:** diagrama em SVG vira download em vez de aparecer na página, e
+formato legítimo fora da lista (`.docx`, `.xlsx`) também. Chato, reversível e
+auditável — o contrário não é.
+
+**Detalhe que é trava, não estilo:** o **nome do arquivo** é escolhido por quem edita
+a página e entra num cabeçalho HTTP. Vai como `filename` ASCII entre aspas (sem
+aspas, sem barra, sem controle) **mais** `filename*=UTF-8''…`, que preserva o acento
+— PT-BR não é caso de borda aqui. CRLF no nome é tentativa de escrever um segundo
+cabeçalho, e o teste de burla cobra a forma do cabeçalho inteiro, não a ausência de
+palavras proibidas.
+
+**Onde reverter:** `TIPOS_INLINE` em `src/lib/confluence/anexo.ts`. Entrar nessa
+lista é decisão de segurança; passe por aqui antes.
+
+---
+
+### D-12 · Toda recusa de leitura devolve a MESMA 404; só indisponibilidade é 503
+**Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada
+
+Na leitura direta (`RF-40`) e no proxy de anexo, as recusas — espaço fora da
+allowlist, label bloqueada, página restrita, página na lixeira, id inválido, página
+inexistente — produzem resposta **byte a byte idêntica**. O motivo real fica na
+auditoria. Dependência fora do ar é o único caso distinguido: `503` com "tente de
+novo em instantes".
+
+**Por quê:** é o mesmo raciocínio do 404-em-vez-de-403 de `RF-30`. Um corpo diferente
+por motivo é oráculo: confirma que a página existe e insinua por que está fechada — e
+o ID de página do Confluence é curto e enumerável. Já o 503 mentir 404 tem custo
+oposto e concreto: a pessoa conclui que a documentação não existe e abre chamado por
+uma página que estava lá (`RNF-18`, `RNF-19`). Indisponibilidade não é fato sobre a
+página, é fato sobre nós.
+
+**Também fechado aqui:** página com `status` diferente de `current` (lixeira,
+rascunho) **não** é exposta. Orientação revogada guiando uma decisão é pior que página
+nenhuma.
+
+**Consequência aceita:** durante uma queda da Atlassian, falha ao consultar restrição
+faz uma página liberada responder 404 — fail-closed, igual à busca. Custa uma página
+a menos; o contrário custa conteúdo restrito na tela de quem não devia ver.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
