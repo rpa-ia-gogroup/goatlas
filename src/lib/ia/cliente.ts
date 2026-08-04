@@ -27,8 +27,16 @@ import {
   type ParametrosClassificacao,
   type RespostaIA,
   type ResultadoClassificacao,
+  type ParametrosExtracao,
+  type ResultadoExtracao,
+  type PropostaSugerida,
 } from './tipos'
-import { PROMPT_CLASSIFICACAO_RESOLUCAO, montarPromptClassificacao } from './prompts'
+import {
+  PROMPT_CLASSIFICACAO_RESOLUCAO,
+  PROMPT_EXTRACAO,
+  montarPromptClassificacao,
+  montarPromptExtracao,
+} from './prompts'
 
 export interface OpcoesClienteIA {
   /** Base do proxy corporativo. Sem ela, chamada direta com `apiKey`. */
@@ -225,6 +233,31 @@ export class ClienteIAHttp implements ClienteIA {
     return { classe, justificativa, custoEstimadoUsd: custo }
   }
 
+  async extrairProposta(params: ParametrosExtracao): Promise<ResultadoExtracao> {
+    const dados = await this.chamar(
+      {
+        messages: [
+          { role: 'system', content: PROMPT_EXTRACAO },
+          { role: 'user', content: montarPromptExtracao(params) },
+        ],
+        response_format: { type: 'json_object' },
+      },
+      'extracao',
+    )
+    const custo = this.estimarCusto(
+      Number(dados.usage?.prompt_tokens ?? 0),
+      Number(dados.usage?.completion_tokens ?? 0),
+    )
+    this._custoAcumuladoUsd += custo
+    return {
+      proposta: interpretarProposta(
+        dados.choices?.[0]?.message?.content,
+        params.tiposPermitidos.map((t) => t.id),
+      ),
+      custoEstimadoUsd: custo,
+    }
+  }
+
   async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {
     try {
       await this.chat({
@@ -277,5 +310,48 @@ export function interpretarClassificacao(bruto: unknown): {
     }
   } catch {
     return { classe: 'indeterminado', justificativa: 'resposta não era JSON válido' }
+  }
+}
+
+/**
+ * Interpreta a extração.
+ *
+ * ⚠️ **`tipoChamadoId` fora da allowlist descarta a proposta inteira** (RF-28). O
+ * modelo pode inventar id — ou ser induzido a isso por conteúdo recuperado — e
+ * aceitar um id inventado colocaria o chamado numa fila que o admin não liberou.
+ * Na dúvida, sem proposta: o agente continua perguntando, que é o pior caso
+ * aceitável. Criar na fila errada não é.
+ */
+export function interpretarProposta(
+  bruto: unknown,
+  idsPermitidos: readonly string[],
+): PropostaSugerida | null {
+  if (typeof bruto !== 'string' || bruto.trim().length === 0) return null
+  let v: Record<string, unknown>
+  try {
+    const parsed = JSON.parse(bruto)
+    if (!parsed || typeof parsed !== 'object') return null
+    v = parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+
+  if (v.pronto !== true) return null
+
+  const titulo = typeof v.titulo === 'string' ? v.titulo.trim() : ''
+  const descricao = typeof v.descricao === 'string' ? v.descricao.trim() : ''
+  const tipoChamadoId = typeof v.tipoChamadoId === 'string' ? v.tipoChamadoId : ''
+  const prioridade = v.prioridade
+
+  if (titulo.length < 5 || descricao.length < 10) return null
+  if (prioridade !== 'critica' && prioridade !== 'alta' && prioridade !== 'normal') return null
+  if (!idsPermitidos.includes(tipoChamadoId)) return null
+
+  return {
+    titulo,
+    descricao,
+    prioridade,
+    tipoChamadoId,
+    area: typeof v.area === 'string' && v.area.trim().length > 0 ? v.area.trim() : null,
   }
 }

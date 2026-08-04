@@ -138,6 +138,24 @@ destes reabre um vazamento que já foi fechado.
   o vazamento que `RNF-09` proíbe.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
+- **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
+  lendo `env.ATLASSIAN_API_TOKEN` faz `RNF-01` depender de disciplina em vez de
+  estrutura.
+- **A identidade é resolvida no roteador e passada como tipo.** Nenhum handler
+  recebe e-mail de corpo, query ou header customizado — eles recebem `Identidade`
+  já validada, então um handler **não tem como** ler um e-mail que não chegou
+  (`RF-04`, `RNF-05`).
+- **Chamado de outra pessoa devolve 404, não 403.** Um 403 diria "existe, mas não é
+  seu", o que já é informação sobre o chamado de outro (`RF-30`).
+- **A chave de idempotência é derivada da conversa** (`conversa:<id>`) e **escopada
+  por usuário** no formulário (`form:<email>:<chave>`). Gerar por clique perderia a
+  proteção justamente no duplo clique; sem escopo, dois usuários com a mesma chave
+  colidiriam.
+- **A proposta do chamado é montada pelo servidor**, deterministicamente, quando as
+  duas verificações já aconteceram e nada bloqueou. O modelo não decide *quando*
+  propor, só *o que* — e `tipoChamadoId` fora da allowlist **descarta a proposta
+  inteira** (`RF-28`): sem proposta o agente continua perguntando, o que é o pior
+  caso aceitável; criar na fila errada não é.
 - **Tool que FALHOU ≠ tool que não rodou.** Falha satisfaz a ordem (a conversa
   tentou) mas o chamado nasce `verificadoRegras: false`. Não rodar continua
   recusando. É a diferença entre "indisponibilidade não vira bypass" e
@@ -162,11 +180,18 @@ Escape hatch do guard de worktree: `GOATLAS_ALLOW_MAIN_EDIT=1`.
 ## Comandos
 
 ```bash
-npm run dev      # dev server
-npm run test     # Vitest
-npm run build    # SPA em dist/
-npm run lint     # eslint
+npm run dev            # dev server COM /api/* servido pelo código do Worker
+npm run test           # Vitest
+npm run build          # typecheck + SPA em dist/
+npm run build:worker   # bundle worker.js (esbuild)
+npm run typecheck
 ```
+
+`npm run dev` sobe o app inteiro **sem credencial nenhuma**: o
+`vite-plugin-api-dev.ts` serve `/api/*` com o mesmo código do Worker, usa os fakes
+e injeta o header de identidade **no servidor** (nunca no navegador — senão
+existiria caminho em que a identidade vem do cliente). Detalhe em
+[`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## Worktree — receita
 
@@ -205,8 +230,15 @@ Fase 0 diagnóstico (João, sem código) → **Fase 1 MVP** → Fase 2 conhecime
 governança → Fase 3 SLA e notificações → Fase 4 rollout. Progresso tarefa por
 tarefa em [`specs/001-mvp-chamados-e-agente/tasks.md`](specs/001-mvp-chamados-e-agente/tasks.md).
 
-Pronto: fundação (scaffold, schema, contratos das camadas isoladas, fakes).
-**8 tarefas seguem `[BLOQUEADA]`** aguardando Q1/Q2/Q3/Q4 — ver `docs/DECISOES.md`.
+**49 de 58 tarefas concluídas · 152 testes · typecheck limpo · fluxo validado no
+navegador**, tudo sem credencial e sem rede. Pronto: fundação, as seis travas
+críticas, clientes de Atlassian e IA, runtime do agente, rotas, worker, frontend e
+`docs/DEPLOY.md`.
+
+O que falta depende de resposta ou de deploy: `criarChamado` contra a Atlassian real
+(**Q1**), campo customizado "Solicitante" (**Q4**), formato do comentário atribuído
+(alinhamento com o time de tech), deploy em staging/prod e o fechamento da Definição
+de Pronto. Detalhe em `specs/001-mvp-chamados-e-agente/tasks.md`.
 
 ### Como testar sem credencial
 As duas camadas isoladas têm **fake** (`src/lib/atlassian/fake.ts`,

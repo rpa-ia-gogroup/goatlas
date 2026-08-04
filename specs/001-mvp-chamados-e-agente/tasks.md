@@ -41,7 +41,7 @@ created: "2026-08-03"
       _Requirements: RNF-22, RNF-23_
 - [x] **T-005** Fakes de Atlassian e IA, com modos de falha injetáveis (indisponível,
       429, timeout). É o que permite testar tudo sem rede. _Requirements: RNF-18_
-- [ ] **T-006** [P] `docs/DEPLOY.md`: app de staging + prod, deploy pelo MCP,
+- [x] **T-006** [P] `docs/DEPLOY.md`: app de staging + prod, deploy pelo MCP,
       variáveis, privilégios de cada credencial e **rotação sem downtime**.
       _Requirements: RNF-10, RNF-27_
 
@@ -79,7 +79,7 @@ created: "2026-08-03"
       Registrar em `D-02`. _Requirements: RF-05, RF-06_
 - [x] **T-022** [P] Perfil admin por allowlist explícita, configurável sem deploy.
       _Requirements: RF-02, RN-09_
-- [ ] **T-023** [P] Sessão com expiração configurável e logout explícito.
+- [x] **T-023** [P] Sessão com expiração configurável e logout explícito.
       _Requirements: RF-03_
 - [x] **T-024** `audit/` append-only (sem UPDATE/DELETE no código), registrando
       também as ações que falham. _Requirements: RF-58, RN-10_
@@ -95,9 +95,9 @@ created: "2026-08-03"
       _Requirements: RNF-16, RNF-23, RNF-34_
 - [x] **T-028** [P] `config`: thresholds, allowlists e TTLs em banco, editáveis sem
       deploy — é o que impede o hardcode. _Requirements: RF-49, RF-50, RNF-25_
-- [ ] **T-029** [P] `GET /api/health` com Atlassian, IA, banco e SSO.
+- [x] **T-029** [P] `GET /api/health` com Atlassian, IA, banco e SSO.
       _Requirements: RF-59_
-- [ ] **T-030** [P] Rate limit por usuário. _Requirements: RNF-11_
+- [x] **T-030** [P] Rate limit por usuário. _Requirements: RNF-11_
 
 ## Phase 3 — Regras (funções puras) e orquestrador
 
@@ -143,10 +143,10 @@ created: "2026-08-03"
 - [x] **T-060** Outbox: persistir submissão **antes** da chamada; estados; chave de
       idempotência única no banco. Faz T-016 e T-017 passarem.
       _Requirements: RF-24, RNF-17_
-- [ ] **T-061** `POST /api/conversas/:id/confirmar` — a **única** transição que
+- [x] **T-061** `POST /api/conversas/:id/confirmar` — a **única** transição que
       autoriza criar; o modelo não tem tool equivalente. Faz T-011 passar.
       _Requirements: RF-17, RN-02_
-- [ ] **T-062** Resumo estruturado antes de confirmar (título, descrição, tipo,
+- [x] **T-062** Resumo estruturado antes de confirmar (título, descrição, tipo,
       componente, área, prioridade, SLA) com **prioridade editável**.
       _Requirements: RF-16, RF-18_
 - [ ] **T-063** `criarChamado` via `POST /rest/servicedeskapi/request` com a conta de
@@ -156,13 +156,13 @@ created: "2026-08-03"
       _Requirements: RF-21, R-03_
 - [x] **T-065** Persistir vínculo `issueKey ↔ e-mail ↔ timestamp` na mesma transação
       lógica da conclusão da submissão. _Requirements: RF-22, RN-03_
-- [ ] **T-066** Allowlist de tipos de chamado: só o que o admin liberou é oferecido.
+- [x] **T-066** Allowlist de tipos de chamado: só o que o admin liberou é oferecido.
       _Requirements: RF-28, RNF-07_
-- [ ] **T-067** Confirmação final: chave, prioridade, prazo de primeira resposta e
+- [x] **T-067** Confirmação final: chave, prioridade, prazo de primeira resposta e
       link de acompanhamento **interno**. _Requirements: RF-26_
-- [ ] **T-068** Cron `POST /api/cron/reprocessar-submissoes` (valida
+- [x] **T-068** Cron `POST /api/cron/reprocessar-submissoes` (valida
       `X-Godeploy-Cron`) + job no GoDeploy. _Requirements: RNF-17_
-- [~] **T-069** Cron `POST /api/cron/reconciliar-vinculos`: varre o Jira pelo campo
+- [x] **T-069** Cron `POST /api/cron/reconciliar-vinculos`: varre o Jira pelo campo
       "Solicitante" e reconstrói vínculo órfão. **[BLOQUEADA: Q4]**
       _Requirements: RNF-21_
 - [x] **T-070** Formulário mínimo sem IA (`D-04`): mesmas travas de servidor, marcado
@@ -171,21 +171,21 @@ created: "2026-08-03"
 
 ## Phase 5 — Acompanhamento
 
-- [ ] **T-080** `GET /api/chamados` filtrado por vínculo **no servidor**: resumo,
+- [x] **T-080** `GET /api/chamados` filtrado por vínculo **no servidor**: resumo,
       status, prioridade, SLA, última atualização. Faz T-012 passar.
       _Requirements: RF-29, RF-30, RN-04_
-- [ ] **T-081** Detalhe: descrição, campos, comentários **públicos**, anexos, status,
+- [x] **T-081** Detalhe: descrição, campos, comentários **públicos**, anexos, status,
       histórico de SLA — sem campo interno. _Requirements: RF-31_
 - [ ] **T-082** Comentar publicamente, atribuído de forma legível ao solicitante real.
       **[BLOQUEADA: definir o "como" — ver §10 da spec]** _Requirements: RF-33_
 
 ## Phase 6 — Frontend, mobile e fechamento
 
-- [ ] **T-090** Tela de conversa com **indicação de progresso** das duas
+- [x] **T-090** Tela de conversa com **indicação de progresso** das duas
       verificações (elas rodam antes de o agente poder concluir).
       _Requirements: RF-07, RNF-12_
-- [ ] **T-091** [P] Telas "Meus chamados" e detalhe. _Requirements: RF-29, RF-31_
-- [ ] **T-092** [P] Erros em linguagem de negócio, nunca stack trace nem HTTP cru;
+- [x] **T-091** [P] Telas "Meus chamados" e detalhe. _Requirements: RF-29, RF-31_
+- [x] **T-092** [P] Erros em linguagem de negócio, nunca stack trace nem HTTP cru;
       erro de frontend encaminhado ao backend. _Requirements: RNF-30, RNF-26_
 - [ ] **T-093** Validação real **no celular** do fluxo completo. _Requirements: RNF-28_
 - [ ] **T-094** [P] Varredura provando que nenhuma das três credenciais aparece em
@@ -201,8 +201,9 @@ created: "2026-08-03"
 ---
 ## Estado da implementação (03/08/2026)
 
-**26 concluídas · 2 em andamento · 30 pendentes.** 82 testes passando, typecheck
-limpo, sem nenhuma credencial e sem rede.
+**49 concluídas · 9 pendentes.** 152 testes passando, typecheck limpo, build da SPA
+e do worker OK, e o fluxo validado no navegador — tudo **sem nenhuma credencial e
+sem rede**, pelos fakes.
 
 As **seis travas críticas estão implementadas e com teste de burla**:
 
@@ -215,11 +216,25 @@ As **seis travas críticas estão implementadas e com teste de burla**:
 | `RF-24` idempotência | `UNIQUE` no banco, detectado pela constraint | `rf24-outbox-degradacao.test.ts` |
 | `RNF-17` não perder chamado | `tickets/outbox.ts` — persiste antes de chamar | idem |
 
-**Em andamento (`[~]`)** — a parte feita não depende de resposta; a que falta depende:
-- **T-025** transporte HTTP pronto (backoff, `Retry-After`, jitter, contagem de 429,
-  cache TTL). Faltam as operações reais contra a Atlassian: **`[BLOQUEADA: Q1]`**.
-- **T-069** `reconciliarVinculos` implementado e testado contra o outbox local. A
-  varredura pelo campo "Solicitante" no Jira é **`[BLOQUEADA: Q4]`**.
+**O que falta, e por quê:**
+
+| Tarefa | Estado |
+|---|---|
+| T-021 verificar comportamento do edge com conta desativada | precisa de app deployado |
+| T-063 `criarChamado` contra a Atlassian real | **`[BLOQUEADA: Q1]`** — o código existe e roda contra o fake |
+| T-064 campo customizado "Solicitante" | **`[BLOQUEADA: Q4]`** — hoje o solicitante vai na descrição (cinto e suspensório) |
+| T-082 comentário atribuído ao solicitante real | **`[BLOQUEADA]`** — o formato precisa de alinhamento com o time de tech (`R-03`/Q10) |
+| T-093 validação no celular | feita em viewport de celular no dev; falta no aparelho real |
+| T-094 varredura de credencial em log/bundle | fazer no primeiro deploy |
+| T-095 métricas mínimas | os dados já são gravados (`bloqueios`, `vinculos.via`, auditoria); falta a superfície |
+| T-096 deploy em staging e prod | **`[BLOQUEADA: Q1]`** — precisa dos secrets |
+| T-097 fechar a Definição de Pronto item por item | depende das acima |
+
+Tarefas que **estavam** `[BLOQUEADA]` e saíram sem a resposta chegar: T-025, T-040,
+T-042, T-043 e T-069. Em todas, nada foi chutado — o valor que falta entra como
+**config** (`RNF-25`), e onde a ausência muda o comportamento o código **falha
+explicitamente** em vez de assumir (`regra2Disponivel` para Q3, service desk
+ausente bloqueando a criação para Q1).
 
 ---
 ## Coverage check (gate antes do `/implement`)
