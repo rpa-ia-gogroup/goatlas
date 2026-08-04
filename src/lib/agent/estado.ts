@@ -8,8 +8,9 @@
  */
 
 import type { Banco } from '../db/tipos'
-import { primeiraLinha } from '../db/tipos'
+import { linhasComoObjetos, primeiraLinha } from '../db/tipos'
 import type { Prioridade } from '../atlassian/tipos'
+import type { MensagemIA, NomeTool, PapelMensagem } from '../ia/tipos'
 
 export type EstadoConversa =
   | 'coletando'
@@ -187,6 +188,76 @@ export class RepositorioConversas {
       `INSERT INTO mensagens (id, conversa_id, papel, conteudo, tool_nome, criado_em)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [idMensagem, conversaId, papel, conteudo, toolNome, this.agora()],
+    )
+  }
+
+  /** Histórico da conversa no formato que a camada de IA consome. */
+  async listarMensagens(conversaId: string): Promise<MensagemIA[]> {
+    const r = await this.db.query(
+      `SELECT papel, conteudo, tool_nome FROM mensagens
+        WHERE conversa_id = ? ORDER BY criado_em ASC, rowid ASC`,
+      [conversaId],
+    )
+    return linhasComoObjetos<{
+      papel: PapelMensagem
+      conteudo: string
+      tool_nome: string | null
+    }>(r).map((l) => ({
+      papel: l.papel,
+      conteudo: l.conteudo,
+      ...(l.tool_nome ? { toolNome: l.tool_nome as NomeTool } : {}),
+    }))
+  }
+
+  /**
+   * Registra a tentativa de bloqueio — RF-13, RF-42.
+   *
+   * A tentativa é gravada **mesmo que o usuário faça override depois**: é o par
+   * bloqueio+override que mede a taxa de override (R-04) e alimenta o backlog de
+   * documentação. Gravar só o bloqueio "definitivo" perderia justamente o sinal de
+   * documentação ruim.
+   */
+  async registrarBloqueio(
+    id: string,
+    conversaId: string,
+    regra: string,
+    motivo: string,
+    evidencia: unknown,
+  ): Promise<void> {
+    await this.db.exec(
+      `INSERT INTO bloqueios (id, conversa_id, regra, motivo, evidencia_json, criado_em)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, conversaId, regra, motivo, JSON.stringify(evidencia ?? null), this.agora()],
+    )
+  }
+
+  /**
+   * Override — RF-13, RN-07. Bloqueio é orientação, não parede.
+   *
+   * Devolve quantos bloqueios foram sobrepostos. A conversa volta a `coletando`
+   * para que o fluxo siga; o registro do override permanece.
+   */
+  async registrarOverride(conversaId: string, motivoUsuario: string): Promise<number> {
+    const t = this.agora()
+    const r = await this.db.exec(
+      `UPDATE bloqueios
+          SET houve_override = 1, override_em = ?, override_motivo = ?
+        WHERE conversa_id = ? AND houve_override = 0`,
+      [t, motivoUsuario, conversaId],
+    )
+    await this.definirEstado(conversaId, 'coletando')
+    return r.rowsWritten
+  }
+
+  async listarBloqueios(conversaId: string): Promise<
+    readonly { regra: string; motivo: string; houveOverride: boolean }[]
+  > {
+    const r = await this.db.query(
+      `SELECT regra, motivo, houve_override FROM bloqueios WHERE conversa_id = ? ORDER BY criado_em ASC`,
+      [conversaId],
+    )
+    return linhasComoObjetos<{ regra: string; motivo: string; houve_override: number }>(r).map(
+      (l) => ({ regra: l.regra, motivo: l.motivo, houveOverride: l.houve_override === 1 }),
     )
   }
 }

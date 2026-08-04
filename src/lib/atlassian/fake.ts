@@ -58,6 +58,11 @@ const FALHAS: Readonly<Record<Exclude<ModoFalha, 'nenhum'>, { status: number; tr
 export interface EstadoFake {
   tiposChamado: TipoChamado[]
   paginas: PaginaConfluence[]
+  /**
+   * Ids de páginas com restrição de leitura (RF-40). Sob proxy total, QUALQUER
+   * restrição exclui a página — não dá para avaliar "esta pessoa pode ver?".
+   */
+  idsRestritos: Set<string>
   historico: TicketHistorico[]
   comentarios: Map<string, ComentarioBruto[]>
   chamados: Map<string, Chamado>
@@ -87,6 +92,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     this.estado = {
       tiposChamado: inicial.tiposChamado ?? [],
       paginas: inicial.paginas ?? [],
+      idsRestritos: inicial.idsRestritos ?? new Set(),
       historico: inicial.historico ?? [],
       comentarios: inicial.comentarios ?? new Map(),
       chamados: inicial.chamados ?? new Map(),
@@ -198,6 +204,9 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     return this.estado.paginas
       .filter((p) => permitidos.has(p.espaco))
       .filter((p) => !p.labels.some((l) => bloqueadas.has(l)))
+      // A terceira condição de RN-06: página sem restrição. Espaço liberado NÃO
+      // implica página liberada.
+      .filter((p) => !this.estado.idsRestritos.has(p.id))
       .sort((a, b) => b.score - a.score)
       .slice(0, params.limite)
   }

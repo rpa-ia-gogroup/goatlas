@@ -1,0 +1,217 @@
+/**
+ * Orquestrador da conversa — a state machine de servidor.
+ *
+ * O modelo **propõe**; o servidor **decide**. Cada turno:
+ *   1. lê o estado durável da conversa;
+ *   2. monta o conjunto de tools permitidas AGORA (`gate.toolsPermitidas`);
+ *   3. chama a IA;
+ *   4. para cada tool proposta: recusa o que não está autorizado, executa o que
+ *      está, e persiste o resultado no estado;
+ *   5. se uma regra bloqueou, a mensagem de bloqueio substitui a resposta do
+ *      modelo — a regra não é sugestão ao modelo.
+ *
+ * ⚠️ Nada aqui cria chamado. Criar é transição disparada pelo usuário (RF-17).
+ */
+
+import type { ClienteIA } from '../ia/tipos'
+import { PROMPT_AGENTE } from '../ia/prompts'
+import type { Auditoria } from '../audit'
+import type { ConfigValores } from '../config'
+import { toolAutorizada, toolsPermitidas, TOOLS } from './gate'
+import { RepositorioConversas, type Conversa } from './estado'
+import { ExecutorTools } from './tools'
+
+export interface TurnoResultado {
+  readonly texto: string
+  /** `true` quando uma regra bloqueou neste turno (RF-12). */
+  readonly bloqueado: boolean
+  readonly regraBloqueio: string | null
+  readonly toolsExecutadas: readonly string[]
+  readonly toolsRecusadas: readonly string[]
+  readonly custoUsd: number
+  /** RNF-16 — o teto de custo por conversa foi atingido. */
+  readonly tetoCustoAtingido: boolean
+}
+
+/** Quantas idas ao modelo por turno. Sem limite, uma conversa pode custar sozinha. */
+const MAX_CICLOS_TOOL = 3
+
+export class Orquestrador {
+  constructor(
+    private readonly ia: ClienteIA,
+    private readonly executor: ExecutorTools,
+    private readonly conversas: RepositorioConversas,
+    private readonly auditoria: Auditoria,
+    private readonly novoId: () => string,
+  ) {}
+
+  async processarMensagem(
+    conversa: Conversa,
+    textoUsuario: string,
+    config: ConfigValores,
+  ): Promise<TurnoResultado> {
+    await this.conversas.adicionarMensagem(
+      this.novoId(),
+      conversa.id,
+      'user',
+      textoUsuario,
+      null,
+    )
+
+    const historico = await this.montarHistorico(conversa.id)
+    const executadas: string[] = []
+    const recusadas: string[] = []
+    let custoTurno = 0
+    let bloqueio: { texto: string; regra: string } | null = null
+    let atual = conversa
+    let ultimoTexto = ''
+
+    for (let ciclo = 0; ciclo < MAX_CICLOS_TOOL; ciclo += 1) {
+      // RNF-16 — teto de custo por conversa. Atingido, o turno para e o caminho
+      // do formulário mínimo (D-04) continua disponível.
+      if (atual.custoUsd + custoTurno >= config.teto_custo_conversa_usd) {
+        await this.auditoria.registrar({
+          atorEmail: atual.solicitanteEmail,
+          acao: 'limite_excedido',
+          recurso: `conversa:${atual.id}`,
+          resultado: 'negado',
+          detalhe: { motivo: 'teto_custo_conversa', custoUsd: atual.custoUsd + custoTurno },
+        })
+        return {
+          texto:
+            'Esta conversa ficou longa e vou precisar encerrá-la por aqui. Você pode abrir o chamado pelo formulário, ou começar uma conversa nova com o resumo do que ficou pendente.',
+          bloqueado: false,
+          regraBloqueio: null,
+          toolsExecutadas: executadas,
+          toolsRecusadas: recusadas,
+          custoUsd: custoTurno,
+          tetoCustoAtingido: true,
+        }
+      }
+
+      const permitidas = toolsPermitidas(atual)
+      const resposta = await this.ia.chat({
+        mensagens: [{ papel: 'system', conteudo: PROMPT_AGENTE }, ...historico],
+        toolsPermitidas: permitidas,
+      })
+      custoTurno += resposta.custoEstimadoUsd
+      ultimoTexto = resposta.texto
+
+      if (resposta.toolsPropostas.length === 0) break
+
+      for (const proposta of resposta.toolsPropostas) {
+        // A camada que sobrevive a prompt injection e a nome inventado: o servidor
+        // só reconhece o que ele mesmo autorizou neste turno.
+        if (!toolAutorizada(atual, proposta.nome)) {
+          recusadas.push(proposta.nome)
+          await this.auditoria.registrar({
+            atorEmail: atual.solicitanteEmail,
+            acao: 'tool_recusada',
+            recurso: `conversa:${atual.id}`,
+            resultado: 'negado',
+            detalhe: { toolProposta: proposta.nome, permitidas: permitidas.map((t) => t.nome) },
+          })
+          historico.push({
+            papel: 'tool',
+            conteudo: `A ferramenta "${proposta.nome}" não está disponível neste momento da conversa.`,
+            toolNome: 'search_confluence',
+          })
+          continue
+        }
+
+        const r = await this.rodarTool(atual, proposta.nome, proposta.argumentos, config)
+        custoTurno += r.custoUsd
+        executadas.push(proposta.nome)
+        historico.push({
+          papel: 'tool',
+          conteudo: r.paraModelo,
+          toolNome: proposta.nome as 'search_confluence' | 'check_jira_history',
+        })
+        await this.conversas.adicionarMensagem(
+          this.novoId(),
+          atual.id,
+          'tool',
+          r.paraModelo,
+          proposta.nome,
+        )
+
+        if (r.mensagemBloqueio && r.veredito?.bloquear) {
+          bloqueio = { texto: r.mensagemBloqueio, regra: r.veredito.regra }
+          await this.registrarBloqueio(atual, r.veredito.regra, r.veredito.motivoTecnico, r.veredito.evidencia)
+        }
+
+        const relido = await this.conversas.obter(atual.id)
+        if (relido) atual = relido
+      }
+
+      // Regra que bloqueou encerra o turno: a mensagem de bloqueio SUBSTITUI a
+      // resposta do modelo. Se o modelo pudesse continuar, a "regra" seria uma
+      // sugestão que ele poderia contornar com boa retórica.
+      if (bloqueio) break
+    }
+
+    await this.conversas.somarCusto(atual.id, custoTurno)
+
+    const textoFinal = bloqueio?.texto ?? ultimoTexto
+    await this.conversas.adicionarMensagem(
+      this.novoId(),
+      atual.id,
+      'assistant',
+      textoFinal,
+      null,
+    )
+    if (bloqueio) await this.conversas.definirEstado(atual.id, 'bloqueado')
+
+    return {
+      texto: textoFinal,
+      bloqueado: bloqueio !== null,
+      regraBloqueio: bloqueio?.regra ?? null,
+      toolsExecutadas: executadas,
+      toolsRecusadas: recusadas,
+      custoUsd: custoTurno,
+      tetoCustoAtingido: false,
+    }
+  }
+
+  private async rodarTool(
+    conversa: Conversa,
+    nome: string,
+    argumentos: Record<string, unknown>,
+    config: ConfigValores,
+  ) {
+    if (nome === TOOLS.search_confluence.nome) {
+      const topico = String(argumentos.topico ?? '').trim()
+      const r = await this.executor.executarBuscaConfluence(
+        conversa.solicitanteEmail,
+        topico,
+        config,
+      )
+      await this.conversas.marcarConfluenceVerificado(conversa.id, r.falhou)
+      return r
+    }
+    const tipo = String(argumentos.tipoProblema ?? '').trim()
+    const r = await this.executor.executarHistoricoJira(conversa.solicitanteEmail, tipo, config)
+    await this.conversas.marcarHistoricoVerificado(conversa.id, r.falhou)
+    return r
+  }
+
+  private async registrarBloqueio(
+    conversa: Conversa,
+    regra: string,
+    motivo: string,
+    evidencia: unknown,
+  ): Promise<void> {
+    await this.conversas.registrarBloqueio(this.novoId(), conversa.id, regra, motivo, evidencia)
+    await this.auditoria.registrar({
+      atorEmail: conversa.solicitanteEmail,
+      acao: 'bloqueio_disparado',
+      recurso: `conversa:${conversa.id}`,
+      resultado: 'sucesso',
+      detalhe: { regra, motivo },
+    })
+  }
+
+  private async montarHistorico(conversaId: string) {
+    return this.conversas.listarMensagens(conversaId)
+  }
+}
