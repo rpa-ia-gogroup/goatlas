@@ -11,6 +11,8 @@ export interface Identidade {
   readonly isAdmin: boolean
   /** App publicado em modo demonstração: nada é criado no Jira. */
   readonly modoDemo: boolean
+  /** Logout do edge. `null` em dev, onde não há sessão do edge para encerrar. */
+  readonly urlLogout: string | null
 }
 
 export type EstadoVerificacao = 'pendente' | 'ok' | 'falhou'

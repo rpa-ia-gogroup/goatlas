@@ -47,11 +47,22 @@ export function App() {
           go<span>atlas</span>
         </span>
         {eu && (
-          <span className="identidade">
-            {eu.nome}
-            <br />
-            {eu.email}
-          </span>
+          <div className="conta">
+            <span className="identidade">
+              {eu.nome}
+              <br />
+              {eu.email}
+            </span>
+            {eu.urlLogout && (
+              <a
+                className="botao-sair"
+                href={eu.urlLogout}
+                title="Encerra sua sessão. Você volta para o painel do GoDeploy e precisa entrar de novo para usar o goatlas."
+              >
+                Sair
+              </a>
+            )}
+          </div>
         )}
       </header>
 

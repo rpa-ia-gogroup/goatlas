@@ -66,7 +66,13 @@ export async function tratarRequisicao(
   if (caminho === '/api/auth/me' && req.method === 'GET') {
     // `modoDemo` vai para a UI porque ela precisa avisar de forma permanente que
     // nada chega ao time de tech (ver `demo.ts`).
-    return json({ email: eu.email, nome: eu.nome, isAdmin: eu.isAdmin, modoDemo: ctx.modoDemo })
+    return json({
+      email: eu.email,
+      nome: eu.nome,
+      isAdmin: eu.isAdmin,
+      modoDemo: ctx.modoDemo,
+      urlLogout: urlLogoutDoEdge(url.hostname),
+    })
   }
 
   // RNF-11 — rate limit por usuário, antes de qualquer trabalho caro.
@@ -390,6 +396,38 @@ async function rotear(
   }
 
   return ERROS.naoEncontrado()
+}
+
+/**
+ * URL de logout do edge — RF-03 (logout explícito).
+ *
+ * Derivada do **próprio host** em vez de hardcoded (`RNF-25`): o app é servido em
+ * `<slug>.<dominio-da-plataforma>`, então o domínio-base é o hostname sem o primeiro
+ * rótulo. Se a plataforma mudar de domínio, nada aqui quebra.
+ *
+ * ⚠️ Devolve `null` em `localhost`: no dev o shim injeta a identidade, então não
+ * existe sessão do edge para encerrar, e um botão que finge sair é pior que botão
+ * nenhum. A UI o esconde quando é `null`.
+ *
+ * ⚠️ O logout do edge **ignora parâmetro de redirect** (testado com `redirect`,
+ * `next`, `returnTo`, `return_to`, `r`, `continue`, `redirect_uri`, `callback`) e
+ * sempre leva ao domínio da plataforma. Por isso a interface avisa para onde a
+ * pessoa vai — em vez de tentar um `fetch` disfarçado, que poderia falhar em
+ * silêncio e deixá-la achando que saiu sem ter saído. Em computador compartilhado de
+ * loja ou expedição isso é problema de verdade, não detalhe.
+ */
+export function urlLogoutDoEdge(hostname: string): string | null {
+  // IP é rejeitado explicitamente: `127.0.0.1` tem 4 rótulos e passaria por uma
+  // checagem de contagem, produzindo `https://0.0.1/auth/logout` — lixo que a
+  // pessoa clicaria achando que sai. Foi um bug real, pego pelo teste.
+  if (/^\d+(\.\d+)*$/.test(hostname)) return null
+
+  const partes = hostname.split('.')
+  if (partes.length < 3) return null // localhost, ou domínio sem subdomínio
+  const base = partes.slice(1).join('.')
+  // O domínio-base tem de ser plausível: ao menos um ponto e um TLD alfabético.
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(base)) return null
+  return `https://${base}/auth/logout`
 }
 
 function estadoVerificacao(

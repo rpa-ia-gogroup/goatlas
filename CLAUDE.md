@@ -222,6 +222,17 @@ persistente.
 - **Deploy:** `getUploadToken` → upload dos arquivos → `updateApp` com
   `entrypoint`, `assets` (lista derivada do `dist/` **real** — hashes mudam a cada
   build) e `assetConfig.not_found_handling: "single-page-application"`.
+- ⚠️ **O nome do campo no upload é o caminho SERVIDO, sem o prefixo `dist/`.**
+  `-F "dist/index.html=@..."` serve a SPA em `/dist/index.html` e a raiz dá **404**.
+  Diagnóstico: nos logs, `GET /` com `source: worker` = a plataforma não achou asset
+  e caiu no worker. Já aconteceu neste app.
+- ⚠️ **`updateApp` MESCLA assets, não substitui.** Para limpar caminho errado são
+  dois deploys: `assets: []` e depois a lista certa. Confira com `getApp` +
+  `include: ["manifest"]`.
+- **Logout é do edge** (`https://<dominio-base>/auth/logout`) e **ignora parâmetro de
+  redirect** — testado com `redirect`, `next`, `returnTo`, `return_to`, `r`,
+  `continue`, `redirect_uri` e `callback`. Sempre leva ao domínio da plataforma; a UI
+  avisa para onde a pessoa vai. A URL é derivada do próprio host, não hardcoded.
 
 ## Estado do projeto
 

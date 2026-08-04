@@ -70,12 +70,30 @@ npm run test && npm run build && npm run build:worker
 #      assetConfig → { "not_found_handling": "single-page-application" }
 ```
 
-**Armadilhas que já custaram bug em outro app da casa:**
+**Armadilhas — as duas primeiras já morderam neste app:**
+
+- **⚠️ O nome do campo no upload é o CAMINHO SERVIDO, e não pode ter o prefixo
+  `dist/`.** Subir `-F "dist/index.html=@./dist/index.html"` faz a SPA ser servida em
+  `/dist/index.html`, e a raiz dá **404** — foi exatamente o que aconteceu na
+  primeira publicação. O certo:
+
+  ```bash
+  curl -X POST "$UPLOAD_URL" -H "Authorization: Bearer $TOKEN"     -F "worker.js=@./worker.js"     -F "index.html=@./dist/index.html"     -F "assets/index-abc123.js=@./dist/assets/index-abc123.js"
+  #    ^^^^^^ caminho SERVIDO           ^^^^^^^^^^ arquivo LOCAL
+  ```
+
+  Sintoma de diagnóstico: nos logs, `GET /` aparece com `source: worker`. Isso
+  significa que a plataforma **não achou asset** para `/` e caiu no worker, que
+  devolve 404 para o que não é `/api/`.
+
+- **⚠️ `updateApp` MESCLA os assets, não substitui.** Passar a lista certa **não**
+  remove a errada — o manifest fica com as duas. Para limpar, são dois deploys:
+  primeiro `assets: []` (zera), depois a lista correta. Confira o resultado com
+  `getApp` + `include: ["manifest"]`; se houver caminho a mais ali, o próximo deploy
+  vai confundir quem for depurar.
 
 - **Nunca reaproveite a lista de assets.** O Vite gera hash novo a cada build;
-  lista antiga → tela branca. E varrer só `assets/*` deixa o `favicon` de fora, e
-  o SPA fallback devolve HTML no lugar dele.
-- **Assets sem o prefixo `dist/`** na lista.
+  lista antiga → tela branca. Derive do `dist/` real, na hora.
 - **`uploadId` é single-use** — um por deploy.
 - **SPA fallback é obrigatório**, senão qualquer rota que não seja `/` dá 404.
 
