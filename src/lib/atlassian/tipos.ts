@@ -99,8 +99,28 @@ export interface PaginaConfluence {
  * funciona hoje e vaza no dia em que um caminho esquecer o filtro — o conteúdo
  * restrito já estaria na memória do app.
  */
+export interface EspacoConfluence {
+  readonly chave: string
+  readonly nome: string
+  /** Página inicial do espaço — é ela que serve de raiz da árvore (`RF-41`). */
+  readonly homepageId: string | null
+}
+
+export interface FilhosParams {
+  readonly idPai: string
+  /** Allowlist de espaços. Vai para a QUERY, como na busca (`RN-06`, `RNF-07`). */
+  readonly espacosPermitidos: readonly string[]
+  readonly labelsBloqueadas: readonly string[]
+  readonly limite: number
+}
+
 export interface MetadadosPagina {
   readonly id: string
+  /**
+   * Id da página mãe, ou `null` na raiz. É a fonte dos breadcrumbs (`RF-41`) — e cada
+   * ancestral ainda precisa passar por `RN-06` antes de ser nomeado.
+   */
+  readonly idPai: string | null
   /**
    * **Chave** do espaço (`TECH`), nunca o `spaceId` numérico da v2.
    *
@@ -226,6 +246,19 @@ export interface ClienteAtlassian {
    * como recusa).
    */
   obterMetadadosPagina(idPagina: string): Promise<MetadadosPagina>
+
+  /** Espaço por chave — nome e homepage, para a raiz da árvore (`RF-41`). */
+  obterEspaco(chaveEspaco: string): Promise<EspacoConfluence>
+
+  /**
+   * Filhos diretos de uma página, **um nível** (`RF-41`).
+   *
+   * Um nível por vez não é preguiça: a árvore inteira exigiria uma consulta de
+   * restrição por página, e um clique viraria dezenas de chamadas com a credencial
+   * única (`R-02`). Espaço e label vão no CQL; só a restrição sobra por página, presa
+   * ao `limite`.
+   */
+  listarFilhosDaPagina(params: FilhosParams): Promise<readonly PaginaConfluence[]>
 
   /**
    * A página tem **qualquer** restrição de leitura? — a terceira condição de

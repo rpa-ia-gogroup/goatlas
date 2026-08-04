@@ -196,7 +196,15 @@ destes reabre um vazamento que já foi fechado.
   `App.tsx` continua navegando por estado (Princípio V); o deep link existe por dois
   motivos concretos: link de página compartilhável entre colegas, e o link `ri:page` do
   próprio Confluence funcionando (ele dá **título**, não id, então cai na busca pelo
-  título). Router de verdade entra com T-115, quando houver árvore para navegar.
+  título). T-115 trouxe a árvore e o deep link continuou suficiente: navegar é clicar em
+  nó, e cada nó já tem URL própria (`?pagina=`).
+- **A árvore desce UM nível por vez, e o `pai` é verificado como qualquer página**
+  (`RF-41`). A árvore inteira custaria uma consulta de restrição por página — um clique
+  viraria dezenas de chamadas (`R-02`); espaço e label vão no CQL (`parent = "id"`), a
+  restrição sobra por item com teto de 50. E o **breadcrumb para no primeiro ancestral
+  não exposto**: nomeá-lo vaza o título, e seguir acima dele entrega a posição da página
+  dentro de uma seção fechada. A tela não marca o corte — "nível oculto" contaria o que
+  o corte evita.
 - **A identidade é resolvida no roteador e passada como tipo.** Nenhum handler
   recebe e-mail de corpo, query ou header customizado — eles recebem `Identidade`
   já validada, então um handler **não tem como** ler um e-mail que não chegou
@@ -328,7 +336,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**313 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**335 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -338,14 +346,15 @@ runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2:
 condições de `RN-06`, com os testes de burla escritos antes.
 
 A aba **Documentação** (T-114) é a superfície disso: busca, leitura com a espinha lime,
-anexo pelo proxy, e deep link `?q=`/`?pagina=`. E a deflexão da Regra 1 (T-118) linka
-para essa leitura, não mais para `atlassian.net`.
+anexo pelo proxy, **árvore do espaço com breadcrumbs** (T-115) e deep link
+`?q=`/`?pagina=`. E a deflexão da Regra 1 (T-118) linka para essa leitura, não mais para
+`atlassian.net`.
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), campo customizado "Solicitante" (**Q4**), formato do
 comentário atribuído (alinhamento com o time de tech), deploy em staging/prod e o
-fechamento da Definição de Pronto. Da Fase 2, o próximo passo é T-115 (árvore do espaço
-e breadcrumbs) e T-116/T-117 (registro de buscas e o mapa de lacunas). **Q5** não trava
+fechamento da Definição de Pronto. Da Fase 2, o próximo passo é T-116/T-117 (registro de
+buscas e leituras em tabela própria, e o mapa de lacunas para o admin). **Q5** não trava
 mais código, só o dado de
 `espacos_confluence`, sem o qual a busca devolve zero e diz `buscaConfigurada: false`.
 

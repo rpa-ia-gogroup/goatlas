@@ -157,6 +157,59 @@ export async function lerPaginaAutorizada(
 }
 
 /**
+ * Teto da subida do breadcrumb.
+ *
+ * Cada nível custa uma verificação de exposição (metadados + labels + restrição).
+ * Cinco níveis cobrem qualquer hierarquia real de espaço e impedem que uma árvore
+ * profunda — ou um ciclo de `parentId`, que a Atlassian não deveria produzir mas o app
+ * não pode assumir — vire uma dezena de chamadas por leitura.
+ */
+const MAX_ANCESTRAIS = 5
+
+export interface Ancestral {
+  readonly id: string
+  readonly titulo: string
+}
+
+/**
+ * Caminho até a página — `RF-41`, o breadcrumb.
+ *
+ * ⚠️ **Cada ancestral passa pelas três condições, e o primeiro que não passa
+ * INTERROMPE a subida.** Duas razões, e nenhuma é estética:
+ *
+ * 1. Nomear um ancestral restrito vaza o título dele — o mesmo furo que a mensagem de
+ *    bloqueio já teve uma vez, com outro rótulo.
+ * 2. Continuar subindo por cima dele entregaria a **posição** da página dentro de uma
+ *    seção fechada, que é informação sobre a estrutura que a pessoa não deveria ver.
+ *
+ * O resultado é o prefixo contíguo exposto, da raiz para baixo. Breadcrumb curto é
+ * melhor que breadcrumb que conta o que estava escondido.
+ */
+export async function ancestraisExpostos(
+  atlassian: ClienteAtlassian,
+  allowlist: AllowlistConfluence,
+  metadados: MetadadosPagina,
+): Promise<readonly Ancestral[]> {
+  const caminho: Ancestral[] = []
+  const vistos = new Set<string>([metadados.id])
+  let idAtual = metadados.idPai
+
+  while (idAtual !== null && caminho.length < MAX_ANCESTRAIS) {
+    // Ciclo em `parentId` não deveria existir; se existir, para aqui em vez de girar.
+    if (vistos.has(idAtual)) break
+    vistos.add(idAtual)
+
+    const exposicao = await verificarExposicao(atlassian, allowlist, idAtual)
+    if (!exposicao.ok) break
+
+    caminho.unshift({ id: exposicao.metadados.id, titulo: exposicao.metadados.titulo })
+    idAtual = exposicao.metadados.idPai
+  }
+
+  return caminho
+}
+
+/**
  * Transitório = "tente de novo"; o resto = "não existe para você".
  *
  * Erro que não é `ErroAtlassian` (bug nosso, JSON inesperado) cai no lado

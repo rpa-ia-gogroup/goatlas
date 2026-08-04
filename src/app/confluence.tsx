@@ -32,7 +32,15 @@
  */
 
 import { useEffect, useState, type FormEvent } from 'react'
-import { api, ErroApi, type PaginaLida, type RespostaBusca } from './api'
+import {
+  api,
+  ErroApi,
+  type Ancestral,
+  type EspacoNavegavel,
+  type NivelDaArvore,
+  type PaginaLida,
+  type RespostaBusca,
+} from './api'
 import { Aviso, Vazio } from './componentes'
 import { ConteudoConfluence } from '../lib/confluence/renderizar'
 
@@ -120,11 +128,103 @@ export function ResultadosDaBusca({
   )
 }
 
+/**
+ * Breadcrumb — `RF-41`.
+ *
+ * ⚠️ O caminho vem do servidor **já cortado** no primeiro ancestral não exposto
+ * (`RN-06`), então ele pode ser curto ou vazio. A tela **não** inventa reticências
+ * nem "…": um marcador de nível oculto contaria que existe algo escondido ali, que é
+ * a informação que o corte existe para não dar. Sem caminho, não há caminho.
+ */
+export function Breadcrumb({
+  espaco,
+  ancestrais,
+  aoAbrir,
+}: {
+  espaco: string
+  ancestrais: readonly Ancestral[]
+  aoAbrir: (id: string) => void
+}) {
+  if (ancestrais.length === 0) return null
+  return (
+    <nav className="breadcrumb" aria-label={`Caminho no espaço ${espaco}`}>
+      <ol>
+        {ancestrais.map((a) => (
+          <li key={a.id}>
+            <button type="button" className="breadcrumb-item" onClick={() => aoAbrir(a.id)}>
+              {a.titulo}
+            </button>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  )
+}
+
+/** Um nível da árvore: as páginas dentro da que está aberta (`RF-41`). */
+export function FilhosDaPagina({
+  nivel,
+  aoAbrir,
+}: {
+  nivel: NivelDaArvore
+  aoAbrir: (id: string) => void
+}) {
+  if (nivel.itens.length === 0) return null
+  return (
+    <section className="pilha secao-filhos">
+      <h2 className="titulo-filhos">Dentro desta página</h2>
+      <ul className="resultados">
+        {nivel.itens.map((f) => (
+          <li key={f.id}>
+            <button type="button" className="resultado" onClick={() => aoAbrir(f.id)}>
+              <span className="resultado-titulo">{f.titulo}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/**
+ * Porta de entrada da árvore (`RF-41`) — aparece no estado inicial, antes de qualquer
+ * busca. Quem não sabe o que procurar navega; quem sabe, busca.
+ */
+export function EspacosNavegaveis({
+  espacos,
+  aoAbrir,
+}: {
+  espacos: readonly EspacoNavegavel[]
+  aoAbrir: (id: string) => void
+}) {
+  if (espacos.length === 0) return null
+  return (
+    <section className="pilha secao-filhos">
+      <h2 className="titulo-filhos">Ou navegue pela documentação</h2>
+      <ul className="resultados">
+        {espacos.map((e) => (
+          <li key={e.chave}>
+            <button type="button" className="resultado" onClick={() => aoAbrir(e.homepageId)}>
+              <span className="resultado-espaco">{e.chave}</span>
+              <span className="resultado-titulo">{e.nome}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 export function LeituraDaPagina({
   pagina,
+  filhos,
+  aoAbrir,
   aoVoltar,
 }: {
   pagina: PaginaLida
+  /** Nível abaixo desta página, quando já carregado (`RF-41`). */
+  filhos?: NivelDaArvore | null
+  aoAbrir: (id: string) => void
   aoVoltar: () => void
 }) {
   return (
@@ -135,6 +235,7 @@ export function LeituraDaPagina({
 
       <header className="pilha">
         <span className="eyebrow">{pagina.espaco}</span>
+        <Breadcrumb espaco={pagina.espaco} ancestrais={pagina.ancestrais} aoAbrir={aoAbrir} />
         <h1 className="titulo-secao">{pagina.titulo}</h1>
         <p className="pagina-meta">
           {formatarData(pagina.atualizadoEm)}
@@ -165,6 +266,8 @@ export function LeituraDaPagina({
         truncado={pagina.truncado}
         opcoes={opcoesDeRender(pagina.id)}
       />
+
+      {filhos && <FilhosDaPagina nivel={filhos} aoAbrir={aoAbrir} />}
     </div>
   )
 }
@@ -206,6 +309,8 @@ export function TelaDocumentacao({
   const [termo, setTermo] = useState(inicial.termo ?? '')
   const [busca, setBusca] = useState<RespostaBusca | null>(null)
   const [pagina, setPagina] = useState<PaginaLida | null>(null)
+  const [filhos, setFilhos] = useState<NivelDaArvore | null>(null)
+  const [espacos, setEspacos] = useState<readonly EspacoNavegavel[]>([])
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -232,9 +337,19 @@ export function TelaDocumentacao({
   async function abrir(id: string) {
     setCarregando(true)
     setErro(null)
+    setFilhos(null)
     try {
-      setPagina(await api.lerPagina(id))
+      const lida = await api.lerPagina(id)
+      setPagina(lida)
       lembrarNaUrl({ pagina: id })
+      // O nível abaixo vem em requisição separada, DEPOIS de a leitura aparecer: a
+      // página é o que a pessoa pediu, e a árvore não deve atrasá-la. Falhar aqui não
+      // é erro de tela — só não há navegação para mostrar.
+      try {
+        setFilhos(await api.arvore(lida.espaco, lida.id))
+      } catch {
+        setFilhos(null)
+      }
     } catch (e) {
       setPagina(null)
       // ⚠️ A mensagem NÃO distingue os motivos de recusa (`D-12`): "não está liberada"
@@ -254,6 +369,11 @@ export function TelaDocumentacao({
   useEffect(() => {
     if (inicial.pagina) void abrir(inicial.pagina)
     else if (inicial.termo) void buscar(inicial.termo)
+    // Os espaços navegáveis não bloqueiam nada: se falharem, resta a busca.
+    api
+      .espacos()
+      .then((r) => setEspacos(r.itens))
+      .catch(() => setEspacos([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -267,6 +387,8 @@ export function TelaDocumentacao({
       {pagina ? (
         <LeituraDaPagina
           pagina={pagina}
+          filhos={filhos}
+          aoAbrir={abrir}
           aoVoltar={() => {
             setPagina(null)
             lembrarNaUrl(termo.trim() ? { q: termo.trim() } : {})
@@ -301,10 +423,13 @@ export function TelaDocumentacao({
           {carregando && <p className="carregando">Procurando na documentação…</p>}
 
           {!carregando && !erro && busca === null && (
-            <Vazio
-              titulo="Procure antes de abrir chamado"
-              texto="Busque por um processo, uma mensagem de erro ou o nome de um sistema. A resposta pode já estar documentada — e você lê aqui, sem conta da Atlassian."
-            />
+            <>
+              <Vazio
+                titulo="Procure antes de abrir chamado"
+                texto="Busque por um processo, uma mensagem de erro ou o nome de um sistema. A resposta pode já estar documentada — e você lê aqui, sem conta da Atlassian."
+              />
+              <EspacosNavegaveis espacos={espacos} aoAbrir={abrir} />
+            </>
           )}
 
           {!carregando && busca !== null && (

@@ -1013,3 +1013,59 @@
   font-size: var(--fs-small);
   color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
 }
+
+/* ---------- árvore do espaço e breadcrumb (RF-41) ---------------------- */
+
+/**
+ * O breadcrumb é **trilha**, não migalha decorativa: ele diz onde a página mora no
+ * espaço, e cada nível é clicável porque subir um nível é a ação natural depois de
+ * ler. O separador é `›` gerado por CSS — conteúdo é o título, não o desenho.
+ *
+ * ⚠️ Ele pode vir curto ou vazio: o servidor corta no primeiro ancestral não exposto
+ * (`RN-06`), e a tela não sinaliza o corte. Marcador de "nível oculto" contaria o que
+ * o corte existe para não contar.
+ */
+.breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  list-style: none;
+}
+.breadcrumb li:not(:first-child)::before {
+  content: '›';
+  margin-inline-end: var(--space-2);
+  color: color-mix(in srgb, var(--go-text-primary) 45%, transparent);
+}
+.breadcrumb li {
+  display: flex;
+  align-items: center;
+}
+.breadcrumb-item {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-small);
+  color: var(--go-text-heading);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--go-lime) 70%, transparent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.breadcrumb-item:hover {
+  text-decoration-color: var(--go-blue);
+}
+
+/* A navegação para baixo fica DEPOIS do conteúdo: quem abriu a página veio para ler,
+   não para navegar. Descer um nível é o passo seguinte, não o primeiro. */
+.secao-filhos {
+  padding-top: var(--space-5);
+  border-top: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+}
+.titulo-filhos {
+  font-size: var(--fs-h4);
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+}

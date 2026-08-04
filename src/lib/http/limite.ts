@@ -33,7 +33,7 @@ export async function verificarLimite(
     `SELECT COUNT(*) AS n FROM auditoria
       WHERE ator_email = ? AND criado_em >= ?
         AND acao IN ('mensagem_enviada', 'busca_confluence', 'pagina_confluence_lida',
-                     'anexo_servido', 'consulta_historico', 'chamado_criado', 'comentario_criado')`,
+                     'anexo_servido', 'arvore_navegada', 'consulta_historico', 'chamado_criado', 'comentario_criado')`,
     [email, inicioJanela],
   )
   const usadas = Number(primeiraLinha<{ n: number }>(r)?.n ?? 0)

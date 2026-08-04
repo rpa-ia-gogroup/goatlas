@@ -22,7 +22,9 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import {
+  Breadcrumb,
   entradaDaUrl,
+  FilhosDaPagina,
   LeituraDaPagina,
   opcoesDeRender,
   ResultadosDaBusca,
@@ -39,7 +41,9 @@ function resultados(resposta: RespostaBusca): string {
 }
 
 function leitura(pagina: PaginaLida): string {
-  return renderToStaticMarkup(createElement(LeituraDaPagina, { pagina, aoVoltar: semAcao }))
+  return renderToStaticMarkup(
+    createElement(LeituraDaPagina, { pagina, aoVoltar: semAcao, aoAbrir: semAcao }),
+  )
 }
 
 const PAGINA_BASE: PaginaLida = {
@@ -48,6 +52,7 @@ const PAGINA_BASE: PaginaLida = {
   espaco: 'TECH',
   atualizadoEm: '2026-08-01T10:00:00.000Z',
   urlOriginal: 'https://goengenharia.atlassian.net/wiki/spaces/TECH/pages/77',
+  ancestrais: [],
   nos: [],
   truncado: false,
 }
@@ -192,5 +197,66 @@ describe('deep link — como um colega compartilha uma página', () => {
     expect(entradaDaUrl('')).toEqual({})
     expect(entradaDaUrl('?q=%20%20')).toEqual({})
     expect(entradaDaUrl('?outra=coisa')).toEqual({})
+  })
+})
+
+
+describe('RF-41 — breadcrumb e navegação por nível na tela', () => {
+  it('o caminho aparece clicável, na ordem raiz → mãe', async () => {
+    const html = renderToStaticMarkup(
+      createElement(Breadcrumb, {
+        espaco: 'TECH',
+        ancestrais: [
+          { id: 'home', titulo: 'Documentação de tecnologia' },
+          { id: 'processos', titulo: 'Processos operacionais' },
+        ],
+        aoAbrir: semAcao,
+      }),
+    )
+    expect(html.indexOf('Documentação de tecnologia')).toBeLessThan(
+      html.indexOf('Processos operacionais'),
+    )
+    expect(html).toContain('<nav')
+    expect(html).toContain('aria-label="Caminho no espaço TECH"')
+  })
+
+  it('caminho vazio NÃO vira reticências nem placeholder', async () => {
+    // O servidor corta o caminho no primeiro ancestral não exposto (RN-06). Um "…" na
+    // tela contaria que existe um nível escondido — exatamente o que o corte evita.
+    const html = renderToStaticMarkup(
+      createElement(Breadcrumb, { espaco: 'TECH', ancestrais: [], aoAbrir: semAcao }),
+    )
+    expect(html).toBe('')
+  })
+
+  it('nível sem filhos não desenha seção vazia', async () => {
+    const html = renderToStaticMarkup(
+      createElement(FilhosDaPagina, {
+        nivel: {
+          espaco: { chave: 'TECH', nome: 'Tecnologia' },
+          pai: { id: 'p', titulo: 'P' },
+          ancestrais: [],
+          itens: [],
+        },
+        aoAbrir: semAcao,
+      }),
+    )
+    expect(html).toBe('')
+  })
+
+  it('com filhos, a seção convida a descer um nível', async () => {
+    const html = renderToStaticMarkup(
+      createElement(FilhosDaPagina, {
+        nivel: {
+          espaco: { chave: 'TECH', nome: 'Tecnologia' },
+          pai: { id: 'p', titulo: 'P' },
+          ancestrais: [],
+          itens: [{ id: 'f1', titulo: 'Como reprocessar' }],
+        },
+        aoAbrir: semAcao,
+      }),
+    )
+    expect(html).toMatch(/dentro desta página/i)
+    expect(html).toContain('Como reprocessar')
   })
 })

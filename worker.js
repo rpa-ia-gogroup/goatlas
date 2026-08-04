@@ -195,6 +195,18 @@ function montarCql(params) {
   }
   return partes.join(" AND ");
 }
+function montarCqlFilhos(params) {
+  const espacos = params.espacosPermitidos.map((e) => `"${escaparCql(e)}"`).join(", ");
+  const partes = [
+    `type = page`,
+    `space in (${espacos})`,
+    `parent = "${escaparCql(params.idPai)}"`
+  ];
+  for (const label of params.labelsBloqueadas) {
+    partes.push(`label != "${escaparCql(label)}"`);
+  }
+  return `${partes.join(" AND ")} ORDER BY title ASC`;
+}
 function montarJql(params) {
   const campo = params.campoAgrupamento;
   const valor = escaparCql(params.chaveAgrupamento);
@@ -420,6 +432,7 @@ var ClienteAtlassianHttp = class {
     );
     const metadados = {
       id: String(dados?.id ?? idPagina),
+      idPai: dados?.parentId === void 0 || dados?.parentId === null ? null : String(dados.parentId),
       titulo: String(dados?.title ?? ""),
       espaco: await this.chaveDoEspaco(String(dados?.spaceId ?? "")),
       labels: await this.labelsDaPagina(idPagina),
@@ -430,6 +443,67 @@ var ClienteAtlassianHttp = class {
     };
     this.cacheConteudo.definir(chave, metadados, this.opcoes.ttlConteudoSeg);
     return metadados;
+  }
+  /** Espaço por chave — v2 (`/wiki/api/v2/spaces?keys=`). Cacheado como metadado. */
+  async obterEspaco(chaveEspaco) {
+    const chave = `espacoPorChave:${chaveEspaco}`;
+    const cacheado = this.cacheMetadados.obter(chave);
+    if (cacheado) return cacheado;
+    const dados = await this.transporte.requisitar(
+      `/wiki/api/v2/spaces?keys=${encodeURIComponent(chaveEspaco)}&limit=1`
+    );
+    const bruto = (dados?.results ?? [])[0];
+    if (!bruto) {
+      throw new ErroAtlassian("espa\xE7o n\xE3o encontrado", {
+        status: 404,
+        transitorio: false,
+        recurso: "obterEspaco"
+      });
+    }
+    const espaco = {
+      chave: String(bruto.key ?? chaveEspaco),
+      nome: String(bruto.name ?? chaveEspaco),
+      homepageId: bruto.homepageId === void 0 || bruto.homepageId === null ? null : String(bruto.homepageId)
+    };
+    if (bruto.id !== void 0 && bruto.id !== null) {
+      this.cacheMetadados.definir(`espaco:${String(bruto.id)}`, espaco.chave, this.opcoes.ttlMetadadosSeg);
+    }
+    this.cacheMetadados.definir(chave, espaco, this.opcoes.ttlMetadadosSeg);
+    return espaco;
+  }
+  /**
+   * Um nível da árvore (`RF-41`), pelo CQL — v1, como a busca (`R-09`).
+   *
+   * A terceira condição de `RN-06` (restrição por página) é aplicada **item por
+   * item**, igual em `buscarConfluence`: o CQL não sabe filtrar restrição, e título de
+   * página restrita numa lista de navegação é o mesmo vazamento que já apareceu na
+   * mensagem de bloqueio uma vez.
+   */
+  async listarFilhosDaPagina(params) {
+    if (params.espacosPermitidos.length === 0 || !params.idPai) return [];
+    const cql = montarCqlFilhos(params);
+    const chave = `filhos:${cql}:${params.limite}`;
+    const cacheado = this.cacheConteudo.obter(chave);
+    if (cacheado) return cacheado;
+    const dados = await this.transporte.requisitar(
+      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}`
+    );
+    const candidatas = (dados?.results ?? []).map((r) => ({
+      id: String(r.content?.id ?? ""),
+      titulo: String(r.content?.title ?? r.title ?? ""),
+      espaco: String(r.content?.space?.key ?? ""),
+      url: `${this.opcoes.baseUrl}/wiki${String(r.url ?? "")}`,
+      score: typeof r.score === "number" ? r.score : 0,
+      trecho: "",
+      labels: []
+    }));
+    const filhos = [];
+    for (const p of candidatas) {
+      if (await this.paginaRestrita(p.id)) continue;
+      filhos.push(p);
+    }
+    this.cacheConteudo.definir(chave, filhos, this.opcoes.ttlConteudoSeg);
+    return filhos;
   }
   /** `spaceId` (v2) → chave do espaço, que é o que a allowlist usa (`RN-06`). */
   async chaveDoEspaco(spaceId) {
@@ -584,6 +658,7 @@ var ClienteAtlassianFake = class {
       idsRestritos: inicial.idsRestritos ?? /* @__PURE__ */ new Set(),
       filtrarPorTermo: inicial.filtrarPorTermo ?? false,
       conteudoPaginas: inicial.conteudoPaginas ?? /* @__PURE__ */ new Map(),
+      espacos: inicial.espacos ?? /* @__PURE__ */ new Map(),
       anexos: inicial.anexos ?? /* @__PURE__ */ new Map(),
       limiteAnexoBytes: inicial.limiteAnexoBytes ?? MAX_ANEXO_BYTES,
       historico: inicial.historico ?? [],
@@ -694,6 +769,7 @@ var ClienteAtlassianFake = class {
     }
     return {
       id: idPagina,
+      idPai: p.idPai ?? null,
       titulo: p.titulo,
       espaco: p.espaco,
       labels: p.labels,
@@ -708,6 +784,43 @@ var ClienteAtlassianFake = class {
     this.checar(this.estado.falhas.paginaRestrita, "paginaRestrita");
     if (!idPagina) return true;
     return this.estado.idsRestritos.has(idPagina);
+  }
+  async obterEspaco(chaveEspaco) {
+    this.chamadas.push({ operacao: "obterEspaco", params: chaveEspaco });
+    this.checar(this.estado.falhas.obterPagina, "obterEspaco");
+    const e = this.estado.espacos.get(chaveEspaco);
+    if (!e) {
+      throw new ErroAtlassian("espa\xE7o n\xE3o encontrado", {
+        status: 404,
+        transitorio: false,
+        recurso: "obterEspaco"
+      });
+    }
+    return { chave: chaveEspaco, nome: e.nome, homepageId: e.homepageId };
+  }
+  async listarFilhosDaPagina(params) {
+    this.chamadas.push({ operacao: "listarFilhosDaPagina", params });
+    this.checar(this.estado.falhas.buscarConfluence, "listarFilhosDaPagina");
+    if (params.espacosPermitidos.length === 0) return [];
+    const permitidos = new Set(params.espacosPermitidos);
+    const bloqueadas = new Set(params.labelsBloqueadas.map((l) => l.toLowerCase()));
+    const filhos = [];
+    for (const [id, p] of this.estado.conteudoPaginas) {
+      if ((p.idPai ?? null) !== params.idPai) continue;
+      if (!permitidos.has(p.espaco)) continue;
+      if (p.labels.some((l) => bloqueadas.has(l.toLowerCase()))) continue;
+      if (this.estado.idsRestritos.has(id)) continue;
+      filhos.push({
+        id,
+        titulo: p.titulo,
+        espaco: p.espaco,
+        url: `https://exemplo.invalid/wiki/pages/${id}`,
+        score: 0,
+        trecho: "",
+        labels: [...p.labels]
+      });
+    }
+    return filhos.sort((a, b) => a.titulo.localeCompare(b.titulo, "pt-BR")).slice(0, params.limite);
   }
   async obterCorpoStorage(idPagina) {
     this.chamadas.push({ operacao: "obterCorpoStorage", params: idPagina });
@@ -1388,9 +1501,17 @@ function semearAtlassianDemo(fake) {
     }
   ];
   fake.estado.filtrarPorTermo = true;
+  fake.estado.espacos.set("TECH", { nome: "Tecnologia", homepageId: "demo-home" });
+  fake.estado.conteudoPaginas.set("demo-home", {
+    titulo: "Documenta\xE7\xE3o de tecnologia",
+    espaco: "TECH",
+    labels: [],
+    storage: "<p>Escolha um assunto abaixo.</p>"
+  });
   fake.estado.conteudoPaginas.set("demo-1", {
     titulo: "Como reprocessar o relat\xF3rio de vendas",
     espaco: "TECH",
+    idPai: "demo-home",
     labels: [],
     storage: [
       "<h2>Quando usar</h2>",
@@ -1404,6 +1525,7 @@ function semearAtlassianDemo(fake) {
   fake.estado.conteudoPaginas.set("demo-2", {
     titulo: "Padr\xE3o de nomes das lojas no sistema",
     espaco: "TECH",
+    idPai: "demo-home",
     labels: [],
     storage: [
       "<p>As lojas seguem o padr\xE3o <code>SIGLA-CIDADE</code>.</p>",
@@ -2883,7 +3005,7 @@ async function verificarLimite(db, email, limitePorMinuto, agoraMs) {
     `SELECT COUNT(*) AS n FROM auditoria
       WHERE ator_email = ? AND criado_em >= ?
         AND acao IN ('mensagem_enviada', 'busca_confluence', 'pagina_confluence_lida',
-                     'anexo_servido', 'consulta_historico', 'chamado_criado', 'comentario_criado')`,
+                     'anexo_servido', 'arvore_navegada', 'consulta_historico', 'chamado_criado', 'comentario_criado')`,
     [email, inicioJanela]
   );
   const usadas = Number(primeiraLinha(r)?.n ?? 0);
@@ -3672,6 +3794,21 @@ async function lerPaginaAutorizada(atlassian, allowlist, idPagina) {
   }
   return { ok: true, metadados: exposicao.metadados, conteudo: sanitizarStorage(storage) };
 }
+var MAX_ANCESTRAIS = 5;
+async function ancestraisExpostos(atlassian, allowlist, metadados) {
+  const caminho = [];
+  const vistos = /* @__PURE__ */ new Set([metadados.id]);
+  let idAtual = metadados.idPai;
+  while (idAtual !== null && caminho.length < MAX_ANCESTRAIS) {
+    if (vistos.has(idAtual)) break;
+    vistos.add(idAtual);
+    const exposicao = await verificarExposicao(atlassian, allowlist, idAtual);
+    if (!exposicao.ok) break;
+    caminho.unshift({ id: exposicao.metadados.id, titulo: exposicao.metadados.titulo });
+    idAtual = exposicao.metadados.idPai;
+  }
+  return caminho;
+}
 function ehTransitorio(erro2) {
   return erro2 instanceof ErroAtlassian && erro2.detalhe.transitorio;
 }
@@ -4068,9 +4205,75 @@ async function rotear(req, ctx, eu, caminho, url) {
       espaco: r.metadados.espaco,
       atualizadoEm: r.metadados.atualizadoEm,
       urlOriginal: r.metadados.url,
+      // RF-41 — o caminho até aqui, já filtrado por RN-06 (ver `ancestraisExpostos`).
+      ancestrais: await ancestraisExpostos(ctx.atlassian, ctx.valores, r.metadados),
       nos: r.conteudo.nos,
       truncado: r.conteudo.truncado
     });
+  }
+  if (caminho === "/api/confluence/espacos" && req.method === "GET") {
+    const itens = [];
+    for (const chave of ctx.valores.espacos_confluence) {
+      try {
+        const espaco = await ctx.atlassian.obterEspaco(chave);
+        if (espaco.homepageId) {
+          itens.push({ chave: espaco.chave, nome: espaco.nome, homepageId: espaco.homepageId });
+        }
+      } catch {
+      }
+    }
+    return json({ itens });
+  }
+  if (caminho === "/api/confluence/arvore" && req.method === "GET") {
+    const chaveEspaco = (url.searchParams.get("espaco") ?? "").trim();
+    if (!chaveEspaco || !ctx.valores.espacos_confluence.includes(chaveEspaco)) {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "arvore_navegada",
+        recurso: chaveEspaco,
+        resultado: "negado",
+        detalhe: { motivo: "espaco_fora_da_allowlist" }
+      });
+      return ERROS.naoEncontrado();
+    }
+    const paiPedido = decodificar(url.searchParams.get("pai") ?? "");
+    try {
+      const espaco = await ctx.atlassian.obterEspaco(chaveEspaco);
+      const idPai = paiPedido !== null && paiPedido !== "" ? paiPedido : espaco.homepageId;
+      if (idPai === null) return ERROS.naoEncontrado();
+      const exposicaoPai = await verificarExposicao(ctx.atlassian, ctx.valores, idPai);
+      if (!exposicaoPai.ok) {
+        await ctx.auditoria.registrar({
+          atorEmail: eu.email,
+          acao: "arvore_navegada",
+          recurso: idPai,
+          resultado: exposicaoPai.motivo === "indisponivel" ? "falha" : "negado",
+          detalhe: { motivo: exposicaoPai.motivo }
+        });
+        return exposicaoPai.motivo === "indisponivel" ? ERROS.conteudoIndisponivel() : ERROS.naoEncontrado();
+      }
+      const filhos = await ctx.atlassian.listarFilhosDaPagina({
+        idPai,
+        espacosPermitidos: ctx.valores.espacos_confluence,
+        labelsBloqueadas: ctx.valores.labels_bloqueadas,
+        limite: LIMITE_NIVEL_ARVORE
+      });
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "arvore_navegada",
+        recurso: idPai,
+        resultado: "sucesso",
+        detalhe: { espaco: chaveEspaco, filhos: filhos.length }
+      });
+      return json({
+        espaco: { chave: espaco.chave, nome: espaco.nome },
+        pai: { id: exposicaoPai.metadados.id, titulo: exposicaoPai.metadados.titulo },
+        ancestrais: await ancestraisExpostos(ctx.atlassian, ctx.valores, exposicaoPai.metadados),
+        itens: filhos.map((f) => ({ id: f.id, titulo: f.titulo }))
+      });
+    } catch {
+      return ERROS.conteudoIndisponivel();
+    }
   }
   const anexoConfluence = caminho.match(/^\/api\/confluence\/anexo\/([^/]+)\/(.+)$/);
   if (anexoConfluence && req.method === "GET") {
@@ -4165,6 +4368,7 @@ var MIN_TERMO_BUSCA = 2;
 var MAX_TERMO_BUSCA = 200;
 var LIMITE_BUSCA_PADRAO = 10;
 var LIMITE_BUSCA_MAXIMO = 25;
+var LIMITE_NIVEL_ARVORE = 50;
 function limiteDeBusca(bruto) {
   const n = Number.parseInt(bruto ?? "", 10);
   if (!Number.isInteger(n) || n < 1) return LIMITE_BUSCA_PADRAO;

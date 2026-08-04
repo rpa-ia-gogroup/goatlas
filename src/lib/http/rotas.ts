@@ -21,7 +21,7 @@ import { verificarLimite } from './limite'
 import { CriacaoRecusada, MENSAGEM_RECUSA } from '../agent/gate'
 import { SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos'
 import type { PropostaChamado } from '../agent/estado'
-import { lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
+import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
 import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
 
 export interface EnvCron {
@@ -478,9 +478,99 @@ async function rotear(
       espaco: r.metadados.espaco,
       atualizadoEm: r.metadados.atualizadoEm,
       urlOriginal: r.metadados.url,
+      // RF-41 — o caminho até aqui, já filtrado por RN-06 (ver `ancestraisExpostos`).
+      ancestrais: await ancestraisExpostos(ctx.atlassian, ctx.valores, r.metadados),
       nos: r.conteudo.nos,
       truncado: r.conteudo.truncado,
     })
+  }
+
+  // Os espaços que a pessoa pode navegar — o ponto de ENTRADA da árvore (RF-41).
+  //
+  // Sem isto a árvore só é alcançável por acidente (a partir de uma página que a busca
+  // achou). A allowlist não é segredo: ela é exatamente o que a pessoa pode ver, e
+  // esconder o nome do espaço não protegeria nada — só deixaria a navegação sem porta.
+  if (caminho === '/api/confluence/espacos' && req.method === 'GET') {
+    const itens: { chave: string; nome: string; homepageId: string }[] = []
+    for (const chave of ctx.valores.espacos_confluence) {
+      try {
+        const espaco = await ctx.atlassian.obterEspaco(chave)
+        // Espaço sem homepage não tem raiz para navegar; melhor omitir que oferecer um
+        // caminho que morre no clique.
+        if (espaco.homepageId) {
+          itens.push({ chave: espaco.chave, nome: espaco.nome, homepageId: espaco.homepageId })
+        }
+      } catch {
+        // Espaço configurado que não resolve não vira erro da tela: os outros valem.
+      }
+    }
+    return json({ itens })
+  }
+
+  // Árvore do espaço, um nível por vez (RF-41).
+  //
+  // ⚠️ O `pai` vem do cliente, então ele **também** passa pela verificação de
+  // exposição: listar os filhos de uma seção restrita entregaria a estrutura de
+  // dentro dela, mesmo que cada filho, isolado, fosse legítimo.
+  if (caminho === '/api/confluence/arvore' && req.method === 'GET') {
+    const chaveEspaco = (url.searchParams.get('espaco') ?? '').trim()
+    // Negação por padrão: espaço fora da allowlist responde como inexistente (D-12),
+    // e nem chega a consultar a Atlassian.
+    if (!chaveEspaco || !ctx.valores.espacos_confluence.includes(chaveEspaco)) {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'arvore_navegada',
+        recurso: chaveEspaco,
+        resultado: 'negado',
+        detalhe: { motivo: 'espaco_fora_da_allowlist' },
+      })
+      return ERROS.naoEncontrado()
+    }
+
+    const paiPedido = decodificar(url.searchParams.get('pai') ?? '')
+    try {
+      const espaco = await ctx.atlassian.obterEspaco(chaveEspaco)
+      // Sem `pai`, a raiz é a homepage do espaço — é a raiz que o Confluence mesmo usa.
+      const idPai = paiPedido !== null && paiPedido !== '' ? paiPedido : espaco.homepageId
+      if (idPai === null) return ERROS.naoEncontrado()
+
+      // O nó de partida precisa ser legível por quem pediu.
+      const exposicaoPai = await verificarExposicao(ctx.atlassian, ctx.valores, idPai)
+      if (!exposicaoPai.ok) {
+        await ctx.auditoria.registrar({
+          atorEmail: eu.email,
+          acao: 'arvore_navegada',
+          recurso: idPai,
+          resultado: exposicaoPai.motivo === 'indisponivel' ? 'falha' : 'negado',
+          detalhe: { motivo: exposicaoPai.motivo },
+        })
+        return exposicaoPai.motivo === 'indisponivel'
+          ? ERROS.conteudoIndisponivel()
+          : ERROS.naoEncontrado()
+      }
+
+      const filhos = await ctx.atlassian.listarFilhosDaPagina({
+        idPai,
+        espacosPermitidos: ctx.valores.espacos_confluence,
+        labelsBloqueadas: ctx.valores.labels_bloqueadas,
+        limite: LIMITE_NIVEL_ARVORE,
+      })
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'arvore_navegada',
+        recurso: idPai,
+        resultado: 'sucesso',
+        detalhe: { espaco: chaveEspaco, filhos: filhos.length },
+      })
+      return json({
+        espaco: { chave: espaco.chave, nome: espaco.nome },
+        pai: { id: exposicaoPai.metadados.id, titulo: exposicaoPai.metadados.titulo },
+        ancestrais: await ancestraisExpostos(ctx.atlassian, ctx.valores, exposicaoPai.metadados),
+        itens: filhos.map((f) => ({ id: f.id, titulo: f.titulo })),
+      })
+    } catch {
+      return ERROS.conteudoIndisponivel()
+    }
   }
 
   // Proxy de anexo — RNF-02: o navegador não tem credencial e não fala com a
@@ -609,6 +699,16 @@ const MIN_TERMO_BUSCA = 2
 const MAX_TERMO_BUSCA = 200
 const LIMITE_BUSCA_PADRAO = 10
 const LIMITE_BUSCA_MAXIMO = 25
+
+/**
+ * Teto de itens por nível da árvore (`RF-41`).
+ *
+ * Cada item custa uma consulta de restrição (a terceira condição de `RN-06` não cabe
+ * no CQL), então o teto é o que impede um nível gigante de virar dezenas de chamadas
+ * com a credencial única (`R-02`). Nível maior que isto aparece truncado — pior que
+ * mostrar tudo, melhor que derrubar o orçamento de API de todos.
+ */
+const LIMITE_NIVEL_ARVORE = 50
 
 /**
  * Quantos resultados pedir. Vem do cliente, então é **clampado**: cada resultado

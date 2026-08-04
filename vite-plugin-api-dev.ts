@@ -96,6 +96,7 @@ export function apiDev(): Plugin {
           conteudoPaginas: Map<string, unknown>
           anexos: Map<string, unknown>
           idsRestritos: Set<string>
+          espacos: Map<string, { nome: string; homepageId: string | null }>
         }
       }
       fake.estado.tiposChamado = [
@@ -133,6 +134,8 @@ export function apiDev(): Plugin {
         },
       ]
       fake.estado.idsRestritos = new Set(['p3'])
+      // Espaço com homepage: é dela que a árvore parte (RF-41).
+      fake.estado.espacos.set('TECH', { nome: 'Tecnologia', homepageId: 'home' })
       // Busca que devolve tudo para qualquer termo faz a tela parecer quebrada — em dev
       // o fake imita o `text ~` do CQL (ver `filtrarPorTermo` no fake).
       ;(fake.estado as unknown as { filtrarPorTermo: boolean }).filtrarPorTermo = true
@@ -140,9 +143,17 @@ export function apiDev(): Plugin {
       // Corpo das páginas — sem isso a leitura em dev responde "não encontramos", e a
       // tela de leitura não é exercitada. Storage format de verdade, com macro não
       // suportada e tabela, para ver `RF-43` e a rolagem de tabela no celular.
+      fake.estado.conteudoPaginas.set('home', {
+        titulo: 'Documentação de tecnologia',
+        espaco: 'TECH',
+        labels: [],
+        atualizadoEm: '2026-05-02T08:00:00.000Z',
+        storage: '<p>Escolha um assunto abaixo.</p>',
+      })
       fake.estado.conteudoPaginas.set('p1', {
         titulo: 'Como reprocessar o relatório de vendas',
         espaco: 'TECH',
+        idPai: 'home',
         labels: [],
         atualizadoEm: '2026-07-28T13:20:00.000Z',
         storage: [
@@ -158,6 +169,7 @@ export function apiDev(): Plugin {
       fake.estado.conteudoPaginas.set('p2', {
         titulo: 'Padrão de nomes das lojas no sistema',
         espaco: 'TECH',
+        idPai: 'home',
         labels: [],
         atualizadoEm: '2026-06-11T09:00:00.000Z',
         storage: [

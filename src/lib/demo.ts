@@ -77,9 +77,17 @@ export function semearAtlassianDemo(fake: ClienteAtlassianFake): void {
   // demonstração em vez de dar "não encontramos". Storage format de verdade,
   // inclusive uma macro que o renderizador não suporta — é assim que a degradação
   // visível de RF-43 aparece na demo em vez de só no teste.
+  fake.estado.espacos.set('TECH', { nome: 'Tecnologia', homepageId: 'demo-home' })
+  fake.estado.conteudoPaginas.set('demo-home', {
+    titulo: 'Documentação de tecnologia',
+    espaco: 'TECH',
+    labels: [],
+    storage: '<p>Escolha um assunto abaixo.</p>',
+  })
   fake.estado.conteudoPaginas.set('demo-1', {
     titulo: 'Como reprocessar o relatório de vendas',
     espaco: 'TECH',
+    idPai: 'demo-home',
     labels: [],
     storage: [
       '<h2>Quando usar</h2>',
@@ -93,6 +101,7 @@ export function semearAtlassianDemo(fake: ClienteAtlassianFake): void {
   fake.estado.conteudoPaginas.set('demo-2', {
     titulo: 'Padrão de nomes das lojas no sistema',
     espaco: 'TECH',
+    idPai: 'demo-home',
     labels: [],
     storage: [
       '<p>As lojas seguem o padrão <code>SIGLA-CIDADE</code>.</p>',
