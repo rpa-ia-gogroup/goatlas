@@ -182,6 +182,16 @@ destes reabre um vazamento que já foi fechado.
   `buscaConfigurada: false` no primeiro caso e **não** registra lacuna de `RF-42` —
   registrar envenenaria o mapa de T-117 com termos que ninguém deixou de documentar, e
   a tela mandaria a pessoa procurar de novo com outras palavras para sempre.
+- **A deflexão linka para DENTRO do app, e o formato do link é contrato entre duas
+  camadas.** `urlDeLeituraNoApp` (`rules/`) escreve `?pagina=<id>` e `entradaDaUrl`
+  (`app/confluence.tsx`) interpreta — com teste que gera de um lado e lê do outro,
+  porque divergência aqui é silenciosa: o link continua bonito e leva a 404. Linkar
+  `atlassian.net` derrubava a deflexão no clique, já que o público do app não tem
+  assento. E em `TextoDoAgente` o link interno é **allowlist de forma**, nunca "começa
+  com barra": aquele texto carrega saída do modelo, que pode repetir conteúdo de página
+  editável por qualquer pessoa (`R-07`). Ele abre em **outra aba** de propósito — a
+  conversa vive em estado de React, e navegar na mesma aba destruiria o botão de
+  override (`RF-13`) de quem aceitou ler primeiro.
 - **A tela de documentação lê `?q=` e `?pagina=` no boot — e isso NÃO é um router.**
   `App.tsx` continua navegando por estado (Princípio V); o deep link existe por dois
   motivos concretos: link de página compartilhável entre colegas, e o link `ri:page` do
@@ -318,7 +328,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**306 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**313 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -328,15 +338,15 @@ runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2:
 condições de `RN-06`, com os testes de burla escritos antes.
 
 A aba **Documentação** (T-114) é a superfície disso: busca, leitura com a espinha lime,
-anexo pelo proxy, e deep link `?q=`/`?pagina=`.
+anexo pelo proxy, e deep link `?q=`/`?pagina=`. E a deflexão da Regra 1 (T-118) linka
+para essa leitura, não mais para `atlassian.net`.
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), campo customizado "Solicitante" (**Q4**), formato do
 comentário atribuído (alinhamento com o time de tech), deploy em staging/prod e o
 fechamento da Definição de Pronto. Da Fase 2, o próximo passo é T-115 (árvore do espaço
-e breadcrumbs), T-116/T-117 (registro de buscas e o mapa de lacunas) e **T-118** — hoje
-a mensagem de bloqueio da Regra 1 ainda linka para `atlassian.net`, que é uma parede
-para quem não tem assento. **Q5** não trava mais código, só o dado de
+e breadcrumbs) e T-116/T-117 (registro de buscas e o mapa de lacunas). **Q5** não trava
+mais código, só o dado de
 `espacos_confluence`, sem o qual a busca devolve zero e diz `buscaConfigurada: false`.
 
 ### Como testar sem credencial

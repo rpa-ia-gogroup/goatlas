@@ -15,6 +15,11 @@ export type Regra = 'regra1_confluence' | 'regra2_ajuste_operacional'
 
 export interface EvidenciaRegra1 {
   readonly paginas: readonly {
+    /**
+     * Id da página — é ele que permite ler **dentro do app** (`RF-39`). Sem id só
+     * sobra o link do Confluence, que é uma parede para quem não tem assento.
+     */
+    readonly id: string
     readonly titulo: string
     readonly url: string
     readonly score: number
@@ -69,7 +74,12 @@ export function avaliarRegra1(
     regra: 'regra1_confluence',
     motivoTecnico: `${acimaDoThreshold.length} página(s) com score >= ${thresholdScore}`,
     evidencia: {
-      paginas: acimaDoThreshold.map((p) => ({ titulo: p.titulo, url: p.url, score: p.score })),
+      paginas: acimaDoThreshold.map((p) => ({
+        id: p.id,
+        titulo: p.titulo,
+        url: p.url,
+        score: p.score,
+      })),
     },
   }
 }
@@ -117,10 +127,34 @@ export function avaliarRegra2(
 }
 
 /**
+ * URL de leitura **dentro do app** — `RF-39`, `T-118`.
+ *
+ * ⚠️ **Este formato é contrato com o frontend**: `entradaDaUrl` em
+ * `src/app/confluence.tsx` interpreta exatamente `?pagina=<id>`, e `TextoDoAgente`
+ * só transforma em link o caminho que casa com esta forma. Existe teste que gera a
+ * URL aqui e a faz voltar por lá — um comentário pedindo que as duas camadas
+ * concordem não impediria a divergência silenciosa (o link continuaria bonito e
+ * levaria a 404).
+ *
+ * A alternativa era o servidor não conhecer rota de tela nenhuma e devolver a lista
+ * de páginas estruturada para a UI montar o link. Fica para quando existir uma
+ * segunda superfície consumindo a mensagem; hoje seria indireção sem consumidor.
+ */
+export function urlDeLeituraNoApp(idPagina: string): string {
+  return `/?pagina=${encodeURIComponent(idPagina)}`
+}
+
+/**
  * Mensagem de bloqueio com os **três elementos obrigatórios** de RF-12:
  *   1. qual regra disparou
  *   2. motivo em linguagem natural — para o solicitante saber COMO AGIR
- *   3. link da página do Confluence — sempre na Regra 1, e na Regra 2 quando houver
+ *   3. link da página — sempre na Regra 1, e na Regra 2 quando houver
+ *
+ * ⚠️ O link é o da **leitura no app**, não o do Confluence (`T-118`). Quem usa o
+ * goatlas não tem assento Atlassian: linkar `atlassian.net` derrubava a deflexão
+ * exatamente no clique, depois de a pessoa ter sido convencida a ler primeiro. A
+ * rota interna já aplica as três condições de `RN-06`, então o link não amplia
+ * exposição.
  *
  * ⚠️ A redação define a percepção do produto inteiro (RNF-31): o bloqueio precisa
  * soar como **ajuda**, não como recusa. E precisa deixar o caminho de override
@@ -131,7 +165,10 @@ export function montarMensagemBloqueio(veredito: Veredito & { bloquear: true }):
     const ev = veredito.evidencia as EvidenciaRegra1
     const links = ev.paginas
       .slice(0, 3)
-      .map((p) => `- [${p.titulo}](${p.url})`)
+      // Sem id não há como abrir aqui dentro; o link externo é pior que o interno e
+      // melhor que nenhum — a alternativa seria mostrar o título de algo que a pessoa
+      // não tem como abrir.
+      .map((p) => `- [${p.titulo}](${p.id ? urlDeLeituraNoApp(p.id) : p.url})`)
       .join('\n')
     return [
       'Achei documentação que parece responder exatamente isso — vale olhar antes de abrir o chamado, porque a resposta pode estar a um clique daqui:',

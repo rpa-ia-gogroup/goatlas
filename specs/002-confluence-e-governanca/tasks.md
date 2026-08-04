@@ -83,11 +83,11 @@ created: "2026-08-04"
 
 ## Phase 2 — Confluence como superfície
 
-> **Estado: T-110 a T-114 concluídos** — **306 testes** na suíte (79 novos), typecheck,
-> build e bundle do worker limpos. Busca, leitura e proxy de anexo existem **com tela**,
-> e os testes de burla foram escritos antes de cada rota. Falta desta fase: T-115
-> (árvore e breadcrumbs), T-116 (tabelas de busca/leitura), T-117 (lacunas) e T-118 (a
-> deflexão apontar para dentro do app).
+> **Estado: T-110 a T-114 e T-118 concluídos** — **313 testes** na suíte (86 novos),
+> typecheck, build e bundle do worker limpos. Busca, leitura e proxy de anexo existem
+> **com tela**, a deflexão da Regra 1 abre a página **dentro do app**, e os testes de
+> burla foram escritos antes de cada rota. Falta desta fase: T-115 (árvore e
+> breadcrumbs), T-116 (tabelas de busca/leitura) e T-117 (lacunas).
 
 - [x] **T-110** `obterPagina` no cliente isolado (v2: `/wiki/api/v2/pages/{id}`),
       com cache. _Requirements: RF-39, RNF-13, RNF-22_
@@ -171,11 +171,25 @@ created: "2026-08-04"
         para o detalhe do chamado, que usava o mesmo padrão.
       - Verificado no navegador (`npm run dev`), inclusive a página **restrita** não
         aparecendo na busca nem abrindo por URL.
-- [ ] **T-118** [P] A mensagem de bloqueio da Regra 1 aponta para **dentro** do app.
-      Hoje `montarMensagemBloqueio` monta link para `atlassian.net` — que é uma parede
-      para quem não tem assento, exatamente o público do app. Precisa das páginas
-      (id + título) na resposta do turno, não de parse da mensagem.
-      _Requirements: RF-09, RF-13, RF-39_
+- [x] **T-118** [P] A mensagem de bloqueio da Regra 1 aponta para **dentro** do app.
+      `montarMensagemBloqueio` linkava `atlassian.net` — parede para quem não tem
+      assento, exatamente o público do app. A deflexão funcionava até o clique.
+      _Requirements: RF-09, RF-12, RF-13, RF-39_
+      - `EvidenciaRegra1.paginas` ganhou **`id`** — sem ele não há link interno
+        possível. O id atravessa cliente → tool → veredito → mensagem, e o teste do
+        orquestrador cobra isso ponta a ponta.
+      - **O formato do link é contrato entre duas camadas** (`urlDeLeituraNoApp` em
+        `rules/` e `entradaDaUrl` em `app/confluence.tsx`). O teste gera a URL num lado
+        e a interpreta no outro: comentário pedindo que concordem não impediria a
+        divergência silenciosa — o link continuaria bonito, levando a 404.
+      - **Link interno é allowlist de FORMA**, não "começa com barra": o texto do
+        agente carrega saída do modelo, que pode repetir conteúdo de página editável
+        por qualquer pessoa (`R-07`). `/api/...` e caminho inventado seguem texto puro.
+      - Abre em **outra aba**, de propósito: a conversa vive em estado de React, e
+        navegar na mesma aba destruiria justamente o botão de override (`RF-13`) da
+        pessoa que aceitou o convite de ler primeiro. Descoberto clicando, não lendo.
+      - Fallback: página sem id mantém o link externo — informação vale mais que
+        estética, e mostrar título sem forma de abrir seria pior.
 - [ ] **T-115** Árvore do espaço + breadcrumbs (`RF-41`, P1).
       _Requirements: RF-41_
 - [ ] **T-116** Tabela `buscas` + `paginas_lidas`; registrar termo, nº de

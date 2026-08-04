@@ -156,7 +156,10 @@ describe('RF-12 / RNF-31 — a mensagem de bloqueio tem os três elementos e soa
     const msg = montarMensagemBloqueio(v)
 
     expect(msg).toContain('Reprocessar pipeline')
-    expect(msg).toContain('https://goengenharia.atlassian.net/wiki')
+    // T-118 — o link é a leitura DENTRO do app. Quem usa o goatlas não tem assento
+    // Atlassian: `atlassian.net` seria uma parede no momento do clique.
+    expect(msg).toContain('/?pagina=')
+    expect(msg).not.toContain('atlassian.net')
     // RF-13 / RN-07: o caminho de override tem de estar VISÍVEL na mensagem.
     expect(msg).toMatch(/não resolvem o \*\*seu\*\* caso/)
     // RNF-31: soa como ajuda, não como recusa.
