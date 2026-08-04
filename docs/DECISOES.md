@@ -150,6 +150,39 @@ Aceita conscientemente para ter a visão completa do trabalho antes de começar.
 
 ---
 
+### D-07 - Publicar em modo demonstracao antes de existir credencial
+**Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada
+
+O app está no ar em **https://goatlas.devgogroup.com** (`appId 9c47f42f`,
+`visibility: authenticated`) rodando em **modo demonstração**: fakes semeados com
+dados fictícios, nenhuma chamada à Atlassian ou a provedor de IA. Publicado antes
+de **Q1** de propósito — dá para mostrar o produto funcionando (login, deflexão,
+override, recibo, acompanhamento) enquanto a conta de serviço não existe.
+
+**A tarja de aviso é parte da decisão, não enfeite.** Sem ela alguém abre um
+"chamado", vê a chave na tela e acredita que o pedido chegou ao time de tech —
+espera uma resposta que nunca vem, e o problema fica sem tratamento. Isso é pior
+que o app não existir. Por isso `modoDemo` é exposto em `/api/auth/me` e
+`/api/health`, e a interface mostra o aviso de forma permanente.
+
+**Bootstrap por env, porque o app é fail-closed.** Toda allowlist nasce vazia e
+vazio significa negar (`RNF-07`), então um app recém-deployado negaria **todo
+mundo** — inclusive quem entraria para configurá-lo. `GOATLAS_DOMINIOS` e
+`GOATLAS_ADMINS` resolvem o ovo e a galinha: valem enquanto a chave **não existe**
+no banco; no instante em que um admin salva pelo console, o banco manda (`RF-49`).
+Isso **não** afrouxa o fail-closed — env vazio e banco vazio continua negando, e há
+teste para as duas metades.
+
+Configurado hoje: domínio `gocase.com` **[SUPOSIÇÃO: Q7]** · admin
+`kaique.breno@gocase.com`. Ambos mudam por secret ou pelo console, sem deploy.
+
+**Pendência que esta decisão cria:** quando as credenciais reais entrarem, este app
+passa a ser **produção** (é ele que tem o slug bom). A regra 10 do `CLAUDE.md` exige
+staging antes de prod, então **antes do primeiro deploy com credencial real** é
+preciso criar o app de staging. Não deixar isso para a hora do deploy.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

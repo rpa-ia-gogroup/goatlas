@@ -36,8 +36,19 @@ navegador**, para não existir caminho em que a identidade venha do cliente
 
 | Ambiente | appId | Uso |
 |---|---|---|
-| **staging** | *(a criar)* | Valida toda mudança de código antes de prod |
-| **produção** | *(a criar)* | `visibility: authenticated` — o edge faz o OAuth |
+| **demo / futura produção** | **`9c47f42f`** — https://goatlas.devgogroup.com | No ar em **modo demonstração** (`D-07`). Vira produção quando as credenciais reais entrarem |
+| **staging** | *(a criar)* | ⚠️ **Criar ANTES do primeiro deploy com credencial real** — regra 10 |
+
+### Secrets já configurados em `9c47f42f`
+
+| Secret | Valor | Por quê |
+|---|---|---|
+| `GOATLAS_MODO_DEMO` | `1` | Fakes + tarja de aviso. **Remover ao virar produção.** |
+| `GOATLAS_DOMINIOS` | `gocase.com` | Bootstrap — sem ele o app nega todo mundo (`RNF-07`). **[SUPOSIÇÃO: Q7]** |
+| `GOATLAS_ADMINS` | `kaique.breno@gocase.com` | Bootstrap do primeiro admin (`RF-02`) |
+
+O env é **bootstrap**: vale enquanto a chave não existe no banco. Assim que um admin
+salva pelo console, o banco manda (`RF-49`).
 
 Ambos precisam de `visibility: authenticated`: é isso que faz o edge injetar
 `x-godeploy-user-email`. Um app `public` **não** recebe o header, e o goatlas

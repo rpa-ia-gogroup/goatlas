@@ -623,6 +623,32 @@ function montarResultadoHistoricoParaModelo(tickets) {
   return `Chamados anteriores do mesmo tipo:
 ${itens}`;
 }
+var PROMPT_EXTRACAO = `Voc\xEA l\xEA uma conversa entre um colaborador e o assistente de chamados, e extrai os campos do chamado a ser aberto.
+
+Devolva **apenas** JSON:
+{"pronto": true|false, "titulo": "...", "descricao": "...", "prioridade": "critica"|"alta"|"normal", "tipoChamadoId": "...", "area": "..."|null}
+
+Regras:
+- \`pronto: false\` quando ainda falta informa\xE7\xE3o essencial (o que aconteceu, desde quando, qual sistema). Nesse caso os outros campos s\xE3o ignorados. N\xE3o invente contexto para poder responder \`true\`.
+- **titulo**: uma linha, espec\xEDfica, sem "urgente" nem "por favor". Descreve o problema, n\xE3o o pedido de socorro.
+- **descricao**: o que a pessoa esperava, o que aconteceu, desde quando, e qualquer identificador que ela deu (n\xFAmero de pedido, nome de relat\xF3rio, loja). Escreva em portugu\xEAs, terceira pessoa, sem repetir a conversa inteira.
+- **prioridade**: siga o impacto DESCRITO, n\xE3o a urg\xEAncia sentida.
+  - \`critica\`: sistema fora do ar, impacto direto em vendas ou opera\xE7\xE3o parada.
+  - \`alta\`: funcionalidade comprometida, existe contorno tempor\xE1rio.
+  - \`normal\`: melhoria, ajuste pontual, d\xFAvida, sugest\xE3o.
+- **tipoChamadoId**: escolha um id EXATAMENTE da lista fornecida. Nunca invente id.
+- **area**: a \xE1rea do solicitante, se ela apareceu na conversa. Sen\xE3o, null.`;
+function montarPromptExtracao(params) {
+  const tipos = params.tiposPermitidos.map((t) => `- ${t.id}: ${t.nome}`).join("\n");
+  const conversa = params.mensagens.filter((m) => m.papel === "user" || m.papel === "assistant").map((m) => `${m.papel === "user" ? "Colaborador" : "Assistente"}: ${m.conteudo}`).join("\n");
+  return [
+    "Tipos de chamado dispon\xEDveis:",
+    tipos.length > 0 ? tipos : "(nenhum)",
+    "",
+    "Conversa:",
+    conversa
+  ].join("\n");
+}
 
 // src/lib/ia/cliente.ts
 var TIMEOUT_PADRAO_MS = 25e3;
@@ -762,6 +788,30 @@ ${m.conteudo}` : m.conteudo
     const { classe, justificativa } = interpretarClassificacao(bruto);
     return { classe, justificativa, custoEstimadoUsd: custo };
   }
+  async extrairProposta(params) {
+    const dados = await this.chamar(
+      {
+        messages: [
+          { role: "system", content: PROMPT_EXTRACAO },
+          { role: "user", content: montarPromptExtracao(params) }
+        ],
+        response_format: { type: "json_object" }
+      },
+      "extracao"
+    );
+    const custo = this.estimarCusto(
+      Number(dados.usage?.prompt_tokens ?? 0),
+      Number(dados.usage?.completion_tokens ?? 0)
+    );
+    this._custoAcumuladoUsd += custo;
+    return {
+      proposta: interpretarProposta(
+        dados.choices?.[0]?.message?.content,
+        params.tiposPermitidos.map((t) => t.id)
+      ),
+      custoEstimadoUsd: custo
+    };
+  }
   async verificarSaude() {
     try {
       await this.chat({
@@ -799,6 +849,32 @@ function interpretarClassificacao(bruto) {
     return { classe: "indeterminado", justificativa: "resposta n\xE3o era JSON v\xE1lido" };
   }
 }
+function interpretarProposta(bruto, idsPermitidos) {
+  if (typeof bruto !== "string" || bruto.trim().length === 0) return null;
+  let v;
+  try {
+    const parsed = JSON.parse(bruto);
+    if (!parsed || typeof parsed !== "object") return null;
+    v = parsed;
+  } catch {
+    return null;
+  }
+  if (v.pronto !== true) return null;
+  const titulo = typeof v.titulo === "string" ? v.titulo.trim() : "";
+  const descricao = typeof v.descricao === "string" ? v.descricao.trim() : "";
+  const tipoChamadoId = typeof v.tipoChamadoId === "string" ? v.tipoChamadoId : "";
+  const prioridade = v.prioridade;
+  if (titulo.length < 5 || descricao.length < 10) return null;
+  if (prioridade !== "critica" && prioridade !== "alta" && prioridade !== "normal") return null;
+  if (!idsPermitidos.includes(tipoChamadoId)) return null;
+  return {
+    titulo,
+    descricao,
+    prioridade,
+    tipoChamadoId,
+    area: typeof v.area === "string" && v.area.trim().length > 0 ? v.area.trim() : null
+  };
+}
 
 // src/lib/ia/fake.ts
 var ClienteIAFake = class {
@@ -809,6 +885,8 @@ var ClienteIAFake = class {
   chatsRecebidos = [];
   classificacoesRecebidas = [];
   falharChat = false;
+  /** Reinicia o roteiro quando ele acaba — só para desenvolvimento. */
+  repetirRoteiro = false;
   falharClassificacao = false;
   classePadrao = "resolucao_real";
   /** Classe por título de ticket, para montar histórico misto na Regra 2. */
@@ -816,11 +894,19 @@ var ClienteIAFake = class {
   constructor(roteiro = []) {
     this.roteiro = roteiro;
   }
+  /** Troca o roteiro e reinicia o índice — usado pelo modo demonstração. */
+  definirRoteiro(roteiro) {
+    this.roteiro = [...roteiro];
+    this.indice = 0;
+  }
   async chat(params) {
     this.chatsRecebidos.push(params);
     this.permissoesRecebidas.push(params.toolsPermitidas.map((t) => t.nome));
     if (this.falharChat) {
       throw new ErroIA("fake: IA indispon\xEDvel", { transitorio: true, etapa: "chat" });
+    }
+    if (this.repetirRoteiro && this.roteiro.length > 0 && this.indice >= this.roteiro.length) {
+      this.indice = 0;
     }
     const turno = this.roteiro[this.indice];
     this.indice += 1;
@@ -849,6 +935,27 @@ var ClienteIAFake = class {
       justificativa: "fake",
       custoEstimadoUsd: 5e-4
     };
+  }
+  /**
+   * Proposta que o fake devolve. `null` simula "ainda falta informação", que é o
+   * caso a testar tanto quanto o caminho pronto.
+   */
+  propostaSugerida = {
+    titulo: "Pipeline de vendas n\xE3o atualizou",
+    descricao: "O relat\xF3rio di\xE1rio de vendas n\xE3o trouxe os dados de ontem.",
+    prioridade: "alta",
+    tipoChamadoId: "rt-1",
+    area: null
+  };
+  extracoesRecebidas = [];
+  async extrairProposta(params) {
+    this.extracoesRecebidas.push(params);
+    if (this.falharChat) {
+      throw new ErroIA("fake: extra\xE7\xE3o indispon\xEDvel", { transitorio: true, etapa: "extracao" });
+    }
+    const p = this.propostaSugerida;
+    const permitido = p && params.tiposPermitidos.some((t) => t.id === p.tipoChamadoId);
+    return { proposta: permitido ? p : null, custoEstimadoUsd: 2e-4 };
   }
   async verificarSaude() {
     return this.falharChat ? { ok: false, detalhe: "fake com falha" } : { ok: true, detalhe: "fake" };
@@ -934,16 +1041,33 @@ var CONFIG_PADRAO = Object.freeze({
   limite_requisicoes_por_minuto: 30,
   teto_custo_conversa_usd: 0.5
 });
+function lista(bruto) {
+  return (bruto ?? "").split(",").map((v) => v.trim().toLowerCase()).filter((v) => v.length > 0);
+}
+function valoresDoBootstrap(env) {
+  const parcial = {};
+  const dominios = lista(env.GOATLAS_DOMINIOS);
+  if (dominios.length > 0) parcial.dominios_permitidos = dominios;
+  const admins = lista(env.GOATLAS_ADMINS);
+  if (admins.length > 0) parcial.admins = admins;
+  const tipos = lista(env.GOATLAS_TIPOS_CHAMADO);
+  if (tipos.length > 0) parcial.tipos_chamado_permitidos = tipos;
+  const espacos = (env.GOATLAS_ESPACOS_CONFLUENCE ?? "").split(",").map((v) => v.trim()).filter((v) => v.length > 0);
+  if (espacos.length > 0) parcial.espacos_confluence = espacos;
+  if (env.GOATLAS_SERVICE_DESK_ID) parcial.service_desk_id = env.GOATLAS_SERVICE_DESK_ID;
+  return parcial;
+}
 var Config = class {
-  constructor(db) {
+  constructor(db, bootstrap = {}) {
     this.db = db;
+    this.bootstrap = bootstrap;
   }
   cache = null;
   async carregar() {
     if (this.cache) return this.cache;
     const r = await this.db.query("SELECT chave, valor_json FROM config", []);
     const linhas = linhasComoObjetos(r);
-    const valores = { ...CONFIG_PADRAO };
+    const valores = { ...CONFIG_PADRAO, ...this.bootstrap };
     for (const linha of linhas) {
       if (!(linha.chave in CONFIG_PADRAO)) continue;
       try {
@@ -976,6 +1100,93 @@ var Config = class {
     this.cache = null;
   }
 };
+
+// src/lib/demo.ts
+var TIPO_CHAMADO_DEMO = "rt-demo";
+var SERVICE_DESK_DEMO = "sd-demo";
+function configDemo() {
+  return {
+    tipos_chamado_permitidos: [TIPO_CHAMADO_DEMO],
+    service_desk_id: SERVICE_DESK_DEMO,
+    espacos_confluence: ["TECH"],
+    // Exemplos EXPLICITAMENTE fictícios. Em produção esta lista nasce vazia e a
+    // Regra 2 se declara indisponível (RF-14, Q3) — é o comportamento certo, e não
+    // deve ser "resolvido" copiando estes exemplos para lá.
+    regra2_exemplos_ajuste_operacional: [
+      "[EXEMPLO FICT\xCDCIO] Rodei o pipeline manualmente",
+      "[EXEMPLO FICT\xCDCIO] Reparticionei a tabela para destravar"
+    ]
+  };
+}
+function semearAtlassianDemo(fake) {
+  fake.estado.tiposChamado = [
+    {
+      id: TIPO_CHAMADO_DEMO,
+      serviceDeskId: SERVICE_DESK_DEMO,
+      nome: "Suporte de tecnologia",
+      descricao: "Problemas em sistemas, relat\xF3rios e integra\xE7\xF5es"
+    }
+  ];
+  fake.estado.paginas = [
+    {
+      id: "demo-1",
+      titulo: "Como reprocessar o relat\xF3rio de vendas",
+      espaco: "TECH",
+      url: "https://goengenharia.atlassian.net/wiki/spaces/TECH/pages/1",
+      score: 0.93,
+      trecho: "Quando o relat\xF3rio di\xE1rio n\xE3o atualiza, abra o painel de tarefas e execute a rotina de reprocessamento manual.",
+      labels: []
+    },
+    {
+      id: "demo-2",
+      titulo: "Padr\xE3o de nomes das lojas no sistema",
+      espaco: "TECH",
+      url: "https://goengenharia.atlassian.net/wiki/spaces/TECH/pages/2",
+      score: 0.42,
+      trecho: "As lojas seguem o padr\xE3o SIGLA-CIDADE.",
+      labels: []
+    }
+  ];
+  fake.estado.historico = [
+    {
+      issueKey: "DEMO-101",
+      titulo: "Relat\xF3rio de vendas n\xE3o atualizou",
+      criadoEm: "2026-06-02T10:00:00.000Z",
+      resolvidoEm: "2026-06-02T14:00:00.000Z",
+      chaveAgrupamento: "relatorio-vendas",
+      comentariosResolucao: ["[FICT\xCDCIO] Reprocessei manualmente e voltou."]
+    },
+    {
+      issueKey: "DEMO-118",
+      titulo: "Relat\xF3rio de vendas sem dados do dia",
+      criadoEm: "2026-07-04T09:00:00.000Z",
+      resolvidoEm: "2026-07-04T11:30:00.000Z",
+      chaveAgrupamento: "relatorio-vendas",
+      comentariosResolucao: ["[FICT\xCDCIO] Rodei a rotina na m\xE3o de novo."]
+    }
+  ];
+}
+function semearIaDemo(fake) {
+  fake.definirRoteiro([
+    {
+      texto: "Entendi. Deixa eu ver se isso j\xE1 est\xE1 documentado e se j\xE1 apareceu antes.",
+      toolsPropostas: [
+        { nome: "search_confluence", argumentos: { topico: "relat\xF3rio de vendas" } },
+        { nome: "check_jira_history", argumentos: { tipoProblema: "relatorio-vendas" } }
+      ]
+    },
+    { texto: "Montei o chamado com o que voc\xEA contou. Confira e confirme." }
+  ]);
+  fake.repetirRoteiro = true;
+  fake.classePadrao = "ajuste_operacional";
+  fake.propostaSugerida = {
+    titulo: "Relat\xF3rio de vendas n\xE3o atualizou",
+    descricao: "O relat\xF3rio di\xE1rio de vendas n\xE3o trouxe os dados do dia anterior. Sem atualiza\xE7\xE3o desde a manh\xE3.",
+    prioridade: "alta",
+    tipoChamadoId: TIPO_CHAMADO_DEMO,
+    area: null
+  };
+}
 
 // src/lib/db/schema.ts
 var TABELAS = [
@@ -1333,11 +1544,11 @@ function montarMensagemBloqueio(veredito) {
     ].join("\n");
   }
   const ev = veredito.evidencia;
-  const lista = ev.ticketsAjusteOperacional.slice(0, 5).map((t) => `- ${t.issueKey} \u2014 ${t.titulo}`).join("\n");
+  const lista2 = ev.ticketsAjusteOperacional.slice(0, 5).map((t) => `- ${t.issueKey} \u2014 ${t.titulo}`).join("\n");
   return [
     `Esse problema j\xE1 apareceu ${ev.ticketsAjusteOperacional.length} vezes, e nas vezes anteriores foi resolvido com um ajuste manual em vez de corre\xE7\xE3o da causa raiz:`,
     "",
-    lista,
+    lista2,
     "",
     "Abrir de novo provavelmente traria o mesmo ajuste tempor\xE1rio. Faz mais sentido tratar a causa \u2014 posso registrar isso como um chamado de causa raiz, com o hist\xF3rico anexado.",
     "",
@@ -1708,6 +1919,11 @@ var Orquestrador = class {
       }
       if (bloqueio) break;
     }
+    if (!bloqueio && !atual.proposta && this.verificacoesConcluidas(atual)) {
+      custoTurno += await this.tentarMontarProposta(atual, config);
+      const relido = await this.conversas.obter(atual.id);
+      if (relido) atual = relido;
+    }
     await this.conversas.somarCusto(atual.id, custoTurno);
     const textoFinal = bloqueio?.texto ?? ultimoTexto;
     await this.conversas.adicionarMensagem(
@@ -1727,6 +1943,51 @@ var Orquestrador = class {
       custoUsd: custoTurno,
       tetoCustoAtingido: false
     };
+  }
+  /**
+   * Monta a proposta imediatamente — usado depois do override (RF-13).
+   *
+   * Sem isso, o agente diz "vamos seguir com o chamado" e nada acontece até a
+   * pessoa digitar outra mensagem: um beco sem saída logo depois de ela ter
+   * insistido. O override É o sinal de seguir.
+   */
+  async montarPropostaAgora(conversa, config) {
+    if (conversa.proposta) return true;
+    if (!this.verificacoesConcluidas(conversa)) return false;
+    const custo = await this.tentarMontarProposta(conversa, config);
+    if (custo > 0) await this.conversas.somarCusto(conversa.id, custo);
+    return Boolean((await this.conversas.obter(conversa.id))?.proposta);
+  }
+  /** Ambas as tools foram TENTADAS — verificada ou falhada (RNF-18). */
+  verificacoesConcluidas(c) {
+    return (c.confluenceVerificado || c.confluenceFalhou) && (c.historicoVerificado || c.historicoFalhou);
+  }
+  /**
+   * Tenta extrair a proposta. Falha ou contexto insuficiente **não é erro**: o
+   * agente segue conversando, que é o comportamento certo quando ainda falta
+   * informação — inventar campos para poder propor seria pior.
+   */
+  async tentarMontarProposta(conversa, config) {
+    if (config.tipos_chamado_permitidos.length === 0) return 0;
+    try {
+      const r = await this.ia.extrairProposta({
+        mensagens: await this.conversas.listarMensagens(conversa.id),
+        tiposPermitidos: config.tipos_chamado_permitidos.map((id) => ({ id, nome: id }))
+      });
+      if (r.proposta) {
+        await this.conversas.definirProposta(conversa.id, {
+          titulo: r.proposta.titulo,
+          descricao: r.proposta.descricao,
+          tipoChamadoId: r.proposta.tipoChamadoId,
+          prioridade: r.proposta.prioridade,
+          area: r.proposta.area,
+          componente: null
+        });
+      }
+      return r.custoEstimadoUsd;
+    } catch {
+      return 0;
+    }
   }
   async rodarTool(conversa, nome, argumentos, config) {
     if (nome === TOOLS.search_confluence.nome) {
@@ -1824,6 +2085,21 @@ var Outbox = class {
     const r = await this.db.query(
       `SELECT ${COLUNAS} FROM submissoes WHERE chave_idempotencia = ?`,
       [chave]
+    );
+    const linha = primeiraLinha(r);
+    return linha ? daLinha2(linha) : null;
+  }
+  /**
+   * Submissão pelo `issueKey`.
+   *
+   * É o que permite mostrar título e prioridade **do nosso próprio registro**
+   * quando a Atlassian não responde (`RNF-19`): a pessoa vê seus chamados com
+   * conteúdo em vez de "título indisponível". O dado já estava aqui; faltava usá-lo.
+   */
+  async obterPorIssueKey(issueKey) {
+    const r = await this.db.query(
+      `SELECT ${COLUNAS} FROM submissoes WHERE issue_key = ? LIMIT 1`,
+      [issueKey]
     );
     const linha = primeiraLinha(r);
     return linha ? daLinha2(linha) : null;
@@ -2160,13 +2436,15 @@ var ServicoChamados = class {
 function novoIdPadrao() {
   return crypto.randomUUID();
 }
-async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).toISOString(), novoId = novoIdPadrao) {
+async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).toISOString(), novoId = novoIdPadrao, reaproveitar = {}) {
   await migrar(env.DB);
-  const config = new Config(env.DB);
+  const modoDemo = env.GOATLAS_MODO_DEMO === "1";
+  const bootstrap = { ...modoDemo ? configDemo() : {}, ...valoresDoBootstrap(env) };
+  const config = new Config(env.DB, bootstrap);
   const valores = await config.carregar();
   const auditoria = new AuditoriaBanco(env.DB, agora, novoId);
-  const usandoFakes = env.GOATLAS_USAR_FAKES === "1" || !env.ATLASSIAN_API_TOKEN;
-  const atlassian = usandoFakes ? new ClienteAtlassianFake() : new ClienteAtlassianHttp({
+  const usandoFakes = modoDemo || env.GOATLAS_USAR_FAKES === "1" || !env.ATLASSIAN_API_TOKEN;
+  const atlassian = reaproveitar.atlassian ? reaproveitar.atlassian : usandoFakes ? new ClienteAtlassianFake() : new ClienteAtlassianHttp({
     baseUrl: env.ATLASSIAN_BASE_URL ?? "",
     email: env.ATLASSIAN_EMAIL ?? "",
     apiToken: env.ATLASSIAN_API_TOKEN ?? "",
@@ -2174,13 +2452,17 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     ttlConteudoSeg: valores.ttl_conteudo_seg,
     campoSolicitanteId: null
   });
-  const ia = usandoFakes || !env.LLM_API_KEY ? new ClienteIAFake() : new ClienteIAHttp({
+  const ia = reaproveitar.ia ? reaproveitar.ia : usandoFakes || !env.LLM_API_KEY ? new ClienteIAFake() : new ClienteIAHttp({
     baseUrl: env.LLM_BASE_URL ?? null,
     apiKey: env.LLM_API_KEY,
     modelo: env.LLM_MODEL ?? "gpt-5.4-mini",
     apiKeyFallback: env.LLM_FALLBACK ?? null,
     ...env.LLM_FALLBACK_MODEL ? { modeloFallback: env.LLM_FALLBACK_MODEL } : {}
   });
+  if (modoDemo) {
+    if (atlassian instanceof ClienteAtlassianFake) semearAtlassianDemo(atlassian);
+    if (ia instanceof ClienteIAFake) semearIaDemo(ia);
+  }
   const conversas = new RepositorioConversas(env.DB, agora);
   const vinculos = new RepositorioVinculos(env.DB, agora);
   const outbox = new Outbox(env.DB, agora);
@@ -2201,7 +2483,8 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     orquestrador,
     agora,
     novoId,
-    usandoFakes
+    usandoFakes,
+    modoDemo
   };
 }
 
@@ -2343,7 +2626,7 @@ async function tratarRequisicao(req, ctx, env) {
   }
   const eu = auth.identidade;
   if (caminho === "/api/auth/me" && req.method === "GET") {
-    return json({ email: eu.email, nome: eu.nome, isAdmin: eu.isAdmin });
+    return json({ email: eu.email, nome: eu.nome, isAdmin: eu.isAdmin, modoDemo: ctx.modoDemo });
   }
   if (req.method === "POST") {
     const limite = await verificarLimite(
@@ -2438,7 +2721,13 @@ async function rotear(req, ctx, eu, caminho, url) {
       resultado: "sucesso",
       detalhe: { bloqueiosSobrepostos: sobrepostos, motivo }
     });
-    return json({ ok: true, bloqueiosSobrepostos: sobrepostos });
+    const liberada = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email);
+    let proposta2 = liberada?.proposta ?? null;
+    if (liberada && !proposta2) {
+      await ctx.orquestrador.montarPropostaAgora(liberada, ctx.valores);
+      proposta2 = (await ctx.conversas.obterDoSolicitante(conversa.id, eu.email))?.proposta ?? null;
+    }
+    return json({ ok: true, bloqueiosSobrepostos: sobrepostos, proposta: proposta2 });
   }
   const proposta = caminho.match(/^\/api\/conversas\/([^/]+)\/proposta$/);
   if (proposta && req.method === "PUT") {
@@ -2508,6 +2797,13 @@ async function rotear(req, ctx, eu, caminho, url) {
   }
   if (caminho === "/api/chamados" && req.method === "GET") {
     const vinculos = await ctx.vinculos.listarDoSolicitante(eu.email, 100);
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "chamado_lido",
+      recurso: "meus-chamados",
+      resultado: "sucesso",
+      detalhe: { quantidade: vinculos.length }
+    });
     const itens = [];
     for (const v of vinculos) {
       try {
@@ -2522,11 +2818,12 @@ async function rotear(req, ctx, eu, caminho, url) {
           verificadoRegras: v.verificadoRegras
         });
       } catch {
+        const submissao = await ctx.outbox.obterPorIssueKey(v.issueKey);
         itens.push({
           issueKey: v.issueKey,
-          titulo: null,
+          titulo: submissao?.payload.titulo ?? null,
           status: "indisponivel",
-          prioridade: null,
+          prioridade: submissao?.payload.prioridade ?? null,
           atualizadoEm: null,
           via: v.via,
           verificadoRegras: v.verificadoRegras
@@ -2658,6 +2955,7 @@ async function tratarHealth(ctx) {
     {
       ok,
       usandoFakes: ctx.usandoFakes,
+      modoDemo: ctx.modoDemo,
       dependencias: { atlassian, ia, banco, sso: { ok: true, detalhe: "edge GoDeploy" } }
     },
     ok ? 200 : 503

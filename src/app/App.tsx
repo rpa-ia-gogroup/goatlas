@@ -55,6 +55,13 @@ export function App() {
         )}
       </header>
 
+      {eu?.modoDemo && (
+        <p className="tarja-demo" role="status">
+          <strong>Modo demonstração.</strong> Os dados são fictícios e nada é criado no Jira —
+          chamados abertos aqui <strong>não chegam ao time de tech</strong>.
+        </p>
+      )}
+
       <main className="painel">
         {erroAuth ? (
           <Aviso atencao>{erroAuth}</Aviso>

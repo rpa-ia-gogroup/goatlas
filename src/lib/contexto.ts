@@ -14,7 +14,8 @@ import { ClienteIAHttp } from './ia/cliente'
 import { ClienteIAFake } from './ia/fake'
 import type { ClienteIA } from './ia/tipos'
 import { AuditoriaBanco, type Auditoria } from './audit'
-import { Config, type ConfigValores } from './config'
+import { Config, valoresDoBootstrap, type BootstrapEnv, type ConfigValores } from './config'
+import { configDemo, semearAtlassianDemo, semearIaDemo } from './demo'
 import { migrar } from './db/schema'
 import type { Banco } from './db/tipos'
 import { RepositorioConversas } from './agent/estado'
@@ -25,7 +26,7 @@ import { RepositorioVinculos } from './tickets/vinculos'
 import { ServicoChamados } from './tickets/servico'
 
 /** O que o GoDeploy injeta. `DB` é a plataforma; o resto são secrets. */
-export interface EnvGoDeploy {
+export interface EnvGoDeploy extends BootstrapEnv {
   readonly DB: Banco
   readonly ATLASSIAN_BASE_URL?: string
   readonly ATLASSIAN_EMAIL?: string
@@ -37,8 +38,14 @@ export interface EnvGoDeploy {
   readonly LLM_FALLBACK?: string
   readonly LLM_FALLBACK_MODEL?: string
   readonly GODEPLOY_CRON_KEY?: string
-  /** `1` usa os fakes — para desenvolvimento antes de Q1. Nunca em produção. */
+  /** `1` usa os fakes — para desenvolvimento antes de Q1. Nunca em produção real. */
   readonly GOATLAS_USAR_FAKES?: string
+  /**
+   * `1` publica o app em **modo demonstração**: fakes semeados com dados fictícios
+   * e tarja de aviso permanente na interface. Ver `demo.ts` — a tarja não é
+   * cosmética: sem ela alguém acredita que o chamado chegou ao time de tech.
+   */
+  readonly GOATLAS_MODO_DEMO?: string
 }
 
 export interface Contexto {
@@ -56,6 +63,7 @@ export interface Contexto {
   readonly agora: () => string
   readonly novoId: () => string
   readonly usandoFakes: boolean
+  readonly modoDemo: boolean
 }
 
 export function novoIdPadrao(): string {
@@ -83,11 +91,15 @@ export async function montarContexto(
 ): Promise<Contexto> {
   await migrar(env.DB)
 
-  const config = new Config(env.DB)
+  const modoDemo = env.GOATLAS_MODO_DEMO === '1'
+  // Bootstrap: padrão fail-closed → env → banco. A demo acrescenta o mínimo para o
+  // app ser clicável; domínios e admins vêm SEMPRE do env/banco, nunca da demo.
+  const bootstrap = { ...(modoDemo ? configDemo() : {}), ...valoresDoBootstrap(env) }
+  const config = new Config(env.DB, bootstrap)
   const valores = await config.carregar()
   const auditoria = new AuditoriaBanco(env.DB, agora, novoId)
 
-  const usandoFakes = env.GOATLAS_USAR_FAKES === '1' || !env.ATLASSIAN_API_TOKEN
+  const usandoFakes = modoDemo || env.GOATLAS_USAR_FAKES === '1' || !env.ATLASSIAN_API_TOKEN
 
   const atlassian: ClienteAtlassian = reaproveitar.atlassian
     ? reaproveitar.atlassian
@@ -114,6 +126,14 @@ export async function montarContexto(
           ...(env.LLM_FALLBACK_MODEL ? { modeloFallback: env.LLM_FALLBACK_MODEL } : {}),
         })
 
+  if (modoDemo) {
+    // Os fakes são semeados a cada montagem porque o Worker é stateless: o estado
+    // deles não sobrevive entre requisições. O que persiste (conversa, vínculo,
+    // chamado) está no banco.
+    if (atlassian instanceof ClienteAtlassianFake) semearAtlassianDemo(atlassian)
+    if (ia instanceof ClienteIAFake) semearIaDemo(ia)
+  }
+
   const conversas = new RepositorioConversas(env.DB, agora)
   const vinculos = new RepositorioVinculos(env.DB, agora)
   const outbox = new Outbox(env.DB, agora)
@@ -136,5 +156,6 @@ export async function montarContexto(
     agora,
     novoId,
     usandoFakes,
+    modoDemo,
   }
 }

@@ -9,6 +9,8 @@ export interface Identidade {
   readonly email: string
   readonly nome: string
   readonly isAdmin: boolean
+  /** App publicado em modo demonstração: nada é criado no Jira. */
+  readonly modoDemo: boolean
 }
 
 export type EstadoVerificacao = 'pendente' | 'ok' | 'falhou'

@@ -77,16 +77,70 @@ export const CONFIG_PADRAO: Readonly<ConfigValores> = Object.freeze({
 
 export type ChaveConfig = keyof ConfigValores
 
+/**
+ * Bootstrap por env — resolve o problema do primeiro boot.
+ *
+ * Como TODA allowlist nasce vazia e vazio significa negar (`RNF-07`), um app
+ * recém-deployado nega **todo mundo**, inclusive quem precisaria entrar para
+ * configurá-lo. Ovo e galinha.
+ *
+ * A saída é o mesmo padrão do godocs: env como **bootstrap**, banco como fonte
+ * corrente. O env só vale enquanto a chave **não existe** no banco — no instante
+ * em que um admin salva pelo console, o banco manda e o env vira irrelevante
+ * (`RF-49`: mudança sem deploy).
+ *
+ * ⚠️ Isto **não** afrouxa o fail-closed: env vazio **e** banco vazio continua
+ * negando. O bootstrap dá um caminho de entrada, não uma porta aberta.
+ */
+export interface BootstrapEnv {
+  /** Lista separada por vírgula. Ex.: `gocase.com,gobeaute.com.br` (Q7). */
+  readonly GOATLAS_DOMINIOS?: string
+  /** Lista separada por vírgula de e-mails admin (RF-02, RN-09). */
+  readonly GOATLAS_ADMINS?: string
+  readonly GOATLAS_SERVICE_DESK_ID?: string
+  readonly GOATLAS_TIPOS_CHAMADO?: string
+  readonly GOATLAS_ESPACOS_CONFLUENCE?: string
+}
+
+function lista(bruto: string | undefined): string[] {
+  return (bruto ?? '')
+    .split(',')
+    .map((v) => v.trim().toLowerCase())
+    .filter((v) => v.length > 0)
+}
+
+export function valoresDoBootstrap(env: BootstrapEnv): Partial<ConfigValores> {
+  const parcial: Partial<ConfigValores> = {}
+  const dominios = lista(env.GOATLAS_DOMINIOS)
+  if (dominios.length > 0) parcial.dominios_permitidos = dominios
+  const admins = lista(env.GOATLAS_ADMINS)
+  if (admins.length > 0) parcial.admins = admins
+  const tipos = lista(env.GOATLAS_TIPOS_CHAMADO)
+  if (tipos.length > 0) parcial.tipos_chamado_permitidos = tipos
+  const espacos = (env.GOATLAS_ESPACOS_CONFLUENCE ?? '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0)
+  if (espacos.length > 0) parcial.espacos_confluence = espacos
+  if (env.GOATLAS_SERVICE_DESK_ID) parcial.service_desk_id = env.GOATLAS_SERVICE_DESK_ID
+  return parcial
+}
+
 export class Config {
   private cache: ConfigValores | null = null
 
-  constructor(private readonly db: Banco) {}
+  constructor(
+    private readonly db: Banco,
+    /** Bootstrap do primeiro boot. O banco, quando tem valor, sempre vence. */
+    private readonly bootstrap: Partial<ConfigValores> = {},
+  ) {}
 
   async carregar(): Promise<ConfigValores> {
     if (this.cache) return this.cache
     const r = await this.db.query('SELECT chave, valor_json FROM config', [])
     const linhas = linhasComoObjetos<{ chave: string; valor_json: string }>(r)
-    const valores: ConfigValores = { ...CONFIG_PADRAO }
+    // Ordem que importa: padrão (fail-closed) → bootstrap do env → BANCO.
+    const valores: ConfigValores = { ...CONFIG_PADRAO, ...this.bootstrap }
     for (const linha of linhas) {
       if (!(linha.chave in CONFIG_PADRAO)) continue
       try {

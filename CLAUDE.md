@@ -230,7 +230,11 @@ Fase 0 diagnóstico (João, sem código) → **Fase 1 MVP** → Fase 2 conhecime
 governança → Fase 3 SLA e notificações → Fase 4 rollout. Progresso tarefa por
 tarefa em [`specs/001-mvp-chamados-e-agente/tasks.md`](specs/001-mvp-chamados-e-agente/tasks.md).
 
-**49 de 58 tarefas concluídas · 152 testes · typecheck limpo · fluxo validado no
+**No ar em modo demonstração: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
+ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
+chega ao time de tech.
+
+**49 de 58 tarefas concluídas · 166 testes · typecheck limpo · fluxo validado no
 navegador**, tudo sem credencial e sem rede. Pronto: fundação, as seis travas
 críticas, clientes de Atlassian e IA, runtime do agente, rotas, worker, frontend e
 `docs/DEPLOY.md`.
