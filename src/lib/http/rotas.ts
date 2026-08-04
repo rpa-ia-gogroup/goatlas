@@ -423,8 +423,19 @@ async function rotear(
       })
     }
 
+    // T-116 — o registro só acontece quando a busca de fato procurou em algum lugar.
+    // Sem espaço configurado ela não é lacuna de documentação, é lacuna de config.
+    const buscaId = configurada
+      ? await ctx.conhecimento.registrarBusca({
+          solicitanteEmail: eu.email,
+          termo,
+          resultados: paginas.length,
+        })
+      : null
+
     return json({
       termo,
+      buscaId,
       buscaConfigurada: configurada,
       itens: paginas.map((p) => ({
         id: p.id,
@@ -460,6 +471,20 @@ async function rotear(
       })
       return r.motivo === 'indisponivel' ? ERROS.conteudoIndisponivel() : ERROS.naoEncontrado()
     }
+
+    // T-116 — o `?de=` diz de qual busca a pessoa veio. `via` é DERIVADO: só vale
+    // `busca` se o id pertencer a quem está lendo (o e-mail está no `WHERE`).
+    const veioDaBusca = await ctx.conhecimento.marcarClique(
+      decodificar(url.searchParams.get('de') ?? '') ?? '',
+      eu.email,
+    )
+    await ctx.conhecimento.registrarLeitura({
+      solicitanteEmail: eu.email,
+      paginaId: r.metadados.id,
+      titulo: r.metadados.titulo,
+      espaco: r.metadados.espaco,
+      via: veioDaBusca ? 'busca' : 'direto',
+    })
 
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -671,6 +696,13 @@ async function rotear(
       })
       return json({ ok: true })
     }
+  }
+
+  // T-117 / RF-42 — o backlog de documentação. Admin porque é dado agregado de toda a
+  // empresa; o método do registro carrega `_apenasAdmin` no nome pelo mesmo motivo.
+  if (caminho === '/api/admin/lacunas' && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    return json(await ctx.conhecimento.agregarLacunas_apenasAdmin())
   }
 
   if (caminho === '/api/admin/auditoria' && req.method === 'GET') {

@@ -105,6 +105,11 @@ export interface ResultadoBusca {
 export interface RespostaBusca {
   readonly termo: string
   /**
+   * Id desta busca (`T-116`). A tela o devolve ao abrir uma página, e é assim que o
+   * mapa de lacunas distingue "não existe documentação" de "existe e não convence".
+   */
+  readonly buscaId: string | null
+  /**
    * `false` = nenhum espaço na allowlist. Zero resultados por falta de configuração
    * e zero por falta de documentação são problemas de pessoas diferentes, e a tela
    * **precisa** dizer qual dos dois foi.
@@ -175,6 +180,28 @@ export interface ConfigValores {
   readonly ttl_conteudo_seg: number
   readonly limite_requisicoes_por_minuto: number
   readonly teto_custo_conversa_usd: number
+}
+
+/* ---------- mapa de lacunas (RF-42) ------------------------------------ */
+
+export interface TermoComLacuna {
+  readonly termo: string
+  readonly ocorrencias: number
+  /** Pessoas distintas — o mapa conta, não nomeia (ver `confluence/registro.ts`). */
+  readonly pessoas: number
+  readonly ultimaEm: string
+}
+
+export interface OverrideRegistrado {
+  readonly regra: string
+  readonly motivo: string
+  readonly criadoEm: string
+}
+
+export interface MapaDeLacunas {
+  readonly semResultado: readonly TermoComLacuna[]
+  readonly semClique: readonly TermoComLacuna[]
+  readonly overrides: readonly OverrideRegistrado[]
 }
 
 export interface RegistroAuditoria {
@@ -286,8 +313,11 @@ export const api = {
   buscarDocumentacao: (termo: string) =>
     chamar<RespostaBusca>(`/api/confluence/busca?q=${encodeURIComponent(termo)}`),
 
-  lerPagina: (id: string) =>
-    chamar<PaginaLida>(`/api/confluence/pagina/${encodeURIComponent(id)}`),
+  lerPagina: (id: string, deBusca?: string | null) =>
+    chamar<PaginaLida>(
+      `/api/confluence/pagina/${encodeURIComponent(id)}` +
+        (deBusca ? `?de=${encodeURIComponent(deBusca)}` : ''),
+    ),
 
   espacos: () => chamar<{ itens: EspacoNavegavel[] }>('/api/confluence/espacos'),
 
@@ -304,6 +334,8 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ chave, valor }),
     }),
+
+  adminLacunas: () => chamar<MapaDeLacunas>('/api/admin/lacunas'),
 
   adminAuditoria: (email?: string) =>
     chamar<{ itens: RegistroAuditoria[] }>(

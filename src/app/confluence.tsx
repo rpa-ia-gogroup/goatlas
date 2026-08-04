@@ -334,12 +334,12 @@ export function TelaDocumentacao({
     }
   }
 
-  async function abrir(id: string) {
+  async function abrir(id: string, deBusca?: string | null) {
     setCarregando(true)
     setErro(null)
     setFilhos(null)
     try {
-      const lida = await api.lerPagina(id)
+      const lida = await api.lerPagina(id, deBusca ?? null)
       setPagina(lida)
       lembrarNaUrl({ pagina: id })
       // O nível abaixo vem em requisição separada, DEPOIS de a leitura aparecer: a
@@ -433,7 +433,13 @@ export function TelaDocumentacao({
           )}
 
           {!carregando && busca !== null && (
-            <ResultadosDaBusca resposta={busca} aoAbrir={abrir} aoConversar={aoConversar} />
+            <ResultadosDaBusca
+              resposta={busca}
+              // O id da busca viaja com o clique: é o que transforma "ninguém abriu"
+              // em sinal de lacuna (`RF-42`), em vez de silêncio.
+              aoAbrir={(id) => void abrir(id, busca.buscaId)}
+              aoConversar={aoConversar}
+            />
           )}
         </>
       )}

@@ -59,7 +59,7 @@ const PAGINA_BASE: PaginaLida = {
 
 describe('RF-42 — os três vazios são três telas diferentes', () => {
   it('sem espaço configurado: diz que é configuração, e NÃO diz "nada encontrado"', async () => {
-    const html = resultados({ termo: 'home office', buscaConfigurada: false, itens: [] })
+    const html = resultados({ termo: 'home office', buscaId: 'b1', buscaConfigurada: false, itens: [] })
     expect(html).toMatch(/não foi liberada para nenhum espaço/i)
     expect(html).toMatch(/time de tech/i)
     // O erro de sempre: tratar os dois zeros como o mesmo zero.
@@ -67,7 +67,7 @@ describe('RF-42 — os três vazios são três telas diferentes', () => {
   })
 
   it('zero resultados com espaço configurado: nomeia o termo e oferece o agente', async () => {
-    const html = resultados({ termo: 'home office', buscaConfigurada: true, itens: [] })
+    const html = resultados({ termo: 'home office', buscaId: 'b1', buscaConfigurada: true, itens: [] })
     expect(html).toMatch(/nada encontrado/i)
     expect(html).toContain('home office')
     // Vazio é convite para agir, não beco: a lacuna vira conversa (RF-42 → RF-09).
@@ -77,6 +77,7 @@ describe('RF-42 — os três vazios são três telas diferentes', () => {
   it('com resultados: título, espaço e trecho — e o score NÃO aparece', async () => {
     const html = resultados({
       termo: 'relatório',
+      buscaId: 'b1',
       buscaConfigurada: true,
       itens: [
         {
@@ -108,6 +109,7 @@ describe('RF-42 — os três vazios são três telas diferentes', () => {
     }
     const html = resultados({
       termo: 'x',
+      buscaId: 'b1',
       buscaConfigurada: true,
       itens: [item, { ...item, id: 'b', titulo: 'B' }],
     })

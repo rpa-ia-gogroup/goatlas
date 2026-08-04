@@ -19,6 +19,7 @@ import { configDemo, semearAtlassianDemo, semearIaDemo } from './demo'
 import { migrar } from './db/schema'
 import type { Banco } from './db/tipos'
 import { RepositorioConversas } from './agent/estado'
+import { RegistroConhecimento } from './confluence/registro'
 import { ExecutorTools } from './agent/tools'
 import { Orquestrador } from './agent/orquestrador'
 import { Outbox } from './tickets/outbox'
@@ -56,6 +57,8 @@ export interface Contexto {
   readonly atlassian: ClienteAtlassian
   readonly ia: ClienteIA
   readonly conversas: RepositorioConversas
+  /** Registro de busca/leitura da documentação e o mapa de lacunas (RF-42). */
+  readonly conhecimento: RegistroConhecimento
   readonly vinculos: RepositorioVinculos
   readonly outbox: Outbox
   readonly chamados: ServicoChamados
@@ -135,6 +138,7 @@ export async function montarContexto(
   }
 
   const conversas = new RepositorioConversas(env.DB, agora)
+  const conhecimento = new RegistroConhecimento(env.DB, agora, novoId)
   const vinculos = new RepositorioVinculos(env.DB, agora)
   const outbox = new Outbox(env.DB, agora)
   const chamados = new ServicoChamados(atlassian, outbox, vinculos, auditoria, novoId)
@@ -149,6 +153,7 @@ export async function montarContexto(
     atlassian,
     ia,
     conversas,
+    conhecimento,
     vinculos,
     outbox,
     chamados,

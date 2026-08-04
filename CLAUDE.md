@@ -205,6 +205,14 @@ destes reabre um vazamento que já foi fechado.
   não exposto**: nomeá-lo vaza o título, e seguir acima dele entrega a posição da página
   dentro de uma seção fechada. A tela não marca o corte — "nível oculto" contaria o que
   o corte evita.
+- **O mapa de lacunas tem TRÊS sinais, e o do meio é o que ninguém pensa** (`RF-42`):
+  termo sem resultado · **resultado que ninguém abriu** · motivo do override. O segundo
+  é documentação que existe, aparece na busca e não convence — invisível em qualquer
+  contagem de "buscas vazias". Daí a coluna `houve_clique`, marcada por `?de=<buscaId>`
+  **com o e-mail no `WHERE`**: id de outra pessoa não marca nada, e `via` é derivado
+  disso no servidor. E o mapa **conta pessoas, não as nomeia** — é backlog de escrita;
+  nomear quem procurou vira cobrança de gente, e o histórico por pessoa já está na
+  auditoria, para investigação, que é outro propósito.
 - **A identidade é resolvida no roteador e passada como tipo.** Nenhum handler
   recebe e-mail de corpo, query ou header customizado — eles recebem `Identidade`
   já validada, então um handler **não tem como** ler um e-mail que não chegou
@@ -336,7 +344,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**335 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**348 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -348,14 +356,15 @@ condições de `RN-06`, com os testes de burla escritos antes.
 A aba **Documentação** (T-114) é a superfície disso: busca, leitura com a espinha lime,
 anexo pelo proxy, **árvore do espaço com breadcrumbs** (T-115) e deep link
 `?q=`/`?pagina=`. E a deflexão da Regra 1 (T-118) linka para essa leitura, não mais para
-`atlassian.net`.
+`atlassian.net`. O uso fica registrado em `buscas`/`paginas_lidas` (T-116) e vira o
+**mapa de lacunas** na aba de admin (T-117).
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), campo customizado "Solicitante" (**Q4**), formato do
 comentário atribuído (alinhamento com o time de tech), deploy em staging/prod e o
-fechamento da Definição de Pronto. Da Fase 2, o próximo passo é T-116/T-117 (registro de
-buscas e leituras em tabela própria, e o mapa de lacunas para o admin). **Q5** não trava
-mais código, só o dado de
+fechamento da Definição de Pronto. A **Phase 2 da spec 002 está completa**; o que resta dela é a
+governança de assentos (Phase 3), que depende de **Q1** para valer contra a API real —
+o fake permite construir o console antes. **Q5** não trava código, só o dado de
 `espacos_confluence`, sem o qual a busca devolve zero e diz `buscaConfigurada: false`.
 
 ### Como testar sem credencial

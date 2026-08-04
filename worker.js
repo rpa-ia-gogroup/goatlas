@@ -1690,6 +1690,46 @@ var TABELAS = [
   `CREATE INDEX IF NOT EXISTS idx_auditoria_ator ON auditoria (ator_email, criado_em)`,
   `CREATE INDEX IF NOT EXISTS idx_auditoria_acao ON auditoria (acao, criado_em)`,
   /**
+   * Buscas na documentação (RF-42, T-116) — o insumo do mapa de lacunas e de `O6`.
+   *
+   * ⚠️ `houve_clique` é o campo que faz a diferença entre "não existe documentação"
+   * e "existe e não convence". Sem ele, o mapa só veria busca vazia — e o caso mais
+   * interessante (a página apareceu, a pessoa leu o título e foi abrir chamado) ficaria
+   * invisível.
+   *
+   * `termo_normalizado` existe para agrupar: "política" e "politica" são a mesma
+   * pergunta, e agrupar no `SELECT` com função de normalização impediria o índice.
+   */
+  `CREATE TABLE IF NOT EXISTS buscas (
+     id                TEXT PRIMARY KEY,
+     solicitante_email TEXT NOT NULL,
+     termo             TEXT NOT NULL,
+     termo_normalizado TEXT NOT NULL,
+     resultados        INTEGER NOT NULL,
+     houve_clique      INTEGER NOT NULL DEFAULT 0,
+     criado_em         TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_buscas_termo ON buscas (termo_normalizado, criado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_buscas_solicitante ON buscas (solicitante_email, criado_em)`,
+  /**
+   * Páginas lidas (RF-58, T-116) — quem leu o quê e por qual caminho.
+   *
+   * É o que mede `O6` (uso da documentação por quem **não tem assento**) e o que
+   * permite dizer se a busca resolveu. `via` é derivado no servidor, não recebido do
+   * cliente: `busca` só quando o `?de=` aponta para uma busca **daquela pessoa**.
+   */
+  `CREATE TABLE IF NOT EXISTS paginas_lidas (
+     id                TEXT PRIMARY KEY,
+     solicitante_email TEXT NOT NULL,
+     pagina_id         TEXT NOT NULL,
+     titulo            TEXT NOT NULL,
+     espaco            TEXT NOT NULL,
+     via               TEXT NOT NULL,
+     criado_em         TEXT NOT NULL,
+     CHECK (via IN ('busca', 'direto'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_paginas_lidas_pagina ON paginas_lidas (pagina_id, criado_em)`,
+  /**
    * Configuração em banco (RF-49, RF-50) — thresholds, allowlists e TTLs mudam
    * SEM DEPLOY. É também o que impede o hardcode de IDs proibido por RNF-25.
    */
@@ -1871,6 +1911,115 @@ var RepositorioConversas = class {
     return linhasComoObjetos(r).map(
       (l) => ({ regra: l.regra, motivo: l.motivo, houveOverride: l.houve_override === 1 })
     );
+  }
+};
+
+// src/lib/confluence/registro.ts
+function normalizarTermo(termo) {
+  return termo.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+var RegistroConhecimento = class {
+  constructor(db, agora, novoId) {
+    this.db = db;
+    this.agora = agora;
+    this.novoId = novoId;
+  }
+  /** Registra a busca e devolve o id — é ele que a tela manda de volta no clique. */
+  async registrarBusca(dados) {
+    const id = this.novoId();
+    await this.db.exec(
+      `INSERT INTO buscas
+         (id, solicitante_email, termo, termo_normalizado, resultados, houve_clique, criado_em)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
+      [
+        id,
+        dados.solicitanteEmail,
+        dados.termo,
+        normalizarTermo(dados.termo),
+        dados.resultados,
+        this.agora()
+      ]
+    );
+    return id;
+  }
+  /**
+   * Marca que a busca levou a uma leitura.
+   *
+   * ⚠️ O e-mail está no `WHERE`, não numa checagem antes: é o mesmo desenho de
+   * `vinculos.ts`. Assim o pior caso de um `?de=` chutado é zero linhas afetadas.
+   * Devolve se marcou, porque quem chama usa isso para decidir o `via` da leitura.
+   */
+  async marcarClique(buscaId, solicitanteEmail) {
+    if (!buscaId) return false;
+    const r = await this.db.exec(
+      `UPDATE buscas SET houve_clique = 1
+        WHERE id = ? AND solicitante_email = ?`,
+      [buscaId, solicitanteEmail]
+    );
+    return r.rowsWritten > 0;
+  }
+  async registrarLeitura(dados) {
+    await this.db.exec(
+      `INSERT INTO paginas_lidas
+         (id, solicitante_email, pagina_id, titulo, espaco, via, criado_em)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        this.novoId(),
+        dados.solicitanteEmail,
+        dados.paginaId,
+        dados.titulo,
+        dados.espaco,
+        dados.via,
+        this.agora()
+      ]
+    );
+  }
+  /**
+   * O mapa de lacunas — **agregado e entre usuários**.
+   *
+   * O nome carrega o `_apenasAdmin` de propósito, como
+   * `obterSemIsolamento_apenasReconciliacao` em `vinculos.ts`: este é o único método
+   * daqui que atravessa o isolamento por e-mail, então usá-lo numa rota de colaborador
+   * precisa ser um bug **visível na revisão**, não um detalhe.
+   */
+  async agregarLacunas_apenasAdmin(limite = 50) {
+    const porTermo = async (condicao) => {
+      const r = await this.db.query(
+        `SELECT termo_normalizado,
+                COUNT(*)                          AS ocorrencias,
+                COUNT(DISTINCT solicitante_email) AS pessoas,
+                MAX(criado_em)                    AS ultima_em
+           FROM buscas
+          WHERE ${condicao}
+          GROUP BY termo_normalizado
+          ORDER BY ocorrencias DESC, ultima_em DESC
+          LIMIT ?`,
+        [limite]
+      );
+      return linhasComoObjetos(r).map((l) => ({
+        termo: l.termo_normalizado,
+        ocorrencias: Number(l.ocorrencias),
+        pessoas: Number(l.pessoas),
+        ultimaEm: l.ultima_em
+      }));
+    };
+    const overridesBrutos = await this.db.query(
+      `SELECT regra, override_motivo, override_em
+         FROM bloqueios
+        WHERE houve_override = 1 AND override_motivo IS NOT NULL
+        ORDER BY override_em DESC
+        LIMIT ?`,
+      [limite]
+    );
+    return {
+      semResultado: await porTermo("resultados = 0"),
+      semClique: await porTermo("resultados > 0 AND houve_clique = 0"),
+      overrides: linhasComoObjetos(overridesBrutos).map((l) => ({
+        regra: l.regra,
+        motivo: l.override_motivo,
+        criadoEm: l.override_em
+      }))
+    };
   }
 };
 
@@ -2858,6 +3007,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     if (ia instanceof ClienteIAFake) semearIaDemo(ia);
   }
   const conversas = new RepositorioConversas(env.DB, agora);
+  const conhecimento = new RegistroConhecimento(env.DB, agora, novoId);
   const vinculos = new RepositorioVinculos(env.DB, agora);
   const outbox = new Outbox(env.DB, agora);
   const chamados = new ServicoChamados(atlassian, outbox, vinculos, auditoria, novoId);
@@ -2871,6 +3021,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     atlassian,
     ia,
     conversas,
+    conhecimento,
     vinculos,
     outbox,
     chamados,
@@ -4162,8 +4313,14 @@ async function rotear(req, ctx, eu, caminho, url) {
         detalhe: { motivo: "sem_resultado_util", lacunaDocumentacao: true, via: "superficie" }
       });
     }
+    const buscaId = configurada ? await ctx.conhecimento.registrarBusca({
+      solicitanteEmail: eu.email,
+      termo,
+      resultados: paginas.length
+    }) : null;
     return json({
       termo,
+      buscaId,
       buscaConfigurada: configurada,
       itens: paginas.map((p) => ({
         id: p.id,
@@ -4190,6 +4347,17 @@ async function rotear(req, ctx, eu, caminho, url) {
       });
       return r.motivo === "indisponivel" ? ERROS.conteudoIndisponivel() : ERROS.naoEncontrado();
     }
+    const veioDaBusca = await ctx.conhecimento.marcarClique(
+      decodificar(url.searchParams.get("de") ?? "") ?? "",
+      eu.email
+    );
+    await ctx.conhecimento.registrarLeitura({
+      solicitanteEmail: eu.email,
+      paginaId: r.metadados.id,
+      titulo: r.metadados.titulo,
+      espaco: r.metadados.espaco,
+      via: veioDaBusca ? "busca" : "direto"
+    });
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: "pagina_confluence_lida",
@@ -4355,6 +4523,10 @@ async function rotear(req, ctx, eu, caminho, url) {
       });
       return json({ ok: true });
     }
+  }
+  if (caminho === "/api/admin/lacunas" && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    return json(await ctx.conhecimento.agregarLacunas_apenasAdmin());
   }
   if (caminho === "/api/admin/auditoria" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();

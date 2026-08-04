@@ -11,7 +11,14 @@
  */
 
 import { useEffect, useState } from 'react'
-import { api, ErroApi, type ConfigValores, type RegistroAuditoria } from './api'
+import {
+  api,
+  ErroApi,
+  type ConfigValores,
+  type MapaDeLacunas,
+  type RegistroAuditoria,
+  type TermoComLacuna,
+} from './api'
 import { Aviso, Selo } from './componentes'
 
 /**
@@ -136,6 +143,7 @@ export function TelaAdmin() {
   const [aviso, setAviso] = useState<string | null>(null)
   const [auditoria, setAuditoria] = useState<RegistroAuditoria[] | null>(null)
   const [filtroEmail, setFiltroEmail] = useState('')
+  const [lacunas, setLacunas] = useState<MapaDeLacunas | null>(null)
 
   async function carregar() {
     try {
@@ -160,6 +168,12 @@ export function TelaAdmin() {
   useEffect(() => {
     void carregar()
     void carregarAuditoria()
+    // O mapa de lacunas não bloqueia a tela: se falhar, a configuração continua
+    // editável — são coisas independentes.
+    api
+      .adminLacunas()
+      .then(setLacunas)
+      .catch(() => setLacunas(null))
   }, [])
 
   async function salvar(chave: keyof ConfigValores, tipo: 'lista' | 'numero' | 'texto') {
@@ -239,6 +253,55 @@ export function TelaAdmin() {
       </div>
 
       <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
+        Lacunas de documentação
+      </h2>
+      <Aviso>
+        O que as pessoas procuraram e <strong>não resolveu</strong>. São três sinais
+        diferentes, e o segundo é o menos óbvio: documentação que existe, aparece na
+        busca e ninguém abre. Isto é backlog de <strong>escrita</strong> — por isso
+        conta pessoas em vez de nomeá-las.
+      </Aviso>
+
+      {lacunas === null ? (
+        <p className="carregando">Carregando o mapa de lacunas…</p>
+      ) : (
+        <div className="pilha">
+          <ListaDeLacunas
+            titulo="Ninguém documentou"
+            explicacao="A busca não achou nada para estes termos."
+            itens={lacunas.semResultado}
+          />
+          <ListaDeLacunas
+            titulo="Documentado, mas ninguém abriu"
+            explicacao="Havia resultado e a pessoa seguiu sem abrir — o título não convenceu, ou não era isso."
+            itens={lacunas.semClique}
+          />
+          <div className="pilha">
+            <h3 className="titulo-filhos">O que disseram ao insistir</h3>
+            <p className="dica">
+              Motivo escrito por quem foi bloqueado e seguiu mesmo assim (RF-13). É o
+              sinal mais direto do que falta na página.
+            </p>
+            {lacunas.overrides.length === 0 ? (
+              <p className="dica">Nenhum override registrado ainda.</p>
+            ) : (
+              <ul className="chamados">
+                {lacunas.overrides.map((o, i) => (
+                  <li key={i} className="chamado" style={{ cursor: 'default' }}>
+                    <span className="chamado-topo">
+                      <span className="chamado-chave">{rotuloRegra(o.regra)}</span>
+                      <span className="dica">{o.criadoEm}</span>
+                    </span>
+                    <span className="chamado-titulo">{o.motivo}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
         Auditoria
       </h2>
       <Aviso>
@@ -290,4 +353,47 @@ export function TelaAdmin() {
       )}
     </div>
   )
+}
+
+
+/** Uma das duas listas de termo do mapa (`RF-42`). */
+function ListaDeLacunas({
+  titulo,
+  explicacao,
+  itens,
+}: {
+  titulo: string
+  explicacao: string
+  itens: readonly TermoComLacuna[]
+}) {
+  return (
+    <div className="pilha">
+      <h3 className="titulo-filhos">{titulo}</h3>
+      <p className="dica">{explicacao}</p>
+      {itens.length === 0 ? (
+        <p className="dica">Nada por aqui — o que é uma boa notícia.</p>
+      ) : (
+        <ul className="chamados">
+          {itens.map((t) => (
+            <li key={t.termo} className="chamado" style={{ cursor: 'default' }}>
+              <span className="chamado-titulo">{t.termo}</span>
+              <span className="chamado-meta">
+                <Selo variante="contorno">
+                  {t.ocorrencias === 1 ? '1 busca' : `${t.ocorrencias} buscas`}
+                </Selo>
+                <Selo variante="contorno">
+                  {t.pessoas === 1 ? '1 pessoa' : `${t.pessoas} pessoas`}
+                </Selo>
+                <span className="dica">última: {t.ultimaEm}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function rotuloRegra(regra: string): string {
+  return regra === 'regra1_confluence' ? 'Documentação' : 'Histórico'
 }
