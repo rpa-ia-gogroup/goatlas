@@ -18,6 +18,7 @@ import { montarContexto } from '@/lib/contexto'
 import { tratarRequisicao } from '@/lib/http/rotas'
 import { HEADER_EMAIL } from '@/lib/auth'
 import { AVISO_DEMO, TIPO_CHAMADO_DEMO } from '@/lib/demo'
+import { ClienteAtlassianHttp } from '@/lib/atlassian/cliente'
 
 const ANA = 'ana@gocase.com'
 const CHEFE = 'kaique.breno@gocase.com'
@@ -163,6 +164,50 @@ describe('modo demonstração', () => {
 
     const criado = await chamar(`/api/conversas/${id}/confirmar`, { metodo: 'POST' })
     expect(criado.corpo).toMatchObject({ estado: 'criado', verificadoRegras: true })
+  })
+})
+
+describe('RF-21 / Q4 — campo_solicitante_id é CONFIG, nunca hardcoded', () => {
+  it('sem config, o cliente real nasce sem o campo (só a descrição identifica)', async () => {
+    const ctx = await montarContexto({
+      DB: db,
+      ATLASSIAN_API_TOKEN: 'token',
+      ATLASSIAN_EMAIL: 'servico@gocase.com',
+      ATLASSIAN_BASE_URL: 'https://goengenharia.atlassian.net',
+    })
+    const cliente = ctx.atlassian as ClienteAtlassianHttp
+    const { camposExtra } = cliente.montarCamposSolicitante({
+      serviceDeskId: 'sd-1',
+      tipoChamadoId: 'rt-1',
+      titulo: 't',
+      descricao: 'd',
+      prioridade: 'normal',
+      solicitanteEmail: 'ana@gocase.com',
+      chaveIdempotencia: 'k1',
+    })
+    expect(Object.keys(camposExtra)).toHaveLength(0)
+  })
+
+  it('com o valor salvo no banco (RF-49, sem deploy), o cliente real passa a usar o campo', async () => {
+    const config = new Config(db)
+    await config.definir('campo_solicitante_id', 'customfield_10050', 'chefe@gocase.com', '2026-08-05T00:00:00.000Z')
+    const ctx = await montarContexto({
+      DB: db,
+      ATLASSIAN_API_TOKEN: 'token',
+      ATLASSIAN_EMAIL: 'servico@gocase.com',
+      ATLASSIAN_BASE_URL: 'https://goengenharia.atlassian.net',
+    })
+    const cliente = ctx.atlassian as ClienteAtlassianHttp
+    const { camposExtra } = cliente.montarCamposSolicitante({
+      serviceDeskId: 'sd-1',
+      tipoChamadoId: 'rt-1',
+      titulo: 't',
+      descricao: 'd',
+      prioridade: 'normal',
+      solicitanteEmail: 'ana@gocase.com',
+      chaveIdempotencia: 'k1',
+    })
+    expect(camposExtra.customfield_10050).toBe('ana@gocase.com')
   })
 })
 
