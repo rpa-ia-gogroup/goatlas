@@ -77,6 +77,10 @@ created: "2026-08-03"
 - [ ] **T-021** Verificar no GoDeploy: o edge restringe login ao Workspace
       corporativo? existe header de nome? o que acontece com conta desativada?
       Registrar em `D-02`. _Requirements: RF-05, RF-06_
+      **Deprioritizada (05/08/2026):** anotada como medida de segurança pendente,
+      não bloqueia desenvolvimento nem `/implement` de outras tarefas. Exige app
+      deployado de verdade para verificar — não é algo que dê pra confirmar contra
+      fake. Retomar perto do deploy em staging (T-096).
 - [x] **T-022** [P] Perfil admin por allowlist explícita, configurável sem deploy.
       _Requirements: RF-02, RN-09_
 - [~] **T-023** [P] Sessão com expiração configurável e logout explícito.
@@ -197,8 +201,15 @@ created: "2026-08-03"
       _Requirements: RF-29, RF-30, RN-04_
 - [x] **T-081** Detalhe: descrição, campos, comentários **públicos**, anexos, status,
       histórico de SLA — sem campo interno. _Requirements: RF-31_
-- [ ] **T-082** Comentar publicamente, atribuído de forma legível ao solicitante real.
-      **[BLOQUEADA: definir o "como" — ver §10 da spec]** _Requirements: RF-33_
+- [x] **T-082** Comentar publicamente, atribuído de forma legível ao solicitante real.
+      _Requirements: RF-33_
+      → **Resolvida (D-13):** prefixo `**Nome** (email) via goatlas:` no corpo do
+      comentário, com nome/e-mail do login corporativo Google — visível no Jira
+      nativo, sem precisar do console do goatlas. A função pura já existia
+      (`atlassian/comentarios.ts#prefixarAutoria`, escrita quando a pergunta ainda
+      estava aberta); faltava a rota passar `eu.nome`, não só `eu.email` — sem
+      isso o prefixo saía com o e-mail duplicado. 1 teste novo em
+      `tests/rotas.test.ts` confirmando o nome real chegando ao cliente Atlassian.
 
 ## Phase 6 — Frontend, mobile e fechamento
 
@@ -209,6 +220,9 @@ created: "2026-08-03"
 - [x] **T-092** [P] Erros em linguagem de negócio, nunca stack trace nem HTTP cru;
       erro de frontend encaminhado ao backend. _Requirements: RNF-30, RNF-26_
 - [ ] **T-093** Validação real **no celular** do fluxo completo. _Requirements: RNF-28_
+      **Deixada para o final (05/08/2026), por decisão do usuário:** não bloqueia
+      nenhuma outra tarefa nem `/implement` — é ajuste de UX pós-conclusão, feito
+      depois de todo o resto pronto, não durante.
 - [x] **T-094** [P] Varredura provando que nenhuma das três credenciais aparece em
       log, resposta ou bundle. _Requirements: RNF-01_
       → `tests/rnf01-vazamento-credenciais.test.ts`, 13 casos. Estrutural: cada
@@ -264,7 +278,7 @@ As **seis travas críticas estão implementadas e com teste de burla**:
 | T-021 verificar comportamento do edge com conta desativada | precisa de app deployado |
 | T-063 `criarChamado` contra a Atlassian real | **`[BLOQUEADA: Q1]`** — o código existe e roda contra o fake |
 | T-064 campo customizado "Solicitante" | **Concluída** — `campo_solicitante_id` é config (RNF-25); sem Q4 o solicitante segue só na descrição (cinto e suspensório) |
-| T-082 comentário atribuído ao solicitante real | **`[BLOQUEADA]`** — o formato precisa de alinhamento com o time de tech (`R-03`/Q10) |
+| T-082 comentário atribuído ao solicitante real | **Concluída** — prefixo com nome/e-mail do login corporativo (`D-13`), ver T-082 acima |
 | T-093 validação no celular | feita em viewport de celular no dev; falta no aparelho real |
 | T-094 varredura de credencial em log/bundle | **Concluída** — `tests/rnf01-vazamento-credenciais.test.ts`, ver T-094 acima |
 | T-095 métricas mínimas | **Concluída** — seção "Métricas" no console de admin, ver T-095 acima |
@@ -282,9 +296,12 @@ ausente bloqueando a criação para Q1).
 - [x] Todo RF/RN no escopo da spec aparece em ao menos uma tarefa
 - [x] Toda tarefa referencia requisito
 - [x] Testes das travas críticas vêm **antes** da implementação (Phase 1 antes de 3–5)
-- [ ] **Nenhuma tarefa `[BLOQUEADA]`** — há **8**: T-040 (Q5), T-042 (Q2), T-043
-      (Q3), T-063 (Q1), T-064 e T-069 (Q4), T-082 (definição do "como"), e T-020
-      opera sob suposição (Q7)
+- [ ] **Nenhuma tarefa `[BLOQUEADA]`** — snapshot em 05/08/2026: T-063 e T-096
+      (Q1, credencial completa — só a peça da Organizations API chegou, falta
+      token Jira/Confluence e a chave de IA) seguem bloqueadas. T-040, T-042,
+      T-043, T-064, T-069 e **T-082** (resolvida, `D-13`) saíram da lista sem a
+      resposta chegar — o valor que faltava virou config ou decisão registrada,
+      nunca hardcode. T-020 opera sob suposição (Q7)
 
 > **O caminho livre hoje:** Phase 0 e Phase 1 inteiras, e a maior parte da Phase 2 —
 > fundação, fakes e **todos os testes de bypass** não dependem de nenhuma resposta.

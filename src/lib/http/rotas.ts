@@ -387,7 +387,9 @@ async function rotear(
     const texto = typeof corpo?.texto === 'string' ? corpo.texto.trim() : ''
     if (!texto) return ERROS.dadosInvalidos('Escreva o comentário antes de enviar.')
 
-    await ctx.atlassian.comentar(comentar[1]!, texto, eu.email)
+    // RF-33 / D-13 — o nome vem do login corporativo Google, não de entrada do
+    // usuário: é o que torna o prefixo confiável no comentário público.
+    await ctx.atlassian.comentar(comentar[1]!, texto, eu.email, eu.nome)
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: 'comentario_criado',

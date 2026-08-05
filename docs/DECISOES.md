@@ -339,6 +339,38 @@ a menos; o contrário custa conteúdo restrito na tela de quem não devia ver.
 
 ---
 
+### D-13 · RF-33: prefixo no corpo do comentário, com nome do login corporativo
+**Data:** 05/08/2026 · **Quem:** Kaique · **Status:** fechada
+
+Resolve o `[NEEDS CLARIFICATION]` de `spec.md` §10 (interage com R-03 e Q10): o
+comentário público que o goatlas posta no Jira, partindo sempre da conta de
+serviço (`D-01`), leva um **prefixo visível no corpo** identificando quem pediu de
+verdade — formato `**Nome** (email) via goatlas:`.
+
+**Por quê este caminho, e não só o rastro interno:** quem resolve o chamado
+trabalha no Jira **nativo**, não no console do goatlas. Deixar a identidade só em
+`vinculos.solicitante_email` (visível apenas na auditoria do admin) obrigaria o
+time de tech a abrir uma segunda ferramenta para saber quem pediu cada coisa —
+exatamente o atrito que `RF-33`/`R-03` existem para evitar.
+
+**O que torna o prefixo confiável, mesmo a mensagem partindo do bot:** o nome e o
+e-mail vêm do **login corporativo Google**, obrigatório por `RF-01`/`RF-05` — a
+pessoa não digita o próprio nome em lugar nenhum, então não há como forjar a
+atribuição pela UI. O rastro interno (`vinculos`, auditoria) continua existindo em
+paralelo, para investigação — os dois não são alternativas, são camadas.
+
+**Implementação:** já existia como função pura isolada
+(`atlassian/comentarios.ts#prefixarAutoria`, escrita quando a pergunta ainda
+estava aberta, propositalmente pronta para o dia da resposta). O que faltava era
+a rota (`POST /api/chamados/:issueKey/comentarios`) passar o **nome**, não só o
+e-mail — sem isso o prefixo saía com o e-mail duplicado
+(`**ana@gocase.com** (ana@gocase.com)`). `Identidade.nome` já existe desde
+`RF-04`/`RNF-05` (do header do edge quando presente, ou derivado do e-mail via
+`derivarNomeDeEmail` — ver `D-02`/T-021), então a mudança foi só **passar o
+campo que já existia**, não criar um novo.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

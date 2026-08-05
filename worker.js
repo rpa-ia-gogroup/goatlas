@@ -782,15 +782,15 @@ var ClienteAtlassianFake = class {
   comentariosBrutos(issueKey) {
     return this.estado.comentarios.get(issueKey) ?? [];
   }
-  async comentar(issueKey, corpo, autorEmail) {
-    this.chamadas.push({ operacao: "comentar", params: { issueKey, corpo, autorEmail } });
+  async comentar(issueKey, corpo, autorEmail, autorNome) {
+    this.chamadas.push({ operacao: "comentar", params: { issueKey, corpo, autorEmail, autorNome } });
     const atuais = this.estado.comentarios.get(issueKey) ?? [];
     this.estado.comentarios.set(issueKey, [
       ...atuais,
       {
         id: `c${atuais.length + 1}`,
         corpo,
-        autorNome: autorEmail,
+        autorNome: autorNome ?? autorEmail,
         criadoEm: (/* @__PURE__ */ new Date(0)).toISOString(),
         publico: true
       }
@@ -4637,7 +4637,7 @@ async function rotear(req, ctx, eu, caminho, url) {
     const corpo = await lerJson(req);
     const texto = typeof corpo?.texto === "string" ? corpo.texto.trim() : "";
     if (!texto) return ERROS.dadosInvalidos("Escreva o coment\xE1rio antes de enviar.");
-    await ctx.atlassian.comentar(comentar[1], texto, eu.email);
+    await ctx.atlassian.comentar(comentar[1], texto, eu.email, eu.nome);
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: "comentario_criado",

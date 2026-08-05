@@ -271,8 +271,15 @@ export interface ClienteAtlassian {
    */
   listarComentariosPublicos(issueKey: string): Promise<readonly ComentarioPublico[]>
 
-  /** Comentário público atribuído de forma legível ao solicitante real (RF-33). */
-  comentar(issueKey: string, corpo: string, autorEmail: string): Promise<void>
+  /**
+   * Comentário público atribuído de forma legível ao solicitante real (RF-33).
+   *
+   * `autorNome` é o nome capturado no login corporativo Google (obrigatório —
+   * `RF-01`/`RF-05`), então o prefixo é confiável mesmo partindo da conta de
+   * serviço: quem vê o ticket no Jira nativo já sabe quem pediu, sem precisar do
+   * console do goatlas (decisão registrada em `docs/DECISOES.md`, D-13).
+   */
+  comentar(issueKey: string, corpo: string, autorEmail: string, autorNome?: string): Promise<void>
 
   buscarConfluence(params: BuscaConfluenceParams): Promise<readonly PaginaConfluence[]>
 

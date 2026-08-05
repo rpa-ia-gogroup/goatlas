@@ -211,6 +211,24 @@ describe('RF-30 / RN-04 — isolamento pela rota', () => {
     expect(fake.chamadas.filter((c) => c.operacao === 'comentar')).toHaveLength(0)
   })
 
+  it('RF-33 / D-13 — o comentário público leva o nome real, capturado no login', async () => {
+    const issueKey = await abrirComoAna()
+    const r = await chamar(
+      req(`/api/chamados/${issueKey}/comentarios`, {
+        metodo: 'POST',
+        email: ANA,
+        corpo: { texto: 'O relatório não atualizou.' },
+      }),
+    )
+    expect(r.status).toBe(201)
+    const fake = ctx.atlassian as ClienteAtlassianFake
+    const chamada = fake.chamadas.find((c) => c.operacao === 'comentar')
+    // "Ana" vem de derivarNomeDeEmail(ana@gocase.com) — o header de nome do edge
+    // não foi enviado nesta requisição, e é assim que o cliente é atribuído mesmo
+    // sem o edge fornecer nome (D-02/T-021).
+    expect(chamada?.params).toMatchObject({ autorEmail: ANA, autorNome: 'Ana' })
+  })
+
   it('"Meus chamados" só devolve os do e-mail da sessão', async () => {
     await abrirComoAna('k1')
     await abrirComoAna('k2')
