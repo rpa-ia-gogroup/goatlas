@@ -335,8 +335,27 @@ created: "2026-08-04"
 - [ ] **T-131** `RF-57` (P2): revogar produto pelo console, **dupla confirmação** e
       auditoria. Única escrita da credencial de Org Admin. **[BLOQUEADA: Q1]**
       _Requirements: RF-57, RN-10_
-- [ ] **T-132** Fechar os Success Criteria da spec 002 item por item.
+- [x] **T-132** Fechar os Success Criteria da spec 002 item por item.
       _Requirements: todos_
+      → **ScC-1** (leitura sem licença, sem vazar restrita/fora da allowlist):
+      satisfeito — `tests/rf40-leitura-direta.test.ts` prova o mesmo 404 para
+      espaço fora da allowlist, label bloqueada, restrição e lixeira (`D-12`);
+      `tests/rf40-restricao-pagina.test.ts` cobre as três condições de RN-06
+      juntas. **ScC-2** (console mostra gasto e ocioso, com limitação do dado
+      de último acesso visível): satisfeito na estrutura — `admin.tsx` exibe o
+      aviso de `limitacoesUltimoAcesso` e nunca inventa valor
+      (`custo.ts` + `tests/custo.test.ts`); o **valor** em R$ segue
+      `custoConfigurado: false` até **Q8** responder, que é o fail-closed
+      correto, não uma lacuna. **ScC-3** (recomendações reproduzem a Fase 0
+      manual): satisfeito — `recomendacoes.ts` implementa as duas regras da
+      Fase 0 (`docs/REQUISITOS.md` §Fase 0: rebaixar quem só usa service desk,
+      remover quem não acessa há N dias), testado em
+      `tests/governanca.test.ts`. **ScC-4** (nenhum não-admin alcança rota de
+      governança): satisfeito — `tests/admin-gate.test.ts` testa TODAS as
+      rotas `/api/admin/*` (inclusive `assentos` e
+      `assentos/recomendacoes`) sem identidade, com não-admin e com admin.
+      3 de 4 critérios sem ressalva; ScC-2 depende de Q8 para o número, não
+      para o comportamento.
 
 ---
 ## Coverage check
