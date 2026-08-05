@@ -44,8 +44,12 @@ created: "2026-08-04"
       vira 404, e um teste **estrutural** garantindo que só `confluence/acesso.ts`
       chama `obterCorpoStorage` — o gate só é trava se não houver desvio.
       _Requirements: RF-40, RN-06, RNF-09_
-- [ ] **T-104** [P] Teste de burla do gate de admin em **todas** as rotas de
+- [x] **T-104** [P] Teste de burla do gate de admin em **todas** as rotas de
       governança. _Requirements: RN-09, RNF-04_
+      → `tests/admin-gate.test.ts`, `describe.each` sobre as seis rotas de admin
+      (config, lacunas, auditoria, assentos, recomendações e `?formato=csv`):
+      sem identidade, colaborador e admin, um só arquivo para que rota nova
+      não dependa de alguém lembrar de escrever o bypass dela.
 - [x] **T-105** `confluence/sanitizar.ts`: **allowlist** de tags e atributos (nunca
       blocklist), storage format → **árvore de nós tipada**, `href`/`src` só
       `http(s)`. Faz T-101 passar. _Requirements: RNF-06_
@@ -237,36 +241,75 @@ created: "2026-08-04"
 
 ## Phase 3 — Governança de assentos
 
-- [ ] **T-120** `atlassian/organizacao.ts` com **transporte próprio** — não
+> **Estado (05/08/2026):** T-120, T-121, T-104, T-124, T-125, T-126, T-127 e T-128
+> concluídos — **393 testes** na suíte (45 novos), typecheck e build limpos, tudo
+> contra o fake. T-122/T-123/T-131 seguem `[BLOQUEADA: Q1]`: a credencial de Org
+> Admin não existe, então `ClienteOrganizacaoHttp` não tem como ser escrito de
+> forma verificável ainda — o que existia para escrever agora (contrato,
+> transporte, fake, cache, cálculo, tela) está pronto e testado.
+
+- [x] **T-120** `atlassian/organizacao.ts` com **transporte próprio** — não
       compartilha instância com o cliente de Jira/Confluence, para que bug de
       roteamento não faça chamada de usuário sair com credencial de Org Admin.
       _Requirements: RNF-04, RNF-22_
-- [ ] **T-121** [P] Fake da Organizations API, com usuários, produtos e último
+      → Contrato `ClienteOrganizacao` + `TransporteOrganizacao` (Bearer, backoff
+      com jitter igual ao de `atlassian/http.ts`, mas instância própria — outra
+      credencial, outro esquema de auth). `ClienteOrganizacaoHttp` (as chamadas de
+      domínio em si) é T-122/T-123, e por isso continua bloqueado por Q1.
+- [x] **T-121** [P] Fake da Organizations API, com usuários, produtos e último
       acesso. _Requirements: RNF-04_
+      → `atlassian/organizacao-fake.ts`, mesmo padrão de `atlassian/fake.ts`:
+      estado seedável, falha injetável por operação (`indisponivel`,
+      `rate_limit`, `timeout`).
 - [ ] **T-122** `listarUsuarios` (`GET /admin/v1/orgs/{orgId}/users`). `orgId` de
       config. **[BLOQUEADA: Q1]** _Requirements: RF-51, RNF-25_
 - [ ] **T-123** `ultimoAcesso` (`.../last-active-dates`), **carregando as limitações
       oficiais no payload**: atrasa até 24h, "ativo" = viu página por ≥2s. Elas vão
       **na tela** (`RF-52`) — sem isso alguém rebaixa quem estava de férias.
       **[BLOQUEADA: Q1]** _Requirements: RF-52_
-- [ ] **T-124** Tabela `inventario_assentos` + `POST /api/cron/coletar-inventario`
+- [x] **T-124** Tabela `inventario_assentos` + `POST /api/cron/coletar-inventario`
       diário. A API é lenta para consulta interativa, e o histórico é o que faz `O2`
       ser recorrente em vez de retrato. _Requirements: RF-51, RF-52_
-- [ ] **T-125** `governanca/custo.ts` — funções puras: custo por produto e total,
+      → `governanca/inventario.ts` (`RepositorioInventario`, INSERT por coleta,
+      leitura pelo `MAX(coletado_em)`) + rota de cron. Sem `organizacao`/`org_id`
+      configurados, a rota responde `{ ok: true, motivo: 'organizacao_nao_configurada' }`
+      — RNF-18, não erro. `ultimoAcesso` que falha para uma conta não derruba a
+      coleta das outras.
+- [x] **T-125** `governanca/custo.ts` — funções puras: custo por produto e total,
       agregado de ocioso (sem acesso há N dias, N configurável). **Sem Q8, mostra
       contagem e marca o valor como não configurado — nunca número inventado**, que
       é pior que nenhum porque alguém decide rebaixamento com ele.
-      **[BLOQUEADA: Q8 para o valor]** _Requirements: RF-53_
-- [ ] **T-126** [P] Recomendações de rebaixamento/remoção, com o caso central: quem
+      _Requirements: RF-53_
+      → `custoConfigurado` só é `true` quando TODOS os produtos do inventário têm
+      preço em `custo_mensal_por_produto` (config, `RF-49`); preço parcial não
+      sub-conta em silêncio, e vira `totalMensalUsd: null` do mesmo jeito que preço
+      nenhum. **Não está mais bloqueada**: o comportamento sem Q8 (contagem, nunca
+      dinheiro) É o entregável — só o VALOR do preço depende do financeiro, o
+      mesmo raciocínio que já tirou T-113 da lista de bloqueadas por causa de Q5.
+- [x] **T-126** [P] Recomendações de rebaixamento/remoção, com o caso central: quem
       tem assento cujo único uso é abrir chamado (customer de JSM é gratuito e
       ilimitado). _Requirements: RF-54_
-- [ ] **T-127** [P] Exportação CSV com escape correto (vírgula e aspas em nome).
+      → `governanca/recomendacoes.ts`. Tem `jira-servicedesk` E todo o resto ocioso
+      (ou não tem mais nada) → `rebaixar_para_customer`; tem algo ATIVO além do
+      service desk → nenhuma recomendação (uso legítimo); sem service desk e tudo
+      ocioso → `remover_ocioso`.
+- [x] **T-127** [P] Exportação CSV com escape correto (vírgula e aspas em nome).
       _Requirements: RF-54_
-- [ ] **T-128** Console de assentos: inventário, custo, ocioso, recomendações — com
+      → `governanca/csv.ts`. Além do pedido: campo começando com `=`/`+`/`-`/`@`
+      ganha prefixo `'` — nome e motivo vêm de um sistema de terceiro (a
+      organização Atlassian), e injeção de fórmula em CSV aberto no Excel/Sheets é
+      uma classe de vulnerabilidade real, não hipotética, para um campo que é
+      literalmente o nome de alguém.
+- [x] **T-128** Console de assentos: inventário, custo, ocioso, recomendações — com
       as limitações do dado visíveis. Skill `frontend-design` antes. ⚠️ A aba de admin
       **já existe** desde a Fase 1 (`D-09`, edição de config + auditoria); isto
       acrescenta a seção de assentos a ela, não cria tela nova.
       _Requirements: RF-51…RF-54, RNF-28_
+      → Seção "Governança de assentos" em `admin.tsx`, entre Configuração e
+      Lacunas: resumo (`.recibo`) com ociosos e custo, a limitação de RF-52 num
+      `<Aviso atencao>` (não em rodapé), lista por produto e recomendações
+      reaproveitando os padrões já existentes (`Selo`, `.chamados`/`.chamado`).
+      Verificado em `npm run dev` com dados seedados no plugin de dev.
 - [~] **T-129** [P] `GET /api/admin/auditoria` com filtro por usuário, período e
       ação + exportação (`RF-56`). **Filtro por usuário e a tela já vieram na Fase 1**
       (`D-09`); faltam **período**, **ação** e **exportação**. _Requirements: RF-56_
@@ -290,15 +333,19 @@ created: "2026-08-04"
       — T-101 escrito e vermelho antes de T-105/T-106 existirem; T-102 e T-103
       escritos e vermelhos (36 casos) antes de T-110/T-111/T-112 existirem; T-104
       acompanha a governança da Phase 3, pelo mesmo motivo
-- [ ] **Nenhuma `[BLOQUEADA]`** — há **4**: T-122/T-123/T-131 (Q1), T-125 (Q8).
-      T-113 saiu da lista: o código está pronto e o que falta de **Q5** é **dado de
-      config**, não implementação — com `espacos_confluence` vazio a busca devolve
-      zero e diz `buscaConfigurada: false`, que é o fail-closed correto
+- [ ] **Nenhuma `[BLOQUEADA]`** — há **3**: T-122/T-123/T-131 (Q1).
+      T-113 e T-125 saíram da lista: o código está pronto e o que falta de **Q5**/
+      **Q8** é **dado de config**, não implementação — com `espacos_confluence`
+      vazio a busca devolve zero e diz `buscaConfigurada: false`, e sem
+      `custo_mensal_por_produto` o console mostra contagem e `custoConfigurado:
+      false`. Os dois são o fail-closed correto, não uma lacuna de código.
 
-> **Caminho livre hoje:** Phase 1 inteira (a trava da fase) e quase toda a Phase 2
-> — sanitização, renderização, proxy de anexo e telas rodam contra o fake. A
-> governança precisa da credencial de Org Admin para valer contra a API real, mas o
-> fake (T-121) permite construir e testar o console todo antes disso.
+> **Caminho livre hoje:** Phase 1 inteira (a trava da fase), toda a Phase 2, e a
+> Phase 3 quase inteira — sanitização, renderização, proxy de anexo, telas,
+> inventário de assentos, custo, recomendações e CSV rodam contra o fake. Só
+> T-122/T-123 (as chamadas de domínio reais) e T-131 (revogar produto) esperam a
+> credencial de Org Admin — o fake (T-121) e o transporte (T-120) é o que permitiu
+> construir e testar o console inteiro antes disso.
 
 > ⚠️ **Bloqueio de produção, não de código:** `R-01`. Servir conteúdo do Confluence a
 > quem não tem licença, via token admin, é exatamente o que uma auditoria leria como

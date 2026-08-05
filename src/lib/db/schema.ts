@@ -184,6 +184,26 @@ export const TABELAS = [
      atualizado_em TEXT NOT NULL,
      atualizado_por TEXT
    )`,
+
+  /**
+   * Cache histórico do inventário de assentos (RF-51, RF-52, T-124). Uma linha por
+   * (conta × produto atribuído) A CADA coleta — nunca `UPDATE` — porque o
+   * histórico é o que torna o assento ocioso um dado que se acompanha ao longo do
+   * tempo (O2, O7), não um retrato único. A Organizations API é lenta demais para
+   * consulta interativa; por isso o console lê o CACHE (`MAX(coletado_em)`), nunca
+   * a API ao vivo.
+   */
+  `CREATE TABLE IF NOT EXISTS inventario_assentos (
+     id                TEXT PRIMARY KEY,
+     account_id        TEXT NOT NULL,
+     email             TEXT NOT NULL,
+     nome              TEXT NOT NULL,
+     produto           TEXT NOT NULL,
+     ultimo_acesso_em  TEXT,
+     coletado_em       TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_inventario_assentos_coletado ON inventario_assentos (coletado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_inventario_assentos_conta ON inventario_assentos (account_id, produto, coletado_em)`,
 ] as const
 
 export async function migrar(db: Banco): Promise<void> {

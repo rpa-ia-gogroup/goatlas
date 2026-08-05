@@ -23,6 +23,10 @@ import { SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos
 import type { PropostaChamado } from '../agent/estado'
 import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
 import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
+import { LIMITACOES_ULTIMO_ACESSO } from '../atlassian/organizacao'
+import { calcularCusto } from '../governanca/custo'
+import { gerarRecomendacoes } from '../governanca/recomendacoes'
+import { recomendacoesParaCsv } from '../governanca/csv'
 
 export interface EnvCron {
   readonly GODEPLOY_CRON_KEY?: string
@@ -717,6 +721,52 @@ async function rotear(
     return json({ itens })
   }
 
+  // --- governança de assentos (RF-51 a RF-54, T-124 a T-128) ----------------
+  //
+  // As duas rotas leem o CACHE (`inventario_assentos`), nunca a Organizations API
+  // ao vivo — ela é lenta demais para consulta interativa (ver T-124). "Sem
+  // coleta ainda" e "coleta rodou, zero assentos" são respostas 200 iguais na
+  // forma; a tela distingue pelo `coletadoEm: null`.
+  if (caminho === '/api/admin/assentos' && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    const snapshot = await ctx.inventarioAssentos.obterMaisRecente()
+    const custo = calcularCusto(
+      snapshot.itens,
+      ctx.valores.custo_mensal_por_produto,
+      ctx.valores.assentos_ocioso_dias,
+      Date.parse(ctx.agora()),
+    )
+    return json({
+      coletadoEm: snapshot.coletadoEm,
+      ociosoDesdeDias: ctx.valores.assentos_ocioso_dias,
+      // RF-52 — a limitação oficial do dado vai NA TELA, não em rodapé de documento.
+      limitacoesUltimoAcesso: LIMITACOES_ULTIMO_ACESSO,
+      itens: snapshot.itens,
+      custo,
+    })
+  }
+
+  if (caminho === '/api/admin/assentos/recomendacoes' && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    const snapshot = await ctx.inventarioAssentos.obterMaisRecente()
+    const recomendacoes = gerarRecomendacoes(
+      snapshot.itens,
+      ctx.valores.assentos_ocioso_dias,
+      Date.parse(ctx.agora()),
+    )
+    if (url.searchParams.get('formato') === 'csv') {
+      return new Response(recomendacoesParaCsv(recomendacoes), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="recomendacoes-assentos.csv"',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      })
+    }
+    return json({ itens: recomendacoes })
+  }
+
   return ERROS.naoEncontrado()
 }
 
@@ -904,6 +954,51 @@ async function tratarCron(
   if (caminho === '/api/cron/reconciliar-vinculos') {
     const recuperados = await ctx.chamados.reconciliarVinculos(50)
     return json({ recuperados })
+  }
+
+  // T-124 — coleta diária do inventário de assentos (RF-51, RF-52). A Organizations
+  // API não serve consulta interativa: o cron é o único lugar que a chama, e o
+  // console só lê o que ele gravou.
+  if (caminho === '/api/cron/coletar-inventario') {
+    // Sem credencial de Org Admin (Q1) ou sem `org_id` configurado (RNF-25), a
+    // coleta não tem como rodar. Isso não é falha do cron — é ausência de
+    // configuração, e ele diz isso em vez de fingir sucesso ou gritar erro.
+    if (!ctx.organizacao || !ctx.valores.org_id) {
+      return json({ ok: true, registros: 0, motivo: 'organizacao_nao_configurada' })
+    }
+    const orgId = ctx.valores.org_id
+    try {
+      const usuarios = await ctx.organizacao.listarUsuarios(orgId)
+      const entradas = []
+      for (const usuario of usuarios) {
+        try {
+          entradas.push({
+            usuario,
+            ultimoAcesso: await ctx.organizacao.ultimoAcesso(orgId, usuario.accountId),
+          })
+        } catch {
+          // RNF-18: uma conta cujo último acesso falhou não derruba a coleta das
+          // outras. Ela entra sem o dado, não some do inventário.
+          entradas.push({ usuario, ultimoAcesso: null })
+        }
+      }
+      const r = await ctx.inventarioAssentos.registrarColeta(entradas, ctx.agora())
+      await ctx.auditoria.registrar({
+        atorEmail: '(cron)',
+        acao: 'inventario_coletado',
+        resultado: 'sucesso',
+        detalhe: { usuarios: usuarios.length, registros: r.registros },
+      })
+      return json({ ok: true, ...r })
+    } catch (e) {
+      await ctx.auditoria.registrar({
+        atorEmail: '(cron)',
+        acao: 'inventario_coletado',
+        resultado: 'falha',
+        detalhe: { erro: e instanceof Error ? e.message : String(e) },
+      })
+      return ERROS.conteudoIndisponivel()
+    }
   }
 
   return ERROS.naoEncontrado()

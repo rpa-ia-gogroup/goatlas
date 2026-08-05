@@ -18,6 +18,7 @@ import { tratarRequisicao } from './src/lib/http/rotas'
 import { Config } from './src/lib/config'
 import { migrar } from './src/lib/db/schema'
 import { ClienteIAFake } from './src/lib/ia/fake'
+import { ClienteOrganizacaoFake } from './src/lib/atlassian/organizacao-fake'
 
 const EMAIL_DEV = process.env.GOATLAS_DEV_EMAIL ?? 'dev@gocase.com'
 const CRON_KEY_DEV = 'dev-cron'
@@ -42,6 +43,7 @@ export function apiDev(): Plugin {
         await config.definir('tipos_chamado_permitidos', ['rt-dev'], EMAIL_DEV, new Date().toISOString())
         await config.definir('service_desk_id', 'sd-dev', EMAIL_DEV, new Date().toISOString())
         await config.definir('espacos_confluence', ['TECH'], EMAIL_DEV, new Date().toISOString())
+        await config.definir('org_id', 'org-dev', EMAIL_DEV, new Date().toISOString())
         await config.definir(
           'regra2_exemplos_ajuste_operacional',
           ['Rodei o pipeline manualmente', 'Reparticionei a tabela'],
@@ -77,6 +79,40 @@ export function apiDev(): Plugin {
         area: 'Growth',
       }
 
+      // Organizations API fake — para o console de governança (T-128) ter o que
+      // mostrar em dev sem esperar a credencial de Org Admin (Q1).
+      const organizacaoDev = new ClienteOrganizacaoFake({
+        usuarios: [
+          {
+            accountId: 'acc-dev-1',
+            email: 'ana@gocase.com',
+            nome: 'Ana',
+            produtos: [
+              { chave: 'confluence', nome: 'Confluence' },
+              { chave: 'jira-software', nome: 'Jira Software' },
+            ],
+          },
+          {
+            // Só abre chamado — é o caso central de RF-54 (rebaixar para customer).
+            accountId: 'acc-dev-2',
+            email: 'bruno@gocase.com',
+            nome: 'Bruno',
+            produtos: [{ chave: 'jira-servicedesk', nome: 'Jira Service Management' }],
+          },
+          {
+            // Ocioso em tudo — candidato a remoção.
+            accountId: 'acc-dev-3',
+            email: 'carla@gocase.com',
+            nome: 'Carla',
+            produtos: [{ chave: 'confluence', nome: 'Confluence' }],
+          },
+        ],
+        ultimoAcesso: new Map([
+          ['acc-dev-1', [{ produto: 'confluence', ultimoAcessoEm: new Date().toISOString() }]],
+          // Bruno e Carla: sem entrada = "nunca visto" (o caso mais ocioso que existe).
+        ]),
+      })
+
       // Um contexto inicial só para instanciar os fakes, que são REAPROVEITADOS
       // entre requisições — o contexto em si é remontado a cada uma, como o Worker
       // faz, para que config alterada pelo console valha na requisição seguinte.
@@ -84,9 +120,23 @@ export function apiDev(): Plugin {
         { DB: db, GOATLAS_USAR_FAKES: '1' },
         undefined,
         undefined,
-        { ia: iaDev },
+        { ia: iaDev, organizacao: organizacaoDev },
       )
-      const clientes = { atlassian: inicial.atlassian, ia: iaDev }
+      const clientes = { atlassian: inicial.atlassian, ia: iaDev, organizacao: organizacaoDev }
+
+      // Uma coleta já rodada, para a tela de governança não nascer vazia — em
+      // produção isso é o cron diário (`POST /api/cron/coletar-inventario`).
+      if ((await inicial.inventarioAssentos.obterMaisRecente()).coletadoEm === null) {
+        const usuarios = await organizacaoDev.listarUsuarios('org-dev')
+        const entradas = []
+        for (const usuario of usuarios) {
+          entradas.push({
+            usuario,
+            ultimoAcesso: await organizacaoDev.ultimoAcesso('org-dev', usuario.accountId),
+          })
+        }
+        await inicial.inventarioAssentos.registrarColeta(entradas, new Date().toISOString())
+      }
 
       // Dados de fake para a UI ter o que mostrar.
       const fake = inicial.atlassian as unknown as {

@@ -16,7 +16,9 @@ import {
   ErroApi,
   type ConfigValores,
   type MapaDeLacunas,
+  type Recomendacao,
   type RegistroAuditoria,
+  type RespostaAssentos,
   type TermoComLacuna,
 } from './api'
 import { Aviso, Selo } from './componentes'
@@ -144,6 +146,8 @@ export function TelaAdmin() {
   const [auditoria, setAuditoria] = useState<RegistroAuditoria[] | null>(null)
   const [filtroEmail, setFiltroEmail] = useState('')
   const [lacunas, setLacunas] = useState<MapaDeLacunas | null>(null)
+  const [assentos, setAssentos] = useState<RespostaAssentos | null>(null)
+  const [recomendacoes, setRecomendacoes] = useState<Recomendacao[] | null>(null)
 
   async function carregar() {
     try {
@@ -174,6 +178,14 @@ export function TelaAdmin() {
       .adminLacunas()
       .then(setLacunas)
       .catch(() => setLacunas(null))
+    api
+      .adminAssentos()
+      .then(setAssentos)
+      .catch(() => setAssentos(null))
+    api
+      .adminRecomendacoesAssentos()
+      .then((r) => setRecomendacoes(r.itens))
+      .catch(() => setRecomendacoes(null))
   }, [])
 
   async function salvar(chave: keyof ConfigValores, tipo: 'lista' | 'numero' | 'texto') {
@@ -251,6 +263,116 @@ export function TelaAdmin() {
           )
         })}
       </div>
+
+      <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
+        Governança de assentos
+      </h2>
+      <Aviso>
+        Inventário e último acesso vêm da Organizations API, coletados <strong>uma vez
+        por dia</strong> por um cron — não dá para consultar ao vivo.{' '}
+        {assentos?.coletadoEm
+          ? `Última coleta: ${assentos.coletadoEm}.`
+          : 'Ainda não há nenhuma coleta registrada.'}
+      </Aviso>
+
+      {assentos === null ? (
+        <p className="carregando">Carregando o inventário de assentos…</p>
+      ) : assentos.coletadoEm === null ? (
+        <p className="dica">
+          Sem dado ainda — ou a organização não está configurada (Q1), ou o cron diário
+          ainda não rodou.
+        </p>
+      ) : (
+        <div className="pilha">
+          <div className="recibo">
+            <dl>
+              <dt>Assentos ociosos</dt>
+              <dd>
+                {assentos.custo.ocioso.usuarios} sem uso de nenhum produto atribuído há
+                pelo menos {assentos.ociosoDesdeDias} dias
+              </dd>
+              <dt>Custo mensal</dt>
+              <dd>
+                {assentos.custo.custoConfigurado ? (
+                  formatarUsd(assentos.custo.totalMensalUsd)
+                ) : (
+                  <>
+                    <Selo variante="contorno">Não configurado</Selo> — falta o preço por
+                    produto (Q8, com o financeiro)
+                  </>
+                )}
+              </dd>
+            </dl>
+          </div>
+
+          <Aviso atencao>
+            {assentos.limitacoesUltimoAcesso.criterioAtivo} E o dado pode atrasar até{' '}
+            {assentos.limitacoesUltimoAcesso.atrasoMaximoHoras}h — não rebaixe o acesso
+            de alguém só porque "sem uso" apareceu agora.
+          </Aviso>
+
+          <div className="pilha">
+            <h3 className="titulo-filhos">Por produto</h3>
+            <ul className="chamados">
+              {assentos.custo.porProduto.map((p) => (
+                <li key={p.produto} className="chamado" style={{ cursor: 'default' }}>
+                  <span className="chamado-topo">
+                    <span className="chamado-chave">{p.produto}</span>
+                    <Selo variante="contorno">
+                      {p.usuarios} {p.usuarios === 1 ? 'assento' : 'assentos'}
+                    </Selo>
+                  </span>
+                  <span className="chamado-meta">
+                    <Selo variante={p.ociosos > 0 ? 'lime' : 'contorno'}>
+                      {p.ociosos} {p.ociosos === 1 ? 'ocioso' : 'ociosos'}
+                    </Selo>
+                    <span className="dica">
+                      {p.custoMensalUsd === null
+                        ? 'custo não configurado'
+                        : formatarUsd(p.custoMensalUsd) + '/mês'}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="pilha">
+            <div className="chamado-topo">
+              <h3 className="titulo-filhos">Recomendações de rebaixamento/remoção</h3>
+              <a
+                className="botao botao-contorno"
+                href="/api/admin/assentos/recomendacoes?formato=csv"
+                download="recomendacoes-assentos.csv"
+              >
+                Exportar CSV
+              </a>
+            </div>
+            {!recomendacoes ? (
+              <p className="carregando">Carregando as recomendações…</p>
+            ) : recomendacoes.length === 0 ? (
+              <p className="dica">Nada por aqui — o que é uma boa notícia.</p>
+            ) : (
+              <ul className="chamados">
+                {recomendacoes.map((r) => (
+                  <li key={r.accountId} className="chamado" style={{ cursor: 'default' }}>
+                    <span className="chamado-topo">
+                      <span className="chamado-chave">{r.email}</span>
+                      <Selo variante={r.tipo === 'rebaixar_para_customer' ? 'lime' : 'contorno'}>
+                        {rotuloRecomendacao(r.tipo)}
+                      </Selo>
+                    </span>
+                    <span className="chamado-titulo">{r.motivo}</span>
+                    <span className="chamado-meta">
+                      <span className="dica">{r.produtosAfetados.join(', ')}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
         Lacunas de documentação
@@ -396,4 +518,14 @@ function ListaDeLacunas({
 
 function rotuloRegra(regra: string): string {
   return regra === 'regra1_confluence' ? 'Documentação' : 'Histórico'
+}
+
+function rotuloRecomendacao(tipo: 'rebaixar_para_customer' | 'remover_ocioso'): string {
+  return tipo === 'rebaixar_para_customer' ? 'Rebaixar para customer' : 'Remover assento'
+}
+
+/** `null` nunca chega aqui — quem chama já testou `custoConfigurado`. */
+function formatarUsd(valor: number | null): string {
+  if (valor === null) return 'não configurado'
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'USD' }).format(valor)
 }
