@@ -209,8 +209,20 @@ created: "2026-08-03"
 - [x] **T-092** [P] Erros em linguagem de negócio, nunca stack trace nem HTTP cru;
       erro de frontend encaminhado ao backend. _Requirements: RNF-30, RNF-26_
 - [ ] **T-093** Validação real **no celular** do fluxo completo. _Requirements: RNF-28_
-- [ ] **T-094** [P] Varredura provando que nenhuma das três credenciais aparece em
+- [x] **T-094** [P] Varredura provando que nenhuma das três credenciais aparece em
       log, resposta ou bundle. _Requirements: RNF-01_
+      → `tests/rnf01-vazamento-credenciais.test.ts`, 13 casos. Estrutural: cada
+      env var das 3 credenciais só é lida por `contexto.ts` (varredura de `src/`,
+      mesmo padrão do teste de `obterCorpoStorage`) e `build-worker.mjs` não usa
+      `define`/`inject` (sem isso um valor de ambiente do build viraria string
+      fixa dentro do `worker.js` versionado). Comportamental: as três camadas de
+      transporte (`atlassian/http.ts`, `atlassian/organizacao.ts`,
+      `ia/cliente.ts`) recebem uma resposta de erro com um "segredo" plantado no
+      corpo e a mensagem lançada não o contém — prova a garantia que já estava
+      documentada em código, não presume. `redigirSensiveis` (auditoria) testado
+      isoladamente e ponta a ponta contra o banco. `ATLASSIAN_ORG_API_KEY` (Q1)
+      segue sem nenhum lugar que a leia — o teste cobra que continue assim
+      **ou** que, quando for lida, seja só em `contexto.ts`.
 - [ ] **T-095** Métricas mínimas desde o dia 1: taxa de deflexão por regra, taxa de
       override, chamados por via (conversa × formulário), buscas sem resultado.
       Sem instrumentação não há como calibrar threshold. _Requirements: O1, R-04, RF-42_
@@ -243,10 +255,10 @@ As **seis travas críticas estão implementadas e com teste de burla**:
 |---|---|
 | T-021 verificar comportamento do edge com conta desativada | precisa de app deployado |
 | T-063 `criarChamado` contra a Atlassian real | **`[BLOQUEADA: Q1]`** — o código existe e roda contra o fake |
-| T-064 campo customizado "Solicitante" | **`[BLOQUEADA: Q4]`** — hoje o solicitante vai na descrição (cinto e suspensório) |
+| T-064 campo customizado "Solicitante" | **Concluída** — `campo_solicitante_id` é config (RNF-25); sem Q4 o solicitante segue só na descrição (cinto e suspensório) |
 | T-082 comentário atribuído ao solicitante real | **`[BLOQUEADA]`** — o formato precisa de alinhamento com o time de tech (`R-03`/Q10) |
 | T-093 validação no celular | feita em viewport de celular no dev; falta no aparelho real |
-| T-094 varredura de credencial em log/bundle | fazer no primeiro deploy |
+| T-094 varredura de credencial em log/bundle | **Concluída** — `tests/rnf01-vazamento-credenciais.test.ts`, ver T-094 acima |
 | T-095 métricas mínimas | os dados já são gravados (`bloqueios`, `vinculos.via`, auditoria); falta a superfície |
 | T-096 deploy em staging e prod | **`[BLOQUEADA: Q1]`** — precisa dos secrets |
 | T-097 fechar a Definição de Pronto item por item | depende das acima |

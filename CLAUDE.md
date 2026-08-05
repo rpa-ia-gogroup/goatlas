@@ -172,7 +172,10 @@ destes reabre um vazamento que já foi fechado.
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
   lendo `env.ATLASSIAN_API_TOKEN` faz `RNF-01` depender de disciplina em vez de
-  estrutura.
+  estrutura. `tests/rnf01-vazamento-credenciais.test.ts` (T-094) varre `src/`
+  procurando por isso — e também prova, plantando um "segredo" no corpo de uma
+  resposta de erro simulada, que as três camadas de transporte não o repassam na
+  mensagem lançada nem a auditoria o persiste sem redigir.
 - **A Organizations API tem TRANSPORTE PRÓPRIO** (`atlassian/organizacao.ts`,
   `RNF-04`) — não a mesma instância do cliente de Jira/Confluence. A credencial é
   **Org Admin**: "economizar" reaproveitando `atlassian/http.ts` (que já resolve
@@ -360,7 +363,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**410 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**423 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
