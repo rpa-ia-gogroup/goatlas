@@ -334,6 +334,17 @@ git worktree remove .claude/worktrees/<branch>            # ao terminar
 
 Nomes: `<NNN>-<slug>` para feature (o NNN da spec), `fix/<slug>` para correção.
 
+⚠️ **Worktree novo nasce sem `node_modules`** — `npm run test`/`typecheck`/`build`
+falham antes de rodar. Em vez de um `npm install` inteiro por worktree, aponte para o
+da árvore principal (Windows, junção de diretório):
+
+```powershell
+New-Item -ItemType Junction -Path "<worktree>\node_modules" `
+         -Target "C:\Users\User\Desktop\Projetos\goatlas\node_modules"
+```
+
+`node_modules` é gitignored, então a junção não entra em commit nenhum.
+
 ## Plataforma (GoDeploy — restrições duras)
 
 Cloudflare Workers: só JS/TS · sem binário nativo · sem TCP puro (tudo HTTP/REST)
