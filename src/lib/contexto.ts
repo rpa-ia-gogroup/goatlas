@@ -14,6 +14,7 @@ import { ClienteOrganizacaoFake } from './atlassian/organizacao-fake'
 import type { ClienteOrganizacao } from './atlassian/organizacao'
 import { ClienteIAHttp } from './ia/cliente'
 import { ClienteIAFake } from './ia/fake'
+import { ClienteIAIndisponivel } from './ia/indisponivel'
 import type { ClienteIA } from './ia/tipos'
 import { AuditoriaBanco, type Auditoria } from './audit'
 import { Config, valoresDoBootstrap, type BootstrapEnv, type ConfigValores } from './config'
@@ -131,10 +132,16 @@ export async function montarContexto(
         campoSolicitanteId: valores.campo_solicitante_id,
       })
 
+  // ⚠️ O fake só é alcançável por `usandoFakes`. Antes, `!env.LLM_API_KEY` também
+  // caía nele — o que produzia **Atlassian real com IA falsa**: agente respondendo
+  // roteiro de demonstração e chamado nascendo de verdade no JSM. Chave ausente com
+  // o resto configurado é ausência de configuração, e ausência = negar, nunca dublê.
   const ia: ClienteIA = reaproveitar.ia
     ? reaproveitar.ia
-    : usandoFakes || !env.LLM_API_KEY
+    : usandoFakes
       ? new ClienteIAFake()
+      : !env.LLM_API_KEY
+      ? new ClienteIAIndisponivel()
       : new ClienteIAHttp({
           baseUrl: env.LLM_BASE_URL ?? null,
           apiKey: env.LLM_API_KEY,

@@ -248,6 +248,25 @@ created: "2026-08-03"
       `RF-55` na Fase 1 — falta aderência a SLA, que só existe a partir da Fase 3.
       12 testes novos (`tests/metricas.test.ts`) + rota incluída em
       `admin-gate.test.ts` (`ROTAS_ADMIN`). Verificado em `npm run dev`.
+- [x] **T-132** Fechar o fail-open da escolha do cliente de IA: chave ausente com o
+      resto configurado não pode instanciar o **fake**.
+      _Requirements: RNF-18, RNF-25, D-04, D-05, D-14_
+      → Achado ao conferir os secrets de `D-14`: `!env.LLM_API_KEY` caía em
+      `ClienteIAFake` **mesmo com `usandoFakes === false`**, então remover
+      `GOATLAS_MODO_DEMO` sem a chave de IA rodaria com **Atlassian real e IA falsa**
+      — roteiro de demonstração na tela e chamado de verdade no JSM. Agora o fake só
+      é alcançável por `usandoFakes`; sem chave vem `ia/indisponivel.ts`
+      (`ClienteIAIndisponivel`), que recusa como **definitivo** (`transitorio: false`
+      — repetir não resolve, alguém configura) e responde `verificarSaude()` com
+      `ok: false`, fazendo `GET /api/health` devolver **503** com o motivo (`RF-59`).
+      O formulário mínimo (`D-04`) não passa por aqui e segue abrindo chamado
+      (`RNF-18`): degrada, não vira parede. 8 testes novos
+      (`tests/ia-indisponivel-sem-chave.test.ts`), incluindo a regressão do fake em
+      modo demo e a prova comportamental de que o agente recusa em vez de responder
+      roteiro. **Pendência de UX anotada, não bloqueante:** `ia.chat` não é
+      envolvido em `try/catch` no orquestrador, então o turno sobe como `500`
+      genérico de `ERROS.interno()` — fail-closed e auditado, mas a mensagem não
+      diz à pessoa que o agente está sem configuração.
 - [ ] **T-096** Deploy em **staging**, validação, e só então produção.
       _Requirements: CLAUDE.md regra 10_
 - [ ] **T-097** Fechar a Definição de Pronto da Fase 1 (§13 dos requisitos) item por

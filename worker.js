@@ -1421,6 +1421,26 @@ var ClienteIAFake = class {
   }
 };
 
+// src/lib/ia/indisponivel.ts
+var MOTIVO = "IA n\xE3o configurada: falta a chave do provedor (LLM_API_KEY)";
+var ClienteIAIndisponivel = class {
+  recusar(etapa) {
+    throw new ErroIA(MOTIVO, { transitorio: false, etapa });
+  }
+  async chat(_params) {
+    this.recusar("chat");
+  }
+  async classificarResolucao(_params) {
+    this.recusar("classificacao");
+  }
+  async extrairProposta(_params) {
+    this.recusar("extracao");
+  }
+  async verificarSaude() {
+    return { ok: false, detalhe: "chave de IA n\xE3o configurada" };
+  }
+};
+
 // src/lib/db/tipos.ts
 function linhasComoObjetos(r) {
   return r.rows.map((linha) => {
@@ -3201,7 +3221,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     // continua indo na descrição enquanto isso (cinto e suspensório).
     campoSolicitanteId: valores.campo_solicitante_id
   });
-  const ia = reaproveitar.ia ? reaproveitar.ia : usandoFakes || !env.LLM_API_KEY ? new ClienteIAFake() : new ClienteIAHttp({
+  const ia = reaproveitar.ia ? reaproveitar.ia : usandoFakes ? new ClienteIAFake() : !env.LLM_API_KEY ? new ClienteIAIndisponivel() : new ClienteIAHttp({
     baseUrl: env.LLM_BASE_URL ?? null,
     apiKey: env.LLM_API_KEY,
     modelo: env.LLM_MODEL ?? "gpt-5.4-mini",

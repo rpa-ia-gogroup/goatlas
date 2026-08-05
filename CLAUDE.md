@@ -133,6 +133,16 @@ destes reabre um vazamento que já foi fechado.
   sem o campo `public` é tratado como interno. O atalho oposto passa em todo teste
   de caminho feliz e abre o app em produção no dia em que alguém esquecer de
   configurar.
+- ⚠️ **O fake é alcançável SÓ por `usandoFakes`** (`contexto.ts`, T-132). `ClienteIAFake`
+  e `ClienteAtlassianFake` são dublê de teste e de demonstração; fora desses dois
+  contextos, credencial ausente instancia `ClienteIAIndisponivel` (recusa honesta), não
+  um dublê. Era um fail-open real: `!env.LLM_API_KEY` caía no fake **mesmo com
+  `usandoFakes === false`**, então bastava remover `GOATLAS_MODO_DEMO` sem ter a chave
+  de IA para o app rodar com **Atlassian real e IA falsa** — agente respondendo roteiro
+  de demonstração e chamado nascendo de verdade no JSM, sem nada na tela distinguindo.
+  Ausência de configuração é ausência: nega e denuncia (`/api/health` responde 503 com o
+  motivo), nunca simula. O formulário mínimo (`D-04`) não passa por aqui e segue
+  abrindo chamado, que é o que `RNF-18` pede — degradar, não virar parede.
 - **`indisponivel` (503), `rate_limit` (429) e `timeout` (504) são TRANSITÓRIOS;
   só `rejeitado` (400/403) é definitivo.** Classificar indisponibilidade como
   definitiva marca a submissão como `falha` e ela **nunca é reprocessada** — é
@@ -324,6 +334,17 @@ git worktree remove .claude/worktrees/<branch>            # ao terminar
 
 Nomes: `<NNN>-<slug>` para feature (o NNN da spec), `fix/<slug>` para correção.
 
+⚠️ **Worktree novo nasce sem `node_modules`** — `npm run test`/`typecheck`/`build`
+falham antes de rodar. Em vez de um `npm install` inteiro por worktree, aponte para o
+da árvore principal (Windows, junção de diretório):
+
+```powershell
+New-Item -ItemType Junction -Path "<worktree>\node_modules" `
+         -Target "C:\Users\User\Desktop\Projetos\goatlas\node_modules"
+```
+
+`node_modules` é gitignored, então a junção não entra em commit nenhum.
+
 ## Plataforma (GoDeploy — restrições duras)
 
 Cloudflare Workers: só JS/TS · sem binário nativo · sem TCP puro (tudo HTTP/REST)
@@ -368,7 +389,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**437 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**445 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -410,6 +431,15 @@ preencher no console de admin — nenhum código a mudar, nenhum deploy.
 **O comentário público atribuído (RF-33) está resolvido** (`D-13`): prefixo
 `**Nome** (email) via goatlas:` usando a identidade do login corporativo Google
 — sem depender do console do goatlas, visível já no Jira nativo.
+
+**Q1 andou metade (`D-14`, 05/08/2026):** o trio Jira/Confluence
+(`ATLASSIAN_API_TOKEN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_BASE_URL`) e `GOATLAS_ORG_ID`
+estão registrados em `9c47f42f`; faltam `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY` e
+`GODEPLOY_CRON_KEY`. **Nada disso mudou comportamento** — `GOATLAS_MODO_DEMO=1` é o
+primeiro termo do `||` de `usandoFakes`. A ordem de virar produção, o que cada
+ausência silencia e as três confusões de credencial que já aconteceram (API token ≠
+chave de Organizations API · `cloudId` ≠ `orgId` · UUID só tem `0-9a-f`) estão em
+`docs/DEPLOY.md` e `D-14`.
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), o **valor** do campo customizado "Solicitante" (**Q4** —
