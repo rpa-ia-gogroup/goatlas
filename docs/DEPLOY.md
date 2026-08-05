@@ -106,6 +106,7 @@ primeiro deploy, registre:
 |---|---|---|
 | `POST /api/cron/reprocessar-submissoes` | `*/5 * * * *` | `RNF-17` — chamado que ficou pendente por falha da Atlassian |
 | `POST /api/cron/reconciliar-vinculos` | `0 * * * *` | `RNF-21` — vínculo órfão (criado no JSM, vínculo perdido) |
+| `POST /api/cron/coletar-inventario` | diário, ex. `0 6 * * *` | `RF-51`/`RF-52` — a Organizations API não serve consulta interativa (T-124). Sem `ATLASSIAN_ORG_API_KEY`/`org_id` configurados, a rota responde `ok` com `organizacao_nao_configurada` — não é erro, é ausência de credencial (**Q1**) |
 
 A rota exige o header assinado `X-Godeploy-Cron` conferido contra
 `GODEPLOY_CRON_KEY`. **Sem a chave configurada a rota é fechada** (fail-closed) —
@@ -124,6 +125,11 @@ em log, em resposta de API ou no bundle do frontend.
 | `ATLASSIAN_API_TOKEN` + `ATLASSIAN_EMAIL` | JSM REST e Confluence em `goengenharia.atlassian.net` (Basic auth) | Conta de serviço **dedicada ao app**, com acesso de agente ao projeto do portal e leitura nos espaços da allowlist | **Q1** |
 | `ATLASSIAN_ORG_API_KEY` | Organizations API em `api.atlassian.com/admin` (Bearer) | **Org Admin** — privilégio alto | Fase 2 · **Q1** |
 | `LLM_API_KEY` (+ `LLM_BASE_URL`) | Proxy de IA corporativo (`D-05`) | Token do gateway | — |
+
+`GOATLAS_ORG_ID` (bootstrap do `org_id` — `RNF-25`, não é secret) identifica a
+organização Atlassian alvo da Organizations API. Sem `ATLASSIAN_ORG_API_KEY` **e**
+`org_id`, `ctx.organizacao` é `null` e a governança de assentos se declara
+indisponível (fail-closed, não erro) — ver T-120/T-122/T-123.
 
 Complementares: `LLM_MODEL`, `LLM_FALLBACK`, `LLM_FALLBACK_MODEL` (fallback direto
 quando o proxy falha), `GODEPLOY_CRON_KEY`, `ATLASSIAN_BASE_URL`.

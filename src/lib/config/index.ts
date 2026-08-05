@@ -33,6 +33,22 @@ export interface ConfigValores {
   tipos_chamado_permitidos: string[]
   /** RNF-25 — service desk alvo, nunca hardcoded. Q1. */
   service_desk_id: string | null
+  /**
+   * RF-21, R-03 — id do campo customizado "Solicitante" no Jira, ex.:
+   * `customfield_10050`. `null` = ainda não sabemos (Q4): o solicitante real
+   * segue indo só na descrição (cinto e suspensório, ver
+   * `atlassian/cliente.ts#montarCamposSolicitante`) — nunca vazio nem inventado.
+   */
+  campo_solicitante_id: string | null
+
+  /** RNF-25 — organização Atlassian alvo da Organizations API (governança de
+   * assentos). Q1: a credencial de Org Admin ainda não existe. */
+  org_id: string | null
+  /** RF-53 — "ocioso" é último acesso há N dias, N configurável. */
+  assentos_ocioso_dias: number
+  /** RF-53 — custo mensal (USD) por chave de produto. Vazio = Q8 em aberto: o
+   * console mostra contagem, nunca dinheiro inventado. */
+  custo_mensal_por_produto: Record<string, number>
 
   /** RF-09 — score acima disto bloqueia pela Regra 1. Começa conservador (R-04). */
   regra1_threshold_score: number
@@ -63,6 +79,10 @@ export const CONFIG_PADRAO: Readonly<ConfigValores> = Object.freeze({
   labels_bloqueadas: ['confidencial'],
   tipos_chamado_permitidos: [],
   service_desk_id: null,
+  campo_solicitante_id: null,
+  org_id: null,
+  assentos_ocioso_dias: 90,
+  custo_mensal_por_produto: {},
   regra1_threshold_score: 0.75,
   regra2_threshold_recorrencia: 3,
   regra2_janela_dias: 90,
@@ -98,8 +118,10 @@ export interface BootstrapEnv {
   /** Lista separada por vírgula de e-mails admin (RF-02, RN-09). */
   readonly GOATLAS_ADMINS?: string
   readonly GOATLAS_SERVICE_DESK_ID?: string
+  readonly GOATLAS_CAMPO_SOLICITANTE_ID?: string
   readonly GOATLAS_TIPOS_CHAMADO?: string
   readonly GOATLAS_ESPACOS_CONFLUENCE?: string
+  readonly GOATLAS_ORG_ID?: string
 }
 
 function lista(bruto: string | undefined): string[] {
@@ -123,6 +145,10 @@ export function valoresDoBootstrap(env: BootstrapEnv): Partial<ConfigValores> {
     .filter((v) => v.length > 0)
   if (espacos.length > 0) parcial.espacos_confluence = espacos
   if (env.GOATLAS_SERVICE_DESK_ID) parcial.service_desk_id = env.GOATLAS_SERVICE_DESK_ID
+  if (env.GOATLAS_CAMPO_SOLICITANTE_ID) {
+    parcial.campo_solicitante_id = env.GOATLAS_CAMPO_SOLICITANTE_ID
+  }
+  if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID
   return parcial
 }
 

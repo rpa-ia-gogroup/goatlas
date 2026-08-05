@@ -43,6 +43,9 @@ export type AcaoAuditada =
   | 'config_alterada'
   | 'tool_recusada'
   | 'limite_excedido'
+  /** Coleta diária da Organizations API (RF-51, RF-52, T-124) — toca a Atlassian,
+   * então é auditada mesmo quando falha. */
+  | 'inventario_coletado'
 
 export interface EntradaAuditoria {
   readonly atorEmail: string

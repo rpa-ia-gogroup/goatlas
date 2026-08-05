@@ -187,6 +187,7 @@ export interface ConfigValores {
   readonly labels_bloqueadas: string[]
   readonly tipos_chamado_permitidos: string[]
   readonly service_desk_id: string | null
+  readonly campo_solicitante_id: string | null
   readonly regra1_threshold_score: number
   readonly regra2_threshold_recorrencia: number
   readonly regra2_janela_dias: number
@@ -219,6 +220,61 @@ export interface MapaDeLacunas {
   readonly semResultado: readonly TermoComLacuna[]
   readonly semClique: readonly TermoComLacuna[]
   readonly overrides: readonly OverrideRegistrado[]
+}
+
+/* ---------- governança de assentos (RF-51 a RF-54) --------------------- */
+
+export interface CustoPorProduto {
+  readonly produto: string
+  readonly usuarios: number
+  readonly ociosos: number
+  /** `null` = sem preço configurado para este produto (Q8). */
+  readonly custoMensalUsd: number | null
+}
+
+export interface ResumoCusto {
+  readonly porProduto: readonly CustoPorProduto[]
+  /** `null` enquanto QUALQUER produto não tiver preço configurado — nunca um total
+   * que sub-conta em silêncio. */
+  readonly totalMensalUsd: number | null
+  readonly custoConfigurado: boolean
+  readonly ocioso: {
+    readonly usuarios: number
+    readonly custoMensalUsd: number | null
+  }
+}
+
+export interface LimitacoesUltimoAcesso {
+  readonly atrasoMaximoHoras: number
+  readonly criterioAtivo: string
+}
+
+export interface ItemInventarioAssento {
+  readonly accountId: string
+  readonly email: string
+  readonly nome: string
+  readonly produto: string
+  readonly ultimoAcessoEm: string | null
+}
+
+export interface RespostaAssentos {
+  /** `null` = a coleta diária ainda não rodou nenhuma vez. */
+  readonly coletadoEm: string | null
+  readonly ociosoDesdeDias: number
+  readonly limitacoesUltimoAcesso: LimitacoesUltimoAcesso
+  readonly itens: readonly ItemInventarioAssento[]
+  readonly custo: ResumoCusto
+}
+
+export type TipoRecomendacao = 'rebaixar_para_customer' | 'remover_ocioso'
+
+export interface Recomendacao {
+  readonly accountId: string
+  readonly email: string
+  readonly nome: string
+  readonly tipo: TipoRecomendacao
+  readonly motivo: string
+  readonly produtosAfetados: readonly string[]
 }
 
 export interface RegistroAuditoria {
@@ -360,6 +416,11 @@ export const api = {
     }),
 
   adminLacunas: () => chamar<MapaDeLacunas>('/api/admin/lacunas'),
+
+  adminAssentos: () => chamar<RespostaAssentos>('/api/admin/assentos'),
+
+  adminRecomendacoesAssentos: () =>
+    chamar<{ itens: Recomendacao[] }>('/api/admin/assentos/recomendacoes'),
 
   adminAuditoria: (email?: string) =>
     chamar<{ itens: RegistroAuditoria[] }>(
