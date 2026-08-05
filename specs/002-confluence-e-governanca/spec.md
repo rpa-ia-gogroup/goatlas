@@ -114,6 +114,13 @@ leitura boa) e a economia de assentos regride sozinha.
   - **Given** uma recomendação de remoção
   - **When** o admin revoga o acesso pelo console
   - **Then** exige **dupla confirmação** e registra em auditoria.
+- **SC-13** · `RF-27`
+  - **Given** o formulário sem IA (`D-04`) e o schema de campos do request type
+    selecionado
+  - **When** a pessoa preenche os campos adicionais (nenhum hardcoded) e envia
+  - **Then** o chamado é criado com esses valores — e se a busca do schema falhar,
+    o formulário **fixo** (título, descrição, tipo, prioridade) continua abrindo
+    chamado normalmente, porque `RF-27` é aditivo e não pode regredir `D-04`.
 
 ## 4. Requisitos cobertos
 
@@ -123,7 +130,7 @@ leitura boa) e a economia de assentos regride sozinha.
 | M4 lacunas | `RF-42` | SC-05 |
 | M6 inventário e custo | `RF-51`…`RF-54` | SC-06 … SC-09 |
 | M6 acesso e auditoria | `RF-49`, `RF-56`, `RF-57`, `RN-09` | SC-10 … SC-12 |
-| `RF-27` completo | campos do schema do request type | *(a detalhar no `plan.md`)* |
+| `RF-27` completo | campos do schema do request type, aditivos ao formulário mínimo (`D-04`) | SC-13 |
 
 ## 5. NFRs em foco
 

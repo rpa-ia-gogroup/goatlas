@@ -344,7 +344,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**348 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**363 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -358,6 +358,13 @@ anexo pelo proxy, **árvore do espaço com breadcrumbs** (T-115) e deep link
 `?q=`/`?pagina=`. E a deflexão da Regra 1 (T-118) linka para essa leitura, não mais para
 `atlassian.net`. O uso fica registrado em `buscas`/`paginas_lidas` (T-116) e vira o
 **mapa de lacunas** na aba de admin (T-117).
+
+**`RF-27` está completo (T-130, Phase 4 da spec 002):** o formulário sem IA
+(`D-04`) ganhou campos adicionais renderizados a partir do schema do request
+type (`atlassian/cliente.ts#obterCamposDoTipo`, `GET
+/api/tipos-chamado/:id/campos`, mesma allowlist de `RF-28`). É aditivo: schema
+indisponível ou tipo sem campo extra não impede o formulário fixo de abrir
+chamado (RNF-18) — verificado em `npm run dev`.
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), campo customizado "Solicitante" (**Q4**), formato do

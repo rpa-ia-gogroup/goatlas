@@ -92,6 +92,7 @@ export function apiDev(): Plugin {
       const fake = inicial.atlassian as unknown as {
         estado: {
           tiposChamado: unknown[]
+          camposPorTipo: Map<string, unknown[]>
           paginas: unknown[]
           conteudoPaginas: Map<string, unknown>
           anexos: Map<string, unknown>
@@ -102,6 +103,34 @@ export function apiDev(): Plugin {
       fake.estado.tiposChamado = [
         { id: 'rt-dev', serviceDeskId: 'sd-dev', nome: 'Suporte de tecnologia', descricao: null },
       ]
+      // RF-27 (T-130) — schema de campos adicionais, para exercitar o formulário
+      // dinâmico em dev sem esperar a credencial real (Q1).
+      fake.estado.camposPorTipo.set('rt-dev', [
+        {
+          fieldId: 'customfield_sistema',
+          rotulo: 'Sistema afetado',
+          obrigatorio: true,
+          tipo: 'texto',
+          opcoes: [],
+        },
+        {
+          fieldId: 'customfield_detalhes',
+          rotulo: 'Detalhes técnicos (opcional)',
+          obrigatorio: false,
+          tipo: 'texto_longo',
+          opcoes: [],
+        },
+        {
+          fieldId: 'customfield_ambiente',
+          rotulo: 'Ambiente',
+          obrigatorio: true,
+          tipo: 'selecao',
+          opcoes: [
+            { id: 'prod', rotulo: 'Produção' },
+            { id: 'homolog', rotulo: 'Homologação' },
+          ],
+        },
+      ])
       fake.estado.paginas = [
         {
           id: 'p1',

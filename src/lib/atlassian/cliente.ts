@@ -25,6 +25,7 @@ import {
   MAX_ANEXO_BYTES,
   SLA_PRIMEIRA_RESPOSTA_HORAS,
   type BuscaConfluenceParams,
+  type CampoRequestType,
   type Chamado,
   type ChamadoCriado,
   type ClienteAtlassian,
@@ -39,6 +40,7 @@ import {
   type ResultadoAnexo,
   type TicketHistorico,
   type TipoChamado,
+  type TipoCampoRequestType,
 } from './tipos'
 
 export interface OpcoesCliente extends OpcoesHttp {
@@ -136,6 +138,58 @@ export function montarJql(params: HistoricoParams): string {
   ].join(' AND ')
 }
 
+/** `system` dos campos que o formulário fixo já cobre (RF-27) — nunca duplicar. */
+const CAMPOS_DE_SISTEMA_JA_COBERTOS = new Set(['summary', 'description', 'priority'])
+
+interface CampoRequestTypeBruto {
+  fieldId?: unknown
+  name?: unknown
+  required?: unknown
+  jiraSchema?: { type?: unknown; system?: unknown; custom?: unknown }
+  validValues?: { id?: unknown; value?: unknown; label?: unknown }[]
+}
+
+/**
+ * Filtra e mapeia o schema bruto do JSM para os campos ADICIONAIS do formulário
+ * (RF-27) — os três campos de sistema (`summary`/`description`/`priority`) já
+ * têm input fixo (`D-04`) e nunca aparecem duas vezes.
+ *
+ * Exportada (como `montarCql`/`escaparCql`) para ser testável sem rede: o shape
+ * exato de `jiraSchema.custom` (o que distingue texto curto de área de texto)
+ * **[SUPOSIÇÃO — verificável só com credencial (Q1)]** é inferido da doc pública
+ * do JSM, não de uma resposta real ainda vista.
+ */
+export function camposAdicionais(brutos: readonly CampoRequestTypeBruto[]): CampoRequestType[] {
+  const resultado: CampoRequestType[] = []
+  for (const bruto of brutos) {
+    const fieldId = String(bruto.fieldId ?? '')
+    const sistema = typeof bruto.jiraSchema?.system === 'string' ? bruto.jiraSchema.system : null
+    if (!fieldId || (sistema !== null && CAMPOS_DE_SISTEMA_JA_COBERTOS.has(sistema))) continue
+
+    const opcoes = (bruto.validValues ?? []).map((v) => ({
+      id: String(v.id ?? v.value ?? ''),
+      rotulo: String(v.label ?? v.value ?? v.id ?? ''),
+    }))
+    const custom = typeof bruto.jiraSchema?.custom === 'string' ? bruto.jiraSchema.custom : ''
+    const tipoBruto = typeof bruto.jiraSchema?.type === 'string' ? bruto.jiraSchema.type : ''
+    const tipo: TipoCampoRequestType =
+      opcoes.length > 0 || tipoBruto === 'option'
+        ? 'selecao'
+        : custom.toLowerCase().includes('textarea')
+          ? 'texto_longo'
+          : 'texto'
+
+    resultado.push({
+      fieldId,
+      rotulo: String(bruto.name ?? fieldId),
+      obrigatorio: Boolean(bruto.required),
+      tipo,
+      opcoes,
+    })
+  }
+  return resultado
+}
+
 interface RespostaBusca {
   results?: {
     content?: { id?: unknown; title?: unknown; space?: { key?: unknown } }
@@ -181,6 +235,29 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
   }
 
   /**
+   * Schema de campos adicionais do request type (RF-27, T-130).
+   *
+   * A chave de cache inclui `serviceDeskId` **e** `requestTypeId` — diferente de
+   * `listarTiposChamado`, que usa uma chave fixa: aqui há um schema por tipo.
+   */
+  async obterCamposDoTipo(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<readonly CampoRequestType[]> {
+    const chave = `camposDoTipo:${serviceDeskId}:${requestTypeId}`
+    const cacheado = this.cacheMetadados.obter(chave)
+    if (cacheado) return cacheado as CampoRequestType[]
+
+    const dados = (await this.transporte.requisitar(
+      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`,
+    )) as { requestTypeFields?: CampoRequestTypeBruto[] }
+
+    const campos = camposAdicionais(dados?.requestTypeFields ?? [])
+    this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg)
+    return campos
+  }
+
+  /**
    * Campos que carregam o solicitante real — RF-21, mitigação de R-03.
    *
    * ⚠️ **Cinto e suspensório, de propósito.** O e-mail vai no campo customizado
@@ -210,12 +287,20 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
 
   async criarChamado(dados: NovoChamado): Promise<ChamadoCriado> {
     const { descricao, camposExtra } = this.montarCamposSolicitante(dados)
+    // RF-27 (T-130) — campos adicionais do request type. `camposExtra` vem DEPOIS
+    // de propósito: mesmo que um `fieldId` dinâmico colida com o campo de
+    // solicitante/prioridade, o valor de sistema vence (defesa em profundidade,
+    // igual à dupla checagem de RF-32).
+    const camposDinamicos = { ...dados.camposDinamicos }
+    delete camposDinamicos.summary
+    delete camposDinamicos.description
     const corpo = {
       serviceDeskId: dados.serviceDeskId,
       requestTypeId: dados.tipoChamadoId,
       requestFieldValues: {
         summary: dados.titulo,
         description: descricao,
+        ...camposDinamicos,
         ...camposExtra,
       },
     }

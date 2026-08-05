@@ -107,6 +107,13 @@ verificado pelas regras**, para não virar bypass silencioso da deflexão
 (Princípio XI). Se o formulário virar rota de fuga da Regra 1/2, isso aparece na
 métrica e o produto decide o que fazer.
 
+**Atualização (05/08/2026, T-130):** a parte que faltava — campos adicionais
+renderizados a partir do schema do request type — está pronta. `RF-27` está
+**completo** (`Status` desta decisão passa a refletir isso), aditivo ao
+formulário mínimo: um `requestTypeId` sem schema disponível (ou uma falha ao
+buscá-lo) não impede o formulário fixo de abrir chamado — o mesmo raciocínio de
+degradação graciosa que motivou esta decisão no dia 1.
+
 ---
 
 ### D-05 · Q6 (parcial): a camada de IA aponta para o proxy corporativo

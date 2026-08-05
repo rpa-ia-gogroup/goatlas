@@ -11,6 +11,7 @@ import {
   ErroApi,
   PRIORIDADES,
   prioridadePor,
+  type CampoRequestType,
   type ChamadoResumo,
   type DetalheChamado,
   type EstadoVerificacao,
@@ -589,6 +590,13 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
   // (RF-24). Gerar por clique perderia a proteção justamente no duplo clique.
   const chave = useRef(crypto.randomUUID())
 
+  // RF-27 (T-130) — campos adicionais do request type selecionado. `null` =
+  // ainda carregando; `[]` = nenhum campo extra OU a busca falhou — os dois
+  // casos são tratados IGUAL de propósito: o formulário fixo não pode parar de
+  // funcionar por causa do schema (RNF-18).
+  const [campos, setCampos] = useState<CampoRequestType[] | null>(null)
+  const [valoresCampos, setValoresCampos] = useState<Record<string, string>>({})
+
   useEffect(() => {
     api
       .tiposChamado()
@@ -598,6 +606,16 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
       })
       .catch(() => setTipos([]))
   }, [])
+
+  useEffect(() => {
+    if (!tipoChamadoId) return
+    setCampos(null)
+    setValoresCampos({})
+    api
+      .camposDoTipo(tipoChamadoId)
+      .then((r) => setCampos(r.itens))
+      .catch(() => setCampos([]))
+  }, [tipoChamadoId])
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
@@ -611,6 +629,7 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
           tipoChamadoId,
           prioridade,
           chaveIdempotencia: chave.current,
+          ...(Object.keys(valoresCampos).length > 0 ? { camposDinamicos: valoresCampos } : {}),
         }),
       )
     } catch (err) {
@@ -679,6 +698,19 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
         </select>
       </div>
 
+      {campos && campos.length > 0 && (
+        <div className="pilha">
+          {campos.map((c) => (
+            <CampoDinamico
+              key={c.fieldId}
+              campo={c}
+              valor={valoresCampos[c.fieldId] ?? ''}
+              aoMudar={(v) => setValoresCampos((atuais) => ({ ...atuais, [c.fieldId]: v }))}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="campo">
         <label htmlFor="prioridade-form">Prioridade</label>
         <select
@@ -706,5 +738,48 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
         </button>
       </div>
     </form>
+  )
+}
+
+/**
+ * Um campo adicional do request type (RF-27, T-130) — renderizado a partir do
+ * schema, nunca hardcoded. Só três formas de input: o schema do JSM tem bem
+ * mais tipo de campo do que isso, e um tipo não reconhecido aqui cairia melhor
+ * como texto livre do que travando o formulário inteiro por causa de um campo
+ * extra que a pessoa nem precisa preencher para abrir o chamado.
+ */
+function CampoDinamico({
+  campo,
+  valor,
+  aoMudar,
+}: {
+  campo: CampoRequestType
+  valor: string
+  aoMudar: (valor: string) => void
+}) {
+  const id = `campo-dinamico-${campo.fieldId}`
+  return (
+    <div className="campo">
+      <label htmlFor={id}>{campo.rotulo}</label>
+      {campo.tipo === 'texto_longo' ? (
+        <textarea
+          id={id}
+          value={valor}
+          onChange={(e) => aoMudar(e.target.value)}
+          required={campo.obrigatorio}
+        />
+      ) : campo.tipo === 'selecao' ? (
+        <select id={id} value={valor} onChange={(e) => aoMudar(e.target.value)} required={campo.obrigatorio}>
+          <option value="">Selecione…</option>
+          {campo.opcoes.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.rotulo}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input id={id} value={valor} onChange={(e) => aoMudar(e.target.value)} required={campo.obrigatorio} />
+      )}
+    </div>
   )
 }

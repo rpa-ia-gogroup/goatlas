@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  camposAdicionais,
   ClienteAtlassianHttp,
   escaparCql,
   montarCql,
@@ -160,6 +161,118 @@ describe('RF-21 / R-03 — o solicitante real vai no chamado, com e sem o campo 
     const cliente = new ClienteAtlassianHttp({ ...BASE, campoSolicitanteId: null })
     const { descricao } = cliente.montarCamposSolicitante(dados)
     expect(descricao).toContain('chave-123')
+  })
+})
+
+describe('RF-27 (T-130) — camposAdicionais filtra o que o formulário fixo já cobre', () => {
+  it('summary/description/priority NUNCA aparecem — já têm input fixo (D-04)', () => {
+    const campos = camposAdicionais([
+      { fieldId: 'summary', name: 'Summary', jiraSchema: { type: 'string', system: 'summary' } },
+      { fieldId: 'description', name: 'Description', jiraSchema: { type: 'string', system: 'description' } },
+      { fieldId: 'priority', name: 'Priority', jiraSchema: { type: 'priority', system: 'priority' } },
+      { fieldId: 'customfield_1', name: 'Sistema afetado', jiraSchema: { type: 'string' } },
+    ])
+    expect(campos.map((c) => c.fieldId)).toEqual(['customfield_1'])
+  })
+
+  it('campo sem `validValues` e sem custom textarea vira "texto"', () => {
+    const [campo] = camposAdicionais([
+      { fieldId: 'customfield_1', name: 'Sistema afetado', required: true, jiraSchema: { type: 'string' } },
+    ])
+    expect(campo?.tipo).toBe('texto')
+    expect(campo?.obrigatorio).toBe(true)
+    expect(campo?.opcoes).toEqual([])
+  })
+
+  it('custom textarea vira "texto_longo"', () => {
+    const [campo] = camposAdicionais([
+      {
+        fieldId: 'customfield_2',
+        name: 'Detalhes',
+        jiraSchema: { type: 'string', custom: 'com.atlassian.jira.plugin.system.customfieldtypes:textarea' },
+      },
+    ])
+    expect(campo?.tipo).toBe('texto_longo')
+  })
+
+  it('campo com `validValues` vira "selecao", com as opções mapeadas', () => {
+    const [campo] = camposAdicionais([
+      {
+        fieldId: 'customfield_3',
+        name: 'Ambiente',
+        jiraSchema: { type: 'option' },
+        validValues: [
+          { id: '1', label: 'Produção' },
+          { id: '2', label: 'Homologação' },
+        ],
+      },
+    ])
+    expect(campo?.tipo).toBe('selecao')
+    expect(campo?.opcoes).toEqual([
+      { id: '1', rotulo: 'Produção' },
+      { id: '2', rotulo: 'Homologação' },
+    ])
+  })
+
+  it('campo sem fieldId é descartado — não há como enviar valor sem ele', () => {
+    expect(camposAdicionais([{ name: 'Sem id' }])).toEqual([])
+  })
+})
+
+describe('RF-27 (T-130) — criarChamado inclui camposDinamicos em requestFieldValues', () => {
+  it('o valor dinâmico chega no corpo da requisição', async () => {
+    let corpoEnviado: Record<string, unknown> | null = null
+    const cliente = new ClienteAtlassianHttp({
+      ...BASE,
+      campoSolicitanteId: null,
+      maxTentativas: 1,
+      fetchImpl: (async (_url: string, init: { body?: string }) => {
+        corpoEnviado = JSON.parse(init.body ?? '{}')
+        return new Response(JSON.stringify({ issueKey: 'GOATLAS-1', issueId: '1' }), { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+    await cliente.criarChamado({
+      serviceDeskId: 'sd-1',
+      tipoChamadoId: 'rt-1',
+      titulo: 'Título',
+      descricao: 'Descrição',
+      prioridade: 'normal',
+      solicitanteEmail: 'ana@gocase.com',
+      chaveIdempotencia: 'chave-1',
+      camposDinamicos: { customfield_1: 'Servidor de vendas' },
+    })
+    const enviado = corpoEnviado as unknown as {
+      requestFieldValues: Record<string, unknown>
+    }
+    expect(enviado.requestFieldValues.customfield_1).toBe('Servidor de vendas')
+  })
+
+  it('BURLA — camposDinamicos não sobrescreve summary/description do sistema', async () => {
+    let corpoEnviado: Record<string, unknown> | null = null
+    const cliente = new ClienteAtlassianHttp({
+      ...BASE,
+      campoSolicitanteId: null,
+      maxTentativas: 1,
+      fetchImpl: (async (_url: string, init: { body?: string }) => {
+        corpoEnviado = JSON.parse(init.body ?? '{}')
+        return new Response(JSON.stringify({ issueKey: 'GOATLAS-1', issueId: '1' }), { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+    await cliente.criarChamado({
+      serviceDeskId: 'sd-1',
+      tipoChamadoId: 'rt-1',
+      titulo: 'Título real',
+      descricao: 'Descrição real',
+      prioridade: 'normal',
+      solicitanteEmail: 'ana@gocase.com',
+      chaveIdempotencia: 'chave-1',
+      camposDinamicos: { summary: 'forjado', description: 'forjado' },
+    })
+    const enviado = corpoEnviado as unknown as {
+      requestFieldValues: { summary: unknown; description: unknown }
+    }
+    expect(enviado.requestFieldValues.summary).toBe('Título real')
+    expect(String(enviado.requestFieldValues.description)).toContain('Descrição real')
   })
 })
 

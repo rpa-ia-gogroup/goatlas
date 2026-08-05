@@ -273,9 +273,22 @@ created: "2026-08-04"
 
 ## Phase 4 — Fechamento
 
-- [ ] **T-130** `RF-27` completo: campos do formulário renderizados a partir do
+- [x] **T-130** `RF-27` completo: campos do formulário renderizados a partir do
       schema do request type. **O caminho sem IA da Fase 1 não pode regredir.**
       _Requirements: RF-27_
+      → `atlassian/tipos.ts` (`CampoRequestType`) + `atlassian/cliente.ts`
+      (`obterCamposDoTipo`, cache por `serviceDeskId:requestTypeId`, e a função
+      pura `camposAdicionais` — filtra `summary`/`description`/`priority`, que já
+      têm input fixo, e nunca duplica) + `atlassian/fake.ts`. Nova rota
+      `GET /api/tipos-chamado/:id/campos` com a MESMA allowlist de RF-28 (404 fora
+      dela). Os valores preenchidos chegam a `criarChamado` via
+      `PayloadSubmissao.camposDinamicos` → `NovoChamado.camposDinamicos`, com
+      `summary`/`description` descartados na fusão final (defesa em profundidade,
+      igual RF-32). Frontend: `TelaFormulario` busca o schema do tipo selecionado e
+      renderiza texto/texto longo/seleção; falha na busca (ou tipo sem schema) faz
+      `campos` virar `[]` — o formulário fixo **continua funcionando** (RNF-18).
+      Verificado em `npm run dev`: validação nativa bloqueia obrigatório vazio, os
+      três tipos renderizam e o chamado abre com os valores corretos.
 - [ ] **T-131** `RF-57` (P2): revogar produto pelo console, **dupla confirmação** e
       auditoria. Única escrita da credencial de Org Admin. **[BLOQUEADA: Q1]**
       _Requirements: RF-57, RN-10_

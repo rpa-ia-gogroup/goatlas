@@ -29,6 +29,8 @@ export interface PayloadSubmissao {
   readonly tipoChamadoId: string
   readonly serviceDeskId: string
   readonly prioridade: Prioridade
+  /** RF-27 (T-130) — campos adicionais do request type, só no formulário sem IA. */
+  readonly camposDinamicos?: Readonly<Record<string, string>>
 }
 
 export interface Submissao {
