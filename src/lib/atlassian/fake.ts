@@ -270,15 +270,20 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     return this.estado.comentarios.get(issueKey) ?? []
   }
 
-  async comentar(issueKey: string, corpo: string, autorEmail: string): Promise<void> {
-    this.chamadas.push({ operacao: 'comentar', params: { issueKey, corpo, autorEmail } })
+  async comentar(
+    issueKey: string,
+    corpo: string,
+    autorEmail: string,
+    autorNome?: string,
+  ): Promise<void> {
+    this.chamadas.push({ operacao: 'comentar', params: { issueKey, corpo, autorEmail, autorNome } })
     const atuais = this.estado.comentarios.get(issueKey) ?? []
     this.estado.comentarios.set(issueKey, [
       ...atuais,
       {
         id: `c${atuais.length + 1}`,
         corpo,
-        autorNome: autorEmail,
+        autorNome: autorNome ?? autorEmail,
         criadoEm: new Date(0).toISOString(),
         publico: true,
       },

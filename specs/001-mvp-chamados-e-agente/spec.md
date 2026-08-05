@@ -379,10 +379,10 @@ de a resposta estar em [`DECISOES.md`](../../docs/DECISOES.md).
       comporta com conta desativada — se ele mantém a sessão, negar de imediato
       exige checagem própria contra o Workspace. Verificar antes de estimar.]`
       — ver `D-02`.
-- [ ] `[NEEDS CLARIFICATION: RF-33 pede comentário "atribuído de forma legível ao
-      solicitante real", mas o comentário parte da conta de serviço. Prefixo no
-      corpo do comentário (visível a todos, inclusive no Jira nativo) é aceitável
-      para o time de tech, ou há outro caminho?]` *(interage com R-03 e Q10)*
+- [x] **Resolvida** (`D-13`): prefixo no corpo do comentário — `**Nome** (email)
+      via goatlas:`, com nome e e-mail do login corporativo Google. Visível a
+      todos, inclusive no Jira nativo, onde o time de tech trabalha. *(interage
+      com R-03 e Q10 — Q10 segue aberta, mas não bloqueia mais código)*
 
 ## 11. Inconsistência do faseamento — **resolvida**
 

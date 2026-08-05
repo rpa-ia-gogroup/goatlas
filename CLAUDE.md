@@ -368,7 +368,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**436 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**437 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -407,10 +407,13 @@ escrever a chamada real contra um endpoint que ninguém pode testar hoje.
 time de tech confirmar o id do campo "Solicitante" no projeto do portal, é só
 preencher no console de admin — nenhum código a mudar, nenhum deploy.
 
+**O comentário público atribuído (RF-33) está resolvido** (`D-13`): prefixo
+`**Nome** (email) via goatlas:` usando a identidade do login corporativo Google
+— sem depender do console do goatlas, visível já no Jira nativo.
+
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), o **valor** do campo customizado "Solicitante" (**Q4** —
-o código já está pronto, ver acima), formato do comentário atribuído
-(alinhamento com o time de tech), deploy em staging/prod e o fechamento da
+o código já está pronto, ver acima), deploy em staging/prod e o fechamento da
 Definição de Pronto. A **Phase 2 da spec 002 está completa**; o que resta dela é a
 governança de assentos (Phase 3, detalhada acima), que depende de **Q1** para
 valer contra a API real. **Q5** não trava código, só o dado de
