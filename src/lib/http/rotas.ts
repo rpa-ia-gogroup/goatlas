@@ -25,6 +25,7 @@ import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../
 import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
 import { LIMITACOES_ULTIMO_ACESSO } from '../atlassian/organizacao'
 import { calcularCusto } from '../governanca/custo'
+import { obterResumoMetricas } from '../governanca/metricas'
 import { gerarRecomendacoes } from '../governanca/recomendacoes'
 import { recomendacoesParaCsv } from '../governanca/csv'
 
@@ -736,6 +737,14 @@ async function rotear(
   if (caminho === '/api/admin/lacunas' && req.method === 'GET') {
     if (!eu.isAdmin) return ERROS.semPermissao()
     return json(await ctx.conhecimento.agregarLacunas_apenasAdmin())
+  }
+
+  // T-095 / O1, R-04 — taxa de deflexão, taxa de override, via de abertura e
+  // buscas sem resultado, agregado desde o dia 1. É o subconjunto viável de
+  // RF-55 na Fase 1 (sem aderência a SLA, que só existe a partir da Fase 3).
+  if (caminho === '/api/admin/metricas' && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    return json(await obterResumoMetricas(ctx.db))
   }
 
   if (caminho === '/api/admin/auditoria' && req.method === 'GET') {

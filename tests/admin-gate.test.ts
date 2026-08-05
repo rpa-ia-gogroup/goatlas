@@ -53,6 +53,7 @@ const chamar = (r: Request) => tratarRequisicao(r, ctx, {})
 const ROTAS_ADMIN = [
   '/api/admin/config',
   '/api/admin/lacunas',
+  '/api/admin/metricas',
   '/api/admin/auditoria',
   '/api/admin/assentos',
   '/api/admin/assentos/recomendacoes',

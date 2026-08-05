@@ -197,6 +197,11 @@ destes reabre um vazamento que já foi fechado.
   ignorados — é o mesmo raciocínio da identidade: quem consulta não escolhe o próprio
   escopo. Um `?espacos=RH` respeitado seria o caminho mais curto para o espaço do RH.
   `?limite=` é clampado, porque cada resultado custa uma consulta de restrição.
+- **Taxa sem nenhum dado ainda é `null`, nunca `0%`** (`governanca/metricas.ts`,
+  T-095) — mesmo raciocínio de `custoConfigurado` em `custo.ts`/Q8. "0% de
+  override" pareceria "a Regra 1/2 nunca falha" quando na verdade ninguém foi
+  bloqueado ainda; a tela mostra "sem dados" e só passa a calcular de verdade
+  quando o primeiro bloqueio/busca existir.
 - **Zero por falta de config ≠ zero por falta de documentação.** A busca devolve
   `buscaConfigurada: false` no primeiro caso e **não** registra lacuna de `RF-42` —
   registrar envenenaria o mapa de T-117 com termos que ninguém deixou de documentar, e
@@ -363,7 +368,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**423 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**436 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,

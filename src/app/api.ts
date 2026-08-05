@@ -222,6 +222,33 @@ export interface MapaDeLacunas {
   readonly overrides: readonly OverrideRegistrado[]
 }
 
+/* ---------- métricas mínimas (T-095, O1, R-04, RF-42) ------------------ */
+
+export interface DeflexaoPorRegra {
+  readonly regra: string
+  readonly totalBloqueios: number
+  readonly overrides: number
+  /** `null` = nenhum bloqueio ainda dessa regra. */
+  readonly taxaDeflexaoPct: number | null
+}
+
+export interface ResumoBuscasMetricas {
+  readonly total: number
+  readonly semResultado: number
+  /** `null` = nenhuma busca ainda. */
+  readonly taxaSemResultadoPct: number | null
+}
+
+export interface ResumoMetricas {
+  readonly deflexaoPorRegra: readonly DeflexaoPorRegra[]
+  readonly totalBloqueios: number
+  readonly totalOverrides: number
+  /** `null` = nenhum bloqueio ainda, de nenhuma regra. */
+  readonly taxaOverrideGlobalPct: number | null
+  readonly chamadosPorVia: Readonly<Record<string, number>>
+  readonly buscas: ResumoBuscasMetricas
+}
+
 /* ---------- governança de assentos (RF-51 a RF-54) --------------------- */
 
 export interface CustoPorProduto {
@@ -416,6 +443,8 @@ export const api = {
     }),
 
   adminLacunas: () => chamar<MapaDeLacunas>('/api/admin/lacunas'),
+
+  adminMetricas: () => chamar<ResumoMetricas>('/api/admin/metricas'),
 
   adminAssentos: () => chamar<RespostaAssentos>('/api/admin/assentos'),
 
