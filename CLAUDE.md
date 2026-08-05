@@ -173,6 +173,13 @@ destes reabre um vazamento que já foi fechado.
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
   lendo `env.ATLASSIAN_API_TOKEN` faz `RNF-01` depender de disciplina em vez de
   estrutura.
+- **A Organizations API tem TRANSPORTE PRÓPRIO** (`atlassian/organizacao.ts`,
+  `RNF-04`) — não a mesma instância do cliente de Jira/Confluence. A credencial é
+  **Org Admin**: "economizar" reaproveitando `atlassian/http.ts` (que já resolve
+  Basic auth + backoff) transformaria um bug de roteamento comum em vazamento da
+  credencial de maior privilégio do sistema. `ctx.organizacao` é `null` fora dos
+  fakes até T-122/T-123 existirem — rota de governança trata isso como
+  "não configurado" (RNF-18), nunca como erro.
 - **Pergunta em aberto (Q1/Q4/Q5/Q8...) não é motivo para hardcode.** O padrão do
   projeto é sempre o mesmo: o valor que falta vira campo de `ConfigValores`
   (`RNF-25`), com `null`/vazio como default fail-closed, e o código já fica pronto
@@ -353,7 +360,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**350 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**395 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -368,6 +375,19 @@ anexo pelo proxy, **árvore do espaço com breadcrumbs** (T-115) e deep link
 `atlassian.net`. O uso fica registrado em `buscas`/`paginas_lidas` (T-116) e vira o
 **mapa de lacunas** na aba de admin (T-117).
 
+**A Phase 3 da spec 002 (governança de assentos) está quase pronta.** Contrato e
+transporte isolado da Organizations API (`atlassian/organizacao.ts`, T-120), fake
+roteirizável (T-121), cache histórico do inventário + cron diário
+(`governanca/inventario.ts`, T-124), custo e assento ocioso como funções puras
+(`governanca/custo.ts`, T-125 — sem `custo_mensal_por_produto` configurado mostra
+contagem, nunca dinheiro inventado), recomendações de rebaixamento/remoção
+(`governanca/recomendacoes.ts`, T-126), exportação CSV com escape de vírgula, aspas
+**e** fórmula (`governanca/csv.ts`, T-127) e a seção "Governança de assentos" na aba
+de admin (T-128) — tudo testado contra `ClienteOrganizacaoFake`. O que falta,
+`listarUsuarios`/`ultimoAcesso` reais (T-122/T-123) e revogar produto (T-131,
+P2), depende de **Q1**: a credencial de Org Admin ainda não existe, e não há como
+escrever a chamada real contra um endpoint que ninguém pode testar hoje.
+
 **`campo_solicitante_id` (Q4) já é config, não hardcode** (`RF-21`): o dia que o
 time de tech confirmar o id do campo "Solicitante" no projeto do portal, é só
 preencher no console de admin — nenhum código a mudar, nenhum deploy.
@@ -377,9 +397,10 @@ Atlassian real (**Q1**), o **valor** do campo customizado "Solicitante" (**Q4** 
 o código já está pronto, ver acima), formato do comentário atribuído
 (alinhamento com o time de tech), deploy em staging/prod e o fechamento da
 Definição de Pronto. A **Phase 2 da spec 002 está completa**; o que resta dela é a
-governança de assentos (Phase 3), que depende de **Q1** para valer contra a API real —
-o fake permite construir o console antes. **Q5** não trava código, só o dado de
-`espacos_confluence`, sem o qual a busca devolve zero e diz `buscaConfigurada: false`.
+governança de assentos (Phase 3, detalhada acima), que depende de **Q1** para
+valer contra a API real. **Q5** não trava código, só o dado de
+`espacos_confluence`, sem o qual a busca devolve zero e diz `buscaConfigurada: false`
+— o mesmo raciocínio de **Q8** para `custo_mensal_por_produto`.
 
 ### Como testar sem credencial
 As duas camadas isoladas têm **fake** (`src/lib/atlassian/fake.ts`,

@@ -862,6 +862,68 @@ var ClienteAtlassianFake = class {
   }
 };
 
+// src/lib/atlassian/organizacao.ts
+var LIMITACOES_ULTIMO_ACESSO = Object.freeze({
+  atrasoMaximoHoras: 24,
+  criterioAtivo: 'Considerado "ativo" quem visualizou uma p\xE1gina do produto por ao menos 2 segundos.'
+});
+var ErroOrganizacao = ErroAtlassian;
+
+// src/lib/atlassian/organizacao-fake.ts
+var FALHAS2 = Object.freeze({
+  indisponivel: { status: 503, transitorio: true },
+  rate_limit: { status: 429, transitorio: true },
+  timeout: { status: 504, transitorio: true }
+});
+var ClienteOrganizacaoFake = class {
+  estado;
+  constructor(inicial = {}) {
+    this.estado = {
+      usuarios: inicial.usuarios ?? [],
+      ultimoAcesso: inicial.ultimoAcesso ?? /* @__PURE__ */ new Map(),
+      falhas: {
+        listarUsuarios: "nenhum",
+        ultimoAcesso: "nenhum",
+        revogarProduto: "nenhum",
+        ...inicial.falhas
+      }
+    };
+  }
+  checar(modo, recurso) {
+    if (modo === "nenhum") return;
+    const { status, transitorio } = FALHAS2[modo];
+    throw new ErroOrganizacao(`fake organiza\xE7\xE3o: ${modo}`, { status, transitorio, recurso });
+  }
+  async listarUsuarios(_orgId) {
+    this.checar(this.estado.falhas.listarUsuarios, "listarUsuarios");
+    return this.estado.usuarios;
+  }
+  async ultimoAcesso(_orgId, accountId) {
+    this.checar(this.estado.falhas.ultimoAcesso, "ultimoAcesso");
+    return {
+      accountId,
+      porProduto: this.estado.ultimoAcesso.get(accountId) ?? [],
+      coletadoEm: (/* @__PURE__ */ new Date(0)).toISOString()
+    };
+  }
+  async revogarProduto(_orgId, accountId, produto) {
+    this.checar(this.estado.falhas.revogarProduto, "revogarProduto");
+    const usuario = this.estado.usuarios.find((u) => u.accountId === accountId);
+    if (!usuario) {
+      throw new ErroOrganizacao("usu\xE1rio n\xE3o encontrado", {
+        status: 404,
+        transitorio: false,
+        recurso: "revogarProduto"
+      });
+    }
+    const index = this.estado.usuarios.indexOf(usuario);
+    this.estado.usuarios[index] = {
+      ...usuario,
+      produtos: usuario.produtos.filter((p) => p.chave !== produto)
+    };
+  }
+};
+
 // src/lib/ia/tipos.ts
 var ErroIA = class extends Error {
   constructor(message, detalhe) {
@@ -1384,6 +1446,9 @@ var CONFIG_PADRAO = Object.freeze({
   tipos_chamado_permitidos: [],
   service_desk_id: null,
   campo_solicitante_id: null,
+  org_id: null,
+  assentos_ocioso_dias: 90,
+  custo_mensal_por_produto: {},
   regra1_threshold_score: 0.75,
   regra2_threshold_recorrencia: 3,
   regra2_janela_dias: 90,
@@ -1412,6 +1477,7 @@ function valoresDoBootstrap(env) {
   if (env.GOATLAS_CAMPO_SOLICITANTE_ID) {
     parcial.campo_solicitante_id = env.GOATLAS_CAMPO_SOLICITANTE_ID;
   }
+  if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID;
   return parcial;
 }
 var Config = class {
@@ -1742,7 +1808,26 @@ var TABELAS = [
      valor_json    TEXT NOT NULL,
      atualizado_em TEXT NOT NULL,
      atualizado_por TEXT
-   )`
+   )`,
+  /**
+   * Cache histórico do inventário de assentos (RF-51, RF-52, T-124). Uma linha por
+   * (conta × produto atribuído) A CADA coleta — nunca `UPDATE` — porque o
+   * histórico é o que torna o assento ocioso um dado que se acompanha ao longo do
+   * tempo (O2, O7), não um retrato único. A Organizations API é lenta demais para
+   * consulta interativa; por isso o console lê o CACHE (`MAX(coletado_em)`), nunca
+   * a API ao vivo.
+   */
+  `CREATE TABLE IF NOT EXISTS inventario_assentos (
+     id                TEXT PRIMARY KEY,
+     account_id        TEXT NOT NULL,
+     email             TEXT NOT NULL,
+     nome              TEXT NOT NULL,
+     produto           TEXT NOT NULL,
+     ultimo_acesso_em  TEXT,
+     coletado_em       TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_inventario_assentos_coletado ON inventario_assentos (coletado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_inventario_assentos_conta ON inventario_assentos (account_id, produto, coletado_em)`
 ];
 async function migrar(db) {
   for (const sql of TABELAS) {
@@ -2979,6 +3064,67 @@ var ServicoChamados = class {
   }
 };
 
+// src/lib/governanca/inventario.ts
+var RepositorioInventario = class {
+  constructor(db, novoId) {
+    this.db = db;
+    this.novoId = novoId;
+  }
+  /** Uma linha por (usuário × produto atribuído), carimbada com o instante desta coleta. */
+  async registrarColeta(entradas, coletadoEm) {
+    let registros = 0;
+    for (const { usuario, ultimoAcesso } of entradas) {
+      const porProduto = new Map(
+        (ultimoAcesso?.porProduto ?? []).map((p) => [p.produto, p.ultimoAcessoEm])
+      );
+      for (const produto of usuario.produtos) {
+        await this.db.exec(
+          `INSERT INTO inventario_assentos
+             (id, account_id, email, nome, produto, ultimo_acesso_em, coletado_em)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            this.novoId(),
+            usuario.accountId,
+            usuario.email,
+            usuario.nome,
+            produto.chave,
+            porProduto.get(produto.chave) ?? null,
+            coletadoEm
+          ]
+        );
+        registros += 1;
+      }
+    }
+    return { registros };
+  }
+  /** A coleta mais recente — é o que a tela e o cálculo de custo/ocioso leem. */
+  async obterMaisRecente() {
+    const maisRecente = await this.db.query(
+      "SELECT MAX(coletado_em) AS coletado_em FROM inventario_assentos",
+      []
+    );
+    const [linha] = linhasComoObjetos(maisRecente);
+    const coletadoEm = linha?.coletado_em ?? null;
+    if (!coletadoEm) return { coletadoEm: null, itens: [] };
+    const r = await this.db.query(
+      `SELECT account_id, email, nome, produto, ultimo_acesso_em
+         FROM inventario_assentos WHERE coletado_em = ?
+         ORDER BY email, produto`,
+      [coletadoEm]
+    );
+    const itens = linhasComoObjetos(r).map(
+      (l) => ({
+        accountId: l.account_id,
+        email: l.email,
+        nome: l.nome,
+        produto: l.produto,
+        ultimoAcessoEm: l.ultimo_acesso_em
+      })
+    );
+    return { coletadoEm, itens };
+  }
+};
+
 // src/lib/contexto.ts
 function novoIdPadrao() {
   return crypto.randomUUID();
@@ -3009,6 +3155,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     apiKeyFallback: env.LLM_FALLBACK ?? null,
     ...env.LLM_FALLBACK_MODEL ? { modeloFallback: env.LLM_FALLBACK_MODEL } : {}
   });
+  const organizacao = reaproveitar.organizacao ? reaproveitar.organizacao : usandoFakes ? new ClienteOrganizacaoFake() : null;
   if (modoDemo) {
     if (atlassian instanceof ClienteAtlassianFake) semearAtlassianDemo(atlassian);
     if (ia instanceof ClienteIAFake) semearIaDemo(ia);
@@ -3020,6 +3167,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   const chamados = new ServicoChamados(atlassian, outbox, vinculos, auditoria, novoId);
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora);
   const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId);
+  const inventarioAssentos = new RepositorioInventario(env.DB, novoId);
   return {
     db: env.DB,
     config,
@@ -3033,6 +3181,8 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     outbox,
     chamados,
     orquestrador,
+    organizacao,
+    inventarioAssentos,
     agora,
     novoId,
     usandoFakes,
@@ -4012,6 +4162,101 @@ var CABECALHOS_ANEXO = Object.freeze({
   "Cache-Control": "private, max-age=300"
 });
 
+// src/lib/governanca/custo.ts
+function assentoOcioso(ultimoAcessoEm, ociosoDesdeDias, agoraMs) {
+  if (ultimoAcessoEm === null) return true;
+  const diasDesdeUltimoAcesso = (agoraMs - Date.parse(ultimoAcessoEm)) / (1e3 * 60 * 60 * 24);
+  return diasDesdeUltimoAcesso >= ociosoDesdeDias;
+}
+function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
+  const porProdutoMap = /* @__PURE__ */ new Map();
+  for (const item of itens) {
+    const atual = porProdutoMap.get(item.produto) ?? { usuarios: 0, ociosos: 0 };
+    atual.usuarios += 1;
+    if (assentoOcioso(item.ultimoAcessoEm, ociosoDesdeDias, agoraMs)) atual.ociosos += 1;
+    porProdutoMap.set(item.produto, atual);
+  }
+  const porProduto = [];
+  let ociososUsuarios = 0;
+  let todosPrecificados = porProdutoMap.size > 0;
+  let totalMensalUsd = 0;
+  let ociosoCustoMensalUsd = 0;
+  for (const [produto, { usuarios, ociosos }] of porProdutoMap) {
+    const preco = precoMensalPorProduto[produto];
+    const custoMensalUsd = preco === void 0 ? null : usuarios * preco;
+    porProduto.push({ produto, usuarios, ociosos, custoMensalUsd });
+    ociososUsuarios += ociosos;
+    if (preco === void 0) {
+      todosPrecificados = false;
+    } else {
+      totalMensalUsd += usuarios * preco;
+      ociosoCustoMensalUsd += ociosos * preco;
+    }
+  }
+  return {
+    porProduto: porProduto.sort((a, b) => a.produto.localeCompare(b.produto)),
+    totalMensalUsd: todosPrecificados ? totalMensalUsd : null,
+    custoConfigurado: todosPrecificados,
+    ocioso: {
+      usuarios: ociososUsuarios,
+      custoMensalUsd: todosPrecificados ? ociosoCustoMensalUsd : null
+    }
+  };
+}
+
+// src/lib/governanca/recomendacoes.ts
+var PRODUTO_SERVICE_DESK_AGENTE = "jira-servicedesk";
+function gerarRecomendacoes(itens, ociosoDesdeDias, agoraMs) {
+  const porConta = /* @__PURE__ */ new Map();
+  for (const item of itens) {
+    const atual = porConta.get(item.accountId) ?? { email: item.email, nome: item.nome, itens: [] };
+    atual.itens.push(item);
+    porConta.set(item.accountId, atual);
+  }
+  const ocioso = (i) => assentoOcioso(i.ultimoAcessoEm, ociosoDesdeDias, agoraMs);
+  const recomendacoes = [];
+  for (const [accountId, { email, nome, itens: doUsuario }] of porConta) {
+    const temServiceDesk = doUsuario.some((i) => i.produto === PRODUTO_SERVICE_DESK_AGENTE);
+    const outrosProdutos = doUsuario.filter((i) => i.produto !== PRODUTO_SERVICE_DESK_AGENTE);
+    const todosOsOutrosOciosos = outrosProdutos.length > 0 && outrosProdutos.every(ocioso);
+    if (temServiceDesk && (outrosProdutos.length === 0 || todosOsOutrosOciosos)) {
+      recomendacoes.push({
+        accountId,
+        email,
+        nome,
+        tipo: "rebaixar_para_customer",
+        motivo: "Este assento s\xF3 \xE9 usado para abrir e acompanhar chamado \u2014 o perfil customer do JSM \xE9 gratuito e ilimitado.",
+        produtosAfetados: [PRODUTO_SERVICE_DESK_AGENTE, ...outrosProdutos.map((i) => i.produto)]
+      });
+      continue;
+    }
+    if (doUsuario.length > 0 && doUsuario.every(ocioso)) {
+      recomendacoes.push({
+        accountId,
+        email,
+        nome,
+        tipo: "remover_ocioso",
+        motivo: `Sem uso de nenhum produto atribu\xEDdo h\xE1 pelo menos ${ociosoDesdeDias} dias.`,
+        produtosAfetados: doUsuario.map((i) => i.produto)
+      });
+    }
+  }
+  return recomendacoes.sort((a, b) => a.email.localeCompare(b.email, "pt-BR"));
+}
+
+// src/lib/governanca/csv.ts
+var CABECALHO = ["email", "nome", "tipo", "motivo", "produtos_afetados"];
+function escaparCampoCsv(valor) {
+  const semFormula = /^[=+\-@]/.test(valor) ? `'${valor}` : valor;
+  return /[",\r\n]/.test(semFormula) ? `"${semFormula.replace(/"/g, '""')}"` : semFormula;
+}
+function recomendacoesParaCsv(recomendacoes) {
+  const linhas = recomendacoes.map(
+    (r) => [r.email, r.nome, r.tipo, r.motivo, r.produtosAfetados.join("; ")].map(escaparCampoCsv).join(",")
+  );
+  return [CABECALHO.join(","), ...linhas].join("\r\n");
+}
+
 // src/lib/http/rotas.ts
 var PRIORIDADES = ["critica", "alta", "normal"];
 var ehPrioridade = (v) => typeof v === "string" && PRIORIDADES.includes(v);
@@ -4541,6 +4786,44 @@ async function rotear(req, ctx, eu, caminho, url) {
     const itens = alvo ? await ctx.auditoria.listarPorAtor(alvo, 200) : await ctx.auditoria.listarRecentes(200);
     return json({ itens });
   }
+  if (caminho === "/api/admin/assentos" && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    const snapshot = await ctx.inventarioAssentos.obterMaisRecente();
+    const custo = calcularCusto(
+      snapshot.itens,
+      ctx.valores.custo_mensal_por_produto,
+      ctx.valores.assentos_ocioso_dias,
+      Date.parse(ctx.agora())
+    );
+    return json({
+      coletadoEm: snapshot.coletadoEm,
+      ociosoDesdeDias: ctx.valores.assentos_ocioso_dias,
+      // RF-52 — a limitação oficial do dado vai NA TELA, não em rodapé de documento.
+      limitacoesUltimoAcesso: LIMITACOES_ULTIMO_ACESSO,
+      itens: snapshot.itens,
+      custo
+    });
+  }
+  if (caminho === "/api/admin/assentos/recomendacoes" && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    const snapshot = await ctx.inventarioAssentos.obterMaisRecente();
+    const recomendacoes = gerarRecomendacoes(
+      snapshot.itens,
+      ctx.valores.assentos_ocioso_dias,
+      Date.parse(ctx.agora())
+    );
+    if (url.searchParams.get("formato") === "csv") {
+      return new Response(recomendacoesParaCsv(recomendacoes), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": 'attachment; filename="recomendacoes-assentos.csv"',
+          "X-Content-Type-Options": "nosniff"
+        }
+      });
+    }
+    return json({ itens: recomendacoes });
+  }
   return ERROS.naoEncontrado();
 }
 var MIN_TERMO_BUSCA = 2;
@@ -4651,6 +4934,42 @@ async function tratarCron(req, ctx, env, caminho) {
   if (caminho === "/api/cron/reconciliar-vinculos") {
     const recuperados = await ctx.chamados.reconciliarVinculos(50);
     return json({ recuperados });
+  }
+  if (caminho === "/api/cron/coletar-inventario") {
+    if (!ctx.organizacao || !ctx.valores.org_id) {
+      return json({ ok: true, registros: 0, motivo: "organizacao_nao_configurada" });
+    }
+    const orgId = ctx.valores.org_id;
+    try {
+      const usuarios = await ctx.organizacao.listarUsuarios(orgId);
+      const entradas = [];
+      for (const usuario of usuarios) {
+        try {
+          entradas.push({
+            usuario,
+            ultimoAcesso: await ctx.organizacao.ultimoAcesso(orgId, usuario.accountId)
+          });
+        } catch {
+          entradas.push({ usuario, ultimoAcesso: null });
+        }
+      }
+      const r = await ctx.inventarioAssentos.registrarColeta(entradas, ctx.agora());
+      await ctx.auditoria.registrar({
+        atorEmail: "(cron)",
+        acao: "inventario_coletado",
+        resultado: "sucesso",
+        detalhe: { usuarios: usuarios.length, registros: r.registros }
+      });
+      return json({ ok: true, ...r });
+    } catch (e) {
+      await ctx.auditoria.registrar({
+        atorEmail: "(cron)",
+        acao: "inventario_coletado",
+        resultado: "falha",
+        detalhe: { erro: e instanceof Error ? e.message : String(e) }
+      });
+      return ERROS.conteudoIndisponivel();
+    }
   }
   return ERROS.naoEncontrado();
 }

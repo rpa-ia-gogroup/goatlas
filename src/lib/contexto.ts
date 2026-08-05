@@ -10,6 +10,8 @@
 import { ClienteAtlassianHttp } from './atlassian/cliente'
 import { ClienteAtlassianFake } from './atlassian/fake'
 import type { ClienteAtlassian } from './atlassian/tipos'
+import { ClienteOrganizacaoFake } from './atlassian/organizacao-fake'
+import type { ClienteOrganizacao } from './atlassian/organizacao'
 import { ClienteIAHttp } from './ia/cliente'
 import { ClienteIAFake } from './ia/fake'
 import type { ClienteIA } from './ia/tipos'
@@ -25,6 +27,7 @@ import { Orquestrador } from './agent/orquestrador'
 import { Outbox } from './tickets/outbox'
 import { RepositorioVinculos } from './tickets/vinculos'
 import { ServicoChamados } from './tickets/servico'
+import { RepositorioInventario } from './governanca/inventario'
 
 /** O que o GoDeploy injeta. `DB` é a plataforma; o resto são secrets. */
 export interface EnvGoDeploy extends BootstrapEnv {
@@ -63,6 +66,13 @@ export interface Contexto {
   readonly outbox: Outbox
   readonly chamados: ServicoChamados
   readonly orquestrador: Orquestrador
+  /**
+   * `null` fora dos fakes: a credencial de Org Admin ainda não existe (Q1), e não
+   * há `ClienteOrganizacaoHttp` para instanciar — T-122/T-123 é o que a criará.
+   * Rota de governança trata `null` como "não configurado", nunca como erro.
+   */
+  readonly organizacao: ClienteOrganizacao | null
+  readonly inventarioAssentos: RepositorioInventario
   readonly agora: () => string
   readonly novoId: () => string
   readonly usandoFakes: boolean
@@ -84,6 +94,7 @@ export function novoIdPadrao(): string {
 export interface ClientesReaproveitados {
   readonly atlassian?: ClienteAtlassian
   readonly ia?: ClienteIA
+  readonly organizacao?: ClienteOrganizacao
 }
 
 export async function montarContexto(
@@ -132,6 +143,15 @@ export async function montarContexto(
           ...(env.LLM_FALLBACK_MODEL ? { modeloFallback: env.LLM_FALLBACK_MODEL } : {}),
         })
 
+  // `null` fora dos fakes: a credencial de Org Admin é Q1, e não há
+  // `ClienteOrganizacaoHttp` para instanciar ainda (T-122/T-123). A rota de
+  // governança trata `null` como "não configurado", nunca como erro (RNF-18).
+  const organizacao: ClienteOrganizacao | null = reaproveitar.organizacao
+    ? reaproveitar.organizacao
+    : usandoFakes
+      ? new ClienteOrganizacaoFake()
+      : null
+
   if (modoDemo) {
     // Os fakes são semeados a cada montagem porque o Worker é stateless: o estado
     // deles não sobrevive entre requisições. O que persiste (conversa, vínculo,
@@ -147,6 +167,7 @@ export async function montarContexto(
   const chamados = new ServicoChamados(atlassian, outbox, vinculos, auditoria, novoId)
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora)
   const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId)
+  const inventarioAssentos = new RepositorioInventario(env.DB, novoId)
 
   return {
     db: env.DB,
@@ -161,6 +182,8 @@ export async function montarContexto(
     outbox,
     chamados,
     orquestrador,
+    organizacao,
+    inventarioAssentos,
     agora,
     novoId,
     usandoFakes,
