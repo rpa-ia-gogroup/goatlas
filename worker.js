@@ -1383,6 +1383,7 @@ var CONFIG_PADRAO = Object.freeze({
   labels_bloqueadas: ["confidencial"],
   tipos_chamado_permitidos: [],
   service_desk_id: null,
+  campo_solicitante_id: null,
   regra1_threshold_score: 0.75,
   regra2_threshold_recorrencia: 3,
   regra2_janela_dias: 90,
@@ -1408,6 +1409,9 @@ function valoresDoBootstrap(env) {
   const espacos = (env.GOATLAS_ESPACOS_CONFLUENCE ?? "").split(",").map((v) => v.trim()).filter((v) => v.length > 0);
   if (espacos.length > 0) parcial.espacos_confluence = espacos;
   if (env.GOATLAS_SERVICE_DESK_ID) parcial.service_desk_id = env.GOATLAS_SERVICE_DESK_ID;
+  if (env.GOATLAS_CAMPO_SOLICITANTE_ID) {
+    parcial.campo_solicitante_id = env.GOATLAS_CAMPO_SOLICITANTE_ID;
+  }
   return parcial;
 }
 var Config = class {
@@ -2993,7 +2997,10 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     apiToken: env.ATLASSIAN_API_TOKEN ?? "",
     ttlMetadadosSeg: valores.ttl_metadados_seg,
     ttlConteudoSeg: valores.ttl_conteudo_seg,
-    campoSolicitanteId: null
+    // RF-21, Q4 — configurável (RNF-25), nunca hardcoded. `null` até o time
+    // de tech confirmar o id do campo "Solicitante"; o solicitante real
+    // continua indo na descrição enquanto isso (cinto e suspensório).
+    campoSolicitanteId: valores.campo_solicitante_id
   });
   const ia = reaproveitar.ia ? reaproveitar.ia : usandoFakes || !env.LLM_API_KEY ? new ClienteIAFake() : new ClienteIAHttp({
     baseUrl: env.LLM_BASE_URL ?? null,

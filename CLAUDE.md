@@ -173,6 +173,15 @@ destes reabre um vazamento que já foi fechado.
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
   lendo `env.ATLASSIAN_API_TOKEN` faz `RNF-01` depender de disciplina em vez de
   estrutura.
+- **Pergunta em aberto (Q1/Q4/Q5/Q8...) não é motivo para hardcode.** O padrão do
+  projeto é sempre o mesmo: o valor que falta vira campo de `ConfigValores`
+  (`RNF-25`), com `null`/vazio como default fail-closed, e o código já fica pronto
+  para o dia em que a resposta chegar — só um campo no console de admin, sem
+  deploy (`RF-49`). `campo_solicitante_id` (Q4) segue esse padrão: sem ele, o
+  solicitante real ainda vai na descrição (cinto e suspensório); com ele, vira
+  também campo estruturado. O oposto — deixar `campoSolicitanteId: null` fixo no
+  código enquanto a pergunta não responde — obrigaria um deploy no dia da
+  resposta, que é exatamente o atraso que `RF-49` existe para evitar.
 - **A allowlist nunca vem do cliente.** Na busca (`RF-37`), `espacosPermitidos` e
   `labelsBloqueadas` saem de `ctx.valores`, e `?espacos=`/`?labelsBloqueadas=` são
   ignorados — é o mesmo raciocínio da identidade: quem consulta não escolhe o próprio
@@ -344,7 +353,7 @@ e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governan
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**348 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**350 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -359,10 +368,15 @@ anexo pelo proxy, **árvore do espaço com breadcrumbs** (T-115) e deep link
 `atlassian.net`. O uso fica registrado em `buscas`/`paginas_lidas` (T-116) e vira o
 **mapa de lacunas** na aba de admin (T-117).
 
+**`campo_solicitante_id` (Q4) já é config, não hardcode** (`RF-21`): o dia que o
+time de tech confirmar o id do campo "Solicitante" no projeto do portal, é só
+preencher no console de admin — nenhum código a mudar, nenhum deploy.
+
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
-Atlassian real (**Q1**), campo customizado "Solicitante" (**Q4**), formato do
-comentário atribuído (alinhamento com o time de tech), deploy em staging/prod e o
-fechamento da Definição de Pronto. A **Phase 2 da spec 002 está completa**; o que resta dela é a
+Atlassian real (**Q1**), o **valor** do campo customizado "Solicitante" (**Q4** —
+o código já está pronto, ver acima), formato do comentário atribuído
+(alinhamento com o time de tech), deploy em staging/prod e o fechamento da
+Definição de Pronto. A **Phase 2 da spec 002 está completa**; o que resta dela é a
 governança de assentos (Phase 3), que depende de **Q1** para valer contra a API real —
 o fake permite construir o console antes. **Q5** não trava código, só o dado de
 `espacos_confluence`, sem o qual a busca devolve zero e diz `buscaConfigurada: false`.
