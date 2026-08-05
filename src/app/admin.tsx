@@ -19,6 +19,7 @@ import {
   type Recomendacao,
   type RegistroAuditoria,
   type RespostaAssentos,
+  type ResumoMetricas,
   type TermoComLacuna,
 } from './api'
 import { Aviso, Selo } from './componentes'
@@ -153,6 +154,7 @@ export function TelaAdmin() {
   const [auditoria, setAuditoria] = useState<RegistroAuditoria[] | null>(null)
   const [filtroEmail, setFiltroEmail] = useState('')
   const [lacunas, setLacunas] = useState<MapaDeLacunas | null>(null)
+  const [metricas, setMetricas] = useState<ResumoMetricas | null>(null)
   const [assentos, setAssentos] = useState<RespostaAssentos | null>(null)
   const [recomendacoes, setRecomendacoes] = useState<Recomendacao[] | null>(null)
 
@@ -185,6 +187,10 @@ export function TelaAdmin() {
       .adminLacunas()
       .then(setLacunas)
       .catch(() => setLacunas(null))
+    api
+      .adminMetricas()
+      .then(setMetricas)
+      .catch(() => setMetricas(null))
     api
       .adminAssentos()
       .then(setAssentos)
@@ -270,6 +276,66 @@ export function TelaAdmin() {
           )
         })}
       </div>
+
+      <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
+        Métricas
+      </h2>
+      <Aviso>
+        Taxa de deflexão, taxa de override e via de abertura — o mínimo para
+        calibrar o threshold da Regra 1 e da Regra 2 (O1, R-04). Sem bloqueio ou
+        busca ainda, a taxa aparece como <strong>"sem dados"</strong>, nunca 0% —
+        0% pareceria "a regra funciona perfeitamente" quando não há nada para medir.
+      </Aviso>
+
+      {metricas === null ? (
+        <p className="carregando">Carregando as métricas…</p>
+      ) : (
+        <div className="pilha">
+          <div className="recibo">
+            <dl>
+              <dt>Taxa de override (geral)</dt>
+              <dd>{formatarPct(metricas.taxaOverrideGlobalPct)}</dd>
+              <dt>Chamados por conversa</dt>
+              <dd>{metricas.chamadosPorVia.conversa ?? 0}</dd>
+              <dt>Chamados por formulário</dt>
+              <dd>{metricas.chamadosPorVia.formulario ?? 0}</dd>
+              <dt>Buscas sem resultado</dt>
+              <dd>
+                {metricas.buscas.semResultado} de {metricas.buscas.total} (
+                {formatarPct(metricas.buscas.taxaSemResultadoPct)})
+              </dd>
+            </dl>
+          </div>
+
+          <div className="pilha">
+            <h3 className="titulo-filhos">Deflexão por regra</h3>
+            <ul className="chamados">
+              {metricas.deflexaoPorRegra.map((d) => (
+                <li key={d.regra} className="chamado" style={{ cursor: 'default' }}>
+                  <span className="chamado-topo">
+                    <span className="chamado-chave">{rotuloRegra(d.regra)}</span>
+                    <Selo
+                      variante={
+                        d.taxaDeflexaoPct !== null && d.taxaDeflexaoPct >= 50
+                          ? 'lime'
+                          : 'contorno'
+                      }
+                    >
+                      {formatarPct(d.taxaDeflexaoPct)}
+                    </Selo>
+                  </span>
+                  <span className="chamado-meta">
+                    <span className="dica">
+                      {d.overrides} override{d.overrides === 1 ? '' : 's'} de{' '}
+                      {d.totalBloqueios} bloqueio{d.totalBloqueios === 1 ? '' : 's'}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
         Governança de assentos
@@ -535,4 +601,9 @@ function rotuloRecomendacao(tipo: 'rebaixar_para_customer' | 'remover_ocioso'): 
 function formatarUsd(valor: number | null): string {
   if (valor === null) return 'não configurado'
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'USD' }).format(valor)
+}
+
+/** `null` = sem dado ainda — nunca "0%", que pareceria a regra funcionando. */
+function formatarPct(valor: number | null): string {
+  return valor === null ? 'sem dados' : `${valor.toFixed(1)}%`
 }

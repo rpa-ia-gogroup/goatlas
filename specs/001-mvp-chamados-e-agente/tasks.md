@@ -223,9 +223,17 @@ created: "2026-08-03"
       isoladamente e ponta a ponta contra o banco. `ATLASSIAN_ORG_API_KEY` (Q1)
       segue sem nenhum lugar que a leia — o teste cobra que continue assim
       **ou** que, quando for lida, seja só em `contexto.ts`.
-- [ ] **T-095** Métricas mínimas desde o dia 1: taxa de deflexão por regra, taxa de
+- [x] **T-095** Métricas mínimas desde o dia 1: taxa de deflexão por regra, taxa de
       override, chamados por via (conversa × formulário), buscas sem resultado.
       Sem instrumentação não há como calibrar threshold. _Requirements: O1, R-04, RF-42_
+      → `governanca/metricas.ts` (`calcularMetricas`, pura) + `obterResumoMetricas`
+      lendo `bloqueios`/`vinculos`/`buscas`. Rota `GET /api/admin/metricas`, seção
+      "Métricas" no console de admin (antes de "Governança de assentos"). Taxa
+      sem nenhum dado ainda é `null` → tela mostra "sem dados", nunca "0%" (mesmo
+      raciocínio de `custoConfigurado` em `custo.ts`/Q8). Subconjunto viável de
+      `RF-55` na Fase 1 — falta aderência a SLA, que só existe a partir da Fase 3.
+      12 testes novos (`tests/metricas.test.ts`) + rota incluída em
+      `admin-gate.test.ts` (`ROTAS_ADMIN`). Verificado em `npm run dev`.
 - [ ] **T-096** Deploy em **staging**, validação, e só então produção.
       _Requirements: CLAUDE.md regra 10_
 - [ ] **T-097** Fechar a Definição de Pronto da Fase 1 (§13 dos requisitos) item por
@@ -259,7 +267,7 @@ As **seis travas críticas estão implementadas e com teste de burla**:
 | T-082 comentário atribuído ao solicitante real | **`[BLOQUEADA]`** — o formato precisa de alinhamento com o time de tech (`R-03`/Q10) |
 | T-093 validação no celular | feita em viewport de celular no dev; falta no aparelho real |
 | T-094 varredura de credencial em log/bundle | **Concluída** — `tests/rnf01-vazamento-credenciais.test.ts`, ver T-094 acima |
-| T-095 métricas mínimas | os dados já são gravados (`bloqueios`, `vinculos.via`, auditoria); falta a superfície |
+| T-095 métricas mínimas | **Concluída** — seção "Métricas" no console de admin, ver T-095 acima |
 | T-096 deploy em staging e prod | **`[BLOQUEADA: Q1]`** — precisa dos secrets |
 | T-097 fechar a Definição de Pronto item por item | depende das acima |
 

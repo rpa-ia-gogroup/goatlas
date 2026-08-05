@@ -4257,6 +4257,55 @@ function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
   };
 }
 
+// src/lib/governanca/metricas.ts
+var ORDEM_REGRAS = ["regra1_confluence", "regra2_ajuste_operacional"];
+function taxa(numerador, denominador) {
+  return denominador === 0 ? null : numerador / denominador * 100;
+}
+function calcularMetricas(bloqueios, vias, resultadosBuscas) {
+  const porRegra = /* @__PURE__ */ new Map();
+  for (const regra of ORDEM_REGRAS) porRegra.set(regra, { total: 0, overrides: 0 });
+  for (const b of bloqueios) {
+    const atual = porRegra.get(b.regra) ?? { total: 0, overrides: 0 };
+    atual.total += 1;
+    if (b.houveOverride) atual.overrides += 1;
+    porRegra.set(b.regra, atual);
+  }
+  const deflexaoPorRegra = ORDEM_REGRAS.map((regra) => {
+    const { total, overrides } = porRegra.get(regra);
+    return { regra, totalBloqueios: total, overrides, taxaDeflexaoPct: taxa(total - overrides, total) };
+  });
+  const totalBloqueios = bloqueios.length;
+  const totalOverrides = bloqueios.filter((b) => b.houveOverride).length;
+  const chamadosPorVia = {};
+  for (const via of vias) chamadosPorVia[via] = (chamadosPorVia[via] ?? 0) + 1;
+  const totalBuscas = resultadosBuscas.length;
+  const semResultado = resultadosBuscas.filter((r) => r === 0).length;
+  return {
+    deflexaoPorRegra,
+    totalBloqueios,
+    totalOverrides,
+    taxaOverrideGlobalPct: taxa(totalOverrides, totalBloqueios),
+    chamadosPorVia,
+    buscas: {
+      total: totalBuscas,
+      semResultado,
+      taxaSemResultadoPct: taxa(semResultado, totalBuscas)
+    }
+  };
+}
+async function obterResumoMetricas(db) {
+  const bloqueiosBrutos = await db.query("SELECT regra, houve_override FROM bloqueios", []);
+  const bloqueios = linhasComoObjetos(bloqueiosBrutos).map((l) => ({ regra: l.regra, houveOverride: l.houve_override === 1 }));
+  const viasBrutas = await db.query("SELECT via FROM vinculos", []);
+  const vias = linhasComoObjetos(viasBrutas).map((l) => l.via);
+  const buscasBrutas = await db.query("SELECT resultados FROM buscas", []);
+  const resultadosBuscas = linhasComoObjetos(buscasBrutas).map(
+    (l) => Number(l.resultados)
+  );
+  return calcularMetricas(bloqueios, vias, resultadosBuscas);
+}
+
 // src/lib/governanca/recomendacoes.ts
 var PRODUTO_SERVICE_DESK_AGENTE = "jira-servicedesk";
 function gerarRecomendacoes(itens, ociosoDesdeDias, agoraMs) {
@@ -4853,6 +4902,10 @@ async function rotear(req, ctx, eu, caminho, url) {
   if (caminho === "/api/admin/lacunas" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();
     return json(await ctx.conhecimento.agregarLacunas_apenasAdmin());
+  }
+  if (caminho === "/api/admin/metricas" && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    return json(await obterResumoMetricas(ctx.db));
   }
   if (caminho === "/api/admin/auditoria" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();
