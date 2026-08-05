@@ -170,6 +170,7 @@ export interface ConfigValores {
   readonly labels_bloqueadas: string[]
   readonly tipos_chamado_permitidos: string[]
   readonly service_desk_id: string | null
+  readonly campo_solicitante_id: string | null
   readonly regra1_threshold_score: number
   readonly regra2_threshold_recorrencia: number
   readonly regra2_janela_dias: number

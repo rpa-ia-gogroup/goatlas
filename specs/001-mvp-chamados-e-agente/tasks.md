@@ -161,9 +161,20 @@ created: "2026-08-03"
       _Requirements: RF-16, RF-18_
 - [ ] **T-063** `criarChamado` via `POST /rest/servicedeskapi/request` com a conta de
       serviço como reporter. **[BLOQUEADA: Q1]** _Requirements: RF-20_
-- [ ] **T-064** Gravar solicitante real no campo customizado "Solicitante" e como
-      request participant quando aplicável. **[BLOQUEADA: Q4]**
+- [x] **T-064** Gravar solicitante real no campo customizado "Solicitante" e como
+      request participant quando aplicável.
       _Requirements: RF-21, R-03_
+      → `atlassian/cliente.ts#montarCamposSolicitante` já escrevia o campo
+      quando configurado; o que faltava era a config em si —
+      `campoSolicitanteId: null` estava **hardcoded** em `contexto.ts`. Agora é
+      `config.campo_solicitante_id` (`RNF-25`, default `null` = fail-closed),
+      editável no console de admin sem deploy (`RF-49`). **Não está mais
+      bloqueada**: sem Q4 o solicitante segue indo só na descrição (cinto e
+      suspensório, comportamento inalterado); com Q4 respondida, é só preencher
+      o campo — mesmo raciocínio que já tirou T-113 (Q5) e T-125 (Q8) da lista
+      de bloqueadas. **Request participant não entra**: depende de `accountId`
+      real, que não existe sob o proxy total (`D-01`) — é caminho da migração
+      futura (`RNF-22`), não desta arquitetura.
 - [x] **T-065** Persistir vínculo `issueKey ↔ e-mail ↔ timestamp` na mesma transação
       lógica da conclusão da submissão. _Requirements: RF-22, RN-03_
 - [x] **T-066** Allowlist de tipos de chamado: só o que o admin liberou é oferecido.

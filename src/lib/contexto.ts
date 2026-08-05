@@ -125,7 +125,10 @@ export async function montarContexto(
         apiToken: env.ATLASSIAN_API_TOKEN ?? '',
         ttlMetadadosSeg: valores.ttl_metadados_seg,
         ttlConteudoSeg: valores.ttl_conteudo_seg,
-        campoSolicitanteId: null,
+        // RF-21, Q4 — configurável (RNF-25), nunca hardcoded. `null` até o time
+        // de tech confirmar o id do campo "Solicitante"; o solicitante real
+        // continua indo na descrição enquanto isso (cinto e suspensório).
+        campoSolicitanteId: valores.campo_solicitante_id,
       })
 
   const ia: ClienteIA = reaproveitar.ia

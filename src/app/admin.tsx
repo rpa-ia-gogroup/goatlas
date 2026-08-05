@@ -61,6 +61,13 @@ const CAMPOS: readonly {
     ajuda: 'Sem isso, a abertura de chamados fica indisponível.',
   },
   {
+    chave: 'campo_solicitante_id',
+    rotulo: 'Campo customizado "Solicitante" (Q4)',
+    tipo: 'texto',
+    ajuda:
+      'Ex.: customfield_10050. Vazio não bloqueia nada — o solicitante real continua indo na descrição do chamado.',
+  },
+  {
     chave: 'espacos_confluence',
     rotulo: 'Espaços do Confluence liberados',
     tipo: 'lista',
