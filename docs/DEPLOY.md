@@ -41,11 +41,43 @@ navegador**, para não existir caminho em que a identidade venha do cliente
 
 ### Secrets já configurados em `9c47f42f`
 
+Estado em **05/08/2026** (conferido por `listAppSecrets` — que devolve **nomes**,
+nunca valores):
+
 | Secret | Valor | Por quê |
 |---|---|---|
-| `GOATLAS_MODO_DEMO` | `1` | Fakes + tarja de aviso. **Remover ao virar produção.** |
+| `GOATLAS_MODO_DEMO` | `1` | Fakes + tarja de aviso. **Remover ao virar produção — por último, ver abaixo.** |
 | `GOATLAS_DOMINIOS` | `gocase.com` | Bootstrap — sem ele o app nega todo mundo (`RNF-07`). **[SUPOSIÇÃO: Q7]** |
 | `GOATLAS_ADMINS` | `kaique.breno@gocase.com` | Bootstrap do primeiro admin (`RF-02`) |
+| `ATLASSIAN_API_TOKEN` · `ATLASSIAN_EMAIL` · `ATLASSIAN_BASE_URL` | *(registrados)* | Trio Jira/Confluence — `D-14`. ⚠️ Rotação pendente do token |
+| `GOATLAS_ORG_ID` | *(registrado, **não validado**)* | Bootstrap do `org_id`. Não é secret. ⚠️ Reconferir: UUID só tem `0-9a-f` |
+
+Ainda **ausentes**: `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY`, `LLM_BASE_URL` e
+`GODEPLOY_CRON_KEY`.
+
+#### ⚠️ A ordem de configurar importa — `GOATLAS_MODO_DEMO` sai por ÚLTIMO
+
+`usandoFakes` (em `contexto.ts`) é `modoDemo || GOATLAS_USAR_FAKES || !ATLASSIAN_API_TOKEN`.
+O modo demo é o **primeiro** termo: enquanto ele existe, nenhum outro secret muda
+comportamento nenhum. E o terceiro termo era uma rede de proteção que **já caiu** —
+com o token registrado, remover o modo demo passa a valer de verdade na hora.
+
+Cada ausência silencia uma parte diferente, todas fail-closed. Configure nesta ordem,
+e só então remova o modo demo:
+
+| Falta | O que acontece com o modo demo fora |
+|---|---|
+| `LLM_API_KEY` | `ClienteIAIndisponivel`: `/api/health` responde **503** dizendo o motivo, o agente recusa, e o formulário mínimo (`D-04`) segue abrindo chamado. **Antes de T-132 isto era `ClienteIAFake` — Atlassian real com IA falsa** |
+| `GOATLAS_TIPOS_CHAMADO` + `GOATLAS_SERVICE_DESK_ID` | Allowlist vazia → `RF-28` descarta toda proposta → ninguém abre chamado |
+| `GOATLAS_ESPACOS_CONFLUENCE` (**Q5**) | Busca devolve zero com `buscaConfigurada: false`; a deflexão da Regra 1 morre |
+| `GODEPLOY_CRON_KEY` | As três rotas de cron ficam fechadas (reprocessamento, reconciliação, inventário) |
+
+Os dois do meio dão para preencher no console de admin depois, sem deploy (`RF-49`).
+`LLM_API_KEY` e `GODEPLOY_CRON_KEY` são secret — exigem `setAppSecret`.
+
+**Confira o health antes de anunciar o app:** `GET /api/health` devolve 503 com
+`dependencias.ia.ok = false` enquanto a chave de IA não existir. É o sinal de que o
+deploy está incompleto (`RF-59`) — sem ele, um app sem chave de IA parecia saudável.
 
 O env é **bootstrap**: vale enquanto a chave não existe no banco. Assim que um admin
 salva pelo console, o banco manda (`RF-49`).
@@ -130,6 +162,19 @@ em log, em resposta de API ou no bundle do frontend.
 organização Atlassian alvo da Organizations API. Sem `ATLASSIAN_ORG_API_KEY` **e**
 `org_id`, `ctx.organizacao` é `null` e a governança de assentos se declara
 indisponível (fail-closed, não erro) — ver T-120/T-122/T-123.
+
+⚠️ **Três confusões que já aconteceram** ao reunir estas credenciais (`D-14`), todas
+silenciosas — nenhuma dá erro no momento de configurar:
+
+- **API token não é chave de Organizations API.** Prefixo `ATCTT3x…` é *API token*:
+  vai em `ATLASSIAN_API_TOKEN`, com `ATLASSIAN_EMAIL`, Basic auth. A
+  `ATLASSIAN_ORG_API_KEY` nasce em `admin.atlassian.com` → API keys, é `Bearer`, e
+  só ela exige Org Admin. Trocar uma pela outra dá 401 na governança — muito depois.
+- **`cloudId` não é `orgId`.** Os dois são UUID e ficam no mesmo console. O que a
+  Organizations API quer é o **orgId**, o da URL `admin.atlassian.com/o/<id>/`.
+- **UUID só admite `0-9a-f`.** Id com `j`, `k` ou qualquer não-hexadecimal está
+  transcrito errado. `setAppSecret` aceita sem reclamar; o erro aparece como 404 na
+  API, longe da causa.
 
 Complementares: `LLM_MODEL`, `LLM_FALLBACK`, `LLM_FALLBACK_MODEL` (fallback direto
 quando o proxy falha), `GODEPLOY_CRON_KEY`, `ATLASSIAN_BASE_URL`.

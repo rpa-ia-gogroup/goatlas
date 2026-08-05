@@ -371,6 +371,61 @@ campo que já existia**, não criar um novo.
 
 ---
 
+### D-14 · Q1 parcialmente respondida: o trio Jira/Confluence entrou; a Organizations API e a IA não
+**Data:** 05/08/2026 · **Quem:** Kaique · **Status:** parcial — Q1 **continua aberta**
+
+Primeira metade de **Q1**. Registrados como secrets em `9c47f42f`
+(`ATLASSIAN_API_TOKEN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_BASE_URL`, `GOATLAS_ORG_ID`);
+ainda **ausentes** `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY` e `GODEPLOY_CRON_KEY`.
+Nenhum valor aparece aqui nem em nenhum outro arquivo do repo — a checagem é sempre
+por **nome**, via `listAppSecrets` (regra 5).
+
+**Nada disso mudou comportamento**, porque `GOATLAS_MODO_DEMO=1` segue configurado
+e é o primeiro termo do `||` em `contexto.ts` (`usandoFakes`). O terreno ficou
+pronto; o app continua nos fakes.
+
+**Três confusões que apareceram no caminho, e que valem registro porque a próxima
+pessoa vai repetir:**
+
+1. **API token ≠ chave de Organizations API.** `ATCTT3x…` é prefixo de *API token*
+   (Basic auth, e-mail + token, `<site>.atlassian.net`). A `ATLASSIAN_ORG_API_KEY` é
+   gerada em `admin.atlassian.com` → API keys, usada como `Bearer` contra
+   `api.atlassian.com/admin`, e é ela que exige Org Admin. São credenciais de
+   superfícies distintas — daí o transporte próprio de `RNF-04`.
+2. **`cloudId` ≠ `orgId`.** Os dois são UUID e convivem no `admin.atlassian.com`. A
+   Organizations API quer o **orgId** (o da URL `admin.atlassian.com/o/<id>/`).
+3. **UUID só tem `0-9a-f`.** Um id com `j`/`k` está transcrito errado — não dá erro
+   de configuração, dá 404 na API muito depois. O valor de `GOATLAS_ORG_ID` hoje
+   registrado **não foi validado** e precisa ser reconferido.
+
+⚠️ **Rotação pendente:** o token que virou `ATLASSIAN_API_TOKEN` transitou por chat
+antes de ser registrado. Rotacionar é `setAppSecret` na mesma chave, sem redeploy —
+as instâncias pegam o valor novo.
+
+**O que isto NÃO destravou:** `T-063` (`criarChamado` contra a Atlassian real) segue
+bloqueada — falta um projeto **JSM** (`GOATLAS_SERVICE_DESK_ID`,
+`GOATLAS_TIPOS_CHAMADO`), e o projeto oferecido (`TASK`) é `jira/core`, que não tem
+service desk nem request type. `T-122`/`T-123`/`T-131` seguem bloqueadas pela
+ausência de `ATLASSIAN_ORG_API_KEY`.
+
+**O que isto revelou — um fail-open real, corrigido no mesmo PR:** com o trio da
+Atlassian configurado, `!env.LLM_API_KEY` caía em `ClienteIAFake` **fora dos
+fakes**. Ou seja: no instante em que `GOATLAS_MODO_DEMO` saísse sem a chave de IA
+existir, o app rodaria com **Atlassian real e IA falsa** — agente respondendo
+roteiro de demonstração e chamado nascendo de verdade no JSM, sem nada na tela
+distinguindo uma coisa da outra. Agora o fake só é alcançável por `usandoFakes`, e a
+chave ausente instancia `ClienteIAIndisponivel`: `/api/health` responde 503 dizendo
+o motivo (`RF-59`), o caminho do agente recusa, e o formulário mínimo (`D-04`) segue
+abrindo chamado (`RNF-18`). Ver `T-132`.
+
+**Ordem para virar produção** (a sequência importa — cada item silencia uma parte
+diferente do app, todos fail-closed): `LLM_API_KEY` → `GOATLAS_TIPOS_CHAMADO` +
+`GOATLAS_SERVICE_DESK_ID` → `GOATLAS_ESPACOS_CONFLUENCE` (**Q5**) →
+`GODEPLOY_CRON_KEY` → criar o app de **staging** (regra 10, `T-096`) → só então
+remover `GOATLAS_MODO_DEMO`.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
@@ -378,7 +433,7 @@ implementado antes da resposta.
 
 | # | Pergunta | Quem decide | Bloqueia |
 |---|---|---|---|
-| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | Qualquer chamada real à Atlassian. Fase 1 inteira. |
+| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | **Parcial — ver D-14.** O trio Jira/Confluence está registrado; faltam `ATLASSIAN_ORG_API_KEY` (T-122/T-123/T-131) e `LLM_API_KEY`. T-063 depende ainda de um projeto **JSM** |
 | Q2 | Qual campo do Jira delimita "mesmo tipo de ticket" para a Regra 2 — label, componente ou tipo de issue? | João + time de tech | RF-10, RF-11 (o agrupamento do `check_jira_history`) |
 | Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | RF-14 — e sem ele a Regra 2 classifica mal (é pré-requisito, não refinamento) |
 | Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | **Só o valor** — `campo_solicitante_id` já é config (RNF-25), editável sem deploy assim que a resposta chegar. RF-21, RNF-21 (reconciliação) |
