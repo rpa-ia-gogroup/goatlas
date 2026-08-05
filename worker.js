@@ -216,6 +216,30 @@ function montarJql(params) {
     `statusCategory = Done`
   ].join(" AND ");
 }
+var CAMPOS_DE_SISTEMA_JA_COBERTOS = /* @__PURE__ */ new Set(["summary", "description", "priority"]);
+function camposAdicionais(brutos) {
+  const resultado = [];
+  for (const bruto of brutos) {
+    const fieldId = String(bruto.fieldId ?? "");
+    const sistema = typeof bruto.jiraSchema?.system === "string" ? bruto.jiraSchema.system : null;
+    if (!fieldId || sistema !== null && CAMPOS_DE_SISTEMA_JA_COBERTOS.has(sistema)) continue;
+    const opcoes = (bruto.validValues ?? []).map((v) => ({
+      id: String(v.id ?? v.value ?? ""),
+      rotulo: String(v.label ?? v.value ?? v.id ?? "")
+    }));
+    const custom = typeof bruto.jiraSchema?.custom === "string" ? bruto.jiraSchema.custom : "";
+    const tipoBruto = typeof bruto.jiraSchema?.type === "string" ? bruto.jiraSchema.type : "";
+    const tipo = opcoes.length > 0 || tipoBruto === "option" ? "selecao" : custom.toLowerCase().includes("textarea") ? "texto_longo" : "texto";
+    resultado.push({
+      fieldId,
+      rotulo: String(bruto.name ?? fieldId),
+      obrigatorio: Boolean(bruto.required),
+      tipo,
+      opcoes
+    });
+  }
+  return resultado;
+}
 var ClienteAtlassianHttp = class {
   constructor(opcoes) {
     this.opcoes = opcoes;
@@ -243,6 +267,23 @@ var ClienteAtlassianHttp = class {
     }));
     this.cacheMetadados.definir("tiposChamado", tipos, this.opcoes.ttlMetadadosSeg);
     return tipos;
+  }
+  /**
+   * Schema de campos adicionais do request type (RF-27, T-130).
+   *
+   * A chave de cache inclui `serviceDeskId` **e** `requestTypeId` — diferente de
+   * `listarTiposChamado`, que usa uma chave fixa: aqui há um schema por tipo.
+   */
+  async obterCamposDoTipo(serviceDeskId, requestTypeId) {
+    const chave = `camposDoTipo:${serviceDeskId}:${requestTypeId}`;
+    const cacheado = this.cacheMetadados.obter(chave);
+    if (cacheado) return cacheado;
+    const dados = await this.transporte.requisitar(
+      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`
+    );
+    const campos = camposAdicionais(dados?.requestTypeFields ?? []);
+    this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg);
+    return campos;
   }
   /**
    * Campos que carregam o solicitante real — RF-21, mitigação de R-03.
@@ -276,12 +317,16 @@ var ClienteAtlassianHttp = class {
   }
   async criarChamado(dados) {
     const { descricao, camposExtra } = this.montarCamposSolicitante(dados);
+    const camposDinamicos = { ...dados.camposDinamicos };
+    delete camposDinamicos.summary;
+    delete camposDinamicos.description;
     const corpo = {
       serviceDeskId: dados.serviceDeskId,
       requestTypeId: dados.tipoChamadoId,
       requestFieldValues: {
         summary: dados.titulo,
         description: descricao,
+        ...camposDinamicos,
         ...camposExtra
       }
     };
@@ -654,6 +699,7 @@ var ClienteAtlassianFake = class {
   constructor(inicial = {}) {
     this.estado = {
       tiposChamado: inicial.tiposChamado ?? [],
+      camposPorTipo: inicial.camposPorTipo ?? /* @__PURE__ */ new Map(),
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? /* @__PURE__ */ new Set(),
       filtrarPorTermo: inicial.filtrarPorTermo ?? false,
@@ -670,6 +716,7 @@ var ClienteAtlassianFake = class {
         buscarHistorico: "nenhum",
         listarComentarios: "nenhum",
         obterPagina: "nenhum",
+        obterCamposDoTipo: "nenhum",
         paginaRestrita: "nenhum",
         obterAnexo: "nenhum",
         ...inicial.falhas
@@ -684,6 +731,11 @@ var ClienteAtlassianFake = class {
   async listarTiposChamado() {
     this.chamadas.push({ operacao: "listarTiposChamado", params: null });
     return this.estado.tiposChamado;
+  }
+  async obterCamposDoTipo(serviceDeskId, requestTypeId) {
+    this.chamadas.push({ operacao: "obterCamposDoTipo", params: { serviceDeskId, requestTypeId } });
+    this.checar(this.estado.falhas.obterCamposDoTipo, "obterCamposDoTipo");
+    return this.estado.camposPorTipo.get(requestTypeId) ?? [];
   }
   async criarChamado(dados) {
     this.chamadas.push({ operacao: "criarChamado", params: dados });
@@ -2943,7 +2995,8 @@ var ServicoChamados = class {
         descricao: dados.payload.descricao,
         prioridade: dados.payload.prioridade,
         solicitanteEmail: dados.solicitanteEmail,
-        chaveIdempotencia: dados.chaveIdempotencia
+        chaveIdempotencia: dados.chaveIdempotencia,
+        ...dados.payload.camposDinamicos ? { camposDinamicos: dados.payload.camposDinamicos } : {}
       });
       await this.outbox.marcarCriado(submissaoId, criado.issueKey);
       await this.vinculos.criar({
@@ -4442,6 +4495,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       );
     }
     const chave = typeof corpo?.chaveIdempotencia === "string" && corpo.chaveIdempotencia.length > 0 ? `form:${eu.email}:${corpo.chaveIdempotencia}` : `form:${eu.email}:${ctx.novoId()}`;
+    const camposDinamicos = extrairCamposDinamicos(corpo?.camposDinamicos);
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
@@ -4450,10 +4504,30 @@ async function rotear(req, ctx, eu, caminho, url) {
         descricao: validada.proposta.descricao,
         tipoChamadoId: validada.proposta.tipoChamadoId,
         serviceDeskId,
-        prioridade: validada.proposta.prioridade
+        prioridade: validada.proposta.prioridade,
+        ...camposDinamicos ? { camposDinamicos } : {}
       }
     });
     return json(respostaCriacao(r, validada.proposta.prioridade), 201);
+  }
+  const camposDoTipo = caminho.match(/^\/api\/tipos-chamado\/([^/]+)\/campos$/);
+  if (camposDoTipo && req.method === "GET") {
+    const requestTypeId = decodificar(camposDoTipo[1]);
+    if (requestTypeId === null || !ctx.valores.tipos_chamado_permitidos.includes(requestTypeId)) {
+      return ERROS.naoEncontrado();
+    }
+    const serviceDeskId = ctx.valores.service_desk_id;
+    if (!serviceDeskId) {
+      return ERROS.dadosInvalidos(
+        "A abertura de chamados ainda n\xE3o foi configurada nesta instala\xE7\xE3o. Fale com o time de tech."
+      );
+    }
+    try {
+      const itens = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, requestTypeId);
+      return json({ itens });
+    } catch {
+      return ERROS.conteudoIndisponivel();
+    }
   }
   if (caminho === "/api/chamados" && req.method === "GET") {
     const vinculos = await ctx.vinculos.listarDoSolicitante(eu.email, 100);
@@ -4858,6 +4932,17 @@ function respostaCriacao(r, prioridade) {
     slaPrimeiraRespostaHoras: SLA_PRIMEIRA_RESPOSTA_HORAS[prioridade],
     mensagem: r.estado === "criado" ? "Chamado aberto. Voc\xEA acompanha tudo por aqui." : "Recebemos sua solicita\xE7\xE3o e estamos abrindo o chamado. Nada se perdeu \u2014 voc\xEA ver\xE1 a chave aqui em instantes."
   };
+}
+function extrairCamposDinamicos(bruto) {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return null;
+  const saida = {};
+  for (const [chave, valor] of Object.entries(bruto)) {
+    if (typeof valor !== "string") continue;
+    const limpo = valor.trim();
+    if (limpo.length === 0) continue;
+    saida[chave] = limpo;
+  }
+  return Object.keys(saida).length > 0 ? saida : null;
 }
 function validarProposta(corpo, tiposPermitidos) {
   const titulo = typeof corpo?.titulo === "string" ? corpo.titulo.trim() : "";

@@ -79,6 +79,23 @@ export interface TipoChamado {
   readonly descricao: string | null
 }
 
+/* ---------- campos adicionais do formulário sem IA (RF-27, T-130) ------ */
+
+export type TipoCampoRequestType = 'texto' | 'texto_longo' | 'selecao'
+
+export interface OpcaoCampoRequestType {
+  readonly id: string
+  readonly rotulo: string
+}
+
+export interface CampoRequestType {
+  readonly fieldId: string
+  readonly rotulo: string
+  readonly obrigatorio: boolean
+  readonly tipo: TipoCampoRequestType
+  readonly opcoes: readonly OpcaoCampoRequestType[]
+}
+
 export interface ResultadoCriacao {
   readonly issueKey: string | null
   readonly estado: 'criado' | 'pendente'
@@ -351,7 +368,14 @@ export const api = {
     tipoChamadoId: string
     prioridade: Prioridade
     chaveIdempotencia: string
+    /** RF-27 (T-130) — valores dos campos adicionais do request type. */
+    camposDinamicos?: Record<string, string>
   }) => chamar<ResultadoCriacao>('/api/chamados', { method: 'POST', body: JSON.stringify(dados) }),
+
+  camposDoTipo: (requestTypeId: string) =>
+    chamar<{ itens: CampoRequestType[] }>(
+      `/api/tipos-chamado/${encodeURIComponent(requestTypeId)}/campos`,
+    ),
 
   meusChamados: () => chamar<{ itens: ChamadoResumo[] }>('/api/chamados'),
 

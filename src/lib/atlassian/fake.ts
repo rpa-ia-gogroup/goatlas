@@ -12,6 +12,7 @@ import {
   ErroAtlassian,
   MAX_ANEXO_BYTES,
   type BuscaConfluenceParams,
+  type CampoRequestType,
   type Chamado,
   type ChamadoCriado,
   type ClienteAtlassian,
@@ -83,6 +84,8 @@ export interface AnexoFake {
 
 export interface EstadoFake {
   tiposChamado: TipoChamado[]
+  /** Schema de campos adicionais por `requestTypeId` (RF-27, T-130). */
+  camposPorTipo: Map<string, CampoRequestType[]>
   paginas: PaginaConfluence[]
   /**
    * Ids de páginas com restrição de leitura (RF-40). Sob proxy total, QUALQUER
@@ -123,6 +126,7 @@ export interface EstadoFake {
     buscarHistorico: ModoFalha
     listarComentarios: ModoFalha
     obterPagina: ModoFalha
+    obterCamposDoTipo: ModoFalha
     /**
      * Falha ao consultar restrição. No cliente real ela é engolida e vira
      * "restrita"; aqui ela **lança**, para provar que o gate de exposição também
@@ -163,6 +167,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
   constructor(inicial: Partial<EstadoFake> = {}) {
     this.estado = {
       tiposChamado: inicial.tiposChamado ?? [],
+      camposPorTipo: inicial.camposPorTipo ?? new Map(),
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? new Set(),
       filtrarPorTermo: inicial.filtrarPorTermo ?? false,
@@ -179,6 +184,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
         buscarHistorico: 'nenhum',
         listarComentarios: 'nenhum',
         obterPagina: 'nenhum',
+        obterCamposDoTipo: 'nenhum',
         paginaRestrita: 'nenhum',
         obterAnexo: 'nenhum',
         ...inicial.falhas,
@@ -195,6 +201,15 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
   async listarTiposChamado(): Promise<readonly TipoChamado[]> {
     this.chamadas.push({ operacao: 'listarTiposChamado', params: null })
     return this.estado.tiposChamado
+  }
+
+  async obterCamposDoTipo(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<readonly CampoRequestType[]> {
+    this.chamadas.push({ operacao: 'obterCamposDoTipo', params: { serviceDeskId, requestTypeId } })
+    this.checar(this.estado.falhas.obterCamposDoTipo, 'obterCamposDoTipo')
+    return this.estado.camposPorTipo.get(requestTypeId) ?? []
   }
 
   async criarChamado(dados: NovoChamado): Promise<ChamadoCriado> {

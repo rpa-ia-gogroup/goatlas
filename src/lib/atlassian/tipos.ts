@@ -47,6 +47,13 @@ export interface NovoChamado {
    * (RNF-21) em vez de virar chamado invisível ao próprio autor.
    */
   readonly chaveIdempotencia: string
+  /**
+   * Valores dos campos ADICIONAIS do request type (RF-27, T-130) — chave é o
+   * `fieldId` do schema. Só o formulário sem IA (`D-04`) preenche isto: o fluxo
+   * conversacional não tem schema dinâmico. `undefined`/ausente = nenhum campo
+   * adicional, nunca um objeto vazio inventado.
+   */
+  readonly camposDinamicos?: Readonly<Record<string, string>>
 }
 
 export interface ChamadoCriado {
@@ -172,6 +179,28 @@ export type ResultadoAnexo =
  */
 export const MAX_ANEXO_BYTES = 12 * 1024 * 1024
 
+/**
+ * Um campo ADICIONAL do request type (RF-27, T-130) — além dos já cobertos pelo
+ * formulário fixo (título=`summary`, descrição=`description`,
+ * prioridade=`priority`). `camposAdicionais()` em `atlassian/cliente.ts` já
+ * filtra esses três antes de qualquer campo chegar aqui.
+ */
+export type TipoCampoRequestType = 'texto' | 'texto_longo' | 'selecao'
+
+export interface OpcaoCampoRequestType {
+  readonly id: string
+  readonly rotulo: string
+}
+
+export interface CampoRequestType {
+  readonly fieldId: string
+  readonly rotulo: string
+  readonly obrigatorio: boolean
+  readonly tipo: TipoCampoRequestType
+  /** Só populado quando `tipo === 'selecao'`. */
+  readonly opcoes: readonly OpcaoCampoRequestType[]
+}
+
 export interface TicketHistorico {
   readonly issueKey: string
   readonly titulo: string
@@ -217,6 +246,16 @@ export class ErroAtlassian extends Error {
 export interface ClienteAtlassian {
   /** Tipos de chamado do site. A allowlist é aplicada ACIMA desta camada (RF-28). */
   listarTiposChamado(): Promise<readonly TipoChamado[]>
+
+  /**
+   * Schema de campos ADICIONAIS de um request type (RF-27, T-130) — o que falta
+   * para o formulário sem IA (`D-04`) parar de ser hardcoded. `serviceDeskId` e
+   * `requestTypeId` vêm de config/allowlist (RNF-25), nunca fixos no código.
+   */
+  obterCamposDoTipo(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<readonly CampoRequestType[]>
 
   criarChamado(dados: NovoChamado): Promise<ChamadoCriado>
 

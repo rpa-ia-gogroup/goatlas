@@ -149,6 +149,7 @@ export class ServicoChamados {
         prioridade: dados.payload.prioridade,
         solicitanteEmail: dados.solicitanteEmail,
         chaveIdempotencia: dados.chaveIdempotencia,
+        ...(dados.payload.camposDinamicos ? { camposDinamicos: dados.payload.camposDinamicos } : {}),
       })
 
       await this.outbox.marcarCriado(submissaoId, criado.issueKey)

@@ -273,6 +273,11 @@ async function rotear(
         ? `form:${eu.email}:${corpo.chaveIdempotencia}`
         : `form:${eu.email}:${ctx.novoId()}`
 
+    // RF-27 (T-130) — campos adicionais do request type, coletados pelo
+    // formulário dinâmico. Ausente/inválido = nenhum, nunca erro: o caminho sem
+    // IA não pode regredir por causa de um campo extra malformado.
+    const camposDinamicos = extrairCamposDinamicos(corpo?.camposDinamicos)
+
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
@@ -282,9 +287,33 @@ async function rotear(
         tipoChamadoId: validada.proposta.tipoChamadoId,
         serviceDeskId,
         prioridade: validada.proposta.prioridade,
+        ...(camposDinamicos ? { camposDinamicos } : {}),
       },
     })
     return json(respostaCriacao(r, validada.proposta.prioridade), 201)
+  }
+
+  // RF-27 (T-130) — schema de campos adicionais do request type, para o
+  // formulário sem IA renderizar dinamicamente. Mesma allowlist de RF-28: tipo
+  // fora dela responde como inexistente, sem consultar a Atlassian.
+  const camposDoTipo = caminho.match(/^\/api\/tipos-chamado\/([^/]+)\/campos$/)
+  if (camposDoTipo && req.method === 'GET') {
+    const requestTypeId = decodificar(camposDoTipo[1]!)
+    if (requestTypeId === null || !ctx.valores.tipos_chamado_permitidos.includes(requestTypeId)) {
+      return ERROS.naoEncontrado()
+    }
+    const serviceDeskId = ctx.valores.service_desk_id
+    if (!serviceDeskId) {
+      return ERROS.dadosInvalidos(
+        'A abertura de chamados ainda não foi configurada nesta instalação. Fale com o time de tech.',
+      )
+    }
+    try {
+      const itens = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, requestTypeId)
+      return json({ itens })
+    } catch {
+      return ERROS.conteudoIndisponivel()
+    }
   }
 
   // --- meus chamados (RF-29 a RF-33) ----------------------------------------
@@ -842,6 +871,25 @@ function respostaCriacao(
         ? 'Chamado aberto. Você acompanha tudo por aqui.'
         : 'Recebemos sua solicitação e estamos abrindo o chamado. Nada se perdeu — você verá a chave aqui em instantes.',
   }
+}
+
+/**
+ * Extrai os valores dos campos adicionais do corpo (RF-27, T-130).
+ *
+ * Não é um lugar para bloquear a submissão: entrada malformada vira "nenhum
+ * campo adicional", não erro — o formulário fixo (título/descrição/tipo/
+ * prioridade) não pode deixar de funcionar por causa de um extra torto.
+ */
+function extrairCamposDinamicos(bruto: unknown): Record<string, string> | null {
+  if (!bruto || typeof bruto !== 'object' || Array.isArray(bruto)) return null
+  const saida: Record<string, string> = {}
+  for (const [chave, valor] of Object.entries(bruto as Record<string, unknown>)) {
+    if (typeof valor !== 'string') continue
+    const limpo = valor.trim()
+    if (limpo.length === 0) continue
+    saida[chave] = limpo
+  }
+  return Object.keys(saida).length > 0 ? saida : null
 }
 
 type ValidacaoProposta = { proposta: PropostaChamado } | { erro: string }
