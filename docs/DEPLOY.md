@@ -73,8 +73,19 @@ e só então remova o modo demo:
 | `GODEPLOY_CRON_KEY` | **Todas** as rotas de cron ficam fechadas — inclusive o polling do Jira e o envio de notificação, que são o que faz a Fase 3 funcionar |
 | `GOATLAS_WEBHOOK_SEGREDO` | `POST /api/webhook/jira` responde 403 a tudo (fail-closed). O polling sozinho continua notificando — é por isso que `RF-47` pede duas fontes |
 | `EMAIL_API_KEY` | Só importa se o canal escolhido for e-mail. Sem ela o canal recusa em vez de fingir envio |
-| `config.canal_notificacao_padrao` (**Q11**) | Aviso é **registrado e suprimido**, e o console mostra quantos. Não é secret: é campo de config, editável sem deploy (`D-19`) |
-| `config.base_publica_app` | As notificações saem **sem link**. O cron não tem `Request` de onde derivar o host, então este valor não é descobrível |
+| `GOATLAS_CANAL_NOTIFICACAO` (**Q11**) | Sem ele, o aviso é registrado e suprimido e a tela diz "ninguém definiu canal". **Com `nenhum`** (a decisão de `D-20`) o efeito é o mesmo, mas a tela passa a dizer "os avisos vivem aqui" — a diferença é a decisão, não o comportamento. Não é secret: é URL/enum |
+| `GOATLAS_BASE_PUBLICA` | As notificações saem **sem link**. O cron não tem `Request` de onde derivar o host, então este valor não é descobrível. Barra final é tolerada |
+| `LLM_BASE_URL` + `LLM_MODEL` | Sem eles a chave de IA sozinha não liga nada: `LLM_BASE_URL` é a base compatível com OpenAI do proxy corporativo (`ai-proxy.gogroupbr.com`, ver `D-05`) e o cliente concatena `/chat/completions`. Barra final é tolerada desde `D-20` |
+
+**Os valores de `D-20`, para copiar:**
+
+```
+GOATLAS_BASE_PUBLICA      = https://goatlas.devgogroup.com
+GOATLAS_CANAL_NOTIFICACAO = nenhum
+```
+
+⚠️ Estes dois **não são secret** — são URL e enum. Estão como env porque variam por
+ambiente (staging tem outro host), não porque sejam sensíveis.
 
 Os dois do meio dão para preencher no console de admin depois, sem deploy (`RF-49`).
 `LLM_API_KEY`, `GODEPLOY_CRON_KEY`, `GOATLAS_WEBHOOK_SEGREDO` e `EMAIL_API_KEY` são

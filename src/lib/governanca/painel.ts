@@ -91,16 +91,61 @@ export interface ResumoPainel {
     readonly custoMedioUsd: number | null
     readonly conversasNoTeto: number
   }
-  /** T-235, bloqueada: o número é bruto e o painel diz que é bruto. */
+  /**
+   * T-235 — `false` porque continua sendo **proxy**, não medição.
+   *
+   * O campo não mudou de valor com `D-20`: o que mudou é que agora existe um número ao
+   * lado (`deflexaoAparente`) com o viés declarado, em vez de nada.
+   */
   readonly deflexaoResolvidaConhecida: false
   readonly avisoDeflexao: string
+  readonly deflexaoAparente: DeflexaoAparente
 }
 
 /** Limiar de 429 que liga o alerta de `RF-60`. Empírico — é o que a doc não publica. */
 export const LIMIAR_429_PCT = 2
 
+/**
+ * Janela do proxy de deflexão resolvida — T-235, `D-20`.
+ *
+ * Sete dias porque o prazo máximo de primeira resposta é 24h: quem foi bloqueado, não
+ * insistiu e **ainda** não abriu chamado uma semana depois provavelmente resolveu (ou
+ * desistiu de vez, que é o viés declarado abaixo). Janela curta contaria como resolvido
+ * quem só voltou na segunda-feira.
+ */
+export const JANELA_DEFLEXAO_DIAS = 7
+
 export const AVISO_DEFLEXAO =
-  'A taxa de deflexão conta quem foi bloqueado e não abriu chamado. Ela NÃO distingue quem resolveu pela documentação de quem desistiu e foi pedir por outro canal — decidir como medir isso é T-235, e até lá o número é um teto, não um resultado.'
+  'A taxa de deflexão conta quem foi bloqueado e não abriu chamado. Ela é um TETO: não distingue quem resolveu pela documentação de quem desistiu e foi pedir por outro canal.'
+
+/**
+ * O proxy de "defletido e resolveu" — T-235, decidido em `D-20`.
+ *
+ * ⚠️ **É proxy, e o nome do campo diz isso.** A pergunta original não é respondível com o
+ * que o app vê: ele não sabe se a pessoa leu a página e resolveu, ou se fechou a aba e
+ * pediu no chat. O que ele **sabe** é se ela voltou a abrir chamado.
+ *
+ * Definição: bloqueio **sem override** cujo solicitante **não abriu nenhum chamado** nos
+ * `JANELA_DEFLEXAO_DIAS` seguintes.
+ *
+ * **O viés, explícito e não corrigível daqui:** quem foi para o Google Chat pedir pela via
+ * antiga conta como "resolveu". O número portanto **superestima**, e é por isso que a tela
+ * o mostra ao lado do total bruto em vez de substituí-lo — e por isso `RF-55` mede também
+ * *aderência de canal* (`O5`), que é o outro lado da mesma pergunta: quando o volume que
+ * entra por chat cair, este número passa a valer mais.
+ */
+export interface DeflexaoAparente {
+  readonly bloqueiosSemOverride: number
+  /** Sem chamado do mesmo e-mail na janela seguinte. */
+  readonly semChamadoDepois: number
+  /** `null` = nenhum bloqueio ainda. Nunca `0%`. */
+  readonly taxaPct: number | null
+  readonly janelaDias: number
+  readonly viesConhecido: string
+}
+
+export const VIES_DEFLEXAO =
+  'Quem foi pedir pelo canal antigo (chat, reunião) conta aqui como "resolveu": o app não vê o que acontece fora dele. O número é um limite superior — cruze com a aderência de canal antes de celebrar.'
 
 function taxaPct(numerador: number, denominador: number): number | null {
   return denominador === 0 ? null : (numerador / denominador) * 100
@@ -125,6 +170,7 @@ export interface EntradaPainel {
     readonly conversasNoTeto: number
   }
   readonly sla: ResumoSla
+  readonly deflexao: { readonly bloqueiosSemOverride: number; readonly semChamadoDepois: number }
 }
 
 /** Função pura: entra o que o banco tem, sai o painel. */
@@ -183,6 +229,12 @@ export function montarPainel(e: EntradaPainel): ResumoPainel & { readonly sla: R
     sla: e.sla,
     deflexaoResolvidaConhecida: false,
     avisoDeflexao: AVISO_DEFLEXAO,
+    deflexaoAparente: {
+      ...e.deflexao,
+      taxaPct: taxaPct(e.deflexao.semChamadoDepois, e.deflexao.bloqueiosSemOverride),
+      janelaDias: JANELA_DEFLEXAO_DIAS,
+      viesConhecido: VIES_DEFLEXAO,
+    },
   }
 }
 
@@ -253,6 +305,7 @@ export async function lerEntradaDoPainel(
     prioridades,
     vias,
     bloqueios,
+    deflexao: await contarDeflexaoAparente(db),
     thresholds: dados.thresholds,
     notificacoes: dados.notificacoes,
     telemetria: dados.telemetria,
@@ -264,6 +317,41 @@ export async function lerEntradaDoPainel(
       conversasNoTeto: 0,
     },
     sla: dados.sla,
+  }
+}
+
+/**
+ * O proxy de T-235, em SQL — ver `DeflexaoAparente` para o desenho e o viés.
+ *
+ * A ligação bloqueio → pessoa passa por `conversas` (o bloqueio guarda `conversa_id`, não
+ * e-mail). O `NOT EXISTS` é a parte que importa: procura chamado **do mesmo e-mail** com
+ * `criado_em` entre o bloqueio e a janela. Comparação de texto ISO funciona porque todo
+ * carimbo do app é gravado em UTC com o mesmo formato — se um dia não for, isto silencia
+ * em vez de errar alto, e é por isso que o número é rotulado como proxy na tela.
+ */
+async function contarDeflexaoAparente(
+  db: Banco,
+): Promise<{ bloqueiosSemOverride: number; semChamadoDepois: number }> {
+  const r = await db.query(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(
+         CASE WHEN NOT EXISTS (
+           SELECT 1 FROM vinculos v
+            WHERE v.solicitante_email = c.solicitante_email
+              AND v.criado_em >= b.criado_em
+              AND v.criado_em < datetime(b.criado_em, '+' || ? || ' days')
+         ) THEN 1 ELSE 0 END
+       ) AS sem_chamado
+     FROM bloqueios b
+     JOIN conversas c ON c.id = b.conversa_id
+     WHERE b.houve_override = 0`,
+    [JANELA_DEFLEXAO_DIAS],
+  )
+  const linha = linhasComoObjetos<{ total: number; sem_chamado: number | null }>(r)[0]
+  return {
+    bloqueiosSemOverride: Number(linha?.total ?? 0),
+    semChamadoDepois: Number(linha?.sem_chamado ?? 0),
   }
 }
 

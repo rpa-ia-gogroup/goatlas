@@ -366,9 +366,18 @@ export interface ResumoPainel {
     readonly conversasNoTeto: number
   }
   readonly sla: ResumoSla
-  /** T-235 bloqueada: o numero de deflexao e BRUTO, e o painel diz que e. */
+  /** T-235: o número é PROXY, não medição (`D-20`). O painel diz isso na tela. */
   readonly deflexaoResolvidaConhecida: false
   readonly avisoDeflexao: string
+  readonly deflexaoAparente: {
+    readonly bloqueiosSemOverride: number
+    readonly semChamadoDepois: number
+    /** `null` = nenhum bloqueio ainda. Nunca `0%`. */
+    readonly taxaPct: number | null
+    readonly janelaDias: number
+    /** O viés declarado — vai JUNTO do número na tela, nunca em rodapé. */
+    readonly viesConhecido: string
+  }
 }
 
 export interface ResumoMetricas {

@@ -130,7 +130,12 @@ export class ClienteIAHttp implements ClienteIA {
     const controlador = new AbortController()
     const timer = setTimeout(() => controlador.abort(), this.timeoutMs)
     try {
-      const resposta = await this.fetchImpl(`${base}/chat/completions`, {
+      // ⚠️ A barra final é removida aqui, não na configuração. `LLM_BASE_URL` é digitado
+      // por uma pessoa no console do GoDeploy, e o jeito natural de copiar uma URL de
+      // navegador é COM a barra (`https://ai-proxy.gogroupbr.com/`). Sem isto o app monta
+      // `…//chat/completions` e o proxy responde 404 — erro de configuração que parece
+      // "a IA está fora do ar". Normalizar na borda custa uma linha.
+      const resposta = await this.fetchImpl(`${base.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${chave}`,

@@ -570,6 +570,109 @@ fakes, o dublê não é alcançável.
 
 ---
 
+### D-20 · Defaults do MVP: cinco decisões tomadas por delegação, todas ajustáveis por config
+
+**Data:** 07/08/2026 · **Quem:** Kaique delegou explicitamente ("tente apenas considerar o
+contexto do projeto e tudo que já sabe pra decidir") · **Status:** fechadas, revisáveis
+
+O código das Fases 3 e 4 estava pronto e **cinco perguntas abertas seguravam o MVP** — não
+por falta de implementação, por falta de escolha. Cada uma abaixo foi decidida para um MVP
+que funcione hoje e se ajuste depois **sem deploy** (`RF-49`). Nenhuma é irreversível.
+
+#### 1 · Q11 → o canal é `nenhum`, e isso é uma DECISÃO, não uma pendência
+
+Os avisos **vivem na aba Avisos** do app. Nada é enviado para fora.
+
+**Por que não Google Chat, que era o candidato natural:** o webhook do Chat entrega num
+**espaço**, não numa pessoa. Ligar isso publicaria "o chamado TECH-12 da Ana recebeu um
+comentário" numa sala com outras pessoas dentro — o oposto de `RF-30`, que é a trava mais
+básica do app. Chat por espaço só serviria para um canal do próprio time de tech, que é
+outro caso de uso.
+
+**Por que não e-mail ainda:** o Worker não tem SMTP (restrição da plataforma), então
+e-mail exige um **provedor HTTP** que ninguém contratou. Com `canal = email` e sem
+`email_endpoint`, cada aviso iria para `falha` depois de cinco tentativas — pior que não
+enviar, porque enche a fila de erro e some com o aviso.
+
+**O que muda quando houver provedor:** um campo no console (`email_endpoint` +
+`EMAIL_API_KEY`) e `canal_notificacao_padrao = email`. Zero código. E o e-mail é
+**por pessoa**, com o endereço que o login corporativo já dá — sem novo cadastro.
+
+⚠️ **`nenhum` decidido ≠ ninguém decidiu**, e a distinção é visível: a tela mostra "os
+avisos vivem aqui" no primeiro caso e "o canal ainda não foi definido nesta instalação" no
+segundo. É por isso que `CONFIG_PADRAO` **continua** `null` — instalação nova não pode
+afirmar que alguém escolheu. A decisão entra por `GOATLAS_CANAL_NOTIFICACAO`, por ambiente.
+
+#### 2 · Q13 → o piloto começa DESLIGADO
+
+`emails_piloto` fica vazia, e por `D-16` isso libera todo mundo.
+
+**Por quê:** o gate de piloto só faz sentido quando existe um "para onde ir no meio-tempo"
+combinado — a mensagem de encaminhamento aponta para *o canal que você já usa hoje*, e isso
+pressupõe que os líderes saibam que o app existe (`T-333`) e que as áreas foram escolhidas
+(`T-334`). Ligar a lista antes disso adiciona fricção sem nenhum ganho: barra pessoas de um
+app que ainda não foi anunciado.
+
+Ligar depois é digitar e-mails num campo. **Desligar depois de ter barrado alguém é mais
+caro** — a pessoa já foi embora.
+
+#### 3 · T-235 → um proxy definido, com o viés impresso ao lado do número
+
+Não é medição, e o nome do campo diz: `deflexaoAparente`.
+
+**Definição:** bloqueio **sem override** cujo solicitante **não abriu chamado nos 7 dias
+seguintes**. Sete dias porque o prazo máximo de primeira resposta é 24h — quem ainda não
+voltou uma semana depois resolveu, ou desistiu.
+
+**O viés, que vai no payload e na tela, não em rodapé:** quem foi pedir pelo chat conta
+aqui como "resolveu". O número **superestima**, sempre. Por isso ele aparece **ao lado** do
+total bruto em vez de substituí-lo, e por isso `deflexaoResolvidaConhecida` continua
+`false`.
+
+**Por que isto é melhor que não medir:** sem número nenhum, a pergunta "a deflexão está
+funcionando?" fica sem resposta e alguém a responde de memória. Com um teto declarado, a
+conversa passa a ser sobre o teto — e ele fica **honesto na direção certa**: se o proxy diz
+40%, o real é *no máximo* 40%. E ele melhora sozinho conforme a aderência de canal (`O5`)
+sobe, porque a fuga para o chat encolhe.
+
+**Medir de verdade continua em aberto**, e a via é perguntar à pessoa — o que exige decidir
+quando perguntar sem virar mais um formulário.
+
+#### 4 · Destino do alerta de SLA → o solicitante, e só ele
+
+**Por quê:** alertar o time de tech exige saber quem é dono da fila, e isso é `T-331`
+(automação de roteamento no Jira, dono ainda indefinido). Pior: o **Jira nativo já tem SLA
+para agentes** — mandar um segundo alerta pelo goatlas criaria duas fontes de verdade sobre
+o mesmo prazo, e a que o time olha é a do Jira.
+
+O solicitante é o único destinatário que o app conhece com certeza e para quem o aviso é
+informação nova ("ninguém te respondeu ainda, e o prazo está acabando"). Acrescentar outro
+destinatário é uma linha em `avaliarESinalizarSla`.
+
+#### 5 · Retenção → continua `null` (guardar), e isso é escolha
+
+**Por quê:** definir prazo de expurgo de dado pessoal é decisão com peso jurídico, e o
+default errado é irreversível — dado apagado não volta. `null` é o único default que
+preserva a opção.
+
+O que **já está decidido** e não depende de ninguém: `vinculos` nunca é expurgado
+(`D-17`), a auditoria tem piso de 180 dias, e notificação `pendente` não é apagada. Quando
+os prazos forem definidos, são três campos no console.
+
+**Sugestão registrada para quando a conversa acontecer:** conversas 365 dias, notificações
+180, auditoria mantida. Sugestão, não default — está aqui para a decisão começar de algum
+lugar, não para ser aplicada em silêncio.
+
+#### O que ficou fora, e por que não é meu para decidir
+
+- **`baseline_assentos`** — é um número medido na Fase 0, não uma escolha. Inventar
+  baseline é inventar economia.
+- **Retenção/treinamento do provedor de IA** (`Q6`) — conformidade (`RNF-34`), com
+  conteúdo interno trafegando. Não é decisão de engenharia.
+- **As 7 tarefas `[HUMANO]` da spec 004** — todas são conversas com pessoas.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
@@ -587,6 +690,6 @@ implementado antes da resposta.
 | Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | RF-53 (custo mensal e assentos ociosos) |
 | Q9 | Como comunicar o SLA de 24h às áreas que hoje têm retorno em 2h30 sem soar como piora? | João + Produto | Não bloqueia código; bloqueia **rollout** (R-05) |
 | Q10 | O time de tech está ciente de que o reporter dos chamados vai mudar? | João | Não bloqueia código; bloqueia **rollout** (R-03) |
-| Q11 | Google Chat, e-mail ou ambos na v1 de notificações? | João | **Não bloqueia mais código — ver D-19.** Os dois canais estão implementados e testados; o que falta é *escolher*, e a escolha é um campo de config. Enquanto `canal_notificacao_padrao` for `null`, o aviso é registrado e suprimido, e o console diz quantos |
+| Q11 | Google Chat, e-mail ou ambos na v1 de notificações? | João | **Decidida para o MVP em `D-20`: `nenhum`** — o aviso vive na aba Avisos. Chat por espaço foi recusado (vazaria chamado de todos numa sala, contra `RF-30`); e-mail entra quando houver provedor HTTP. Ver também `D-19`. Os dois canais estão implementados e testados; o que falta é *escolher*, e a escolha é um campo de config. Enquanto `canal_notificacao_padrao` for `null`, o aviso é registrado e suprimido, e o console diz quantos |
 | Q12 | ~~O GoDeploy já oferece SSO Google pronto?~~ | Kaique | **Respondida — ver D-02** |
-| Q13 | Quais 1–2 áreas entram no piloto? | João | **Não bloqueia mais código — ver D-16.** O gate existe e `emails_piloto` vazio mantém o piloto desligado; falta a lista (sugestão do documento: CX + Produção) |
+| Q13 | Quais 1–2 áreas entram no piloto? | João | **Decidida para o MVP em `D-20`: piloto DESLIGADO** — o gate só faz sentido depois de `T-333`/`T-334`. Ver também `D-16`. O gate existe e `emails_piloto` vazio mantém o piloto desligado; falta a lista (sugestão do documento: CX + Produção) |

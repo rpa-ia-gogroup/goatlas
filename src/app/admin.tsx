@@ -672,6 +672,18 @@ function PainelDaFase3({ metricas }: { metricas: ResumoMetricas }) {
         <FaixaCalibragem key={c.regra} calibragem={c} />
       ))}
 
+      <div className="grade-metricas">
+        <Metrica
+          rotulo="Não voltaram por chamado"
+          valor={formatarPct(p.deflexaoAparente.taxaPct)}
+          semDados={p.deflexaoAparente.taxaPct === null}
+          nota={`${p.deflexaoAparente.semChamadoDepois} de ${p.deflexaoAparente.bloqueiosSemOverride} bloqueios, em ${p.deflexaoAparente.janelaDias} dias`}
+        />
+      </div>
+      {/* ⚠️ O viés vai JUNTO do número, não num rodapé. Este é o campo mais fácil de ler
+          errado do painel inteiro: quem foi pedir no chat conta aqui como "resolveu". */}
+      <p className="dica">{p.deflexaoAparente.viesConhecido}</p>
+
       <h3 className="titulo-filhos">SLA de primeira resposta</h3>
       <p className="dica">
         Avaliado na última rodada do cron, não agora — ler os comentários de todos os

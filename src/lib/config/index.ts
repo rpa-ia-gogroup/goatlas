@@ -197,6 +197,22 @@ export interface BootstrapEnv {
   readonly GOATLAS_TIPOS_CHAMADO?: string
   readonly GOATLAS_ESPACOS_CONFLUENCE?: string
   readonly GOATLAS_ORG_ID?: string
+  /**
+   * Endereço público do app, para o link das notificações (`D-20`).
+   *
+   * É env, não valor derivado: o cron não tem `Request` de onde tirar o host, e é lá que a
+   * maioria das notificações nasce. E é por ambiente — staging e produção têm hosts
+   * diferentes, então hardcodar um deles quebraria o outro em silêncio.
+   */
+  readonly GOATLAS_BASE_PUBLICA?: string
+  /**
+   * Canal de aviso padrão — `chat`, `email` ou `nenhum` (`D-20`, Q11).
+   *
+   * ⚠️ Aqui a diferença entre **ausente** e **`nenhum`** é a decisão, não o efeito: os dois
+   * não enviam nada. Ausente = ninguém decidiu (a tela diz isso); `nenhum` = alguém decidiu
+   * que o aviso vive na aba Avisos. Ver `notificacoes/preferencias.ts`.
+   */
+  readonly GOATLAS_CANAL_NOTIFICACAO?: string
 }
 
 function lista(bruto: string | undefined): string[] {
@@ -224,6 +240,18 @@ export function valoresDoBootstrap(env: BootstrapEnv): Partial<ConfigValores> {
     parcial.campo_solicitante_id = env.GOATLAS_CAMPO_SOLICITANTE_ID
   }
   if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID
+  if (env.GOATLAS_BASE_PUBLICA) {
+    // Barra final removida aqui pelo mesmo motivo de `LLM_BASE_URL`: quem copia URL do
+    // navegador copia com barra, e `linkDoChamado` já concatena.
+    parcial.base_publica_app = env.GOATLAS_BASE_PUBLICA.trim().replace(/\/+$/, '')
+  }
+  const canal = (env.GOATLAS_CANAL_NOTIFICACAO ?? '').trim().toLowerCase()
+  // Valor desconhecido é **ignorado**, não corrigido para um canal qualquer: um typo
+  // (`e-mail`, `emails`) que virasse `email` mandaria aviso por um caminho que ninguém
+  // pediu. Ignorar deixa o estado em "ninguém decidiu", que é visível na tela.
+  if (canal === 'chat' || canal === 'email' || canal === 'nenhum') {
+    parcial.canal_notificacao_padrao = canal
+  }
   return parcial
 }
 

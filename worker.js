@@ -1512,7 +1512,7 @@ var ClienteIAHttp = class {
     const controlador = new AbortController();
     const timer = setTimeout(() => controlador.abort(), this.timeoutMs);
     try {
-      const resposta = await this.fetchImpl(`${base}/chat/completions`, {
+      const resposta = await this.fetchImpl(`${base.replace(/\/+$/, "")}/chat/completions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${chave}`,
@@ -1918,6 +1918,13 @@ function valoresDoBootstrap(env) {
     parcial.campo_solicitante_id = env.GOATLAS_CAMPO_SOLICITANTE_ID;
   }
   if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID;
+  if (env.GOATLAS_BASE_PUBLICA) {
+    parcial.base_publica_app = env.GOATLAS_BASE_PUBLICA.trim().replace(/\/+$/, "");
+  }
+  const canal = (env.GOATLAS_CANAL_NOTIFICACAO ?? "").trim().toLowerCase();
+  if (canal === "chat" || canal === "email" || canal === "nenhum") {
+    parcial.canal_notificacao_padrao = canal;
+  }
   return parcial;
 }
 var Config = class {
@@ -5844,7 +5851,9 @@ async function obterResumoMetricas(db) {
 
 // src/lib/governanca/painel.ts
 var LIMIAR_429_PCT = 2;
-var AVISO_DEFLEXAO = "A taxa de deflex\xE3o conta quem foi bloqueado e n\xE3o abriu chamado. Ela N\xC3O distingue quem resolveu pela documenta\xE7\xE3o de quem desistiu e foi pedir por outro canal \u2014 decidir como medir isso \xE9 T-235, e at\xE9 l\xE1 o n\xFAmero \xE9 um teto, n\xE3o um resultado.";
+var JANELA_DEFLEXAO_DIAS = 7;
+var AVISO_DEFLEXAO = "A taxa de deflex\xE3o conta quem foi bloqueado e n\xE3o abriu chamado. Ela \xE9 um TETO: n\xE3o distingue quem resolveu pela documenta\xE7\xE3o de quem desistiu e foi pedir por outro canal.";
+var VIES_DEFLEXAO = 'Quem foi pedir pelo canal antigo (chat, reuni\xE3o) conta aqui como "resolveu": o app n\xE3o v\xEA o que acontece fora dele. O n\xFAmero \xE9 um limite superior \u2014 cruze com a ader\xEAncia de canal antes de celebrar.';
 function taxaPct(numerador, denominador) {
   return denominador === 0 ? null : numerador / denominador * 100;
 }
@@ -5894,7 +5903,13 @@ function montarPainel(e) {
     },
     sla: e.sla,
     deflexaoResolvidaConhecida: false,
-    avisoDeflexao: AVISO_DEFLEXAO
+    avisoDeflexao: AVISO_DEFLEXAO,
+    deflexaoAparente: {
+      ...e.deflexao,
+      taxaPct: taxaPct(e.deflexao.semChamadoDepois, e.deflexao.bloqueiosSemOverride),
+      janelaDias: JANELA_DEFLEXAO_DIAS,
+      viesConhecido: VIES_DEFLEXAO
+    }
   };
 }
 async function lerEntradaDoPainel(db, dados) {
@@ -5939,6 +5954,7 @@ async function lerEntradaDoPainel(db, dados) {
     prioridades,
     vias,
     bloqueios,
+    deflexao: await contarDeflexaoAparente(db),
     thresholds: dados.thresholds,
     notificacoes: dados.notificacoes,
     telemetria: dados.telemetria,
@@ -5950,6 +5966,29 @@ async function lerEntradaDoPainel(db, dados) {
       conversasNoTeto: 0
     },
     sla: dados.sla
+  };
+}
+async function contarDeflexaoAparente(db) {
+  const r = await db.query(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(
+         CASE WHEN NOT EXISTS (
+           SELECT 1 FROM vinculos v
+            WHERE v.solicitante_email = c.solicitante_email
+              AND v.criado_em >= b.criado_em
+              AND v.criado_em < datetime(b.criado_em, '+' || ? || ' days')
+         ) THEN 1 ELSE 0 END
+       ) AS sem_chamado
+     FROM bloqueios b
+     JOIN conversas c ON c.id = b.conversa_id
+     WHERE b.houve_override = 0`,
+    [JANELA_DEFLEXAO_DIAS]
+  );
+  const linha = linhasComoObjetos(r)[0];
+  return {
+    bloqueiosSemOverride: Number(linha?.total ?? 0),
+    semChamadoDepois: Number(linha?.sem_chamado ?? 0)
   };
 }
 function titulosDaEvidencia(bruto) {

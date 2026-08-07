@@ -117,13 +117,23 @@ export function TelaAvisos() {
         <h1 className="titulo-secao">Como você quer ser avisado</h1>
       </div>
 
-      {/* ⚠️ A frase muda conforme QUEM ainda não decidiu. É a única coisa nesta tela que
-          não pode ser genérica: as duas situações mostram "nenhum" e são diferentes. */}
+      {/* ⚠️ São TRÊS estados, e os três mostram "nenhum" na prática. A frase é a única
+          coisa que os distingue, e cada um é de uma pessoa diferente:
+          (1) ninguém definiu canal nesta instalação — pendência de quem administra;
+          (2) o canal é "só aqui na aba", decidido de propósito (`D-20`);
+          (3) a pessoa escolheu, ou tem um canal ativo. */}
       {!preferencia.canalPadraoDefinido && !preferencia.escolhidaPelaPessoa ? (
         <Aviso atencao>
           O canal de aviso ainda não foi definido nesta instalação. Seus chamados
           continuam aparecendo em <strong>Meus chamados</strong>, com status e respostas —
           e os avisos ficam guardados aqui até alguém escolher por onde enviá-los.
+        </Aviso>
+      ) : preferencia.canal === 'nenhum' && !preferencia.escolhidaPelaPessoa ? (
+        <Aviso>
+          Por enquanto os avisos <strong>vivem aqui</strong>: nada é enviado por chat ou
+          e-mail. A lista abaixo mostra tudo que aconteceu nos seus chamados, e{' '}
+          <strong>Meus chamados</strong> sempre tem o estado atual. Se preferir receber fora
+          do app, escolha um canal abaixo.
         </Aviso>
       ) : (
         <Aviso>

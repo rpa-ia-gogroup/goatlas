@@ -111,6 +111,17 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   menos.
 - **Q11 em aberto não vira canal inventado** (`D-19`) — o aviso é registrado como
   `suprimida` e o console diz quantos. O default **não** é "e-mail para o corporativo".
+- **Os cinco defaults do MVP estão decididos** (`D-20`), e nenhum é acidente:
+  canal `nenhum` (o aviso vive na aba Avisos — Chat por espaço vazaria chamado de todos
+  numa sala) · piloto **desligado** (o gate só faz sentido depois de `T-333`/`T-334`) ·
+  T-235 como **proxy com o viés impresso ao lado do número** · alerta de SLA só para o
+  solicitante (o Jira nativo já alerta o agente; duas fontes de verdade sobre o mesmo prazo
+  é pior que uma) · retenção `null` (apagar dado pessoal é irreversível; `null` é o único
+  default que preserva a opção). Todos ajustáveis por config, sem deploy.
+- ⚠️ **`CONFIG_PADRAO` continua fail-closed mesmo com `D-20` decidido.** As decisões entram
+  por **env/bootstrap** (`GOATLAS_CANAL_NOTIFICACAO`, `GOATLAS_BASE_PUBLICA`), não mudando o
+  default do código: instalação nova não pode afirmar que alguém escolheu não enviar aviso.
+  Trocar o default "para simplificar" apaga a distinção que a tela de Avisos mostra.
 - **Imagem em URL externa não é renderizada** (`D-10`) — só anexo da página, e
   sempre pelo proxy. Não é (só) XSS: imagem externa numa página que qualquer pessoa
   edita é rastreador de leitura, e o IP de cada colega vaza para um terceiro sem

@@ -709,6 +709,7 @@ describe('T-310 — a calibragem mostra os MOTIVOS, não só o threshold', () =>
         emRisco: 0,
         estourados: 0,
       },
+      deflexao: { bloqueiosSemOverride: 0, semChamadoDepois: 0 },
     })
     const regra1 = painel.calibragem.find((c) => c.regra === 'regra1_confluence')!
     expect(regra1.thresholdAtual).toBe(0.75)
@@ -736,6 +737,7 @@ describe('T-310 — a calibragem mostra os MOTIVOS, não só o threshold', () =>
         emRisco: 0,
         estourados: 0,
       },
+      deflexao: { bloqueiosSemOverride: 0, semChamadoDepois: 0 },
     })
     expect(painel.deflexaoResolvidaConhecida).toBe(false)
     expect(painel.avisoDeflexao).toMatch(/desistiu/i)
@@ -760,6 +762,7 @@ describe('T-310 — a calibragem mostra os MOTIVOS, não só o threshold', () =>
           emRisco: 0,
           estourados: 0,
         },
+        deflexao: { bloqueiosSemOverride: 0, semChamadoDepois: 0 },
       }).telemetriaAtlassian
 
     expect(comTrafego(0, 0).taxa429Pct).toBeNull()
