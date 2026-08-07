@@ -258,6 +258,17 @@ destes reabre um vazamento que já foi fechado.
   gaveta errada. Um `ATCTT` em `ATLASSIAN_API_TOKEN` dá **401 por design**, com e-mail certo
   e site certo, então os testes óbvios (e-mail · expiração · barra final) voltam todos
   negativos para sempre. E o `ATLASSIAN_EMAIL` tem de ser o da conta que gerou o `ATATT`.
+- 🚨 **`ATATT` SCOPED também dá 401 na URL do site — e a Atlassian oferece scoped por
+  padrão.** Token **clássico** (sem escopos) usa `https://<site>.atlassian.net/rest/api/3/…`;
+  token **scoped** exige o gateway `https://api.atlassian.com/ex/jira/{cloudId}/…` e
+  `…/ex/confluence/{cloudId}/…`. Basic auth de scoped contra a URL do site devolve **401** —
+  **o mesmo sintoma do erro de família**, o que faz o diagnóstico parecer não ter avançado.
+  ⚠️ Consequência para nós: `ATLASSIAN_BASE_URL` é **uma só** e serve Jira **e** Confluence
+  (`/rest/api/3/…`, `/rest/servicedeskapi/…`, `/wiki/api/v2/…` no mesmo host). Sob scoped os
+  dois têm **gateways diferentes**, então adotar scoped **exige partir a base em duas** — é
+  mudança de código, não de config. Por isso o pedido é sempre **token clássico**. Fonte:
+  `support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/`
+  e o KB de 401 em conta de serviço.
 - 🚨 **`GET /admin/v1/orgs/{org}/users` lista SÓ conta gerenciada, e sem domínio
   reivindicado isso é zero** (`D-22`). Devolve `{"data": []}` com HTTP 200 — nenhuma
   exceção, console mostrando "0 assentos", ninguém desconfiando da chamada. Mesma família
@@ -472,6 +483,18 @@ persistente.
   `http/cron-auth.ts`, com janela de replay e comparação em tempo constante. ⚠️ **Qual
   string é assinada continua desconhecido** — 10 construções × 2 leituras da chave, nenhuma
   casou. A pergunta exata para a plataforma está em `docs/DEPLOY.md`; chutar não converge.
+  ✅ **Resolvido por outro caminho, e a assimetria é de propósito** (medido em 07/08/2026,
+  `version 18`): as seis rotas **idempotentes** aceitam por **presença** do header quando a
+  requisição **não traz identidade de usuário** — é isso que distingue o gateway da
+  plataforma de um funcionário logado forjando o header, e é seguro porque o desenho delas já
+  é idempotente (outbox por constraint, dedupe por chave do Jira, marca-d'água que só avança
+  no que deu certo). A rota **destrutiva** (`/api/cron/retencao`) **mantém HMAC obrigatório**
+  e por isso segue dando **403** — fail-closed deliberado, não defeito. Consequência aceita:
+  a retenção não roda, o que hoje é inócuo porque a política é `null` (`D-20`) e ela não
+  apagaria nada. ⚠️ **Diagnóstico de cron se faz com `listCronJobs`**, que mostra o status do
+  último disparo: foi assim que se descobriu que o `CLAUDE.md` afirmava "403 nas sete" muito
+  depois de seis terem voltado a funcionar. `404` = rota não deployada · `403` = gate ·
+  `500` = handler explodiu (aí é `getAppLogs`).
 - ⚠️ **Colisão de `UNIQUE (vinculos.issue_key)` é caso previsto, não erro** — e a
   classificação importa: por não ser `ErroAtlassian`, ela caía no default **transitório** e
   o cron reprocessava para sempre contra a mesma constraint. Mesmo solicitante =

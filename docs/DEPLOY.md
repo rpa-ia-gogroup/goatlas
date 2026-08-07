@@ -51,7 +51,7 @@ nunca valores):
 | `GOATLAS_ADMINS` | *(registrado)* | Bootstrap do primeiro admin (`RF-02`) |
 | `ATLASSIAN_API_TOKEN` · `ATLASSIAN_EMAIL` · `ATLASSIAN_BASE_URL` | *(registrados)* | 🚨 **O token é da família ERRADA** — `ATCTT` onde `/rest/api/3/*` exige `ATATT`. É o 401. Ver `D-22` |
 | `LLM_API_KEY` · `LLM_BASE_URL` · `LLM_MODEL` | *(registrados)* | Proxy de IA (`D-05`). ⚠️ Rotação pendente: a chave transitou por chat |
-| `GODEPLOY_CRON_KEY` | *(registrado)* | Cron assinado. ⚠️ Qual string é assinada segue desconhecido — ver a seção de cron |
+| `GODEPLOY_CRON_KEY` | *(registrado)* | 6 das 7 rotas de cron respondem **200** (medido por `listCronJobs` em 07/08). A `retencao` dá **403 de propósito** — ver a seção de cron |
 | `GOATLAS_BASE_PUBLICA` · `GOATLAS_CANAL_NOTIFICACAO` | *(registrados)* | Bootstrap dos defaults de `D-20` |
 | `GOATLAS_ORG_ID` | *(registrado, **não validado**)* | Bootstrap do `org_id`. Não é secret. 🚨 Quase certamente errado: o valor no `.env` de origem tem `j`/`k`, e UUID só tem `0-9a-f` (`D-22`) |
 
@@ -204,6 +204,33 @@ constante.
 testadas 10 construções de mensagem × 2 leituras da chave (texto e hex decodificado em 32
 bytes) — **nenhuma casou**. Cada tentativa custa um ciclo de cron, e chutar não converge.
 
+#### ✅ Resolvido por outro caminho — e a assimetria entre as rotas é de propósito
+
+Estado medido por `listCronJobs` em 07/08/2026 (`version 18`): **6 das 7 rotas respondem
+200**. O que passou a valer:
+
+- **Rotas idempotentes → aceitam por PRESENÇA do header**, e só quando a requisição **não
+  traz identidade de usuário**. Essa segunda condição é o que distingue o gateway da
+  plataforma de um funcionário logado forjando o header — sem ela, a checagem por presença
+  seria só decoração. É seguro porque o desenho dessas rotas já é idempotente: outbox por
+  constraint, dedupe pelo carimbo do Jira, marca-d'água que só avança no que deu certo.
+  Disparar duas vezes não produz efeito diferente de disparar uma.
+- **`/api/cron/retencao` → mantém HMAC obrigatório, e por isso segue em 403.** É a única
+  rota que **apaga dados**, e para ela "não consegui verificar quem chamou" tem de significar
+  "não executo". **Fail-closed deliberado, não defeito.** Custo aceito: a retenção não roda —
+  hoje inócuo, porque a política é toda `null` (`D-20`) e ela não apagaria nada de qualquer
+  forma. Quando os prazos forem decididos, a pergunta abaixo volta a ser bloqueio.
+
+⚠️ **Diagnóstico de cron é `listCronJobs`, não leitura de código.** Ele mostra o status do
+último disparo por job: `404` = rota não deployada · `403` = gate · `500` = handler explodiu
+(aí `getAppLogs`). Foi assim que se descobriu que o `CLAUDE.md` ainda afirmava "403 nas sete
+rotas" muito depois de seis terem voltado a funcionar — e que o 403 de 04:00 da `retencao`
+era **anterior** ao deploy das 04:16.
+
+⚠️ **Cron é UTC.** BRT é UTC−3 sem horário de verão, então *hora desejada em BRT + 3*.
+`0 4 * * *` dispara à **01:00 em Brasília**. Conferir isso antes de agendar qualquer job
+novo é mais barato que descobrir pelo log.
+
 **A pergunta exata para a plataforma:**
 
 > No header `X-Godeploy-Cron` (`t=<unix>;<rótulo>=<hmac-sha256-hex>`), qual é a string
@@ -327,6 +354,20 @@ silenciosas — nenhuma dá erro no momento de configurar:
   `ATLASSIAN_API_TOKEN` dá **401 por design** em `/rest/api/3/*` — com o e-mail certo,
   sem barra final e no site correto. ⚠️ **O e-mail tem de ser o da conta que gerou o
   `ATATT`**, senão o Basic auth falha igual e pela razão errada.
+
+- 🚨 **Peça o `ATATT` CLÁSSICO, não o scoped — os dois dão o MESMO 401 na URL do site.**
+  Na tela de criação, "Create API token" (clássico) e "Create API token with scopes" são
+  botões diferentes, e a Atlassian empurra o segundo.
+
+  | Tipo | Base que aceita |
+  |---|---|
+  | Clássico | `https://<site>.atlassian.net/rest/api/3/…` — **é o que este app usa** |
+  | Scoped | `https://api.atlassian.com/ex/jira/{cloudId}/…` **e** `…/ex/confluence/{cloudId}/…` |
+
+  Como o sintoma é idêntico ao erro de família, um token scoped registrado por engano faz
+  parecer que o diagnóstico do `D-22` não valeu. ⚠️ E adotar scoped **não é config**:
+  `ATLASSIAN_BASE_URL` é **uma só** e hoje serve Jira e Confluence no mesmo host, enquanto
+  scoped tem gateway separado para cada — exigiria partir a base em duas, no código.
 - **`cloudId` não é `orgId`.** Os dois são UUID e ficam no mesmo console. O que a
   Organizations API quer é o **orgId**, o da URL `admin.atlassian.com/o/<id>/`.
 - **UUID só admite `0-9a-f`.** Id com `j`, `k` ou qualquer não-hexadecimal está

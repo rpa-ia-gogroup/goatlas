@@ -695,6 +695,30 @@ Não têm relação entre si; escopo de uma não afeta a outra. O que está regi
 em `ATLASSIAN_API_TOKEN` é um `ATCTT`, e Basic auth contra `/rest/api/3/*` com ele
 **retorna 401 por design** — com o e-mail certo, sem barra final, no site correto.
 
+⚠️ **Verificado em fonte primária, não só no memo** (07/08/2026). A atribuição de prefixo
+foi conferida na documentação da Atlassian e em relato independente: `ATCTT` são *access
+tokens* / criados na seção de admin; `ATATT` são *API tokens*, scoped e clássicos. O memo
+estava certo — mas a checagem era devida, porque o `D-14` também "estava certo" por um dia.
+
+🚨 **E há uma segunda armadilha, que o memo não menciona e que derrubaria o próximo
+token: `ATATT` SCOPED não funciona na URL do site.**
+
+| Tipo de `ATATT` | Base que aceita |
+|---|---|
+| **Clássico** (sem escopos) | `https://<site>.atlassian.net/rest/api/3/…` |
+| **Scoped** | `https://api.atlassian.com/ex/jira/{cloudId}/…` · `…/ex/confluence/{cloudId}/…` |
+
+Basic auth de token scoped contra a URL do site devolve **401** — **o mesmo sintoma** do
+erro de família, o que faria parecer que o diagnóstico não avançou. E a Atlassian hoje
+oferece scoped como caminho padrão na tela de criação.
+
+**Consequência de desenho:** `ATLASSIAN_BASE_URL` é **uma só** e serve Jira e Confluence no
+mesmo host (`/rest/api/3/…`, `/rest/servicedeskapi/…`, `/wiki/api/v2/…`). Sob scoped os dois
+têm gateways **distintos**, então adotar scoped **exige partir a base em duas** — mudança de
+código, não de config, e mais uma razão para pedir **clássico**. Existe pedido público
+(`CLOUD-12617`) para scoped aceitar a URL do site; enquanto não existir, clássico é a
+escolha.
+
 🚨 **A causa raiz não foi um engano de quem registrou: foi o nosso próprio documento.**
 `docs/DEPLOY.md` e o `D-14` afirmavam que `ATCTT3x…` era o *API token* e devia ir em
 `ATLASSIAN_API_TOKEN`. Quem seguiu a instrução acertou o procedimento e errou o
