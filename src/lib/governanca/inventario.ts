@@ -49,7 +49,27 @@ export class RepositorioInventario {
       const porProduto = new Map(
         (ultimoAcesso?.porProduto ?? []).map((p) => [p.produto, p.ultimoAcessoEm] as const),
       )
-      for (const produto of usuario.produtos) {
+      /**
+       * 🚨 **Os produtos vêm da UNIÃO das duas fontes, e hoje só a segunda entrega.**
+       *
+       * Iterar apenas `usuario.produtos` fazia a coleta gravar **zero linha**: medido em
+       * 07/08/2026, `POST /users/search` **não devolve produto atribuído** (e
+       * `expand:["PRODUCT_ACCESS"]` responde 400). Quem sabe o produto é
+       * `last-active-dates`, que o cron já chama por conta.
+       *
+       * A união, e não a troca, é de propósito: se um dia a listagem passar a trazer
+       * produto, uma conta cujo `ultimoAcesso` falhou (`null`, `RNF-18`) continua entrando
+       * no inventário em vez de desaparecer dele — e conta que desaparece do inventário é
+       * assento que ninguém revisa.
+       */
+      const chaves = new Set([
+        ...usuario.produtos.map((p) => p.chave),
+        ...porProduto.keys(),
+      ])
+      const produtos = [...chaves].map(
+        (chave) => usuario.produtos.find((p) => p.chave === chave) ?? { chave, nome: chave },
+      )
+      for (const produto of produtos) {
         await this.db.exec(
           `INSERT INTO inventario_assentos
              (id, account_id, email, nome, produto, ultimo_acesso_em, coletado_em)

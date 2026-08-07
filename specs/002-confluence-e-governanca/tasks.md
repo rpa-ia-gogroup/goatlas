@@ -357,6 +357,20 @@ created: "2026-08-04"
       contrato: **nenhuma** chave de API opera sobre conta **não gerenciada**, e a org
       não reivindicou domínio — então a escrita responde 403 hoje
       independentemente de credencial. Destravar é reivindicar `gocase.com`.
+- [ ] **T-133** ⚠️ **O produto atribuído por conta não vem de `users/search`** — vem de
+      `last-active-dates` (`D-23`). A união das duas fontes em `registrarColeta` já faz o
+      inventário sair do zero, mas **falta verificar contra a org real** que os `key`
+      observados (`confluence`, `jira-core`, `jira-software`) cobrem o que o custo precisa:
+      o `HANDOFF` conta **5 assentos de JSM**, e nenhuma conta amostrada trouxe
+      `jira-servicedesk`. Se o produto de JSM não aparecer ali, o inventário subestima
+      justamente o produto mais caro. _Requirements: RF-51, RF-52, RF-53_
+- [ ] **T-134** 🚨 **A curva de preço do JSM é escalonada, e o `custo.ts` assume preço
+      fixo** (`D-23`, **Q8** respondida). Medido: faixa 1–100 a USD 9,05 e 6,70, e o preço
+      por assento **SOBE quando se corta** — então `economiaEstimada` está
+      **superestimada**, e é esse número que sustenta a recomendação de rebaixar (`RF-56`).
+      Enquanto não houver curva, o honesto é o padrão do projeto: **não mostrar dinheiro
+      que não se sabe**, como `custoConfigurado: false` já faz — mas hoje ele mostra um
+      valor *errado* em vez de nenhum, que é pior. _Requirements: RF-53, RF-56_
 - [x] **T-132** Fechar os Success Criteria da spec 002 item por item.
       _Requirements: todos_
       → **ScC-1** (leitura sem licença, sem vazar restrita/fora da allowlist):

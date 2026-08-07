@@ -53,7 +53,7 @@ nunca valores):
 | `LLM_API_KEY` · `LLM_BASE_URL` · `LLM_MODEL` | *(registrados)* | Proxy de IA (`D-05`). ⚠️ Rotação pendente: a chave transitou por chat |
 | `GODEPLOY_CRON_KEY` | *(registrado)* | 6 das 7 rotas de cron respondem **200** (medido por `listCronJobs` em 07/08). A `retencao` dá **403 de propósito** — ver a seção de cron |
 | `GOATLAS_BASE_PUBLICA` · `GOATLAS_CANAL_NOTIFICACAO` | *(registrados)* | Bootstrap dos defaults de `D-20` |
-| `GOATLAS_ORG_ID` | *(registrado, **não validado**)* | Bootstrap do `org_id`. Não é secret. 🚨 Quase certamente errado: o valor no `.env` de origem tem `j`/`k`, e UUID só tem `0-9a-f` (`D-22`) |
+| `GOATLAS_ORG_ID` | *(registrado e **VALIDADO**)* | Bootstrap do `org_id`. Não é secret. ✅ `GET /admin/v1/orgs/{id}` responde 200 (`D-23`). ⚠️ Ele tem `j`/`k` e **está certo** — org id da Atlassian não é UUID estrito; quem é UUID estrito é o `cloudId` |
 
 Ainda **ausentes**: `ATLASSIAN_ORG_API_KEY` (e o valor certo para ela é o `ATCTT` que
 hoje está em `ATLASSIAN_API_TOKEN`), `GOATLAS_WEBHOOK_SEGREDO`,
@@ -370,9 +370,11 @@ silenciosas — nenhuma dá erro no momento de configurar:
   scoped tem gateway separado para cada — exigiria partir a base em duas, no código.
 - **`cloudId` não é `orgId`.** Os dois são UUID e ficam no mesmo console. O que a
   Organizations API quer é o **orgId**, o da URL `admin.atlassian.com/o/<id>/`.
-- **UUID só admite `0-9a-f`.** Id com `j`, `k` ou qualquer não-hexadecimal está
-  transcrito errado. `setAppSecret` aceita sem reclamar; o erro aparece como 404 na
-  API, longe da causa.
+- 🚨 ~~**UUID só admite `0-9a-f`.**~~ **Esta "confusão" era um erro nosso, refutado por
+  teste (`D-23`).** O **org id da Atlassian NÃO é UUID estrito** — o da Gocase tem `j` e
+  `k` e responde **200**. O `cloudId` **é** UUID estrito, e é essa coexistência que faz a
+  regra falsa parecer válida. Não "conserte" um org id que tem letras fora de hex; teste-o
+  com `GET /admin/v1/orgs/{orgId}` antes de concluir qualquer coisa.
 
 Complementares: `LLM_MODEL`, `LLM_FALLBACK`, `LLM_FALLBACK_MODEL` (fallback direto
 quando o proxy falha), `GODEPLOY_CRON_KEY`, `ATLASSIAN_BASE_URL`.

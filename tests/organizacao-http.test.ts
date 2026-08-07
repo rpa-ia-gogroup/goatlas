@@ -2,10 +2,21 @@
  * T-122 / T-123 / T-131 — o cliente REAL da Organizations API contra `fetch` simulado.
  *
  * ⚠️ Estes testes provam o lado de cá: caminho montado, paginação seguida, tradução
- * dos campos, erro sem corpo cru, credencial certa no cabeçalho certo. Eles **não**
- * provam o contrato do outro lado — a credencial de Org Admin é Q1 e nunca falou com
- * a Atlassian (ver `ENDPOINTS_NAO_VERIFICADOS`). O que dá para garantir sem
- * credencial está aqui; o que não dá está declarado, não escondido.
+ * dos campos, erro sem corpo cru, credencial certa no cabeçalho certo.
+ *
+ * ✅ **E desde 07/08/2026 o contrato do outro lado FOI medido** (`D-22`), com a credencial
+ * de Org Admin real. Foi essa passada que revelou o que nenhum teste local pegaria, porque
+ * o dublê implementava a documentação:
+ *
+ * - `users/search` responde em **camelCase**; o contrato estava em `snake_case`, então as
+ *   54 contas reais eram **todas descartadas** — HTTP 200 e lista vazia.
+ * - `name`/`email` só vêm com `expand: ["NAME","EMAIL"]`.
+ * - `last-active-dates` responde em **snake_case** — a mesma API, convenção diferente.
+ * - `expand: ["PRODUCT_ACCESS"]` responde **400**: o produto atribuído não existe naquele
+ *   endpoint, e é `last-active-dates` que o entrega.
+ *
+ * Os valores abaixo passaram a imitar o que foi **observado**, não o que estava escrito.
+ * O que segue sem medição está em `ENDPOINTS_NAO_VERIFICADOS`.
  *
  * _Requirements: RF-51, RF-52, RF-57, RNF-01, RNF-04, RNF-14_
  */
@@ -89,6 +100,41 @@ describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`',
   })
 
   /**
+   * ⚠️ Sem `expand` a resposta traz **só** `accountId`, `accountType`, `accountStatus` e
+   * `statusInUserbase` — medido. Nome e e-mail não são opcionais para nós: o console de
+   * governança lista pessoas, e `accountId` não identifica ninguém para um humano.
+   */
+  it('manda `expand: ["NAME","EMAIL"]` — sem isso não vem nome nem e-mail', async () => {
+    const { impl, chamadas } = fetchFalso(() => ({ corpo: { data: [] } }))
+    await cliente(impl).listarUsuarios('org-1')
+    expect(corpoDe(chamadas[0]).expand).toEqual(['NAME', 'EMAIL'])
+  })
+
+  /**
+   * 🚨 O contrato foi escrito em `snake_case` seguindo a documentação, e a API responde em
+   * **camelCase**. O efeito era total e silencioso: `accountId` ausente descarta a linha,
+   * então as 54 contas reais eram todas descartadas — HTTP 200, lista vazia, zero exceção.
+   */
+  it('lê os campos em camelCase — `account_id` em snake_case NÃO é reconhecido', async () => {
+    const { impl } = fetchFalso((c) =>
+      corpoDe(c).isSuspended === true
+        ? { corpo: { data: [] } }
+        : {
+            corpo: {
+              data: [
+                // Como a documentação descrevia — e como a API **não** responde.
+                { account_id: 'snake-1', email: 'a@gocase.com', name: 'A' },
+                // Como a API responde de verdade.
+                { accountId: 'camel-1', email: 'b@gocase.com', name: 'B' },
+              ],
+            },
+          },
+    )
+    const r = await cliente(impl).listarUsuarios('org-1')
+    expect(r.usuarios.map((u) => u.accountId)).toEqual(['camel-1'])
+  })
+
+  /**
    * `query`, `groupIds` e `productAccess` respondem **200 com a lista inteira**, sem
    * filtrar. Mandar um deles produz um resultado que parece filtrado e não é — por isso
    * a ausência deles é uma afirmação do teste, não um detalhe.
@@ -119,11 +165,11 @@ describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`',
             corpo: {
               data: [
                 {
-                  account_id: 'acc-1',
+                  accountId: 'acc-1',
                   email: 'ana@gocase.com',
                   name: 'Ana Souza',
-                  account_status: 'active',
-                  product_access: [
+                  accountStatus: 'active',
+                  productAccess: [
                     { key: 'confluence', name: 'Confluence' },
                     { key: 'jira-servicedesk', name: 'Jira Service Management' },
                   ],
@@ -152,7 +198,7 @@ describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`',
     const { impl } = fetchFalso((c) =>
       corpoDe(c).isSuspended === true
         ? { corpo: { data: [] } }
-        : { corpo: { data: [{ account_id: 'acc-9', email: 'x@gocase.com', name: 'X' }] } },
+        : { corpo: { data: [{ accountId: 'acc-9', email: 'x@gocase.com', name: 'X' }] } },
     )
     const r = await cliente(impl).listarUsuarios('org-1')
     expect(r.usuarios).toHaveLength(1)
@@ -167,13 +213,13 @@ describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`',
             corpo: {
               data: [
                 {
-                  account_id: 'acc-1',
+                  accountId: 'acc-1',
                   email: 'a@gocase.com',
                   name: 'A',
-                  account_status: 'inactive',
+                  accountStatus: 'inactive',
                 },
                 { email: 'sem-id@gocase.com', name: 'Sem id' },
-                { account_id: 'acc-2', email: 'b@gocase.com', name: 'B' },
+                { accountId: 'acc-2', email: 'b@gocase.com', name: 'B' },
               ],
             },
           },
@@ -185,8 +231,8 @@ describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`',
   it('a conta suspensa NÃO entra na lista de assentos, e é contada à parte', async () => {
     const { impl } = fetchFalso((c) =>
       corpoDe(c).isSuspended === true
-        ? { corpo: { data: [{ account_id: 'sus-1', email: 's@gocase.com', name: 'S' }] } }
-        : { corpo: { data: [{ account_id: 'acc-1', email: 'a@gocase.com', name: 'A' }] } },
+        ? { corpo: { data: [{ accountId: 'sus-1', email: 's@gocase.com', name: 'S' }] } }
+        : { corpo: { data: [{ accountId: 'acc-1', email: 'a@gocase.com', name: 'A' }] } },
     )
     const r = await cliente(impl).listarUsuarios('org-1')
     // Conta suspensa não consome licença: incluí-la infla o custo e produz
@@ -205,8 +251,8 @@ describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`',
     const mesmaLista = {
       corpo: {
         data: [
-          { account_id: 'acc-1', email: 'a@gocase.com', name: 'A' },
-          { account_id: 'acc-2', email: 'b@gocase.com', name: 'B' },
+          { accountId: 'acc-1', email: 'a@gocase.com', name: 'A' },
+          { accountId: 'acc-2', email: 'b@gocase.com', name: 'B' },
         ],
       },
     }
@@ -224,10 +270,10 @@ describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`',
     const { impl, chamadas } = fetchFalso((c) => {
       if (corpoDe(c).isSuspended === true) return { corpo: { data: [] } }
       return corpoDe(c).cursor === 'abc123'
-        ? { corpo: { data: [{ account_id: 'acc-2', email: 'b@gocase.com', name: 'B' }] } }
+        ? { corpo: { data: [{ accountId: 'acc-2', email: 'b@gocase.com', name: 'B' }] } }
         : {
             corpo: {
-              data: [{ account_id: 'acc-1', email: 'a@gocase.com', name: 'A' }],
+              data: [{ accountId: 'acc-1', email: 'a@gocase.com', name: 'A' }],
               links: {
                 next: `${BASE_ORGANIZACAO}/admin/v1/orgs/org-1/users/search?cursor=abc123`,
               },
@@ -246,7 +292,7 @@ describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`',
   it('`links.next` de OUTRO host é ignorado — cursor de fora não é cursor desta paginação', async () => {
     const { impl, chamadas } = fetchFalso(() => ({
       corpo: {
-        data: [{ account_id: 'acc-1', email: 'a@gocase.com', name: 'A' }],
+        data: [{ accountId: 'acc-1', email: 'a@gocase.com', name: 'A' }],
         links: { next: 'https://exfiltra.example.com/admin/v1/orgs/org-1/users/search?cursor=x' },
       },
     }))
@@ -258,7 +304,7 @@ describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`',
   it('`links.next` que nunca termina para no teto — e a coleta sai marcada como PARCIAL', async () => {
     const { impl, chamadas } = fetchFalso(() => ({
       corpo: {
-        data: [{ account_id: 'acc-1', email: 'a@gocase.com', name: 'A' }],
+        data: [{ accountId: 'acc-1', email: 'a@gocase.com', name: 'A' }],
         links: {
           next: `${BASE_ORGANIZACAO}/admin/v1/orgs/org-1/users/search?cursor=sempre-o-mesmo`,
         },
@@ -318,7 +364,9 @@ describe('T-123 — ultimoAcesso', () => {
     const { impl, chamadas } = fetchFalso(() => ({
       corpo: {
         data: {
-          account_id: 'acc-1',
+          accountId: 'acc-1',
+          // ⚠️ **snake_case aqui, camelCase no `users/search`** — a MESMA API usa as duas
+          // convenções em endpoints diferentes. Medido em 07/08/2026; não é engano do teste.
           product_access: [
             { key: 'confluence', name: 'Confluence', last_active: '2026-08-04T10:00:00.000Z' },
             { key: 'jira-servicedesk', name: 'JSM' },
@@ -337,8 +385,35 @@ describe('T-123 — ultimoAcesso', () => {
     ])
   })
 
+  /**
+   * ⚠️ `last_active` é só a DATA (`"2026-08-03"`); `last_active_timestamp` é o ISO
+   * completo. Os dois vêm juntos — usar o primeiro joga o horário para meia-noite UTC.
+   */
+  it('prefere `last_active_timestamp` a `last_active`', async () => {
+    const { impl } = fetchFalso(() => ({
+      corpo: {
+        data: {
+          product_access: [
+            {
+              key: 'confluence',
+              last_active: '2026-08-03',
+              last_active_timestamp: '2026-08-03T12:52:48.188Z',
+            },
+            // Só a data: continua valendo como fallback, não vira `null`.
+            { key: 'jira-core', last_active: '2026-08-03' },
+          ],
+        },
+      },
+    }))
+    const r = await cliente(impl).ultimoAcesso('org-1', 'acc-1')
+    expect(r.porProduto).toEqual([
+      { produto: 'confluence', ultimoAcessoEm: '2026-08-03T12:52:48.188Z' },
+      { produto: 'jira-core', ultimoAcessoEm: '2026-08-03T00:00:00.000Z' },
+    ])
+  })
+
   it('accountId com caractere especial é escapado no caminho', async () => {
-    const { impl, chamadas } = fetchFalso(() => ({ corpo: { data: { product_access: [] } } }))
+    const { impl, chamadas } = fetchFalso(() => ({ corpo: { data: { productAccess: [] } } }))
     await cliente(impl).ultimoAcesso('org-1', 'acc/../outro')
     expect(chamadas[0]?.url).toContain('acc%2F..%2Foutro')
   })

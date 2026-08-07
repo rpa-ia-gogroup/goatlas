@@ -112,7 +112,7 @@ export const ENDPOINTS_NAO_VERIFICADOS = Object.freeze([
     metodo: 'POST',
     caminho: '/admin/v1/orgs/{orgId}/users/search',
     risco:
-      'Endpoint e filtros vêm de medição real de 31/07/2026 (ver `D-22`), não mais só da documentação. O que continua não observado é o nome dos campos de cada conta (`account_id`, `product_access`) numa org COM domínio reivindicado — hoje a org da Gocase não tem, e a lista volta vazia por isso, não por erro nosso.',
+      '✅ VERIFICADO contra a Atlassian real em 07/08/2026: devolve 54 contas, campos em camelCase, `expand:["NAME","EMAIL"]` obrigatório para nome/e-mail. 🚨 O que FALTA não é verificação, é caminho: **o produto atribuído a cada conta não existe neste endpoint** (`expand:["PRODUCT_ACCESS"]` responde 400). Sem ele o inventário de assentos grava zero linha, e portanto custo (`RF-53`) e assento ocioso (`RF-52`) não têm insumo. A via provável é derivar de grupos (`jira-servicedesk`/`jira-software`/`conf`), que é proxy imperfeito — ver T-133 e `D-22`.',
   }),
   Object.freeze({
     metodo: 'GET',
@@ -238,18 +238,51 @@ export const BASE_ORGANIZACAO = 'https://api.atlassian.com'
 export const MAX_PAGINAS_USUARIOS = 40
 const TAMANHO_PAGINA = 100
 
+/**
+ * Um produto como `last-active-dates` devolve — **snake_case**, medido em 07/08/2026.
+ *
+ * ⚠️ **A mesma API usa DUAS convenções.** `users/search` responde em camelCase
+ * (`accountId`); este endpoint responde em snake_case (`product_access`, `last_active`).
+ * Normalizar "para ficar consistente" quebra um dos dois — e o sintoma é lista vazia com
+ * HTTP 200, nunca uma exceção.
+ *
+ * 🚨 **É AQUI que o produto atribuído vive**, e não em `users/search`. É o que torna o
+ * inventário possível: `listarUsuarios` dá conta/nome/e-mail, este dá produto + último
+ * acesso. Quem escrever "o produto vem da listagem" está reabrindo um inventário vazio.
+ */
 interface ProdutoBruto {
   key?: unknown
   name?: unknown
+  /** Só a data (`"2026-08-03"`). */
   last_active?: unknown
+  /** ISO completo — preferido sobre `last_active`. */
+  last_active_timestamp?: unknown
 }
 
+/**
+ * A conta como o `users/search` devolve — **camelCase**, medido em 07/08/2026.
+ *
+ * 🚨 Este contrato foi escrito em `snake_case` (`account_id`, `account_status`) seguindo a
+ * documentação, e a API responde em **camelCase**. O efeito era silencioso e total:
+ * `accountId` ausente descarta a linha, então **todas** as 54 contas eram descartadas e o
+ * inventário vinha vazio — HTTP 200, nenhuma exceção. Terceira ocorrência da mesma classe
+ * de bug neste projeto (`env.DB` devolvendo `{}` e o `GET /users` vazio foram as outras).
+ *
+ * ⚠️ `name` e `email` **só existem com `expand: ["NAME","EMAIL"]`** no corpo. Sem o expand
+ * a resposta traz apenas `accountId`, `accountType`, `accountStatus` e `statusInUserbase`.
+ */
 interface UsuarioBruto {
-  account_id?: unknown
+  accountId?: unknown
   email?: unknown
   name?: unknown
-  account_status?: unknown
-  product_access?: unknown
+  accountStatus?: unknown
+  /**
+   * ⚠️ **NÃO existe neste endpoint.** `expand: ["PRODUCT_ACCESS"]` responde
+   * **400 INVALID_PARAM** — medido. Declarado aqui para que ninguém volte a mapeá-lo
+   * achando que só faltava pedir; de onde o produto atribuído vem de verdade é problema
+   * aberto, ver `ENDPOINTS_NAO_VERIFICADOS`.
+   */
+  productAccess?: unknown
 }
 
 const texto = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
@@ -386,24 +419,31 @@ export class ClienteOrganizacaoHttp implements ClienteOrganizacao {
           accountTypes: ['atlassian'],
           isSuspended,
           limit: TAMANHO_PAGINA,
+          // ⚠️ Sem este expand a resposta NÃO traz `name` nem `email` — só ids e status.
+          // `PRODUCT_ACCESS` não entra na lista: responde 400 (ver `UsuarioBruto`).
+          expand: ['NAME', 'EMAIL'],
           ...(cursor === null ? {} : { cursor }),
         }),
       })) as { data?: unknown; links?: { next?: unknown } } | null
 
       for (const bruto of Array.isArray(dados?.data) ? (dados!.data as UsuarioBruto[]) : []) {
-        const accountId = texto(bruto?.account_id)
+        const accountId = texto(bruto?.accountId)
         if (!accountId) continue
         // ⚠️ Isto descarta conta DESATIVADA, e **não** é o teste de suspensão: quem
         // responde por suspensão é o filtro `isSuspended` da requisição, porque
-        // `account_status` volta `"active"` até para conta suspensa. Continua aqui
-        // porque só remove linha, nunca inventa uma — e conta desativada não é alvo de
-        // recomendação de assento.
-        if (texto(bruto?.account_status) === 'inactive') continue
+        // `accountStatus` volta `"active"` até para conta suspensa — medido: as 54 contas
+        // vieram `"active"`. Continua aqui porque só remove linha, nunca inventa uma.
+        if (texto(bruto?.accountStatus) === 'inactive') continue
         usuarios.push({
           accountId,
           email: texto(bruto?.email) ?? '',
           nome: texto(bruto?.name) ?? texto(bruto?.email) ?? accountId,
-          produtos: produtosDe(bruto?.product_access),
+          // ⚠️ **Sempre vazio hoje**, e isso é honesto em vez de inventado: o produto
+          // atribuído NÃO vem deste endpoint (ver `UsuarioBruto.productAccess`). Enquanto
+          // for assim, `registrarColeta` grava zero linha por conta — o inventário fica
+          // vazio e a tela diz "sem coleta", que é melhor que um inventário que existe e
+          // está errado. Resolver isto é T-133 (`D-22`).
+          produtos: produtosDe(bruto?.productAccess),
         })
       }
 
@@ -429,7 +469,15 @@ export class ClienteOrganizacaoHttp implements ClienteOrganizacao {
     for (const item of bruto) {
       const produto = texto(item?.key)
       if (!produto) continue
-      porProduto.push({ produto, ultimoAcessoEm: normalizarCarimbo(item?.last_active) })
+      // ⚠️ **`last_active_timestamp` vem primeiro, `last_active` é o fallback.** Medido em
+      // 07/08/2026: os dois existem, e `last_active` é só a DATA (`"2026-08-03"`), que ao
+      // ser normalizada vira meia-noite UTC. Perder as horas não muda "ocioso há 60 dias",
+      // mas muda o limiar de quem acessou hoje de manhã.
+      porProduto.push({
+        produto,
+        ultimoAcessoEm:
+          normalizarCarimbo(item?.last_active_timestamp) ?? normalizarCarimbo(item?.last_active),
+      })
     }
     return { accountId, porProduto, coletadoEm: new Date().toISOString() }
   }

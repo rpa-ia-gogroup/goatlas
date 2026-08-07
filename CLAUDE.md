@@ -270,15 +270,35 @@ destes reabre um vazamento que já foi fechado.
   `support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/`
   e o KB de 401 em conta de serviço.
 - 🚨 **`GET /admin/v1/orgs/{org}/users` lista SÓ conta gerenciada, e sem domínio
-  reivindicado isso é zero** (`D-22`). Devolve `{"data": []}` com HTTP 200 — nenhuma
-  exceção, console mostrando "0 assentos", ninguém desconfiando da chamada. Mesma família
-  do `env.DB` devolvendo `{}`. O endpoint certo é **`POST /admin/v1/orgs/{org}/users/search`**,
-  e nele: **`accountTypes: ["atlassian"]` é obrigatório** (sem ele entram ~83 contas de
-  app/bot) · o **cursor volta em `links.next` e é reenviado no CORPO**, não seguido como URL
-  · **`query`, `groupIds` e `productAccess` respondem 200 SEM filtrar** — filtro que parece
-  filtrar e não filtra é pior que filtro ausente · **`accountStatus` não é status de
-  suspensão** (volta `"active"` para conta suspensa; quem responde é o filtro
-  `isSuspended`, em duas varreduras).
+  reivindicado isso é zero** (`D-22`, **confirmado por teste** em `D-23`). Devolve
+  `{"data": []}` com HTTP 200 — nenhuma exceção, console mostrando "0 assentos", ninguém
+  desconfiando da chamada. Mesma família do `env.DB` devolvendo `{}`. O endpoint certo é
+  **`POST /admin/v1/orgs/{org}/users/search`**, e nele: **`accountTypes: ["atlassian"]` é
+  obrigatório** (sem ele entram ~83 contas de app/bot) · o **cursor volta em `links.next` e
+  é reenviado no CORPO**, não seguido como URL · **`query`, `groupIds` e `productAccess`
+  respondem 200 SEM filtrar** — filtro que parece filtrar e não filtra é pior que filtro
+  ausente · **`accountStatus` não é status de suspensão** (volta `"active"` para conta
+  suspensa — medido nas 54 contas; quem responde é o filtro `isSuspended`, em duas
+  varreduras).
+- 🚨 **A Organizations API usa DUAS convenções de nome, e escolher a errada devolve lista
+  vazia com HTTP 200** (`D-23`). `users/search` responde em **camelCase** (`accountId`,
+  `accountStatus`); `last-active-dates` responde em **snake_case** (`product_access`,
+  `last_active`). O contrato estava em snake_case para os dois, então **as 54 contas eram
+  todas descartadas** por `accountId` ausente. ⚠️ Não unifique "para ficar consistente":
+  os dois formatos são reais e unificar quebra um lado com o mesmo sintoma silencioso.
+- 🚨 **`name`/`email` exigem `expand: ["NAME","EMAIL"]`, e o produto atribuído NÃO está no
+  `users/search`** — `expand: ["PRODUCT_ACCESS"]` responde **400**. Quem entrega produto é
+  `last-active-dates` (`product_access[].key`), que o cron já chama por conta. Por isso
+  `registrarColeta` itera a **união** das duas fontes: iterar só `usuario.produtos` gravava
+  **zero linha** e o inventário rodava vazio. E `last_active` é só a **data**;
+  `last_active_timestamp` é o ISO completo e vem primeiro.
+- 🚨 **O endpoint GLOBAL de tipos de chamado é EXPERIMENTAL e devolve 412.**
+  `GET /rest/servicedeskapi/requesttype` exige `X-ExperimentalApi: opt-in` — era o que
+  `listarTiposChamado` usava, então **listar tipos não funcionava em produção** e a
+  allowlist de `RF-28` não tinha como ser montada. A saída **não** foi ligar o opt-in
+  ("experimental" = pode mudar sem aviso, e isto é trava de roteamento): é o caminho
+  estável **por service desk** (`/servicedesk/{id}/requesttype`, 200 sem cabeçalho). ⚠️ Lá
+  o `serviceDeskId` **não vem em cada item** — tem de vir do laço, senão viraria `''`.
 - **Filtro que pode não filtrar é VERIFICADO, não acreditado** (`organizacao.ts`). Como
   "responde 200 sem filtrar" é comportamento medido desta API, as duas varreduras de
   `isSuspended` são comparadas: interseção não vazia prova que o filtro não separou nada, e
@@ -577,14 +597,17 @@ preencher no console de admin — nenhum código a mudar, nenhum deploy.
 `**Nome** (email) via goatlas:` usando a identidade do login corporativo Google
 — sem depender do console do goatlas, visível já no Jira nativo.
 
-**Q1 andou metade (`D-14`, 05/08/2026):** o trio Jira/Confluence
-(`ATLASSIAN_API_TOKEN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_BASE_URL`) e `GOATLAS_ORG_ID`
-estão registrados em `9c47f42f`; faltam `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY` e
-`GODEPLOY_CRON_KEY`. **Nada disso mudou comportamento** — `GOATLAS_MODO_DEMO=1` é o
-primeiro termo do `||` de `usandoFakes`. A ordem de virar produção, o que cada
-ausência silencia e as três confusões de credencial que já aconteceram (API token ≠
-chave de Organizations API · `cloudId` ≠ `orgId` · UUID só tem `0-9a-f`) estão em
-`docs/DEPLOY.md` e `D-14`.
+**Q1 está RESPONDIDA na parte de credencial (`D-23`, 07/08/2026).** O `ATATT` clássico
+funciona (`/rest/api/3/myself` → **200**), o `ATCTT` está em `ATLASSIAN_ORG_API_KEY`, e
+`GOATLAS_SERVICE_DESK_ID=4` (projeto `GN`, "Tickets Engenharia" — um dos 5 service desks
+do site, com 16 tipos de solicitação). **`T-063` saiu do bloqueio:** o que falta é
+*escolher* quais tipos entram na allowlist de `RF-28`, que é decisão de roteamento.
+
+⚠️ **Das "três confusões de credencial" do `D-14`, duas valem e uma era erro nosso:**
+API token ≠ chave de Organizations API (vale, e o `D-14` a descrevia **invertida** —
+ver `D-22`) · `cloudId` ≠ `orgId` (vale) · ~~UUID só tem `0-9a-f`~~ **falsa: org id da
+Atlassian não é UUID estrito**, o da Gocase tem `j`/`k` e responde 200 (`D-23`). Não
+"conserte" um org id com letras fora de hex — teste-o.
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), o **valor** do campo customizado "Solicitante" (**Q4** —
