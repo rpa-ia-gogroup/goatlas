@@ -357,20 +357,29 @@ created: "2026-08-04"
       contrato: **nenhuma** chave de API opera sobre conta **não gerenciada**, e a org
       não reivindicou domínio — então a escrita responde 403 hoje
       independentemente de credencial. Destravar é reivindicar `gocase.com`.
-- [ ] **T-133** ⚠️ **O produto atribuído por conta não vem de `users/search`** — vem de
-      `last-active-dates` (`D-23`). A união das duas fontes em `registrarColeta` já faz o
-      inventário sair do zero, mas **falta verificar contra a org real** que os `key`
-      observados (`confluence`, `jira-core`, `jira-software`) cobrem o que o custo precisa:
-      o `HANDOFF` conta **5 assentos de JSM**, e nenhuma conta amostrada trouxe
-      `jira-servicedesk`. Se o produto de JSM não aparecer ali, o inventário subestima
-      justamente o produto mais caro. _Requirements: RF-51, RF-52, RF-53_
-- [ ] **T-134** 🚨 **A curva de preço do JSM é escalonada, e o `custo.ts` assume preço
-      fixo** (`D-23`, **Q8** respondida). Medido: faixa 1–100 a USD 9,05 e 6,70, e o preço
-      por assento **SOBE quando se corta** — então `economiaEstimada` está
-      **superestimada**, e é esse número que sustenta a recomendação de rebaixar (`RF-56`).
-      Enquanto não houver curva, o honesto é o padrão do projeto: **não mostrar dinheiro
-      que não se sabe**, como `custoConfigurado: false` já faz — mas hoje ele mostra um
-      valor *errado* em vez de nenhum, que é pior. _Requirements: RF-53, RF-56_
+- [x] **T-133** O produto atribuído vem de `last-active-dates`, não de `users/search`
+      (`D-23`). _Requirements: RF-51, RF-52, RF-53_
+      → `registrarColeta` passou a iterar a **união** das duas fontes; iterar só
+      `usuario.produtos` gravava **zero linha** e o inventário rodava vazio.
+      ✅ **Verificado contra a org real:** a dúvida era se o produto de JSM apareceria, já
+      que a primeira conta amostrada não o trouxe. Consultando os **5 agentes de JSM** do
+      `HANDOFF`, `jira-servicedesk` aparece em todos. A amostra inicial simplesmente não
+      era de agente. Chaves de produto observadas: `confluence`, `jira-core`,
+      `jira-software`, `jira-servicedesk` e **`jira-customer-service`** — esta última não
+      estava em nenhuma lista nossa.
+- [x] **T-134** 🚨 O preço da Atlassian é **escalonado**, e o `custo.ts` assumia preço fixo
+      (`D-23`, **Q8** respondida). _Requirements: RF-53, RF-56_
+      → O `HANDOFF` mede um corte de **54 → 38 assentos (−30%)** que baixou a fatura em
+      **3,4%**: quem fica pode cair numa faixa de preço unitário **mais alto**, então
+      `ociosos × preço` **superestima** a economia — o número que sustenta a recomendação
+      de rebaixar alguém.
+      Entregue: `precoNaFaixa` e `economiaComCurva` (puras), config
+      `curva_preco_por_produto` (`RNF-25`, vazio = sem curva) e
+      **`ocioso.economiaConfiavel`**. Sem curva o valor **continua vindo**, mas marcado
+      como **teto** — e a tela imprime a ressalva **ao lado do número**, não em rodapé,
+      porque é ali que se decide cortar acesso. Mesmo padrão de `custoConfigurado` (Q8) e
+      `deflexaoResolvidaConhecida` (T-235). Um produto sem curva contamina a afirmação
+      inteira, como um produto sem preço já derrubava `custoConfigurado`.
 - [x] **T-132** Fechar os Success Criteria da spec 002 item por item.
       _Requirements: todos_
       → **ScC-1** (leitura sem licença, sem vazar restrita/fora da allowlist):

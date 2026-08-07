@@ -1123,6 +1123,7 @@ async function rotear(
       ctx.valores.custo_mensal_por_produto,
       ctx.valores.assentos_ocioso_dias,
       Date.parse(ctx.agora()),
+      ctx.valores.curva_preco_por_produto,
     )
     return json({
       coletadoEm: snapshot.coletadoEm,

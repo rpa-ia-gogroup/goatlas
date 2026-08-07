@@ -432,6 +432,19 @@ export function TelaAdmin() {
               <dd>
                 {assentos.custo.ocioso.usuarios} sem uso de nenhum produto atribuído há
                 pelo menos {assentos.ociosoDesdeDias} dias
+                {/* T-134 — o número do ocioso é TETO enquanto não houver curva de preço.
+                    Fica ao lado do próprio número, não em rodapé: é aqui que alguém
+                    decide cortar acesso, e "economia" superestimada empurra para cortar. */}
+                {assentos.custo.ocioso.custoMensalUsd !== null &&
+                  !assentos.custo.ocioso.economiaConfiavel && (
+                    <>
+                      {' — '}
+                      <Selo variante="contorno">Economia é teto</Selo> o preço da Atlassian
+                      é escalonado, então cortar assento pode subir o preço unitário dos
+                      que ficam. Sem a curva por faixa configurada, o valor é o máximo
+                      possível, não o esperado.
+                    </>
+                  )}
               </dd>
               <dt>Custo mensal</dt>
               <dd>

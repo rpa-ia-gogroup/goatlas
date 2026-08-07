@@ -49,6 +49,16 @@ export interface ConfigValores {
   /** RF-53 — custo mensal (USD) por chave de produto. Vazio = Q8 em aberto: o
    * console mostra contagem, nunca dinheiro inventado. */
   custo_mensal_por_produto: Record<string, number>
+  /**
+   * T-134 — curva de preço por faixa, por produto. Vazio = sem curva, e aí a economia de
+   * assento ocioso é tratada como **teto** (`economiaConfiavel: false`), não estimativa.
+   *
+   * ⚠️ Existe porque o preço do JSM é **escalonado**: cortar assento pode subir o preço
+   * unitário dos que ficam, e `ociosos × preço` superestima a economia. Ver `D-23`.
+   * Formato: `{ "jira-servicedesk": [{ "ate": 100, "precoUnitarioUsd": 9.05 }, …] }` —
+   * `ate: null` na última faixa significa "daí para cima".
+   */
+  curva_preco_por_produto: Record<string, { ate: number | null; precoUnitarioUsd: number }[]>
 
   /** RF-09 — score acima disto bloqueia pela Regra 1. Começa conservador (R-04). */
   regra1_threshold_score: number
@@ -145,6 +155,7 @@ export const CONFIG_PADRAO: Readonly<ConfigValores> = Object.freeze({
   org_id: null,
   assentos_ocioso_dias: 90,
   custo_mensal_por_produto: {},
+  curva_preco_por_produto: {},
   regra1_threshold_score: 0.75,
   regra2_threshold_recorrencia: 3,
   regra2_janela_dias: 90,
