@@ -53,6 +53,9 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
   const [confluence, setConfluence] = useState<EstadoVerificacao>('pendente')
   const [historico, setHistorico] = useState<EstadoVerificacao>('pendente')
   const [bloqueado, setBloqueado] = useState(false)
+  // Mora aqui, e não dentro de `CaminhoOverride`, porque quem precisa saber é o
+  // compositor: enquanto a justificativa está aberta, a caixa de mensagem fecha.
+  const [justificando, setJustificando] = useState(false)
   const [proposta, setProposta] = useState<Proposta | null>(null)
   const [criado, setCriado] = useState<ResultadoCriacao | null>(null)
   const fim = useRef<HTMLDivElement>(null)
@@ -99,6 +102,7 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
     try {
       const r = await api.registrarOverride(conversaId, motivo)
       setBloqueado(false)
+      setJustificando(false)
       // A proposta vem na resposta do override: a pessoa insistiu, então o próximo
       // passo aparece na hora, sem ela ter de adivinhar que precisa digitar de novo.
       if (r.proposta) setProposta(r.proposta)
@@ -150,7 +154,14 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
         <div ref={fim} />
       </div>
 
-      {bloqueado && <CaminhoOverride aoConfirmar={usarOverride} />}
+      {bloqueado && (
+        <CaminhoOverride
+          aberto={justificando}
+          aoAbrir={() => setJustificando(true)}
+          aoFechar={() => setJustificando(false)}
+          aoConfirmar={usarOverride}
+        />
+      )}
 
       {proposta && conversaId && !bloqueado && (
         <ReciboConfirmacao
@@ -162,24 +173,71 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
 
       {erro && <Aviso atencao>{erro}</Aviso>}
 
-      <form className="compositor" onSubmit={enviar}>
-        <div className="campo">
-          <label htmlFor="mensagem">Sua mensagem</label>
-          <textarea
-            id="mensagem"
-            value={rascunho}
-            onChange={(e) => setRascunho(e.target.value)}
-            placeholder="Ex.: o relatório de vendas de ontem não atualizou"
-            disabled={enviando}
-          />
-        </div>
-        <div className="acoes">
-          <button type="submit" className="botao botao-primario" disabled={enviando || !rascunho.trim()}>
-            {enviando ? 'Enviando…' : 'Enviar'}
-          </button>
-        </div>
-      </form>
+      <Compositor
+        valor={rascunho}
+        aoMudar={setRascunho}
+        aoEnviar={enviar}
+        enviando={enviando}
+        justificando={justificando}
+      />
     </div>
+  )
+}
+
+/**
+ * A caixa de mensagem para o agente.
+ *
+ * ⚠️ Ela **fecha** enquanto a justificativa do override está aberta. Com as duas
+ * disponíveis ao mesmo tempo, a pessoa escreve na de baixo — que é a maior, a que
+ * ela já usou e a que está onde o dedo espera. Aí o texto vira mensagem para o
+ * agente, o override não acontece, e ela fica repetindo "isso não resolve" para um
+ * modelo que não tem como liberar nada (`RN-07`).
+ *
+ * Fechada, não escondida: sumir com o campo faz a página saltar e deixa a pessoa
+ * sem entender o que aconteceu. O motivo vai escrito, e some assim que ela fecha a
+ * justificativa pelo "Voltar".
+ */
+export function Compositor({
+  valor,
+  aoMudar,
+  aoEnviar,
+  enviando,
+  justificando,
+}: {
+  valor: string
+  aoMudar: (v: string) => void
+  aoEnviar: (e: FormEvent) => void
+  enviando: boolean
+  justificando: boolean
+}) {
+  return (
+    <form className="compositor" onSubmit={aoEnviar}>
+      <div className="campo">
+        <label htmlFor="mensagem">Sua mensagem</label>
+        <textarea
+          id="mensagem"
+          value={valor}
+          onChange={(e) => aoMudar(e.target.value)}
+          placeholder="Ex.: o relatório de vendas de ontem não atualizou"
+          disabled={enviando || justificando}
+          aria-describedby={justificando ? 'mensagem-pausada' : undefined}
+        />
+        {justificando && (
+          <span className="dica" id="mensagem-pausada">
+            Termine a justificativa acima — ou use "Voltar" — para escrever aqui de novo.
+          </span>
+        )}
+      </div>
+      <div className="acoes">
+        <button
+          type="submit"
+          className="botao botao-primario"
+          disabled={enviando || justificando || !valor.trim()}
+        >
+          {enviando ? 'Enviando…' : 'Enviar'}
+        </button>
+      </div>
+    </form>
   )
 }
 
@@ -190,14 +248,23 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
  * melhoria da documentação. Bloqueio é orientação, não parede, e o caminho de saída
  * fica visível ao lado do bloqueio, não escondido.
  */
-function CaminhoOverride({ aoConfirmar }: { aoConfirmar: (motivo: string) => void }) {
-  const [aberto, setAberto] = useState(false)
+export function CaminhoOverride({
+  aberto,
+  aoAbrir,
+  aoFechar,
+  aoConfirmar,
+}: {
+  aberto: boolean
+  aoAbrir: () => void
+  aoFechar: () => void
+  aoConfirmar: (motivo: string) => void
+}) {
   const [motivo, setMotivo] = useState('')
 
   if (!aberto) {
     return (
       <div className="acoes">
-        <button type="button" className="botao botao-contorno" onClick={() => setAberto(true)}>
+        <button type="button" className="botao botao-contorno" onClick={aoAbrir}>
           Isso não resolve meu caso
         </button>
       </div>
@@ -233,7 +300,7 @@ function CaminhoOverride({ aoConfirmar }: { aoConfirmar: (motivo: string) => voi
         <button type="submit" className="botao botao-primario" disabled={!motivo.trim()}>
           Seguir com o chamado
         </button>
-        <button type="button" className="botao botao-discreto" onClick={() => setAberto(false)}>
+        <button type="button" className="botao botao-discreto" onClick={aoFechar}>
           Voltar
         </button>
       </div>

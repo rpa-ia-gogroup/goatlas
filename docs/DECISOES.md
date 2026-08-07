@@ -720,6 +720,14 @@ fica registrada:
    "Corrigir a recomendação", caixa creme. Foi lido como "outro chat" no primeiro teste,
    e duas caixas de texto idênticas na mesma tela não têm como comunicar que uma vai
    para o agente e a outra para a auditoria.
+6. **O compositor FECHA enquanto a justificativa está aberta.** Distinguir as duas
+   caixas não bastava: com as duas disponíveis, a pessoa escreve na de baixo — maior,
+   já usada, onde o dedo espera. O texto viraria mensagem para o agente, o override não
+   aconteceria, e ela repetiria "isso não resolve" para um modelo que não tem como
+   liberar nada. Fechado, **não escondido**: sumir com o campo faz a página saltar; o
+   motivo vai escrito ao lado e o "Voltar" reabre. E campo desabilitado passou a
+   *parecer* desabilitado (`.campo :disabled`) — sem isso o clique não fazia nada e a
+   conclusão seria "travou" em vez de "é ali em cima".
 
 **O que NÃO mudou:** bloqueio continua não sendo parede (`RF-13`). O botão está sempre
 visível, o override nunca é recusado, e o formulário mínimo (`D-04`) segue aberto. A
@@ -727,7 +735,17 @@ mudança é *por onde* se passa, não *se* dá para passar.
 
 **Testes:** três em `tests/orquestrador.test.ts`, sendo dois de burla — insistir pelo
 chat não monta proposta e não registra override; `montarPropostaAgora` recusa com
-bloqueio de pé.
+bloqueio de pé. Mais seis em `tests/rn07-caminho-override.test.ts`, do lado da tela:
+a justificativa se apresenta como correção e não como mensagem, o compositor fecha com
+o motivo escrito, e volta a abrir depois.
+
+**Nota de ambiente (não é produção):** o roteiro do dublê de IA em `npm run dev` tem
+dois turnos e o índice é do **processo**, não da conversa — uma conversa que terminava
+com número ímpar de mensagens deixava a próxima começando pelo turno 2, respondendo
+"montei o chamado" sem ter verificado nada. Nada nascia daí (`RF-08` continua fechando
+o caminho, e nenhuma proposta era montada), mas quem testava via o agente pular a
+deflexão e concluía que a Regra 1 tinha quebrado. `vite-plugin-api-dev.ts` reinicia o
+roteiro a cada `POST /api/conversas`.
 
 ---
 

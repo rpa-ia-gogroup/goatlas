@@ -517,6 +517,23 @@
 .campo select:focus {
   border-color: var(--go-blue);
 }
+
+/**
+ * Campo desabilitado precisa PARECER desabilitado.
+ *
+ * Sem isto, o compositor fechado durante a justificativa (`RN-07`) fica idêntico ao
+ * aberto: a pessoa clica, nada acontece, e a conclusão é "travou" em vez de "é ali
+ * em cima". Borda apagada + cursor, nunca só opacidade — e a explicação em texto
+ * continua ao lado, porque estado nunca é comunicado só por aparência.
+ */
+.campo input:disabled,
+.campo textarea:disabled,
+.campo select:disabled {
+  background: color-mix(in srgb, var(--go-blue) 4%, var(--go-cream));
+  border-color: color-mix(in srgb, var(--go-blue) 12%, transparent);
+  color: color-mix(in srgb, var(--go-text-primary) 55%, transparent);
+  cursor: not-allowed;
+}
 .dica {
   font-size: var(--fs-caption);
   color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
