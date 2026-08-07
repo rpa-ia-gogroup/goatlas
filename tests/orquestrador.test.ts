@@ -23,6 +23,7 @@ import { RepositorioConversas } from '@/lib/agent/estado'
 import { ExecutorTools, hashConteudo } from '@/lib/agent/tools'
 import { Orquestrador } from '@/lib/agent/orquestrador'
 import { autorizarCriacao } from '@/lib/agent/gate'
+import { MENSAGEM_BLOQUEIO_PENDENTE } from '@/lib/rules'
 import type { PaginaConfluence, TicketHistorico } from '@/lib/atlassian/tipos'
 
 const ANA = 'ana@gocase.com'
@@ -246,9 +247,17 @@ describe('RF-13 / RN-07 — bloqueio é orientação, não parede', () => {
     expect(segundo.bloqueioPendente).toBe(true) // ...mas o bloqueio anterior continua de pé
     expect((await conversas.obter('c1'))?.proposta).toBeNull()
 
-    // O modelo escreveu "sigo com o chamado" e o servidor não vai montar nada:
-    // sem o lembrete, a tela contradiz o texto e a pessoa acha que travou.
+    // RNF-16 — com bloqueio de pé o modelo nem é chamado: o texto dele seria
+    // descartado, e pagar por resposta que ninguém vê, a cada mensagem, é gasto puro.
+    expect(ia.chatsRecebidos).toHaveLength(1) // só o primeiro turno
+    expect(segundo.custoUsd).toBe(0)
+
+    // O modelo escreveu "Entendi, sigo com o chamado" e o servidor não vai montar
+    // nada. Quem fala é o servidor: o texto do modelo é DESCARTADO, não recebe um
+    // aviso colado embaixo — isso produzia uma resposta que se contradizia sozinha.
+    expect(segundo.texto).toBe(MENSAGEM_BLOQUEIO_PENDENTE)
     expect(segundo.texto).toContain('Isso não resolve meu caso')
+    expect(segundo.texto).not.toContain('sigo com o chamado')
 
     // E o que o furo custava: nenhum override registrado entre o bloqueio e a
     // criação, então a taxa de override não contava quem escapou por aqui.

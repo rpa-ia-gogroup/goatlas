@@ -15,6 +15,7 @@
 
 import type { ClienteIA } from '../ia/tipos'
 import { PROMPT_AGENTE } from '../ia/prompts'
+import { MENSAGEM_BLOQUEIO_PENDENTE } from '../rules'
 import type { Auditoria } from '../audit'
 import type { ConfigValores } from '../config'
 import { toolAutorizada, toolsPermitidas, TOOLS } from './gate'
@@ -63,6 +64,30 @@ export class Orquestrador {
       textoUsuario,
       null,
     )
+
+    // Bloqueio de pé: nem chama o modelo. O texto dele seria descartado de
+    // qualquer forma (a regra em vigor é quem fala), e pagar por uma resposta que
+    // ninguém vai ver, a cada mensagem, é o tipo de gasto que `RNF-16` existe para
+    // evitar — o turno do bloqueio descarta UMA vez; aqui seria toda vez.
+    if (await this.conversas.temBloqueioPendente(conversa.id)) {
+      await this.conversas.adicionarMensagem(
+        this.novoId(),
+        conversa.id,
+        'assistant',
+        MENSAGEM_BLOQUEIO_PENDENTE,
+        null,
+      )
+      return {
+        texto: MENSAGEM_BLOQUEIO_PENDENTE,
+        bloqueado: false,
+        bloqueioPendente: true,
+        regraBloqueio: null,
+        toolsExecutadas: [],
+        toolsRecusadas: [],
+        custoUsd: 0,
+        tetoCustoAtingido: false,
+      }
+    }
 
     const historico = await this.montarHistorico(conversa.id)
     const executadas: string[] = []
@@ -177,15 +202,12 @@ export class Orquestrador {
     await this.conversas.somarCusto(atual.id, custoTurno)
 
     // Bloqueio pendente de turno ANTERIOR: o modelo não sabe que o servidor não vai
-    // montar proposta, e escreve "montei o chamado abaixo" com nada abaixo. Texto
-    // que contradiz a tela faz a pessoa duvidar do que está lendo — e o pior é que
-    // ela conclui que travou, quando o caminho está a um clique. O lembrete é do
-    // SERVIDOR, determinístico, pelo mesmo motivo que a mensagem de bloqueio é.
-    const textoFinal =
-      bloqueio?.texto ??
-      (bloqueioPendente
-        ? `${ultimoTexto}\n\nSó não consigo abrir o chamado ainda: para isso preciso registrar o que a documentação não cobriu. Use o botão "Isso não resolve meu caso" logo abaixo e me conte em uma frase.`
-        : ultimoTexto)
+    // montar proposta, e escreve "montei o chamado abaixo" com nada abaixo. Enquanto
+    // a regra está em vigor quem fala é o servidor — o texto do modelo é DESCARTADO,
+    // exatamente como no turno em que o bloqueio dispara (ver `bloqueio?.texto`).
+    // Acrescentar o aviso ao texto do modelo, em vez de substituí-lo, produzia uma
+    // resposta que se contradizia sozinha.
+    const textoFinal = bloqueio?.texto ?? (bloqueioPendente ? MENSAGEM_BLOQUEIO_PENDENTE : ultimoTexto)
     await this.conversas.adicionarMensagem(
       this.novoId(),
       atual.id,

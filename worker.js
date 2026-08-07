@@ -2931,6 +2931,7 @@ function avaliarRegra2(classificados, thresholdRecorrencia) {
 function urlDeLeituraNoApp(idPagina) {
   return `/?pagina=${encodeURIComponent(idPagina)}`;
 }
+var MENSAGEM_BLOQUEIO_PENDENTE = 'Ainda n\xE3o consigo abrir o chamado: primeiro preciso registrar o que a documenta\xE7\xE3o n\xE3o resolveu no seu caso. Use o bot\xE3o "Isso n\xE3o resolve meu caso" aqui embaixo e me conte em uma frase \u2014 abro o chamado na sequ\xEAncia.';
 function montarMensagemBloqueio(veredito) {
   if (veredito.regra === "regra1_confluence") {
     const ev2 = veredito.evidencia;
@@ -3248,6 +3249,25 @@ var Orquestrador = class {
       textoUsuario,
       null
     );
+    if (await this.conversas.temBloqueioPendente(conversa.id)) {
+      await this.conversas.adicionarMensagem(
+        this.novoId(),
+        conversa.id,
+        "assistant",
+        MENSAGEM_BLOQUEIO_PENDENTE,
+        null
+      );
+      return {
+        texto: MENSAGEM_BLOQUEIO_PENDENTE,
+        bloqueado: false,
+        bloqueioPendente: true,
+        regraBloqueio: null,
+        toolsExecutadas: [],
+        toolsRecusadas: [],
+        custoUsd: 0,
+        tetoCustoAtingido: false
+      };
+    }
     const historico = await this.montarHistorico(conversa.id);
     const executadas = [];
     const recusadas = [];
@@ -3333,9 +3353,7 @@ var Orquestrador = class {
       if (relido) atual = relido;
     }
     await this.conversas.somarCusto(atual.id, custoTurno);
-    const textoFinal = bloqueio?.texto ?? (bloqueioPendente ? `${ultimoTexto}
-
-S\xF3 n\xE3o consigo abrir o chamado ainda: para isso preciso registrar o que a documenta\xE7\xE3o n\xE3o cobriu. Use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo e me conte em uma frase.` : ultimoTexto);
+    const textoFinal = bloqueio?.texto ?? (bloqueioPendente ? MENSAGEM_BLOQUEIO_PENDENTE : ultimoTexto);
     await this.conversas.adicionarMensagem(
       this.novoId(),
       atual.id,

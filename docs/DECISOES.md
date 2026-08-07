@@ -713,9 +713,16 @@ fica registrada:
    caminho de override — com `bloqueado` (do turno) o botão sumiria na mensagem
    seguinte, e aí sim viraria parede.
 3. **A copy aponta o botão**, nas duas regras.
-4. **Lembrete determinístico do servidor** quando o modelo responde com bloqueio
-   pendente: ele não sabe que a proposta não vai nascer e escreve "montei o chamado
-   abaixo" com nada abaixo. Texto que contradiz a tela faz a pessoa concluir que travou.
+4. **Com bloqueio de pé, quem responde é o SERVIDOR** — `MENSAGEM_BLOQUEIO_PENDENTE`
+   substitui o texto do modelo, e o modelo nem chega a ser chamado. A primeira versão
+   *acrescentava* o aviso ao texto dele, e o resultado se contradizia sozinho:
+   "Montei o chamado abaixo — confira e confirme." seguido de "Só não consigo abrir o
+   chamado ainda". O modelo não sabe que o servidor recusou montar a proposta, e
+   nenhum aviso colado embaixo conserta uma frase que já foi dita. É a mesma regra que
+   `montarMensagemBloqueio` já seguia: **a regra em vigor fala, o modelo não** —
+   deixá-lo narrar durante o bloqueio é o que transforma a regra em sugestão que ele
+   contorna com boa retórica. Pular a chamada também é `RNF-16`: o turno do bloqueio
+   descarta a resposta do modelo uma vez; sem o desvio, descartaria a cada mensagem.
 5. **O campo de justificativa deixou de parecer chat** — espinha lime, sobretítulo
    "Corrigir a recomendação", caixa creme. Foi lido como "outro chat" no primeiro teste,
    e duas caixas de texto idênticas na mesma tela não têm como comunicar que uma vai

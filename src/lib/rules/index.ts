@@ -160,6 +160,26 @@ export function urlDeLeituraNoApp(idPagina: string): string {
  * soar como **ajuda**, não como recusa. E precisa deixar o caminho de override
  * visível (RF-13, RN-07) — bloqueio não é parede.
  */
+/**
+ * A resposta enquanto o bloqueio continua de pé — RF-13, RN-07.
+ *
+ * ⚠️ Ela **substitui** o texto do modelo, não é acrescentada a ele. A primeira
+ * versão acrescentava, e o resultado foi uma resposta que se contradizia sozinha:
+ * "Montei o chamado abaixo — confira e confirme." seguido de "Só não consigo abrir
+ * o chamado ainda". O modelo não sabe que o servidor recusou montar a proposta, e
+ * nenhum aviso colado embaixo conserta uma frase que já foi dita.
+ *
+ * É a mesma regra que `montarMensagemBloqueio` já seguia no turno do bloqueio: a
+ * regra em vigor fala, o modelo não. Deixar o modelo narrar durante o bloqueio é o
+ * que transforma a regra em sugestão que ele contorna com boa retórica.
+ *
+ * ⚠️ NÃO cita o formulário de "Abrir direto" como alternativa. Ele existe e abre
+ * chamado sem passar pelas regras (`D-04`, `RNF-18`), mas ensiná-lo aqui seria
+ * ensinar a pular a deflexão — que é o produto.
+ */
+export const MENSAGEM_BLOQUEIO_PENDENTE =
+  'Ainda não consigo abrir o chamado: primeiro preciso registrar o que a documentação não resolveu no seu caso. Use o botão "Isso não resolve meu caso" aqui embaixo e me conte em uma frase — abro o chamado na sequência.'
+
 export function montarMensagemBloqueio(veredito: Veredito & { bloquear: true }): string {
   if (veredito.regra === 'regra1_confluence') {
     const ev = veredito.evidencia as EvidenciaRegra1

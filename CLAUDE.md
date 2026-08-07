@@ -339,9 +339,11 @@ destes reabre um vazamento que já foi fechado.
   de override, então o painel mostrava deflexão alta justamente onde ela falhou. A
   UI tem o mesmo par: `bloqueado` faria o botão de override sumir no turno
   seguinte — é `bloqueioPendente` que o mantém, e sem ele a trava viraria a parede
-  que `RF-13` proíbe. E quando o bloqueio está pendente, o **servidor** acrescenta
-  o lembrete do botão: o modelo não sabe que a proposta não vai nascer e escreve
-  "montei o chamado abaixo" com nada abaixo.
+  que `RF-13` proíbe. E com bloqueio de pé **o modelo nem é chamado**: quem responde
+  é `MENSAGEM_BLOQUEIO_PENDENTE`. Acrescentar o aviso ao texto do modelo, em vez de
+  substituí-lo, produzia resposta que se contradizia sozinha ("Montei o chamado
+  abaixo" + "não consigo abrir ainda") — ele não sabe que o servidor recusou, e
+  aviso colado embaixo não conserta frase já dita.
 - **A sanitização devolve ÁRVORE TIPADA, não string de HTML** (`confluence/`).
   Nenhum nó de `No` carrega saco de atributos, então não existe onde um `onerror`
   viajar: o pior caso é um nó que o renderizador não conhece. É isto que torna
