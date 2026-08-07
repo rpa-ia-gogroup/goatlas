@@ -14,7 +14,7 @@
  * declaradamente diferente (D-04), e ele **marca o chamado como não verificado**.
  */
 
-import { resolverIdentidade, MENSAGEM_NEGACAO, type Identidade } from '../auth'
+import { resolverIdentidade, HEADER_EMAIL, MENSAGEM_NEGACAO, type Identidade } from '../auth'
 import type { Contexto } from '../contexto'
 import { ERROS, erro, json, lerJson } from './respostas'
 import { verificarLimite } from './limite'
@@ -97,6 +97,9 @@ export async function tratarRequisicao(
       nome: eu.nome,
       isAdmin: eu.isAdmin,
       modoDemo: ctx.modoDemo,
+      // A UI precisa avisar de forma permanente: sem isso, a pessoa tenta abrir chamado,
+      // toma a recusa e conclui que o app está quebrado.
+      somenteLeitura: ctx.somenteLeitura,
     })
   }
 
@@ -1554,6 +1557,7 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
       ok,
       usandoFakes: ctx.usandoFakes,
       modoDemo: ctx.modoDemo,
+      somenteLeitura: ctx.somenteLeitura,
       dependencias: { atlassian, ia, banco, sso: { ok: true, detalhe: 'edge GoDeploy' } },
     },
     ok ? 200 : 503,
@@ -1594,6 +1598,9 @@ async function tratarCron(
     caminho,
     corpo: corpoCron,
     agoraMs: Date.parse(ctx.agora()),
+    // O edge injeta este header quando há PESSOA na requisição. O gateway de cron não —
+    // e é o que impede um funcionário logado de disparar cron forjando o header.
+    identidadeDeUsuario: req.headers.get(HEADER_EMAIL),
   })
 
   if (!veredito.ok) {

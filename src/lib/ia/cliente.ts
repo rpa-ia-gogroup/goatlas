@@ -80,7 +80,13 @@ export class ClienteIAHttp implements ClienteIA {
   private _custoAcumuladoUsd = 0
 
   constructor(private readonly opcoes: OpcoesClienteIA) {
-    this.fetchImpl = opcoes.fetchImpl ?? fetch
+    // ⚠️ **`fetch` PRECISA vir com `this` amarrado ao global.** Guardado numa propriedade e
+    // chamado como `this.fetchImpl(...)`, o `this` passa a ser este objeto, e o runtime dos
+    // Workers recusa com `Illegal invocation` — a chamada nem sai. No Node dos testes
+    // funciona, porque lá o `fetch` não confere o `this`: por isso 643 testes verdes
+    // conviviam com um cliente que não conseguia fazer uma única requisição em produção.
+    // Descoberto em 07/08/2026, no instante em que o modo demonstração saiu.
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis)
     this.timeoutMs = opcoes.timeoutMs ?? TIMEOUT_PADRAO_MS
   }
 

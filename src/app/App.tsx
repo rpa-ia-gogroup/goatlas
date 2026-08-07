@@ -92,6 +92,16 @@ export function App() {
         </p>
       )}
 
+      {/* ⚠️ Tarja diferente da de demonstração, porque o estado é OUTRO: aqui o que se lê
+          é real. Achatar os dois numa frase só faria alguém duvidar da documentação que
+          está lendo — que é justamente a parte que funciona. */}
+      {eu?.somenteLeitura && !eu.modoDemo && (
+        <p className="tarja-demo" role="status">
+          <strong>Somente leitura.</strong> A documentação e os chamados que você vê são
+          reais, mas o app <strong>ainda não abre chamado</strong> — está em implantação.
+        </p>
+      )}
+
       <main className="painel">
         {erroAuth ? (
           <Aviso atencao>{erroAuth}</Aviso>

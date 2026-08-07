@@ -161,12 +161,30 @@ describe('verificarCron — o caminho felizes e os cinco degraus de recusa', () 
     })
   })
 
-  it('assinatura de OUTRA chave é recusada', async () => {
+  it('assinatura de OUTRA chave não casa — e só passa pela porta da presença', async () => {
+    // ⚠️ Esta é a fronteira honesta do desenho atual: enquanto a mensagem assinada pelo
+    // gateway for desconhecida, a assinatura errada cai na aceitação por presença. O que
+    // impede abuso não é o HMAC aqui, é a ausência de identidade de usuário — e a rota
+    // destrutiva, que exige o HMAC de verdade.
     const header = `t=${CARIMBO};sig=${await assinar(`${CARIMBO}.`, 'z'.repeat(64))}`
-    expect(await verificarCron({ ...base, headerEnviado: header })).toEqual({
-      ok: false,
-      motivo: 'assinatura_invalida',
+
+    const semIdentidade = await verificarCron({ ...base, headerEnviado: header })
+    expect(semIdentidade.ok).toBe(true)
+    if (semIdentidade.ok) expect(semIdentidade.candidata).toBe('presenca_sem_identidade')
+
+    const comIdentidade = await verificarCron({
+      ...base,
+      headerEnviado: header,
+      identidadeDeUsuario: 'ana@gocase.com',
     })
+    expect(comIdentidade.ok).toBe(false)
+
+    const naDestrutiva = await verificarCron({
+      ...base,
+      caminho: '/api/cron/retencao',
+      headerEnviado: header,
+    })
+    expect(naDestrutiva.ok).toBe(false)
   })
 
   it('⚠️ carimbo VELHO é recusado, mesmo com assinatura válida', async () => {
@@ -195,9 +213,15 @@ describe('verificarCron — o caminho felizes e os cinco degraus de recusa', () 
     expect((await verificarCron({ ...base, headerEnviado: header })).ok).toBe(true)
   })
 
-  it('a assinatura é ligada ao CARIMBO — trocar o carimbo invalida', async () => {
+  it('a assinatura é ligada ao CARIMBO — trocar o carimbo invalida o HMAC', async () => {
+    // Na rota destrutiva, onde só o HMAC vale, isso é recusa direta.
     const header = `t=${CARIMBO + 1};sig=${await assinar(`${CARIMBO}.`)}`
-    expect((await verificarCron({ ...base, headerEnviado: header })).ok).toBe(false)
+    const r = await verificarCron({
+      ...base,
+      caminho: '/api/cron/retencao',
+      headerEnviado: header,
+    })
+    expect(r).toEqual({ ok: false, motivo: 'presenca_insuficiente_para_rota_destrutiva' })
   })
 })
 
@@ -212,5 +236,72 @@ describe('hexConfere — tempo constante', () => {
     // aceita chamadas repetidas isso é a assinatura descoberta por tentativa.
     expect(hexConfere('abc', 'abcdef')).toBe(false)
     expect(hexConfere('abcdef', 'abc')).toBe(false)
+  })
+})
+
+/**
+ * Aceitação por PRESENÇA — a solução que os outros apps da plataforma usam, com as três
+ * condições que eles não têm.
+ *
+ * ⚠️ O `godaily` só checa `if (!req.headers.get('x-godeploy-cron')) return 401`. Funciona,
+ * e é frágil de um jeito que lá não importa e aqui importa: **qualquer pessoa logada**
+ * atravessa o edge e pode forjar o header. No `godaily` o pior caso é reprocessar um lote;
+ * aqui, `/api/cron/retencao` apaga dado.
+ */
+describe('presença do header vale para o idempotente, nunca para o destrutivo', () => {
+  const semAssinaturaValida = `t=${CARIMBO};sig=${'f'.repeat(64)}`
+
+  it('rota idempotente passa por presença, quando NÃO há identidade de usuário', async () => {
+    const r = await verificarCron({ ...base, headerEnviado: semAssinaturaValida })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.candidata).toBe('presenca_sem_identidade')
+  })
+
+  it('⚠️ com identidade de usuário, RECUSA — é o funcionário logado forjando o header', async () => {
+    // O edge injeta o e-mail em toda requisição de pessoa; o gateway de cron não injeta.
+    // É este bit que separa "a plataforma chamou" de "alguém com sessão chamou".
+    const r = await verificarCron({
+      ...base,
+      headerEnviado: semAssinaturaValida,
+      identidadeDeUsuario: 'ana@gocase.com',
+    })
+    expect(r).toEqual({ ok: false, motivo: 'presenca_com_identidade_de_usuario' })
+  })
+
+  it('⚠️ a rota DESTRUTIVA exige assinatura — presença não basta', async () => {
+    // Preferir dado apagado por engano a um cron parado seria a troca errada.
+    const r = await verificarCron({
+      ...base,
+      caminho: '/api/cron/retencao',
+      headerEnviado: semAssinaturaValida,
+    })
+    expect(r).toEqual({ ok: false, motivo: 'presenca_insuficiente_para_rota_destrutiva' })
+  })
+
+  it('a rota destrutiva PASSA com assinatura válida', async () => {
+    const header = `t=${CARIMBO};sig=${await assinar(`${CARIMBO}.`)}`
+    const r = await verificarCron({
+      ...base,
+      caminho: '/api/cron/retencao',
+      headerEnviado: header,
+    })
+    expect(r.ok).toBe(true)
+  })
+
+  it('presença NÃO dispensa a janela de tempo nem o formato', async () => {
+    const velho = CARIMBO - JANELA_CRON_SEG - 60
+    expect(
+      (await verificarCron({ ...base, headerEnviado: `t=${velho};sig=${'f'.repeat(64)}` })).ok,
+    ).toBe(false)
+    expect((await verificarCron({ ...base, headerEnviado: 'qualquer-coisa' })).ok).toBe(false)
+  })
+
+  it('e sem chave configurada, nada passa — nem por presença', async () => {
+    const r = await verificarCron({
+      ...base,
+      chave: undefined,
+      headerEnviado: semAssinaturaValida,
+    })
+    expect(r).toEqual({ ok: false, motivo: 'chave_ausente' })
   })
 })

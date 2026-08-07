@@ -46,7 +46,13 @@ export class TransporteAtlassian {
 
   constructor(private readonly opcoes: OpcoesHttp) {
     this.dormir = opcoes.dormir ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
-    this.fetchImpl = opcoes.fetchImpl ?? fetch
+    // ⚠️ **`fetch` PRECISA vir com `this` amarrado ao global.** Guardado numa propriedade e
+    // chamado como `this.fetchImpl(...)`, o `this` passa a ser este objeto, e o runtime dos
+    // Workers recusa com `Illegal invocation` — a chamada nem sai. No Node dos testes
+    // funciona, porque lá o `fetch` não confere o `this`: por isso 643 testes verdes
+    // conviviam com um cliente que não conseguia fazer uma única requisição em produção.
+    // Descoberto em 07/08/2026, no instante em que o modo demonstração saiu.
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis)
     this.aleatorio = opcoes.aleatorio ?? Math.random
     this.maxTentativas = opcoes.maxTentativas ?? MAX_TENTATIVAS_PADRAO
   }

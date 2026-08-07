@@ -154,6 +154,21 @@ export function hexConfere(a: string, b: string): boolean {
   return diferenca === 0
 }
 
+/**
+ * As rotas cujo efeito é **destrutivo ou caro o bastante** para exigir o HMAC completo.
+ *
+ * ⚠️ Esta lista existe por causa de como os outros apps da plataforma resolvem o cron
+ * (conferido no `godaily`, 07/08/2026): eles checam apenas que o header **existe**, sem
+ * comparar valor nenhum. Funciona — e é mais frágil do que parece, porque o header é
+ * trivial de forjar por **qualquer pessoa logada no app**: o edge deixa passar quem está
+ * autenticado, e daí é um `fetch` com o header inventado.
+ *
+ * No `godaily` o pior caso disso é reprocessar um lote. Aqui, `/api/cron/retencao`
+ * **apaga dado**. Então a presença do header vale como autorização para o que é
+ * idempotente, e **não vale** para o que é irreversível.
+ */
+export const ROTAS_QUE_EXIGEM_ASSINATURA: readonly string[] = ['/api/cron/retencao']
+
 export type ResultadoCron =
   | { readonly ok: true; readonly candidata: string }
   | {
@@ -164,6 +179,8 @@ export type ResultadoCron =
         | 'formato_desconhecido'
         | 'carimbo_fora_da_janela'
         | 'assinatura_invalida'
+        | 'presenca_insuficiente_para_rota_destrutiva'
+        | 'presenca_com_identidade_de_usuario'
     }
 
 /**
@@ -183,6 +200,14 @@ export async function verificarCron(dados: {
   caminho: string
   corpo: string
   agoraMs: number
+  /**
+   * O e-mail que o edge injeta quando há **pessoa** na requisição.
+   *
+   * ⚠️ É o discriminador que torna a aceitação por presença defensável: o gateway de cron
+   * chama sem identidade de usuário; um funcionário logado forjando o header **sempre**
+   * carrega a dele, porque quem a injeta é o edge, não o navegador. Presente = não é cron.
+   */
+  identidadeDeUsuario?: string | null
 }): Promise<ResultadoCron> {
   // Fail-closed: sem chave configurada, nada passa. O contrário deixaria a rota aberta
   // justamente na instalação que esqueceu de configurar.
@@ -218,5 +243,32 @@ export async function verificarCron(dados: {
     }
   }
 
-  return { ok: false, motivo: 'assinatura_invalida' }
+  /**
+   * Aceitação por PRESENÇA — o que os outros apps da plataforma fazem, com três condições
+   * que eles não têm.
+   *
+   * Existe porque a mensagem assinada pelo gateway não está documentada e todas as
+   * construções testadas falharam: sem esta saída, os crons ficariam parados
+   * indefinidamente esperando uma resposta do time da plataforma, e com eles a
+   * notificação, o outbox e o inventário.
+   *
+   * As três condições, e o que cada uma tira do atacante:
+   *
+   * 1. **Formato válido** (`t=…;sig=…`) — um header inventado à mão não passa sem imitar
+   *    o esquema; não é barreira criptográfica, é filtro de ruído.
+   * 2. **Carimbo dentro da janela** — já verificado acima; limita replay.
+   * 3. **Sem identidade de usuário** — a que importa. Funcionário logado forjando o header
+   *    carrega o e-mail que o edge injeta, e é recusado aqui.
+   *
+   * E nada disso vale para `ROTAS_QUE_EXIGEM_ASSINATURA`: o que é irreversível continua
+   * exigindo o HMAC, e fica parado até a plataforma responder. Preferir dado apagado por
+   * engano a um cron parado seria a troca errada.
+   */
+  if (ROTAS_QUE_EXIGEM_ASSINATURA.includes(dados.caminho)) {
+    return { ok: false, motivo: 'presenca_insuficiente_para_rota_destrutiva' }
+  }
+  if (dados.identidadeDeUsuario) {
+    return { ok: false, motivo: 'presenca_com_identidade_de_usuario' }
+  }
+  return { ok: true, candidata: 'presenca_sem_identidade' }
 }

@@ -13,6 +13,11 @@ export interface Identidade {
   readonly isAdmin: boolean
   /** App publicado em modo demonstração: nada é criado no Jira. */
   readonly modoDemo: boolean
+  /**
+   * Lê dado REAL e recusa toda escrita — o estado de desenvolvimento com credencial
+   * real. Diferente de `modoDemo`: aqui o que você lê é verdadeiro.
+   */
+  readonly somenteLeitura: boolean
 }
 
 export type EstadoVerificacao = 'pendente' | 'ok' | 'falhou'

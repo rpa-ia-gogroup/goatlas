@@ -53,7 +53,7 @@ var TransporteAtlassian = class {
   constructor(opcoes) {
     this.opcoes = opcoes;
     this.dormir = opcoes.dormir ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-    this.fetchImpl = opcoes.fetchImpl ?? fetch;
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
     this.aleatorio = opcoes.aleatorio ?? Math.random;
     this.maxTentativas = opcoes.maxTentativas ?? MAX_TENTATIVAS_PADRAO;
   }
@@ -1116,6 +1116,100 @@ var ClienteAtlassianFake = class {
   }
 };
 
+// src/lib/atlassian/somente-leitura.ts
+var MENSAGEM_SOMENTE_LEITURA = "O goatlas est\xE1 em modo somente leitura: consulta \xE0 documenta\xE7\xE3o e aos chamados funciona, mas nada \xE9 criado ou alterado no Jira. Fale com o time de tech se precisar abrir um chamado agora.";
+var ClienteAtlassianSomenteLeitura = class {
+  constructor(real) {
+    this.real = real;
+  }
+  /**
+   * Toda escrita passa por aqui.
+   *
+   * `transitorio: false` de propósito: não é indisponibilidade, é recusa. Marcar como
+   * transitório faria o outbox reprocessar para sempre uma submissão que **nunca** vai
+   * ser aceita enquanto a trava estiver ligada.
+   */
+  recusar(operacao) {
+    throw new ErroAtlassian(MENSAGEM_SOMENTE_LEITURA, {
+      transitorio: false,
+      recurso: operacao
+    });
+  }
+  // --- ESCRITA: bloqueada -------------------------------------------------
+  async criarChamado(_dados) {
+    this.recusar("criarChamado");
+  }
+  // Os parâmetros são declarados mesmo sem uso: a assinatura idêntica à da interface é o
+  // que faz o compilador acusar quando um método de escrita novo aparecer em
+  // `ClienteAtlassian` e ninguém decidir de que lado dele ele fica.
+  async comentar(_issueKey, _corpo, _autorEmail, _autorNome) {
+    this.recusar("comentar");
+  }
+  async anexarArquivo(_serviceDeskId, _issueKey, _arquivo) {
+    this.recusar("anexarArquivo");
+  }
+  async transicionar(_issueKey, _transicaoId) {
+    this.recusar("transicionar");
+  }
+  // --- LEITURA: passa inteira ---------------------------------------------
+  listarTiposChamado() {
+    return this.real.listarTiposChamado();
+  }
+  obterCamposDoTipo(sd, rt) {
+    return this.real.obterCamposDoTipo(sd, rt);
+  }
+  obterChamado(issueKey) {
+    return this.real.obterChamado(issueKey);
+  }
+  listarComentariosPublicos(issueKey) {
+    return this.real.listarComentariosPublicos(issueKey);
+  }
+  buscarConfluence(params) {
+    return this.real.buscarConfluence(params);
+  }
+  obterMetadadosPagina(id) {
+    return this.real.obterMetadadosPagina(id);
+  }
+  obterEspaco(chave) {
+    return this.real.obterEspaco(chave);
+  }
+  listarFilhosDaPagina(params) {
+    return this.real.listarFilhosDaPagina(params);
+  }
+  paginaRestrita(id) {
+    return this.real.paginaRestrita(id);
+  }
+  obterCorpoStorage(id) {
+    return this.real.obterCorpoStorage(id);
+  }
+  obterAnexo(id, nome) {
+    return this.real.obterAnexo(id, nome);
+  }
+  buscarHistoricoTickets(params) {
+    return this.real.buscarHistoricoTickets(params);
+  }
+  buscarChamadosAtualizadosDesde(params) {
+    return this.real.buscarChamadosAtualizadosDesde(params);
+  }
+  buscarChamadosPorChaveIdempotencia(chave) {
+    return this.real.buscarChamadosPorChaveIdempotencia(chave);
+  }
+  /**
+   * ⚠️ Leitura, apesar do nome parecer escrita: só **consulta** quais transições o
+   * workflow oferece. Quem executa é `transicionar`, que está bloqueada.
+   */
+  listarTransicoes(issueKey) {
+    return this.real.listarTransicoes(issueKey);
+  }
+  telemetria() {
+    return this.real.telemetria();
+  }
+  async verificarSaude() {
+    const r = await this.real.verificarSaude();
+    return { ...r, detalhe: `${r.detalhe} \xB7 somente leitura` };
+  }
+};
+
 // src/lib/atlassian/organizacao.ts
 var LIMITACOES_ULTIMO_ACESSO = Object.freeze({
   atrasoMaximoHoras: 24,
@@ -1146,7 +1240,7 @@ var TransporteOrganizacao = class {
   constructor(opcoes) {
     this.opcoes = opcoes;
     this.dormir = opcoes.dormir ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-    this.fetchImpl = opcoes.fetchImpl ?? fetch;
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
     this.aleatorio = opcoes.aleatorio ?? Math.random;
     this.maxTentativas = opcoes.maxTentativas ?? MAX_TENTATIVAS_PADRAO2;
   }
@@ -1482,7 +1576,7 @@ var BASE_DIRETA = "https://api.openai.com/v1";
 var ClienteIAHttp = class {
   constructor(opcoes) {
     this.opcoes = opcoes;
-    this.fetchImpl = opcoes.fetchImpl ?? fetch;
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
     this.timeoutMs = opcoes.timeoutMs ?? TIMEOUT_PADRAO_MS;
   }
   fetchImpl;
@@ -4694,7 +4788,7 @@ var CanalFake = class {
 var CanalGoogleChat = class {
   constructor(opcoes) {
     this.opcoes = opcoes;
-    this.fetchImpl = opcoes.fetchImpl ?? fetch;
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
   }
   nome = "chat";
   fetchImpl;
@@ -4723,7 +4817,7 @@ ${textoPlano(mensagem)}` })
 var CanalEmail = class {
   constructor(opcoes) {
     this.opcoes = opcoes;
-    this.fetchImpl = opcoes.fetchImpl ?? fetch;
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
   }
   nome = "email";
   fetchImpl;
@@ -4782,7 +4876,8 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   const valores = await config.carregar();
   const auditoria = new AuditoriaBanco(env.DB, agora, novoId);
   const usandoFakes = modoDemo || env.GOATLAS_USAR_FAKES === "1" || !env.ATLASSIAN_API_TOKEN;
-  const atlassian = reaproveitar.atlassian ? reaproveitar.atlassian : usandoFakes ? new ClienteAtlassianFake() : new ClienteAtlassianHttp({
+  const somenteLeitura = env.GOATLAS_SOMENTE_LEITURA === "1";
+  const atlassianBase = reaproveitar.atlassian ? reaproveitar.atlassian : usandoFakes ? new ClienteAtlassianFake() : new ClienteAtlassianHttp({
     baseUrl: env.ATLASSIAN_BASE_URL ?? "",
     email: env.ATLASSIAN_EMAIL ?? "",
     apiToken: env.ATLASSIAN_API_TOKEN ?? "",
@@ -4793,6 +4888,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     // continua indo na descrição enquanto isso (cinto e suspensório).
     campoSolicitanteId: valores.campo_solicitante_id
   });
+  const atlassian = somenteLeitura ? new ClienteAtlassianSomenteLeitura(atlassianBase) : atlassianBase;
   const ia = reaproveitar.ia ? reaproveitar.ia : usandoFakes ? new ClienteIAFake() : !env.LLM_API_KEY ? new ClienteIAIndisponivel() : new ClienteIAHttp({
     baseUrl: env.LLM_BASE_URL ?? null,
     apiKey: env.LLM_API_KEY,
@@ -4802,9 +4898,9 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   });
   const organizacao = reaproveitar.organizacao ? reaproveitar.organizacao : usandoFakes ? new ClienteOrganizacaoFake() : env.ATLASSIAN_ORG_API_KEY ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY }) : null;
   if (modoDemo) {
-    if (atlassian instanceof ClienteAtlassianFake) {
-      semearAtlassianDemo(atlassian);
-      await repovoarChamadosDemo(atlassian, env.DB);
+    if (atlassianBase instanceof ClienteAtlassianFake) {
+      semearAtlassianDemo(atlassianBase);
+      await repovoarChamadosDemo(atlassianBase, env.DB);
     }
     if (ia instanceof ClienteIAFake) semearIaDemo(ia);
   }
@@ -4888,7 +4984,8 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     agora,
     novoId,
     usandoFakes,
-    modoDemo
+    modoDemo,
+    somenteLeitura
   };
 }
 
@@ -6243,6 +6340,7 @@ function hexConfere(a, b) {
   }
   return diferenca === 0;
 }
+var ROTAS_QUE_EXIGEM_ASSINATURA = ["/api/cron/retencao"];
 async function verificarCron(dados) {
   if (!dados.chave) return { ok: false, motivo: "chave_ausente" };
   if (dados.headerEnviado === null) return { ok: false, motivo: "header_ausente" };
@@ -6265,7 +6363,13 @@ async function verificarCron(dados) {
       }
     }
   }
-  return { ok: false, motivo: "assinatura_invalida" };
+  if (ROTAS_QUE_EXIGEM_ASSINATURA.includes(dados.caminho)) {
+    return { ok: false, motivo: "presenca_insuficiente_para_rota_destrutiva" };
+  }
+  if (dados.identidadeDeUsuario) {
+    return { ok: false, motivo: "presenca_com_identidade_de_usuario" };
+  }
+  return { ok: true, candidata: "presenca_sem_identidade" };
 }
 
 // src/lib/piloto/areas.ts
@@ -6391,7 +6495,10 @@ async function tratarRequisicao(req, ctx, env) {
       email: eu.email,
       nome: eu.nome,
       isAdmin: eu.isAdmin,
-      modoDemo: ctx.modoDemo
+      modoDemo: ctx.modoDemo,
+      // A UI precisa avisar de forma permanente: sem isso, a pessoa tenta abrir chamado,
+      // toma a recusa e conclui que o app está quebrado.
+      somenteLeitura: ctx.somenteLeitura
     });
   }
   if (req.method === "POST" || caminho.startsWith("/api/confluence/")) {
@@ -7429,6 +7536,7 @@ async function tratarHealth(ctx) {
       ok,
       usandoFakes: ctx.usandoFakes,
       modoDemo: ctx.modoDemo,
+      somenteLeitura: ctx.somenteLeitura,
       dependencias: { atlassian, ia, banco, sso: { ok: true, detalhe: "edge GoDeploy" } }
     },
     ok ? 200 : 503
@@ -7445,7 +7553,10 @@ async function tratarCron(req, ctx, env, caminho) {
     metodo: req.method,
     caminho,
     corpo: corpoCron,
-    agoraMs: Date.parse(ctx.agora())
+    agoraMs: Date.parse(ctx.agora()),
+    // O edge injeta este header quando há PESSOA na requisição. O gateway de cron não —
+    // e é o que impede um funcionário logado de disparar cron forjando o header.
+    identidadeDeUsuario: req.headers.get(HEADER_EMAIL)
   });
   if (!veredito.ok) {
     await ctx.auditoria.registrar({

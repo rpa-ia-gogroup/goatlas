@@ -9,6 +9,7 @@
 
 import { ClienteAtlassianHttp } from './atlassian/cliente'
 import { ClienteAtlassianFake } from './atlassian/fake'
+import { ClienteAtlassianSomenteLeitura } from './atlassian/somente-leitura'
 import type { ClienteAtlassian } from './atlassian/tipos'
 import { ClienteOrganizacaoFake } from './atlassian/organizacao-fake'
 import { ClienteOrganizacaoHttp, type ClienteOrganizacao } from './atlassian/organizacao'
@@ -70,6 +71,16 @@ export interface EnvGoDeploy extends BootstrapEnv {
    * cosmética: sem ela alguém acredita que o chamado chegou ao time de tech.
    */
   readonly GOATLAS_MODO_DEMO?: string
+  /**
+   * `1` liga o **modo somente leitura**: o app lê o Confluence e o Jira de verdade e
+   * **recusa toda escrita** (chamado, comentário, anexo, transição).
+   *
+   * ⚠️ É o estado do meio que faltava entre "fakes em tudo" (`GOATLAS_MODO_DEMO`) e
+   * "produção". Serve para desenvolver e demonstrar com dado real sem que um clique
+   * errado abra chamado na fila do time de tech. A trava é um decorador do cliente
+   * (`atlassian/somente-leitura.ts`), não um `if` espalhado pelas rotas.
+   */
+  readonly GOATLAS_SOMENTE_LEITURA?: string
 }
 
 export interface Contexto {
@@ -117,6 +128,8 @@ export interface Contexto {
   readonly novoId: () => string
   readonly usandoFakes: boolean
   readonly modoDemo: boolean
+  /** Lê de verdade, recusa toda escrita. Ver `GOATLAS_SOMENTE_LEITURA`. */
+  readonly somenteLeitura: boolean
 }
 
 export function novoIdPadrao(): string {
@@ -154,8 +167,9 @@ export async function montarContexto(
   const auditoria = new AuditoriaBanco(env.DB, agora, novoId)
 
   const usandoFakes = modoDemo || env.GOATLAS_USAR_FAKES === '1' || !env.ATLASSIAN_API_TOKEN
+  const somenteLeitura = env.GOATLAS_SOMENTE_LEITURA === '1'
 
-  const atlassian: ClienteAtlassian = reaproveitar.atlassian
+  const atlassianBase: ClienteAtlassian = reaproveitar.atlassian
     ? reaproveitar.atlassian
     : usandoFakes
     ? new ClienteAtlassianFake()
@@ -170,6 +184,15 @@ export async function montarContexto(
         // continua indo na descrição enquanto isso (cinto e suspensório).
         campoSolicitanteId: valores.campo_solicitante_id,
       })
+
+  /**
+   * ⚠️ A trava envolve o cliente **inclusive o fake**. Parece exagero e não é: é o que
+   * permite testar a recusa sem credencial, e é o que impede alguém de concluir que o
+   * modo somente leitura "só vale em produção" e escrever um caminho que o contorna.
+   */
+  const atlassian: ClienteAtlassian = somenteLeitura
+    ? new ClienteAtlassianSomenteLeitura(atlassianBase)
+    : atlassianBase
 
   // ⚠️ O fake só é alcançável por `usandoFakes`. Antes, `!env.LLM_API_KEY` também
   // caía nele — o que produzia **Atlassian real com IA falsa**: agente respondendo
@@ -205,11 +228,14 @@ export async function montarContexto(
     // Os fakes são semeados a cada montagem porque o Worker é stateless: o estado
     // deles não sobrevive entre requisições. O que persiste (conversa, vínculo,
     // chamado) está no banco.
-    if (atlassian instanceof ClienteAtlassianFake) {
-      semearAtlassianDemo(atlassian)
+    // ⚠️ Semeia o cliente BASE, não o embrulhado: com a trava de somente leitura ligada,
+    // `atlassian` é o decorador e o `instanceof` seria falso — a demonstração subiria sem
+    // dado nenhum e pareceria quebrada.
+    if (atlassianBase instanceof ClienteAtlassianFake) {
+      semearAtlassianDemo(atlassianBase)
       // O Worker é stateless: sem isto, o chamado aberto na requisição anterior aparece
       // como indisponível na seguinte. Ver `repovoarChamadosDemo`.
-      await repovoarChamadosDemo(atlassian, env.DB)
+      await repovoarChamadosDemo(atlassianBase, env.DB)
     }
     if (ia instanceof ClienteIAFake) semearIaDemo(ia)
   }
@@ -313,5 +339,6 @@ export async function montarContexto(
     novoId,
     usandoFakes,
     modoDemo,
+    somenteLeitura,
   }
 }
