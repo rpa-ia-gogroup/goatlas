@@ -127,6 +127,21 @@
 .abas::-webkit-scrollbar {
   display: none;
 }
+/**
+ * ⚠️ A partir de 720px as abas QUEBRAM em vez de rolar.
+ *
+ * A rolagem horizontal sem barra visível funcionava com quatro abas: no celular a
+ * pessoa arrasta, e o gesto é natural. Com a chegada de "Avisos" (Fase 3) passaram a ser
+ * seis, e no desktop — onde ninguém arrasta uma faixa de navegação — a última aba
+ * simplesmente **desaparecia sem nenhum sinal**. Quem era admin deixava de achar o
+ * console. Quebrar em duas linhas é feio por dois segundos; navegação invisível é bug.
+ */
+@media (min-width: 720px) {
+  .abas {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+}
 
 .aba {
   flex: 0 0 auto;
@@ -1068,4 +1083,273 @@
   font-size: var(--fs-h4);
   font-weight: var(--fw-bold);
   color: var(--go-text-heading);
+}
+
+/**
+ * ============================================================================
+ * Fase 3 e 4 — calibragem, canal de aviso, filtros, anexo e revogação
+ * ============================================================================
+ *
+ * Nada de direção visual nova: a identidade GoGroup já está decidida (azul, lime,
+ * creme, Poppins, cantos generosos) e o trabalho aqui é **coerência**. As classes
+ * abaixo existem só onde uma lista de `.chamado` ou um `.recibo` não daria conta.
+ *
+ * O elemento com personalidade própria é UM: a `.faixa-calibragem`. Ela é a única
+ * coisa nesta folha que desenha um dado em vez de listá-lo, e é onde a ousadia da
+ * fase foi gasta — ver o comentário dela.
+ */
+
+/* Quatro a seis números que o admin lê de relance. Um `<dl>` com doze linhas seria
+   ilegível; um grid de cartões pequenos, não. Sem sombra: são leitura, não clique. */
+.grade-metricas {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.metrica {
+  background: var(--go-white);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.metrica-rotulo {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--go-blue) 70%, transparent);
+}
+.metrica-valor {
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-extrabold);
+  color: var(--go-text-heading);
+  line-height: 1.1;
+}
+/* "sem dados" não pode competir visualmente com um número real: quem bate o olho
+   precisa perceber que não houve medição, e não ler um valor pequeno. */
+.metrica-valor[data-sem-dados='true'] {
+  font-size: var(--fs-body);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-primary);
+}
+.metrica-nota {
+  font-size: var(--fs-caption);
+  color: var(--go-text-primary);
+}
+.metrica[data-alerta='true'] {
+  border-color: var(--go-blue);
+  box-shadow: var(--shadow-sm);
+}
+
+/**
+ * A faixa de calibragem — o único desenho de dado desta folha.
+ *
+ * ⚠️ Ela existe porque a tela de calibragem tem um viés embutido: o threshold é o único
+ * campo editável ali, então qualquer apresentação que mostre "taxa de override: 66%" ao
+ * lado de um input empurra para mexer no número. E a resposta certa quase nunca é essa —
+ * é escrever a página que as pessoas apontaram (`RF-13`, `RF-42`).
+ *
+ * O desenho encodifica essa escolha: a barra é a proporção de override, o texto ao lado
+ * é o threshold de hoje, e as páginas apontadas ficam **na mesma caixa**, logo abaixo.
+ * Ver os dois juntos é o ponto.
+ */
+.faixa-calibragem {
+  background: var(--go-white);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 14%, transparent);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.faixa-topo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.faixa-nome {
+  font-size: var(--fs-h4);
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+}
+.faixa-trilho {
+  position: relative;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--go-light-blue) 60%, var(--go-white));
+  overflow: hidden;
+}
+.faixa-preenchimento {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--go-blue);
+  transition: width 240ms ease;
+}
+/* Sem nenhum bloqueio ainda, o trilho fica listrado em vez de vazio: barra vazia
+   pareceria "0% de override", e o que houve foi "nada medido" (`null` ≠ `0%`). */
+.faixa-trilho[data-sem-dados='true'] {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--go-light-blue) 55%, var(--go-white)) 0 6px,
+    var(--go-white) 6px 12px
+  );
+}
+.faixa-legenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--fs-small);
+}
+.faixa-paginas {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-small);
+}
+.faixa-motivos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-left: 3px solid var(--go-lime);
+  padding-left: var(--space-3);
+  font-size: var(--fs-small);
+}
+
+/* Filtros da lista de chamados (T-241): empilhados no celular, em linha a partir de
+   520px. O seletor de status é montado com o que existe, não com uma lista fixa. */
+.filtros {
+  display: grid;
+  gap: var(--space-3);
+}
+@media (min-width: 520px) {
+  .filtros {
+    grid-template-columns: 1fr auto auto;
+    align-items: end;
+  }
+}
+.filtros .campo {
+  margin: 0;
+}
+
+/* Anexo (T-240). O input de arquivo nativo é feio e é o que funciona com teclado e
+   leitor de tela; o que se estiliza é a moldura em volta dele. */
+.zona-anexo {
+  border: 2px dashed color-mix(in srgb, var(--go-blue) 30%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--go-white);
+}
+.zona-anexo:focus-within {
+  border-color: var(--go-blue);
+  border-style: solid;
+}
+.lista-anexos {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--fs-small);
+}
+
+/* Escolha de canal (T-224) como cartões de rádio: cada opção precisa de espaço para a
+   frase que a explica — e a diferença entre "não quero receber" e "ninguém definiu
+   canal ainda" é conteúdo, não estilo. */
+.opcoes-canal {
+  display: grid;
+  gap: var(--space-3);
+}
+.opcao-canal {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 16%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--go-white);
+  cursor: pointer;
+}
+.opcao-canal:hover {
+  border-color: var(--go-blue);
+}
+/* Estado nunca só por cor (piso de a11y): a opção escolhida ganha borda grossa E o
+   título em bold, além do próprio rádio marcado. */
+.opcao-canal:has(input:checked) {
+  border-color: var(--go-blue);
+  border-width: 2px;
+  padding: calc(var(--space-4) - 1px);
+  box-shadow: var(--shadow-sm);
+}
+.opcao-canal:has(input:checked) .opcao-canal-titulo {
+  font-weight: var(--fw-bold);
+}
+.opcao-canal input {
+  margin-top: 4px;
+  accent-color: var(--go-blue);
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.opcao-canal-texto {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.opcao-canal-titulo {
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+}
+.opcao-canal-nota {
+  font-size: var(--fs-small);
+  color: var(--go-text-primary);
+}
+
+/**
+ * Confirmação crítica (T-131) — revogar o acesso de outra pessoa.
+ *
+ * Deliberadamente **sem lime**: o lime é o acento de destaque positivo da marca, e usá-lo
+ * numa ação destrutiva treina o olho errado. O peso aqui vem da borda azul sólida e de o
+ * botão só habilitar quando o e-mail digitado casa — a fricção é a proteção, não a cor.
+ */
+.confirmacao-critica {
+  border: 2px solid var(--go-blue);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  background: var(--go-white);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.confirmacao-critica .campo {
+  margin: 0;
+}
+.alvo-revogacao {
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+  word-break: break-all;
+}
+
+/* Endpoints ainda não verificados contra a API real (Q1). Monoespaçado porque é
+   caminho de API — texto para conferir, não para ler. */
+.lista-endpoints {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--fs-small);
+}
+.caminho-api {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-caption);
+  background: var(--go-cream);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
 }

@@ -14,7 +14,7 @@
  * declaradamente diferente (D-04), e ele **marca o chamado como não verificado**.
  */
 
-import { resolverIdentidade, MENSAGEM_NEGACAO, type Identidade } from '../auth'
+import { resolverIdentidade, HEADER_EMAIL, MENSAGEM_NEGACAO, type Identidade } from '../auth'
 import type { Contexto } from '../contexto'
 import { ERROS, erro, json, lerJson } from './respostas'
 import { verificarLimite } from './limite'
@@ -23,11 +23,23 @@ import { SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos
 import type { PropostaChamado } from '../agent/estado'
 import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
 import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
-import { LIMITACOES_ULTIMO_ACESSO } from '../atlassian/organizacao'
+import { ENDPOINTS_NAO_VERIFICADOS, LIMITACOES_ULTIMO_ACESSO } from '../atlassian/organizacao'
 import { calcularCusto } from '../governanca/custo'
 import { obterResumoMetricas } from '../governanca/metricas'
+import { lerEntradaDoPainel, montarPainel } from '../governanca/painel'
 import { gerarRecomendacoes } from '../governanca/recomendacoes'
 import { recomendacoesParaCsv } from '../governanca/csv'
+import {
+  chaveDoPayload,
+  HEADER_WEBHOOK,
+  PARAM_WEBHOOK,
+  segredoConfere,
+} from '../notificacoes/webhook'
+import { validarPreferencia } from '../notificacoes/preferencias'
+import { verificarCron } from './cron-auth'
+import { areaDoEmail, areasConhecidas, dentroDoPiloto } from '../piloto/areas'
+import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
+import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 
 export interface EnvCron {
   readonly GODEPLOY_CRON_KEY?: string
@@ -56,6 +68,13 @@ export async function tratarRequisicao(
     return await tratarCron(req, ctx, env, caminho)
   }
 
+  // Webhook do Jira — a ÚNICA rota que a Atlassian chama, autenticada por segredo
+  // próprio. Fica aqui, ANTES da identidade, porque não existe pessoa logada do outro
+  // lado. Ver `notificacoes/webhook.ts` para as três travas que sustentam isso.
+  if (caminho === '/api/webhook/jira') {
+    return await tratarWebhook(req, ctx, url)
+  }
+
   // --- daqui para baixo, tudo exige identidade válida (RF-01, RF-05) ---------
   const auth = await resolverIdentidade(req.headers, ctx.config)
   if (!auth.ok) {
@@ -78,6 +97,9 @@ export async function tratarRequisicao(
       nome: eu.nome,
       isAdmin: eu.isAdmin,
       modoDemo: ctx.modoDemo,
+      // A UI precisa avisar de forma permanente: sem isso, a pessoa tenta abrir chamado,
+      // toma a recusa e conclui que o app está quebrado.
+      somenteLeitura: ctx.somenteLeitura,
     })
   }
 
@@ -247,14 +269,23 @@ async function rotear(
         'A abertura de chamados ainda não foi configurada nesta instalação. Fale com o time de tech.',
       )
     }
+    const piloto = await verificarPiloto(ctx, eu, caminho)
+    if (piloto) return piloto
+
     // A chave de idempotência é derivada da CONVERSA, não gerada por requisição:
     // é o que faz duplo clique e reenvio caírem na mesma submissão (RF-24).
     const r = await ctx.chamados.abrirPorConversa(
       atual!,
       serviceDeskId,
       `conversa:${conversa.id}`,
+      areaDoEmail(eu.email, ctx.valores.areas_por_email),
     )
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
+    await avisarCriacao(ctx, r, {
+      solicitanteEmail: eu.email,
+      titulo: atual!.proposta!.titulo,
+      prioridade: atual!.proposta!.prioridade,
+    })
     return json(respostaCriacao(r, atual!.proposta!.prioridade), 201)
   }
 
@@ -269,6 +300,9 @@ async function rotear(
         'A abertura de chamados ainda não foi configurada nesta instalação. Fale com o time de tech.',
       )
     }
+    const piloto = await verificarPiloto(ctx, eu, caminho)
+    if (piloto) return piloto
+
     const chave =
       typeof corpo?.chaveIdempotencia === 'string' && corpo.chaveIdempotencia.length > 0
         ? `form:${eu.email}:${corpo.chaveIdempotencia}`
@@ -282,6 +316,7 @@ async function rotear(
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
+      area: areaDoEmail(eu.email, ctx.valores.areas_por_email),
       payload: {
         titulo: validada.proposta.titulo,
         descricao: validada.proposta.descricao,
@@ -290,6 +325,11 @@ async function rotear(
         prioridade: validada.proposta.prioridade,
         ...(camposDinamicos ? { camposDinamicos } : {}),
       },
+    })
+    await avisarCriacao(ctx, r, {
+      solicitanteEmail: eu.email,
+      titulo: validada.proposta.titulo,
+      prioridade: validada.proposta.prioridade,
     })
     return json(respostaCriacao(r, validada.proposta.prioridade), 201)
   }
@@ -315,6 +355,54 @@ async function rotear(
     } catch {
       return ERROS.conteudoIndisponivel()
     }
+  }
+
+  // --- preferência de notificação (RF-45, T-224) -----------------------------
+  if (caminho === '/api/preferencias') {
+    if (req.method === 'GET') {
+      const p = await ctx.preferencias.obterEfetiva(
+        eu.email,
+        ctx.valores.canal_notificacao_padrao,
+      )
+      return json({
+        canal: p.canal,
+        destino: p.destino,
+        escolhidaPelaPessoa: p.escolhidaPelaPessoa,
+        // A tela precisa distinguir "escolhi não receber" de "ninguém definiu canal
+        // ainda" (Q11): as duas mostram `nenhum`, e só uma é decisão da pessoa.
+        canalPadraoDefinido: ctx.valores.canal_notificacao_padrao !== null,
+      })
+    }
+    if (req.method === 'PUT') {
+      const corpo = await lerJson<Record<string, unknown>>(req)
+      const validada = validarPreferencia(corpo)
+      if ('erro' in validada) return ERROS.dadosInvalidos(validada.erro)
+      await ctx.preferencias.definir(eu.email, validada.canal, validada.destino)
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'preferencia_alterada',
+        recurso: eu.email,
+        resultado: 'sucesso',
+        // O DESTINO não vai para a auditoria: é endereço pessoal, e o admin lê isto.
+        detalhe: { canal: validada.canal, destinoAlternativo: validada.destino !== null },
+      })
+      return json({ ok: true, canal: validada.canal, destino: validada.destino })
+    }
+  }
+
+  // Histórico de avisos da PRÓPRIA pessoa (RF-44). O e-mail está no `WHERE`.
+  if (caminho === '/api/notificacoes' && req.method === 'GET') {
+    const itens = await ctx.notificacoes.listarDoDestinatario(eu.email, 50)
+    return json({
+      itens: itens.map((n) => ({
+        issueKey: n.issueKey,
+        tipoEvento: n.tipoEvento,
+        titulo: n.titulo,
+        estado: n.estado,
+        canal: n.canal,
+        criadoEm: n.criadoEm,
+      })),
+    })
   }
 
   // --- meus chamados (RF-29 a RF-33) ----------------------------------------
@@ -357,25 +445,63 @@ async function rotear(
           atualizadoEm: null,
           via: v.via,
           verificadoRegras: v.verificadoRegras,
+          area: v.area,
         })
       }
     }
-    return json({ itens })
+
+    // T-241 / RF-35 — filtro por status e busca textual.
+    //
+    // ⚠️ Filtra DEPOIS de montar, e é o único jeito honesto: `status` e `titulo` vivem no
+    // Jira, não no banco local, então "filtrar antes" significaria filtrar por um dado
+    // que ainda não temos. A lista já é limitada a 100 vínculos da pessoa — não é uma
+    // varredura, é um recorte do que ela mesma abriu.
+    const filtroStatus = (url.searchParams.get('status') ?? '').trim().toLowerCase()
+    const termo = normalizarBusca(url.searchParams.get('q') ?? '')
+    const filtrados = itens.filter((i) => {
+      if (filtroStatus && (i.status ?? '').toLowerCase() !== filtroStatus) return false
+      if (!termo) return true
+      // O `issueKey` entra na busca de propósito: procurar por "GOATLAS-12" é o caso
+      // mais comum de quem tem o número numa conversa de chat.
+      return normalizarBusca(`${i.issueKey} ${i.titulo ?? ''}`).includes(termo)
+    })
+
+    return json({
+      itens: filtrados,
+      // A tela monta o seletor a partir do que EXISTE, não de uma lista fixa: os status
+      // são do workflow do JSM (configuração do projeto), e chumbar "Aberto/Em
+      // andamento/Resolvido" aqui seria hardcode de configuração alheia (RNF-25).
+      statusDisponiveis: [...new Set(itens.map((i) => i.status).filter((s): s is string => Boolean(s)))].sort(),
+      total: itens.length,
+    })
   }
 
   const detalhe = caminho.match(/^\/api\/chamados\/([^/]+)$/)
   if (detalhe && req.method === 'GET') {
     const r = await ctx.chamados.obterChamadoDoSolicitante(detalhe[1]!, eu.email)
     if (!r) return ERROS.chamadoNaoSeu()
-    const comentarios = await ctx.chamados.listarComentariosDoSolicitante(
-      detalhe[1]!,
-      eu.email,
-    )
+    // ⚠️ Os comentários são uma SEGUNDA chamada à Atlassian, e falhavam com 500 pelo mesmo
+    // motivo que o chamado falhava. Aqui a distinção importa mais que na lista: "ainda não
+    // há respostas" e "não consegui buscar as respostas" são frases opostas, e mostrar a
+    // primeira durante uma queda faz a pessoa achar que ninguém olhou o chamado dela.
+    let comentarios: Awaited<ReturnType<typeof ctx.chamados.listarComentariosDoSolicitante>> = []
+    let comentariosIndisponiveis = false
+    try {
+      comentarios = await ctx.chamados.listarComentariosDoSolicitante(detalhe[1]!, eu.email)
+    } catch {
+      comentariosIndisponiveis = true
+    }
     return json({
       chamado: r.chamado,
       via: r.vinculo.via,
       verificadoRegras: r.vinculo.verificadoRegras,
+      area: r.vinculo.area,
       comentarios: comentarios ?? [],
+      // `RNF-19` — a tela precisa distinguir "não há resposta ainda" de "não consegui
+      // buscar as respostas". Sem estes campos, uma queda do Jira apareceria como um
+      // chamado sem histórico, o que é uma informação falsa.
+      degradado: r.degradado,
+      comentariosIndisponiveis,
     })
   }
 
@@ -390,6 +516,24 @@ async function rotear(
     // RF-33 / D-13 — o nome vem do login corporativo Google, não de entrada do
     // usuário: é o que torna o prefixo confiável no comentário público.
     await ctx.atlassian.comentar(comentar[1]!, texto, eu.email, eu.nome)
+
+    // ⚠️ T-211 / RF-48 — registrado como AÇÃO PRÓPRIA, no momento da ação.
+    //
+    // Sem isto, o comentário que a pessoa acabou de escrever volta pelo webhook (ou pelo
+    // polling) como "novo comentário público no seu chamado" e ela é notificada de si
+    // mesma. E não dá para resolver comparando autor: sob proxy total (`D-01`) todo
+    // comentário sai da conta de serviço — ver `notificacoes/acoes.ts`.
+    //
+    // O conteúdo registrado é o TEXTO DA PESSOA, não o corpo com o prefixo de `D-13`: é o
+    // texto que a normalização consegue casar quando ele voltar da Atlassian, já que o
+    // prefixo é remontado por `prefixarAutoria` e some na normalização de qualquer forma.
+    await ctx.acoesProprias.registrar({
+      issueKey: comentar[1]!,
+      atorEmail: eu.email,
+      tipoEvento: 'comentario_publico',
+      conteudo: texto,
+    })
+
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: 'comentario_criado',
@@ -397,6 +541,180 @@ async function rotear(
       resultado: 'sucesso',
     })
     return json({ ok: true }, 201)
+  }
+
+  // --- anexo enviado pelo solicitante (RF-25, RF-34, T-240) ------------------
+  //
+  // Dois passos no JSM (ver `atlassian/cliente.ts#anexarArquivo`), um vínculo antes:
+  // anexar em chamado que não é seu não é caso de uso, e responde 404 como todo o resto
+  // (`RF-30`).
+  const anexarNoChamado = caminho.match(/^\/api\/chamados\/([^/]+)\/anexos$/)
+  if (anexarNoChamado && req.method === 'POST') {
+    const issueKey = anexarNoChamado[1]!
+    const vinculo = await ctx.vinculos.obterDoSolicitante(issueKey, eu.email)
+    if (!vinculo) return ERROS.chamadoNaoSeu()
+
+    const serviceDeskId = ctx.valores.service_desk_id
+    if (!serviceDeskId) {
+      return ERROS.dadosInvalidos(
+        'O envio de anexos ainda não foi configurado nesta instalação. Fale com o time de tech.',
+      )
+    }
+
+    let form: FormData
+    try {
+      form = await req.formData()
+    } catch {
+      return ERROS.dadosInvalidos('Não consegui ler o arquivo enviado. Tente novamente.')
+    }
+
+    const arquivos = form.getAll('arquivo').slice(0, MAX_ANEXOS_POR_ENVIO)
+    if (arquivos.length === 0) return ERROS.dadosInvalidos('Anexe um arquivo para enviar.')
+
+    const enviados: string[] = []
+    for (const bruto of arquivos) {
+      const validado = await validarAnexoEnviado(bruto)
+      if (!validado.ok) return ERROS.dadosInvalidos(validado.mensagem)
+      try {
+        await ctx.atlassian.anexarArquivo(serviceDeskId, issueKey, {
+          nome: validado.nome,
+          tipo: validado.tipo,
+          bytes: validado.bytes,
+        })
+        enviados.push(validado.nome)
+      } catch {
+        await ctx.auditoria.registrar({
+          atorEmail: eu.email,
+          acao: 'anexo_enviado',
+          recurso: issueKey,
+          resultado: 'falha',
+          detalhe: { nome: validado.nome, enviadosAntes: enviados.length },
+        })
+        // Parcial é relatado como parcial: dizer "ok" com dois de três arquivos faz a
+        // pessoa achar que o time de tech tem o print que faltou.
+        return json(
+          {
+            ok: false,
+            enviados,
+            mensagem:
+              enviados.length > 0
+                ? 'Parte dos arquivos foi anexada. Tente enviar os que faltaram em instantes.'
+                : 'Não consegui anexar agora. Tente novamente em instantes — seu chamado está a salvo.',
+          },
+          503,
+        )
+      }
+    }
+
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'anexo_enviado',
+      recurso: issueKey,
+      resultado: 'sucesso',
+      detalhe: { quantidade: enviados.length },
+    })
+    return json({ ok: true, enviados }, 201)
+  }
+
+  // --- resolver / reabrir (RF-36, T-242) -------------------------------------
+  //
+  // ⚠️ O app **não inventa transição**. Ele oferece o que o workflow do JSM expõe ao
+  // customer, e nada mais: um projeto que não expõe transição ao cliente devolve lista
+  // vazia, e a tela simplesmente não mostra botão. Isso é configuração do projeto (a
+  // spec marca a tarefa como P2 por isso), não algo que o app possa contornar.
+  const transicoes = caminho.match(/^\/api\/chamados\/([^/]+)\/transicoes$/)
+  if (transicoes) {
+    const issueKey = transicoes[1]!
+    const vinculo = await ctx.vinculos.obterDoSolicitante(issueKey, eu.email)
+    if (!vinculo) return ERROS.chamadoNaoSeu()
+
+    if (req.method === 'GET') {
+      try {
+        return json({ itens: await ctx.atlassian.listarTransicoes(issueKey) })
+      } catch {
+        // Lista indisponível ≠ lista vazia: vazia esconde o botão para sempre, e o
+        // 503 deixa a tela dizer "não consegui carregar as ações agora".
+        return ERROS.conteudoIndisponivel()
+      }
+    }
+
+    if (req.method === 'POST') {
+      const corpo = await lerJson<{ transicaoId?: unknown }>(req)
+      const transicaoId = typeof corpo?.transicaoId === 'string' ? corpo.transicaoId : ''
+      if (!transicaoId) return ERROS.dadosInvalidos('Escolha uma ação.')
+
+      // A transição pedida é conferida contra a lista REAL do chamado — o id vem do
+      // cliente, e um id arbitrário não pode virar transição no Jira.
+      let disponiveis: readonly { id: string; nome: string }[]
+      try {
+        disponiveis = await ctx.atlassian.listarTransicoes(issueKey)
+      } catch {
+        return ERROS.conteudoIndisponivel()
+      }
+      if (!disponiveis.some((t) => t.id === transicaoId)) {
+        return ERROS.dadosInvalidos('Essa ação não está disponível para este chamado.')
+      }
+
+      try {
+        await ctx.atlassian.transicionar(issueKey, transicaoId)
+      } catch {
+        await ctx.auditoria.registrar({
+          atorEmail: eu.email,
+          acao: 'chamado_transicionado',
+          recurso: issueKey,
+          resultado: 'falha',
+          detalhe: { transicaoId },
+        })
+        return ERROS.conteudoIndisponivel()
+      }
+
+      // ⚠️ Registrada como AÇÃO PRÓPRIA (RF-48): a mudança de status que a própria pessoa
+      // acabou de pedir não deve voltar como notificação. Sob proxy total não há como
+      // distinguir isso pelo autor — ver `notificacoes/acoes.ts`.
+      //
+      // O que se registra é o **status resultante**, não o nome da transição: é o status
+      // que a sincronização compara. "Marcar como resolvido" e "Resolvido" são strings
+      // diferentes, e registrar a primeira faria a supressão nunca casar — o bug seria
+      // silencioso, com a pessoa recebendo aviso do próprio clique.
+      const nome = disponiveis.find((t) => t.id === transicaoId)?.nome ?? transicaoId
+      let statusResultante = nome
+      try {
+        statusResultante = (await ctx.atlassian.obterChamado(issueKey)).status || nome
+      } catch {
+        // Releitura indisponível: fica o nome da transição. Pior caso é um aviso a mais,
+        // nunca um chamado sem transicionar — a transição já aconteceu.
+      }
+      await ctx.acoesProprias.registrar({
+        issueKey,
+        atorEmail: eu.email,
+        tipoEvento: 'status_alterado',
+        conteudo: statusResultante,
+      })
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'chamado_transicionado',
+        recurso: issueKey,
+        resultado: 'sucesso',
+        detalhe: { transicaoId, nome },
+      })
+      return json({ ok: true })
+    }
+  }
+
+  // --- correção manual da área (RF-19, T-305) --------------------------------
+  //
+  // Mesmo padrão de RF-16 com a prioridade: o mapa de áreas envelhece e pessoa que muda
+  // de área é a regra. Sem isso, a métrica por área (T-312) fica errada e o único jeito
+  // de corrigir seria um admin editando config.
+  const areaDoChamado = caminho.match(/^\/api\/chamados\/([^/]+)\/area$/)
+  if (areaDoChamado && req.method === 'PUT') {
+    const corpo = await lerJson<{ area?: unknown }>(req)
+    const bruta = typeof corpo?.area === 'string' ? corpo.area.trim() : ''
+    // Vazio limpa a área — "não sei" é uma resposta válida, e melhor que uma errada.
+    const area = bruta.length > 0 ? bruta.slice(0, 60) : null
+    const ok = await ctx.vinculos.corrigirArea(areaDoChamado[1]!, eu.email, area)
+    if (!ok) return ERROS.chamadoNaoSeu()
+    return json({ ok: true, area, areasConhecidas: areasConhecidas(ctx.valores.areas_por_email) })
   }
 
   // --- Confluence como superfície (RF-37 a RF-40, RN-06) --------------------
@@ -746,7 +1064,37 @@ async function rotear(
   // RF-55 na Fase 1 (sem aderência a SLA, que só existe a partir da Fase 3).
   if (caminho === '/api/admin/metricas' && req.method === 'GET') {
     if (!eu.isAdmin) return ERROS.semPermissao()
-    return json(await obterResumoMetricas(ctx.db))
+    const resumo = await obterResumoMetricas(ctx.db)
+
+    // T-232 / RF-55 — o painel completo. É SUPERFÍCIE, não coleta: tudo abaixo já estava
+    // no banco. O SLA vem do retrato que o cron gravou (`avaliacoes_sla`), nunca de uma
+    // varredura ao vivo — ver o comentário da tabela em `db/schema.ts`.
+    const painel = montarPainel(
+      await lerEntradaDoPainel(ctx.db, {
+        thresholds: {
+          regra1_confluence: ctx.valores.regra1_threshold_score,
+          regra2_ajuste_operacional: ctx.valores.regra2_threshold_recorrencia,
+        },
+        notificacoes: await ctx.notificacoes.contarPorEstado(),
+        telemetria: ctx.atlassian.telemetria(),
+        sla: await ctx.avaliacoesSla.resumir(),
+      }),
+    )
+
+    return json({
+      ...resumo,
+      painel,
+      // T-311 — baseline da Fase 0. `null` = não coletado; a tela diz "sem baseline" em
+      // vez de comparar contra zero, que pareceria economia de 100%.
+      baselineAssentos: ctx.valores.baseline_assentos,
+      // Q11: sem canal definido, a tela precisa dizer POR QUE nada foi enviado.
+      canalNotificacaoDefinido: ctx.valores.canal_notificacao_padrao !== null,
+      // R-06: com piloto ligado, os números são de 1–2 áreas, não da empresa.
+      piloto: {
+        ligado: ctx.valores.emails_piloto.length > 0,
+        pessoas: ctx.valores.emails_piloto.length,
+      },
+    })
   }
 
   if (caminho === '/api/admin/auditoria' && req.method === 'GET') {
@@ -775,6 +1123,7 @@ async function rotear(
       ctx.valores.custo_mensal_por_produto,
       ctx.valores.assentos_ocioso_dias,
       Date.parse(ctx.agora()),
+      ctx.valores.curva_preco_por_produto,
     )
     return json({
       coletadoEm: snapshot.coletadoEm,
@@ -783,6 +1132,87 @@ async function rotear(
       limitacoesUltimoAcesso: LIMITACOES_ULTIMO_ACESSO,
       itens: snapshot.itens,
       custo,
+      // T-122/T-123/T-131 — o que ainda não foi verificado contra a API real (Q1) vai
+      // PARA A TELA. Um console que promete revogar assento e falha no clique é pior
+      // que um console que avisa antes.
+      organizacaoConfigurada: ctx.organizacao !== null,
+      usandoFakes: ctx.usandoFakes,
+      endpointsNaoVerificados: ctx.usandoFakes ? ENDPOINTS_NAO_VERIFICADOS : [],
+      // O2, T-311 — baseline da Fase 0. Ausente NÃO inventa número.
+      baseline: ctx.valores.baseline_assentos,
+    })
+  }
+
+  // --- T-131 / RF-57 (P2) — revogar produto ----------------------------------
+  //
+  // A ÚNICA escrita da credencial de Org Admin, e a rota é desenhada em torno disso:
+  //
+  // - **Dupla confirmação**, e a segunda é o e-mail digitado. Um "tem certeza?" clicável
+  //   é um clique a mais; digitar o e-mail obriga a pessoa a olhar QUEM ela está
+  //   afetando — o erro que se quer evitar não é clicar sem querer, é revogar a linha
+  //   errada de uma tabela ordenada de outro jeito do que se esperava.
+  // - **Nunca sucesso otimista.** Erro da Atlassian volta como erro; marcar "revogado"
+  //   e seguir faria o admin riscar a economia da lista com o assento ainda ativo.
+  // - **Auditada nos dois casos**, porque é ação sobre a conta de outra pessoa.
+  if (caminho === '/api/admin/assentos/revogar' && req.method === 'POST') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    const corpo = await lerJson<Record<string, unknown>>(req)
+    const accountId = typeof corpo?.accountId === 'string' ? corpo.accountId.trim() : ''
+    const produto = typeof corpo?.produto === 'string' ? corpo.produto.trim() : ''
+    const emailConfirmado =
+      typeof corpo?.emailConfirmado === 'string' ? corpo.emailConfirmado.trim().toLowerCase() : ''
+    const emailEsperado =
+      typeof corpo?.email === 'string' ? corpo.email.trim().toLowerCase() : ''
+
+    if (!accountId || !produto || !emailEsperado) {
+      return ERROS.dadosInvalidos('Escolha a conta e o produto a revogar.')
+    }
+    if (emailConfirmado !== emailEsperado) {
+      // Recusa registrada: confirmação que não casa pode ser engano, e pode ser alguém
+      // testando o formulário com o e-mail de outra pessoa.
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'assento_revogado',
+        recurso: accountId,
+        resultado: 'negado',
+        detalhe: { motivo: 'confirmacao_nao_confere', produto },
+      })
+      return ERROS.dadosInvalidos(
+        'Para confirmar, digite exatamente o e-mail da pessoa cujo acesso será revogado.',
+      )
+    }
+    if (!ctx.organizacao || !ctx.valores.org_id) {
+      return ERROS.dadosInvalidos(
+        'A governança de assentos ainda não foi configurada nesta instalação (falta a credencial de Org Admin).',
+      )
+    }
+
+    try {
+      await ctx.organizacao.revogarProduto(ctx.valores.org_id, accountId, produto)
+    } catch {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'assento_revogado',
+        recurso: accountId,
+        resultado: 'falha',
+        detalhe: { produto, email: emailEsperado },
+      })
+      return ERROS.conteudoIndisponivel()
+    }
+
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'assento_revogado',
+      recurso: accountId,
+      resultado: 'sucesso',
+      detalhe: { produto, email: emailEsperado },
+    })
+    return json({
+      ok: true,
+      // O inventário é um CACHE diário (T-124): o console continua mostrando o assento
+      // até a próxima coleta, e dizer isso evita o admin achar que a revogação falhou.
+      aviso:
+        'Revogado. O inventário desta tela é atualizado uma vez por dia — a linha só desaparece na próxima coleta.',
     })
   }
 
@@ -809,6 +1239,116 @@ async function rotear(
 
   return ERROS.naoEncontrado()
 }
+
+/**
+ * Gate do piloto — R-06, T-302.
+ *
+ * Devolve `null` quando pode seguir, ou a **resposta de encaminhamento** quando não.
+ *
+ * ⚠️ Não é 403. Quem está fora do piloto não perdeu acesso a nada — o app ainda não
+ * chegou na área dele, e a mensagem diz para onde ir no meio-tempo (`RNF-30`). A
+ * consulta à documentação continua liberada de propósito: ela não abre chamado, deflete
+ * — barrar a leitura seria barrar exatamente o que o projeto quer que aconteça.
+ */
+async function verificarPiloto(
+  ctx: Contexto,
+  eu: Identidade,
+  caminho: string,
+): Promise<Response | null> {
+  const decisao = dentroDoPiloto(eu.email, ctx.valores.emails_piloto)
+  if (decisao.dentro) return null
+  await ctx.auditoria.registrar({
+    atorEmail: eu.email,
+    acao: 'fora_do_piloto',
+    recurso: caminho,
+    resultado: 'negado',
+    detalhe: { tamanhoDaLista: ctx.valores.emails_piloto.length },
+  })
+  return json({ erro: 'fora_do_piloto', mensagem: decisao.mensagem }, 403)
+}
+
+/**
+ * Aviso de criação (RF-44).
+ *
+ * ⚠️ **Nunca derruba a criação.** O chamado já existe; um canal fora do ar não pode
+ * transformar "chamado aberto" em erro na tela de quem abriu (`RNF-18`). O aviso fica na
+ * fila e o cron o entrega — e se nem isso der, a pessoa vê o chamado na aba dela, que é
+ * o caminho que não depende de canal nenhum.
+ *
+ * Submissão `pendente` (a Atlassian estava fora e o outbox vai reprocessar) não gera
+ * aviso: não há `issueKey` para citar, e "seu chamado foi aberto" sem número é pior que
+ * o silêncio de dois minutos até o cron rodar.
+ */
+async function avisarCriacao(
+  ctx: Contexto,
+  resultado: { issueKey: string | null; estado: string; duplicada: boolean },
+  dados: { solicitanteEmail: string; titulo: string; prioridade: Prioridade },
+): Promise<void> {
+  if (!resultado.issueKey || resultado.estado !== 'criado' || resultado.duplicada) return
+  try {
+    await ctx.notificador.avisarCriacao({
+      issueKey: resultado.issueKey,
+      solicitanteEmail: dados.solicitanteEmail,
+      titulo: dados.titulo,
+      prioridade: dados.prioridade,
+      slaPrimeiraRespostaHoras: SLA_PRIMEIRA_RESPOSTA_HORAS[dados.prioridade],
+      criadoEm: ctx.agora(),
+      valores: ctx.valoresNotificacao,
+    })
+  } catch {
+    // Silencioso por desenho — ver o aviso acima. A falha de fila aparece na contagem
+    // por estado do console (`/api/admin/metricas`), não na cara de quem abriu chamado.
+  }
+}
+
+/**
+ * Descreve a FORMA de um valor opaco, sem revelar o valor.
+ *
+ * ⚠️ Existe para um problema concreto: a plataforma diz que estampa um header
+ * `X-Godeploy-Cron` **assinado**, e não documenta o formato. Medido em 07/08/2026, o que
+ * chega tem 81 caracteres contra 64 da chave configurada — ou seja, **não é a chave crua**,
+ * e comparar por igualdade nunca vai casar. Para verificar direito é preciso saber se é
+ * `timestamp.hmac`, JWT, base64, ou outra coisa.
+ *
+ * O que sai daqui é **estrutura**: separadores, e por segmento o comprimento e o conjunto
+ * de caracteres. Nada de conteúdo — `abc123` e `def456` produzem exatamente a mesma
+ * descrição. É a diferença entre "sei que é hex de 64" e "sei qual hex".
+ */
+function descreverFormato(valor: string): {
+  separadores: string
+  segmentos: { tamanho: number; conjunto: string }[]
+} {
+  const conjuntoDe = (s: string): string => {
+    if (/^\d+$/.test(s)) return 'digitos'
+    if (/^[0-9a-f]+$/.test(s)) return 'hex-minusculo'
+    if (/^[0-9A-F]+$/.test(s)) return 'hex-maiusculo'
+    if (/^[A-Za-z0-9_-]+$/.test(s)) return 'base64url'
+    if (/^[A-Za-z0-9+/=]+$/.test(s)) return 'base64'
+    return 'misto'
+  }
+  return {
+    // Só os caracteres que NÃO são de conteúdo: `.`, `,`, `=`, `:` etc.
+    separadores: valor.replace(/[A-Za-z0-9_-]/g, ''),
+    segmentos: valor
+      .split(/[^A-Za-z0-9_-]+/)
+      .filter((s) => s.length > 0)
+      .map((s) => ({ tamanho: s.length, conjunto: conjuntoDe(s) })),
+  }
+}
+
+/** Sem acento e em minúsculas — "orçamento" e "orcamento" procuram a mesma coisa. */
+function normalizarBusca(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim()
+}
+
+/** Tetos das rodadas de cron. Cada item custa chamadas à Atlassian (`R-02`). */
+const LIMITE_POLLING = 50
+const LIMITE_ENVIO_NOTIFICACOES = 25
+const LIMITE_ALERTAS_SLA = 30
 
 /**
  * Limites do termo de busca.
@@ -944,6 +1484,62 @@ function validarProposta(
   }
 }
 
+/**
+ * Webhook do Jira — RF-48, T-206. **A trava da Fase 3.**
+ *
+ * As três decisões estão em `notificacoes/webhook.ts`; aqui está o que elas produzem:
+ *
+ * - Segredo inválido → **403 sempre igual**, e o registro na auditoria. É a tentativa de
+ *   burla, e ela precisa deixar rastro.
+ * - Segredo válido → **202 sempre igual**, com ou sem vínculo local. Um 404 para chamado
+ *   desconhecido diria "este chamado não passou pelo goatlas", que já é informação sobre
+ *   o chamado de outro (mesmo raciocínio do 404-em-vez-de-403 de `RF-30`).
+ * - O corpo do evento é **ponteiro**: sai dele uma chave de chamado e nada mais. O que a
+ *   pessoa vai ler é relido da Atlassian (`servico.ts`), então evento forjado com texto
+ *   de phishing não vira notificação enviada.
+ */
+async function tratarWebhook(req: Request, ctx: Contexto, url: URL): Promise<Response> {
+  if (req.method !== 'POST') return ERROS.naoEncontrado()
+
+  const enviado = req.headers.get(HEADER_WEBHOOK) ?? url.searchParams.get(PARAM_WEBHOOK)
+  if (!segredoConfere(enviado, ctx.segredoWebhook)) {
+    await ctx.auditoria.registrar({
+      atorEmail: '(webhook)',
+      acao: 'webhook_recebido',
+      recurso: null,
+      resultado: 'negado',
+      // ⚠️ O segredo enviado NÃO vai para a auditoria: ela é lida por admin, e um
+      // segredo quase certo no log é meio caminho andado para quem o vê.
+      detalhe: { motivo: ctx.segredoWebhook ? 'segredo_invalido' : 'segredo_nao_configurado' },
+    })
+    return ERROS.semPermissao()
+  }
+
+  const corpo = await lerJson<unknown>(req)
+  const issueKey = chaveDoPayload(corpo)
+  if (!issueKey) {
+    await ctx.auditoria.registrar({
+      atorEmail: '(webhook)',
+      acao: 'webhook_recebido',
+      resultado: 'falha',
+      detalhe: { motivo: 'sem_chave_valida' },
+    })
+    // 202 mesmo aqui: a Atlassian repetiria o evento por dias se recebesse erro, e o
+    // problema não é dela.
+    return json({ ok: true }, 202)
+  }
+
+  const r = await ctx.notificador.sincronizarChamado(issueKey, 'webhook', ctx.valoresNotificacao)
+  await ctx.auditoria.registrar({
+    atorEmail: '(webhook)',
+    acao: 'webhook_recebido',
+    recurso: issueKey,
+    resultado: r.ok ? 'sucesso' : 'falha',
+    detalhe: { eventos: r.eventos },
+  })
+  return json({ ok: true }, 202)
+}
+
 /** RF-59 — health check das dependências, em rota própria e pública. */
 async function tratarHealth(ctx: Contexto): Promise<Response> {
   const [atlassian, ia] = await Promise.all([
@@ -962,6 +1558,7 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
       ok,
       usandoFakes: ctx.usandoFakes,
       modoDemo: ctx.modoDemo,
+      somenteLeitura: ctx.somenteLeitura,
       dependencias: { atlassian, ia, banco, sso: { ok: true, detalhe: 'edge GoDeploy' } },
     },
     ok ? 200 : 503,
@@ -986,18 +1583,80 @@ async function tratarCron(
 
   const enviado = req.headers.get('x-godeploy-cron')
   const esperado = env.GODEPLOY_CRON_KEY
-  // Fail-closed: sem chave configurada, a rota não funciona. O contrário deixaria
-  // a rota aberta justamente na instalação que esqueceu de configurar.
-  if (!esperado || !enviado || enviado !== esperado) {
+
+  // ⚠️ O header é **assinado**, não é a chave crua — medido no app real em 07/08/2026, e
+  // era a razão de as sete rotas de cron devolverem 403 com a chave certa configurada.
+  // Toda a lógica (HMAC, janela de tempo, comparação em tempo constante) está em
+  // `cron-auth.ts`, com teste próprio: é código de autenticação, não detalhe de roteador.
+  //
+  // O corpo é lido antes porque uma das construções candidatas o inclui na assinatura. As
+  // rotas de cron não têm corpo hoje, e ler string vazia é barato.
+  const corpoCron = await req.clone().text().catch(() => '')
+  const veredito = await verificarCron({
+    headerEnviado: enviado,
+    chave: esperado,
+    metodo: req.method,
+    caminho,
+    corpo: corpoCron,
+    agoraMs: Date.parse(ctx.agora()),
+    // O edge injeta este header quando há PESSOA na requisição. O gateway de cron não —
+    // e é o que impede um funcionário logado de disparar cron forjando o header.
+    identidadeDeUsuario: req.headers.get(HEADER_EMAIL),
+  })
+
+  if (!veredito.ok) {
     await ctx.auditoria.registrar({
       atorEmail: '(cron)',
       acao: 'acesso_negado',
       recurso: caminho,
       resultado: 'negado',
-      detalhe: { motivo: 'cron_nao_autenticado' },
+      // ⚠️ **Diagnóstico sem vazar segredo.** A documentação da plataforma diz que o
+      // header é "assinado", e não está confirmado se o que chega é a chave crua ou uma
+      // assinatura derivada dela — se for assinatura, a comparação por igualdade nunca casa
+      // e o sintoma é idêntico a "esqueci de configurar". Estes três campos distinguem os
+      // casos na primeira rodada:
+      //
+      //   headerAusente → o cron não está batendo aqui (rota errada, ou o edge barrou)
+      //   chaveAusente  → falta o secret `GODEPLOY_CRON_KEY`
+      //   tamanhos diferentes → é OUTRO formato (assinatura, ou a chave errada)
+      //   tamanhos iguais e não casou → é a chave errada, mesmo formato
+      //
+      // O que vai para a auditoria é **comprimento**, nunca valor nem prefixo. Comprimento
+      // de segredo é vazamento desprezível; prefixo não é, e é por isso que ele fica fora.
+      detalhe: {
+        motivo: 'cron_nao_autenticado',
+        // O motivo específico é o que separa "esqueci de configurar" de "alguém está
+        // tentando" — distinção que precisa existir na auditoria, não só no código.
+        detalhe: veredito.motivo,
+        tamanhoRecebido: enviado?.length ?? 0,
+        tamanhoEsperado: esperado?.length ?? 0,
+      },
     })
+    // O MESMO diagnóstico vai para o log da plataforma, e não é redundância: a auditoria
+    // vive em `env.DB` e só é legível por uma rota de admin atrás do SSO — quem está
+    // depurando o cron normalmente está fora do navegador. `getAppLogs` é a superfície que
+    // se lê de fora.
+    //
+    // ⚠️ Os **nomes** dos cabeçalhos entram; os valores, não. É o que revela se a
+    // plataforma mudou o nome do header (aí `x-godeploy-cron` some da lista) — a hipótese
+    // que nenhum outro campo distingue.
+    console.log(
+      '[cron] recusado',
+      JSON.stringify({
+        caminho,
+        motivo: veredito.motivo,
+        headers: [...req.headers.keys()].sort(),
+        tamanhoRecebido: enviado?.length ?? 0,
+        tamanhoEsperado: esperado?.length ?? 0,
+        formatoRecebido: enviado === null ? null : descreverFormato(enviado),
+      }),
+    )
     return ERROS.semPermissao()
   }
+
+  // Qual construção casou. É o que permite reduzir a lista de candidatas a uma só depois
+  // da primeira rodada — o rótulo não revela assinatura nenhuma.
+  console.log('[cron] autenticado', JSON.stringify({ caminho, candidata: veredito.candidata }))
 
   if (caminho === '/api/cron/reprocessar-submissoes') {
     const r = await ctx.chamados.reprocessarPendentes(25)
@@ -1027,9 +1686,9 @@ async function tratarCron(
     }
     const orgId = ctx.valores.org_id
     try {
-      const usuarios = await ctx.organizacao.listarUsuarios(orgId)
+      const varredura = await ctx.organizacao.listarUsuarios(orgId)
       const entradas = []
-      for (const usuario of usuarios) {
+      for (const usuario of varredura.usuarios) {
         try {
           entradas.push({
             usuario,
@@ -1045,10 +1704,26 @@ async function tratarCron(
       await ctx.auditoria.registrar({
         atorEmail: '(cron)',
         acao: 'inventario_coletado',
-        resultado: 'sucesso',
-        detalhe: { usuarios: usuarios.length, registros: r.registros },
+        // ⚠️ Coleta incompleta ou com suspensão desconhecida **não** é `sucesso`. Ela
+        // grava o que deu, mas marcá-la como sucesso apagaria o único registro de que
+        // o inventário daquele dia não é a organização inteira — e é sobre esse
+        // inventário que a tela recomenda revogar assento.
+        resultado: varredura.parcial || !varredura.suspensaoConhecida ? 'falha' : 'sucesso',
+        detalhe: {
+          usuarios: varredura.usuarios.length,
+          registros: r.registros,
+          suspensas: varredura.suspensas,
+          suspensaoConhecida: varredura.suspensaoConhecida,
+          parcial: varredura.parcial,
+        },
       })
-      return json({ ok: true, ...r })
+      return json({
+        ok: true,
+        ...r,
+        suspensas: varredura.suspensas,
+        suspensaoConhecida: varredura.suspensaoConhecida,
+        parcial: varredura.parcial,
+      })
     } catch (e) {
       await ctx.auditoria.registrar({
         atorEmail: '(cron)',
@@ -1058,6 +1733,118 @@ async function tratarCron(
       })
       return ERROS.conteudoIndisponivel()
     }
+  }
+
+  // T-212 — polling incremental, SEMPRE ligado (RF-47).
+  //
+  // ⚠️ Não é redundância do webhook: notificação não pode depender de mecanismo único, e
+  // o webhook depende de o time de tech tê-lo registrado no Jira e de a Atlassian
+  // entregar. O polling é o que é nosso. A dedupe (`RF-47`) é o que torna os dois
+  // conviverem sem a pessoa receber tudo em dobro.
+  if (caminho === '/api/cron/polling-jira') {
+    const marca = await ctx.marcaAguaPolling.obter()
+    let alterados
+    try {
+      alterados = await ctx.atlassian.buscarChamadosAtualizadosDesde({
+        desde: marca,
+        limite: LIMITE_POLLING,
+      })
+    } catch {
+      await ctx.auditoria.registrar({
+        atorEmail: '(cron)',
+        acao: 'polling_executado',
+        resultado: 'falha',
+        detalhe: { motivo: 'busca_indisponivel' },
+      })
+      // ⚠️ A marca-d'água NÃO avança. Avançar aqui perderia a janela inteira: os
+      // chamados que mudaram durante a queda ficariam atrás da marca e nunca seriam
+      // olhados de novo — o erro que `RNF-17` proíbe no outbox, na versão silenciosa.
+      return ERROS.conteudoIndisponivel()
+    }
+
+    const comVinculo = await ctx.vinculos.filtrarComVinculo(alterados.map((a) => a.issueKey))
+    let eventos = 0
+    let falhas = 0
+    /** Só avança a marca até o último chamado processado COM SUCESSO. */
+    let carimboSeguro: string | null = null
+    const porChave = new Map(alterados.map((a) => [a.issueKey, a.atualizadoEm]))
+
+    for (const vinculo of comVinculo) {
+      const r = await ctx.notificador.sincronizarChamado(
+        vinculo.issueKey,
+        'polling',
+        ctx.valoresNotificacao,
+      )
+      if (!r.ok) {
+        falhas += 1
+        // Um chamado ilegível interrompe o AVANÇO da marca, não a rodada: os outros
+        // continuam sendo processados, e a próxima janela reveja este.
+        break
+      }
+      eventos += r.eventos
+      const carimbo = porChave.get(vinculo.issueKey)
+      if (carimbo) carimboSeguro = carimbo
+    }
+
+    // Sem nenhum chamado com vínculo, a marca avança para o instante da rodada: não há
+    // nada a reprocessar, e deixá-la parada faria a janela crescer para sempre.
+    if (comVinculo.length === 0) await ctx.marcaAguaPolling.definir(ctx.agora())
+    else if (carimboSeguro) await ctx.marcaAguaPolling.definir(carimboSeguro)
+
+    await ctx.auditoria.registrar({
+      atorEmail: '(cron)',
+      acao: 'polling_executado',
+      resultado: falhas > 0 ? 'falha' : 'sucesso',
+      detalhe: { alterados: alterados.length, nossos: comVinculo.length, eventos, falhas },
+    })
+    return json({ ok: true, alterados: alterados.length, nossos: comVinculo.length, eventos, falhas })
+  }
+
+  // T-225 — despacho da fila. Falha de envio não perde a notificação.
+  if (caminho === '/api/cron/enviar-notificacoes') {
+    const r = await ctx.notificador.despacharPendentes(LIMITE_ENVIO_NOTIFICACOES)
+    return json({ ok: true, ...r })
+  }
+
+  // T-231 — alerta de SLA de PRIMEIRA RESPOSTA (RF-46, RN-08).
+  if (caminho === '/api/cron/alertas-sla') {
+    const abertos = await ctx.vinculos.listarParaAvaliacaoSla(LIMITE_ALERTAS_SLA)
+    let alertados = 0
+    let avaliados = 0
+    for (const vinculo of abertos) {
+      const r = await ctx.notificador.avaliarESinalizarSla(vinculo, ctx.valoresNotificacao)
+      avaliados += 1
+      if (r.alertou) alertados += 1
+    }
+    await ctx.auditoria.registrar({
+      atorEmail: '(cron)',
+      acao: 'alerta_sla',
+      resultado: 'sucesso',
+      detalhe: { avaliados, alertados },
+    })
+    return json({ ok: true, avaliados, alertados })
+  }
+
+  // T-243 — retenção (RNF-33). Sem política configurada, não apaga nada.
+  if (caminho === '/api/cron/retencao') {
+    const r = await aplicarRetencao(
+      ctx.db,
+      {
+        conversasDias: ctx.valores.retencao_conversas_dias,
+        auditoriaDias: ctx.valores.retencao_auditoria_dias,
+        notificacoesDias: ctx.valores.retencao_notificacoes_dias,
+      },
+      Date.parse(ctx.agora()),
+    )
+    // Registrado DEPOIS do expurgo e com contagem, não com conteúdo: a auditoria do
+    // apagamento não pode carregar o que foi apagado.
+    await ctx.auditoria.registrar({
+      atorEmail: '(cron)',
+      acao: 'retencao_executada',
+      resultado: 'sucesso',
+      detalhe: { ...r, pisoAuditoriaDias: PISO_AUDITORIA_DIAS },
+    })
+    return json({ ok: true, ...r })
   }
 
   return ERROS.naoEncontrado()

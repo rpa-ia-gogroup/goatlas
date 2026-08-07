@@ -241,12 +241,17 @@ created: "2026-08-04"
 
 ## Phase 3 — Governança de assentos
 
-> **Estado (05/08/2026):** T-120, T-121, T-104, T-124, T-125, T-126, T-127 e T-128
-> concluídos — **393 testes** na suíte (45 novos), typecheck e build limpos, tudo
-> contra o fake. T-122/T-123/T-131 seguem `[BLOQUEADA: Q1]`: a credencial de Org
-> Admin não existe, então `ClienteOrganizacaoHttp` não tem como ser escrito de
-> forma verificável ainda — o que existia para escrever agora (contrato,
-> transporte, fake, cache, cálculo, tela) está pronto e testado.
+> **Estado (07/08/2026):** a Phase 3 está **completa em código**. T-120, T-121,
+> T-104, T-124, T-125, T-126, T-127, T-128 e — desde `D-18` — T-122, T-123 e T-131.
+>
+> ⚠️ **O que "completo" significa aqui, e o que não significa.** `D-18` tirou as três
+> do bloqueio de Q1 escrevendo `ClienteOrganizacaoHttp` contra `fetch` simulado, com
+> o não verificado declarado em `ENDPOINTS_NAO_VERIFICADOS` e mostrado na tela. Em
+> 07/08, medição real do tenant (`D-22`) provou que **o endpoint escolhido era o
+> errado** — devolvia lista vazia com HTTP 200. Isto é a lição do `CLAUDE.md` outra
+> vez: o dublê implementa o contrato *documentado*, e onde o outro lado diverge da
+> documentação ele esconde a divergência em vez de revelá-la. Continua faltando uma
+> passada com credencial real (**Q1**, o `ATATT`).
 
 - [x] **T-120** `atlassian/organizacao.ts` com **transporte próprio** — não
       compartilha instância com o cliente de Jira/Confluence, para que bug de
@@ -261,12 +266,22 @@ created: "2026-08-04"
       → `atlassian/organizacao-fake.ts`, mesmo padrão de `atlassian/fake.ts`:
       estado seedável, falha injetável por operação (`indisponivel`,
       `rate_limit`, `timeout`).
-- [ ] **T-122** `listarUsuarios` (`GET /admin/v1/orgs/{orgId}/users`). `orgId` de
-      config. **[BLOQUEADA: Q1]** _Requirements: RF-51, RNF-25_
-- [ ] **T-123** `ultimoAcesso` (`.../last-active-dates`), **carregando as limitações
+- [x] **T-122** `listarUsuarios`. `orgId` de config. _Requirements: RF-51, RNF-25_
+      → ⚠️ **O endpoint mudou depois de medido** (`D-22`): era
+      `GET /admin/v1/orgs/{orgId}/users`, que lista **só conta gerenciada** e devolve
+      `{"data": []}` com HTTP 200 num tenant sem domínio reivindicado — o caso da
+      Gocase. Agora é `POST /admin/v1/orgs/{orgId}/users/search`, com
+      `accountTypes: ["atlassian"]` obrigatório e cursor reenviado no **corpo**. O
+      retorno deixou de ser uma lista e passou a declarar o que não sabe:
+      `suspensas` · `suspensaoConhecida` (o filtro `isSuspended` pode não filtrar, e
+      isso é detectável) · `parcial` (o teto de páginas era atingido em silêncio).
+- [x] **T-123** `ultimoAcesso` (`.../last-active-dates`), **carregando as limitações
       oficiais no payload**: atrasa até 24h, "ativo" = viu página por ≥2s. Elas vão
       **na tela** (`RF-52`) — sem isso alguém rebaixa quem estava de férias.
-      **[BLOQUEADA: Q1]** _Requirements: RF-52_
+      _Requirements: RF-52_
+      → `normalizarCarimbo` resolve segundos × milissegundos (55 anos de diferença
+      entre "ocioso" e "acessou ontem"); na dúvida devolve `null`, porque não ter o
+      dado é honesto e ter o dado errado rebaixa quem estava trabalhando.
 - [x] **T-124** Tabela `inventario_assentos` + `POST /api/cron/coletar-inventario`
       diário. A API é lenta para consulta interativa, e o histórico é o que faz `O2`
       ser recorrente em vez de retrato. _Requirements: RF-51, RF-52_
@@ -332,9 +347,39 @@ created: "2026-08-04"
       `campos` virar `[]` — o formulário fixo **continua funcionando** (RNF-18).
       Verificado em `npm run dev`: validação nativa bloqueia obrigatório vazio, os
       três tipos renderizam e o chamado abre com os valores corretos.
-- [ ] **T-131** `RF-57` (P2): revogar produto pelo console, **dupla confirmação** e
-      auditoria. Única escrita da credencial de Org Admin. **[BLOQUEADA: Q1]**
+- [x] **T-131** `RF-57` (P2): revogar produto pelo console, **dupla confirmação** e
+      auditoria. Única escrita da credencial de Org Admin.
       _Requirements: RF-57, RN-10_
+      → `revogarProduto` **não engole erro**: um `catch` aqui devolveria "revogado"
+      para a tela enquanto o assento segue ativo, e o admin marcaria como capturada
+      uma economia que não aconteceu. ⚠️ **Continua o menos verificável dos três**
+      (`ENDPOINTS_NAO_VERIFICADOS`), e `D-22` acrescenta um motivo que não é de
+      contrato: **nenhuma** chave de API opera sobre conta **não gerenciada**, e a org
+      não reivindicou domínio — então a escrita responde 403 hoje
+      independentemente de credencial. Destravar é reivindicar `gocase.com`.
+- [x] **T-133** O produto atribuído vem de `last-active-dates`, não de `users/search`
+      (`D-23`). _Requirements: RF-51, RF-52, RF-53_
+      → `registrarColeta` passou a iterar a **união** das duas fontes; iterar só
+      `usuario.produtos` gravava **zero linha** e o inventário rodava vazio.
+      ✅ **Verificado contra a org real:** a dúvida era se o produto de JSM apareceria, já
+      que a primeira conta amostrada não o trouxe. Consultando os **5 agentes de JSM** do
+      `HANDOFF`, `jira-servicedesk` aparece em todos. A amostra inicial simplesmente não
+      era de agente. Chaves de produto observadas: `confluence`, `jira-core`,
+      `jira-software`, `jira-servicedesk` e **`jira-customer-service`** — esta última não
+      estava em nenhuma lista nossa.
+- [x] **T-134** 🚨 O preço da Atlassian é **escalonado**, e o `custo.ts` assumia preço fixo
+      (`D-23`, **Q8** respondida). _Requirements: RF-53, RF-56_
+      → O `HANDOFF` mede um corte de **54 → 38 assentos (−30%)** que baixou a fatura em
+      **3,4%**: quem fica pode cair numa faixa de preço unitário **mais alto**, então
+      `ociosos × preço` **superestima** a economia — o número que sustenta a recomendação
+      de rebaixar alguém.
+      Entregue: `precoNaFaixa` e `economiaComCurva` (puras), config
+      `curva_preco_por_produto` (`RNF-25`, vazio = sem curva) e
+      **`ocioso.economiaConfiavel`**. Sem curva o valor **continua vindo**, mas marcado
+      como **teto** — e a tela imprime a ressalva **ao lado do número**, não em rodapé,
+      porque é ali que se decide cortar acesso. Mesmo padrão de `custoConfigurado` (Q8) e
+      `deflexaoResolvidaConhecida` (T-235). Um produto sem curva contamina a afirmação
+      inteira, como um produto sem preço já derrubava `custoConfigurado`.
 - [x] **T-132** Fechar os Success Criteria da spec 002 item por item.
       _Requirements: todos_
       → **ScC-1** (leitura sem licença, sem vazar restrita/fora da allowlist):
@@ -365,8 +410,12 @@ created: "2026-08-04"
       — T-101 escrito e vermelho antes de T-105/T-106 existirem; T-102 e T-103
       escritos e vermelhos (36 casos) antes de T-110/T-111/T-112 existirem; T-104
       acompanha a governança da Phase 3, pelo mesmo motivo
-- [ ] **Nenhuma `[BLOQUEADA]`** — há **3**: T-122/T-123/T-131 (Q1).
-      T-113 e T-125 saíram da lista: o código está pronto e o que falta de **Q5**/
+- [x] **Nenhuma `[BLOQUEADA]`** — as três últimas (T-122/T-123/T-131) saíram em
+      `D-18`, e `D-22` corrigiu o endpoint de T-122 contra medição real.
+      ⚠️ **"Não bloqueada" não é "verificada":** falta a passada com o `ATATT`
+      (**Q1**), e a escrita de T-131 depende de reivindicar o domínio, que não é
+      credencial.
+      T-113 e T-125 saíram da lista antes: o código está pronto e o que falta de **Q5**/
       **Q8** é **dado de config**, não implementação — com `espacos_confluence`
       vazio a busca devolve zero e diz `buscaConfigurada: false`, e sem
       `custo_mensal_por_produto` o console mostra contagem e `custoConfigurado:

@@ -138,8 +138,69 @@ export function montarJql(params: HistoricoParams): string {
   ].join(' AND ')
 }
 
+/**
+ * Janela usada quando não há marca-d'água ainda (primeiro boot, ou banco novo).
+ *
+ * ⚠️ **Não é "traga tudo".** Varredura completa é a forma mais fácil de descobrir os
+ * burst limits não publicados da Atlassian do jeito ruim (`R-02`, `RNF-15`) — e não
+ * ganharia nada: sem marca-d'água não há histórico de notificação para recuperar, e
+ * chamado antigo já foi avisado (ou nunca vai ser, o que é melhor que avisar dez de uma
+ * vez às 3h da manhã).
+ */
+export const JANELA_INICIAL_POLLING_MIN = 30
+
+/**
+ * Margem para trás na marca-d'água.
+ *
+ * O JQL tem precisão de **minuto**; o carimbo do Jira tem milissegundos. Sem margem,
+ * uma mudança no mesmo minuto da marca fica do lado errado do `>=` e desaparece. Reler
+ * um minuto duas vezes é grátis — a dedupe (`RF-47`) descarta o repetido.
+ */
+export const MARGEM_POLLING_MIN = 2
+
+/**
+ * Data no formato que o JQL aceita: `"2026-08-06 10:00"` em **UTC**.
+ *
+ * ⚠️ JQL interpreta data sem fuso no **fuso do usuário da API**, que é configuração da
+ * conta de serviço no Jira — não do Worker. Isso é uma imprecisão conhecida e coberta
+ * pela margem acima; o alternativa (`updated >= -35m`, relativo) evita fuso mas perde a
+ * marca-d'água persistida, que é o que garante não pular janela quando um cron falha.
+ */
+function paraJql(ms: number): string {
+  const d = new Date(ms)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(
+    d.getUTCHours(),
+  )}:${p(d.getUTCMinutes())}`
+}
+
+/**
+ * JQL do polling incremental (T-210).
+ *
+ * `reporter = currentUser()` é o filtro que substitui um project key: sob proxy total
+ * (`D-01`) **todo** chamado aberto pelo app tem a conta de serviço como reporter. Isso
+ * mantém `RNF-25` (nada hardcoded) sem precisar de mais um campo de config, e restringe
+ * a consulta ao que é nosso — chamado que o time de tech abriu direto no Jira não entra
+ * na varredura.
+ */
+export function montarJqlAtualizados(desde: string | null, agoraMs: number): string {
+  const desdeMs = desde ? Date.parse(desde) : Number.NaN
+  const base = Number.isFinite(desdeMs)
+    ? desdeMs - MARGEM_POLLING_MIN * 60_000
+    : agoraMs - JANELA_INICIAL_POLLING_MIN * 60_000
+  return `reporter = currentUser() AND updated >= "${paraJql(base)}" ORDER BY updated ASC`
+}
+
 /** `system` dos campos que o formulário fixo já cobre (RF-27) — nunca duplicar. */
 const CAMPOS_DE_SISTEMA_JA_COBERTOS = new Set(['summary', 'description', 'priority'])
+
+/**
+ * Quantos service desks são varridos ao listar tipos de chamado.
+ *
+ * Cada um custa uma chamada, e a lista de desks vem de fora (`R-02`). O site da Gocase
+ * tem 5; o teto existe para o dia em que alguém criar 80.
+ */
+const MAX_SERVICE_DESKS = 20
 
 interface CampoRequestTypeBruto {
   fieldId?: unknown
@@ -221,15 +282,46 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     const cacheado = this.cacheMetadados.obter('tiposChamado')
     if (cacheado) return cacheado as TipoChamado[]
 
-    const dados = (await this.transporte.requisitar('/rest/servicedeskapi/requesttype')) as {
-      values?: { id?: unknown; serviceDeskId?: unknown; name?: unknown; description?: unknown }[]
+    // 🚨 **O endpoint GLOBAL `/rest/servicedeskapi/requesttype` é EXPERIMENTAL e
+    // responde 412** sem o cabeçalho `X-ExperimentalApi: opt-in` — medido contra a
+    // Atlassian real em 07/08/2026, com credencial válida. Era o que este método usava,
+    // então `listarTiposChamado` **não funcionava em produção**: nem a allowlist de
+    // `RF-28` podia ser montada, nem o formulário sem IA sabia que tipos oferecer.
+    //
+    // A saída não é ligar o opt-in: "experimental" é a Atlassian avisando que pode mudar
+    // sem aviso, e uma allowlist que depende disso quebra num dia qualquer. O caminho
+    // **estável** é por service desk (`/servicedesk/{id}/requesttype`, 200 sem cabeçalho
+    // nenhum), e ele custa uma chamada a mais para listar os desks — pago uma vez por TTL
+    // de cache, não por requisição de usuário.
+    const desks = (await this.transporte.requisitar('/rest/servicedeskapi/servicedesk')) as {
+      values?: { id?: unknown }[]
     }
-    const tipos: TipoChamado[] = (dados?.values ?? []).map((v) => ({
-      id: String(v.id ?? ''),
-      serviceDeskId: String(v.serviceDeskId ?? ''),
-      nome: String(v.name ?? ''),
-      descricao: typeof v.description === 'string' ? v.description : null,
-    }))
+    const idsDesk = (desks?.values ?? [])
+      .map((d) => String(d.id ?? ''))
+      .filter((id) => id.length > 0)
+      // Teto: cada desk é uma chamada, e a lista vem de fora (`R-02`).
+      .slice(0, MAX_SERVICE_DESKS)
+
+    const tipos: TipoChamado[] = []
+    for (const serviceDeskId of idsDesk) {
+      const dados = (await this.transporte.requisitar(
+        `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype`,
+      )) as { values?: { id?: unknown; name?: unknown; description?: unknown }[] }
+
+      for (const v of dados?.values ?? []) {
+        const id = String(v.id ?? '')
+        if (!id) continue
+        tipos.push({
+          id,
+          // ⚠️ Vem do laço, não do corpo: o endpoint por desk **não repete**
+          // `serviceDeskId` em cada item, e `String(undefined ?? '')` daria `''` —
+          // um tipo sem desk é um tipo com que não se cria chamado nenhum.
+          serviceDeskId,
+          nome: String(v.name ?? ''),
+          descricao: typeof v.description === 'string' ? v.description : null,
+        })
+      }
+    }
     this.cacheMetadados.definir('tiposChamado', tipos, this.opcoes.ttlMetadadosSeg)
     return tipos
   }
@@ -732,6 +824,85 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
       issueKey: String(i.key ?? ''),
       issueId: String(i.id ?? ''),
     }))
+  }
+
+  async buscarChamadosAtualizadosDesde(params: {
+    desde: string | null
+    limite: number
+  }): Promise<readonly { issueKey: string; atualizadoEm: string }[]> {
+    const jql = montarJqlAtualizados(params.desde, Date.now())
+    const dados = (await this.transporte.requisitar(
+      `/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&maxResults=${params.limite}&fields=updated`,
+    )) as { issues?: { key?: unknown; fields?: { updated?: unknown } }[] }
+
+    return (dados?.issues ?? [])
+      .map((i) => ({
+        issueKey: String(i.key ?? ''),
+        atualizadoEm: String(i.fields?.updated ?? ''),
+      }))
+      .filter((i) => i.issueKey.length > 0)
+  }
+
+  /**
+   * Anexo em dois passos (RF-25, RF-34).
+   *
+   * ⚠️ O primeiro passo é **multipart com `X-Atlassian-Token: no-check`** — sem esse
+   * cabeçalho a Atlassian recusa o upload como possível CSRF, e o erro que ela devolve
+   * (403 genérico) não diz isso. É o tipo de detalhe que custa uma tarde.
+   */
+  async anexarArquivo(
+    serviceDeskId: string,
+    issueKey: string,
+    arquivo: { nome: string; tipo: string; bytes: ArrayBuffer },
+  ): Promise<void> {
+    const form = new FormData()
+    form.append('file', new Blob([arquivo.bytes], { type: arquivo.tipo }), arquivo.nome)
+
+    const temporario = (await this.transporte.requisitarMultipart(
+      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/attachTemporaryFile`,
+      form,
+    )) as { temporaryAttachments?: { temporaryAttachmentId?: unknown }[] }
+
+    const ids = (temporario?.temporaryAttachments ?? [])
+      .map((t) => (typeof t.temporaryAttachmentId === 'string' ? t.temporaryAttachmentId : null))
+      .filter((id): id is string => id !== null)
+
+    if (ids.length === 0) {
+      throw new ErroAtlassian('upload temporário não devolveu id de anexo', {
+        transitorio: true,
+        recurso: 'attachTemporaryFile',
+      })
+    }
+
+    await this.transporte.requisitar(
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/attachment`,
+      {
+        method: 'POST',
+        // `public: true` de propósito: é o anexo DO SOLICITANTE no próprio chamado, e
+        // anexo interno seria invisível para quem o mandou (`RF-34`).
+        body: JSON.stringify({ temporaryAttachmentIds: ids, public: true }),
+      },
+    )
+  }
+
+  async listarTransicoes(issueKey: string): Promise<readonly { id: string; nome: string }[]> {
+    const dados = (await this.transporte.requisitar(
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/transition`,
+    )) as { values?: { id?: unknown; name?: unknown }[] }
+    return (dados?.values ?? [])
+      .map((t) => ({ id: String(t.id ?? ''), nome: String(t.name ?? '') }))
+      .filter((t) => t.id.length > 0)
+  }
+
+  async transicionar(issueKey: string, transicaoId: string): Promise<void> {
+    await this.transporte.requisitar(
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/transition`,
+      { method: 'POST', body: JSON.stringify({ id: transicaoId }) },
+    )
+  }
+
+  telemetria(): { total429: number; totalRequisicoes: number } {
+    return this.contadores
   }
 
   async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {

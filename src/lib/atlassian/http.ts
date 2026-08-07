@@ -46,7 +46,13 @@ export class TransporteAtlassian {
 
   constructor(private readonly opcoes: OpcoesHttp) {
     this.dormir = opcoes.dormir ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
-    this.fetchImpl = opcoes.fetchImpl ?? fetch
+    // ⚠️ **`fetch` PRECISA vir com `this` amarrado ao global.** Guardado numa propriedade e
+    // chamado como `this.fetchImpl(...)`, o `this` passa a ser este objeto, e o runtime dos
+    // Workers recusa com `Illegal invocation` — a chamada nem sai. No Node dos testes
+    // funciona, porque lá o `fetch` não confere o `this`: por isso 643 testes verdes
+    // conviviam com um cliente que não conseguia fazer uma única requisição em produção.
+    // Descoberto em 07/08/2026, no instante em que o modo demonstração saiu.
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis)
     this.aleatorio = opcoes.aleatorio ?? Math.random
     this.maxTentativas = opcoes.maxTentativas ?? MAX_TENTATIVAS_PADRAO
   }
@@ -81,6 +87,27 @@ export class TransporteAtlassian {
     init: { method?: string; body?: string; headers?: Record<string, string> } = {},
   ): Promise<unknown> {
     const resposta = await this.enviar(caminho, init, 'application/json')
+    const texto = await resposta.text()
+    return texto.length > 0 ? (JSON.parse(texto) as unknown) : null
+  }
+
+  /**
+   * Upload multipart — `attachTemporaryFile` do JSM (`RF-25`, T-240).
+   *
+   * ⚠️ Dois detalhes que a Atlassian não perdoa:
+   *
+   * 1. **`X-Atlassian-Token: no-check`** é obrigatório. Sem ele o upload é recusado
+   *    como possível CSRF, com um 403 genérico que não explica nada.
+   * 2. **Não se define `Content-Type`.** O `fetch` gera o boundary junto com o corpo;
+   *    declarar `multipart/form-data` à mão produz um boundary que não corresponde ao
+   *    do corpo, e a Atlassian responde 400 como se o arquivo estivesse errado.
+   */
+  async requisitarMultipart(caminho: string, form: FormData): Promise<unknown> {
+    const resposta = await this.enviar(
+      caminho,
+      { method: 'POST', corpoBruto: form, headers: { 'X-Atlassian-Token': 'no-check' } },
+      'application/json',
+    )
     const texto = await resposta.text()
     return texto.length > 0 ? (JSON.parse(texto) as unknown) : null
   }
@@ -129,7 +156,13 @@ export class TransporteAtlassian {
    */
   private async enviar(
     caminho: string,
-    init: { method?: string; body?: string; headers?: Record<string, string> },
+    init: {
+      method?: string
+      body?: string
+      /** `FormData` — o `fetch` gera o boundary; nunca declarar `Content-Type`. */
+      corpoBruto?: FormData
+      headers?: Record<string, string>
+    },
     aceitar: string,
   ): Promise<Response> {
     const url = `${this.opcoes.baseUrl}${caminho}`
@@ -146,6 +179,7 @@ export class TransporteAtlassian {
           ...init.headers,
         },
         ...(init.body === undefined ? {} : { body: init.body }),
+        ...(init.corpoBruto === undefined ? {} : { body: init.corpoBruto }),
       })
 
       if (resposta.ok) return resposta

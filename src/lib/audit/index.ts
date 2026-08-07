@@ -46,6 +46,33 @@ export type AcaoAuditada =
   /** Coleta diária da Organizations API (RF-51, RF-52, T-124) — toca a Atlassian,
    * então é auditada mesmo quando falha. */
   | 'inventario_coletado'
+  /**
+   * RF-57 (T-131) — a ÚNICA escrita da credencial de Org Admin. Auditada sempre, e
+   * também quando falha: revogação de assento é ação sobre a conta de outra pessoa, e
+   * "quem revogou o quê" precisa ter resposta seis meses depois.
+   */
+  | 'assento_revogado'
+  /**
+   * RF-44/RF-45 (T-225) — envio de notificação. Registrado sem o CORPO da mensagem: ele
+   * carrega trecho de comentário de chamado, e a auditoria é lida por admin (`RF-30`).
+   */
+  | 'notificacao_enviada'
+  /** RF-47 (T-212) — rodada de polling: quantos chamados olhou, quantos eventos gerou. */
+  | 'polling_executado'
+  /** RF-48 (T-206) — evento de webhook, inclusive o recusado por segredo inválido. */
+  | 'webhook_recebido'
+  /** RF-46 (T-231) — rodada do alerta de SLA de primeira resposta. */
+  | 'alerta_sla'
+  /** RF-25/RF-34 (T-240) — anexo enviado pelo solicitante ao próprio chamado. */
+  | 'anexo_enviado'
+  /** RF-36 (T-242) — transição pedida pelo solicitante (resolver/reabrir). */
+  | 'chamado_transicionado'
+  /** RF-45 (T-224) — a pessoa mudou o próprio canal de notificação. */
+  | 'preferencia_alterada'
+  /** RNF-33 (T-243) — expurgo por retenção. Conta o que apagou, nunca o conteúdo. */
+  | 'retencao_executada'
+  /** R-06 (T-302) — pedido de quem está fora do escopo do piloto. */
+  | 'fora_do_piloto'
 
 export interface EntradaAuditoria {
   readonly atorEmail: string

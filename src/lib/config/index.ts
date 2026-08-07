@@ -49,6 +49,16 @@ export interface ConfigValores {
   /** RF-53 — custo mensal (USD) por chave de produto. Vazio = Q8 em aberto: o
    * console mostra contagem, nunca dinheiro inventado. */
   custo_mensal_por_produto: Record<string, number>
+  /**
+   * T-134 — curva de preço por faixa, por produto. Vazio = sem curva, e aí a economia de
+   * assento ocioso é tratada como **teto** (`economiaConfiavel: false`), não estimativa.
+   *
+   * ⚠️ Existe porque o preço do JSM é **escalonado**: cortar assento pode subir o preço
+   * unitário dos que ficam, e `ociosos × preço` superestima a economia. Ver `D-23`.
+   * Formato: `{ "jira-servicedesk": [{ "ate": 100, "precoUnitarioUsd": 9.05 }, …] }` —
+   * `ate: null` na última faixa significa "daí para cima".
+   */
+  curva_preco_por_produto: Record<string, { ate: number | null; precoUnitarioUsd: number }[]>
 
   /** RF-09 — score acima disto bloqueia pela Regra 1. Começa conservador (R-04). */
   regra1_threshold_score: number
@@ -62,6 +72,68 @@ export interface ConfigValores {
   regra2_exemplos_ajuste_operacional: string[]
   /** R-08 — limita quantos tickets a Regra 2 lê por conversa. */
   regra2_limite_tickets: number
+
+  // --- Fase 3: notificações, SLA e métricas (spec 003) ----------------------
+  /**
+   * RF-45, Q11 — canal padrão de notificação. `null` = **Q11 não respondida**.
+   *
+   * ⚠️ Neste estado a notificação é registrada e **suprimida**, não descartada: o
+   * console mostra "havia 40 avisos a dar e nenhum canal definido", e no dia da resposta
+   * de Q11 basta preencher este campo (`RF-49`, sem deploy). O default **não** é
+   * "e-mail para o corporativo": notificação não pedida em canal não combinado é o
+   * começo do treinamento para ignorar as notificações do app.
+   */
+  canal_notificacao_padrao: 'chat' | 'email' | 'nenhum' | null
+  /** RF-45, Q11 — webhook do espaço no Google Chat. Vazio = canal de chat indisponível. */
+  chat_webhook_url: string | null
+  /** RF-45, Q11 — endpoint HTTP do provedor de e-mail (Workers não têm SMTP). */
+  email_endpoint: string | null
+  email_remetente: string | null
+  /**
+   * Base pública do app, para o link nas notificações. `null` = mensagem sem link.
+   *
+   * Não é derivável no cron: lá não existe `Request` de onde tirar o host. E linkar
+   * `atlassian.net` derrubaria o clique de quem não tem assento — o mesmo raciocínio da
+   * deflexão em `rules/`.
+   */
+  base_publica_app: string | null
+  /**
+   * RF-46 — fração do prazo a partir da qual o SLA de **primeira resposta** entra em
+   * risco. `0.75` = avisa aos 75%. Configurável porque o número certo só aparece com o
+   * volume real da fila (Fase 4).
+   */
+  sla_fracao_aviso: number
+
+  // --- Fase 4: piloto e rollout (spec 004) ---------------------------------
+  /**
+   * R-06, Q13 — e-mails do piloto. **Vazio tem significado especial aqui:** vazio =
+   * piloto desligado, todo mundo pode abrir chamado (o comportamento das Fases 1-3).
+   *
+   * ⚠️ É a única allowlist do projeto cujo vazio NÃO nega. E é deliberado: as outras
+   * governam **exposição de conteúdo** (`RNF-07`), onde vazio-nega evita vazamento;
+   * esta governa **quem pode pedir ajuda**, onde vazio-nega significaria que um deploy
+   * antes de alguém preencher a lista tranca a empresa inteira fora do canal de
+   * suporte. O fail-closed correto para esta lista é o oposto do das outras.
+   */
+  emails_piloto: string[]
+  /** RF-19, T-303 — mapa `e-mail → área`. Fora do mapa = **sem área**, nunca chutada. */
+  areas_por_email: Record<string, string>
+  /**
+   * O2, T-311 — retrato de assentos antes do projeto, para o antes × depois.
+   * `null` = Fase 0 não rodou; a tela mostra "sem baseline", nunca um número inventado.
+   */
+  baseline_assentos: { readonly coletadoEm: string; readonly porProduto: Record<string, number> } | null
+  /**
+   * RNF-33, T-243 — retenção em dias por tipo de dado. `null` = **guardar**.
+   *
+   * O default é guardar (e não um número "seguro") porque apagar vínculo é apagar o
+   * acesso da pessoa ao próprio chamado (`RF-30`): a retenção precisa ser uma decisão
+   * tomada, não um efeito colateral de um default. `conversas` e `auditoria` podem ser
+   * expurgadas sem esse dano — e a auditoria tem piso próprio, ver `retencao.ts`.
+   */
+  retencao_conversas_dias: number | null
+  retencao_auditoria_dias: number | null
+  retencao_notificacoes_dias: number | null
 
   /** RNF-13 — TTL de cache. */
   ttl_metadados_seg: number
@@ -83,12 +155,26 @@ export const CONFIG_PADRAO: Readonly<ConfigValores> = Object.freeze({
   org_id: null,
   assentos_ocioso_dias: 90,
   custo_mensal_por_produto: {},
+  curva_preco_por_produto: {},
   regra1_threshold_score: 0.75,
   regra2_threshold_recorrencia: 3,
   regra2_janela_dias: 90,
   regra2_campo_agrupamento: 'labels',
   regra2_exemplos_ajuste_operacional: [],
   regra2_limite_tickets: 20,
+  canal_notificacao_padrao: null,
+  chat_webhook_url: null,
+  email_endpoint: null,
+  email_remetente: null,
+  base_publica_app: null,
+  sla_fracao_aviso: 0.75,
+  // Vazio = piloto DESLIGADO (ver o comentário do campo — é a exceção deliberada).
+  emails_piloto: [],
+  areas_por_email: {},
+  baseline_assentos: null,
+  retencao_conversas_dias: null,
+  retencao_auditoria_dias: null,
+  retencao_notificacoes_dias: null,
   ttl_metadados_seg: 900,
   ttl_conteudo_seg: 300,
   limite_requisicoes_por_minuto: 30,
@@ -122,6 +208,22 @@ export interface BootstrapEnv {
   readonly GOATLAS_TIPOS_CHAMADO?: string
   readonly GOATLAS_ESPACOS_CONFLUENCE?: string
   readonly GOATLAS_ORG_ID?: string
+  /**
+   * Endereço público do app, para o link das notificações (`D-20`).
+   *
+   * É env, não valor derivado: o cron não tem `Request` de onde tirar o host, e é lá que a
+   * maioria das notificações nasce. E é por ambiente — staging e produção têm hosts
+   * diferentes, então hardcodar um deles quebraria o outro em silêncio.
+   */
+  readonly GOATLAS_BASE_PUBLICA?: string
+  /**
+   * Canal de aviso padrão — `chat`, `email` ou `nenhum` (`D-20`, Q11).
+   *
+   * ⚠️ Aqui a diferença entre **ausente** e **`nenhum`** é a decisão, não o efeito: os dois
+   * não enviam nada. Ausente = ninguém decidiu (a tela diz isso); `nenhum` = alguém decidiu
+   * que o aviso vive na aba Avisos. Ver `notificacoes/preferencias.ts`.
+   */
+  readonly GOATLAS_CANAL_NOTIFICACAO?: string
 }
 
 function lista(bruto: string | undefined): string[] {
@@ -149,6 +251,18 @@ export function valoresDoBootstrap(env: BootstrapEnv): Partial<ConfigValores> {
     parcial.campo_solicitante_id = env.GOATLAS_CAMPO_SOLICITANTE_ID
   }
   if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID
+  if (env.GOATLAS_BASE_PUBLICA) {
+    // Barra final removida aqui pelo mesmo motivo de `LLM_BASE_URL`: quem copia URL do
+    // navegador copia com barra, e `linkDoChamado` já concatena.
+    parcial.base_publica_app = env.GOATLAS_BASE_PUBLICA.trim().replace(/\/+$/, '')
+  }
+  const canal = (env.GOATLAS_CANAL_NOTIFICACAO ?? '').trim().toLowerCase()
+  // Valor desconhecido é **ignorado**, não corrigido para um canal qualquer: um typo
+  // (`e-mail`, `emails`) que virasse `email` mandaria aviso por um caminho que ninguém
+  // pediu. Ignorar deixa o estado em "ninguém decidiu", que é visível na tela.
+  if (canal === 'chat' || canal === 'email' || canal === 'nenhum') {
+    parcial.canal_notificacao_padrao = canal
+  }
   return parcial
 }
 

@@ -34,6 +34,8 @@ export interface DadosAbertura {
   readonly via: ViaAbertura
   readonly conversaId: string | null
   readonly verificadoRegras: boolean
+  /** RF-19, T-304 — congelada no vínculo. `null` = mapa não conhece o e-mail. */
+  readonly area: string | null
   readonly payload: PayloadSubmissao
 }
 
@@ -57,6 +59,8 @@ export class ServicoChamados {
     conversa: Conversa,
     serviceDeskId: string,
     chaveIdempotencia: string,
+    /** RF-19, T-304 — área do solicitante no momento da criação. */
+    area: string | null = null,
   ): Promise<ResultadoCriacao> {
     const autorizacao = autorizarCriacao(conversa)
     if (!autorizacao.ok) {
@@ -78,6 +82,7 @@ export class ServicoChamados {
       via: 'conversa',
       conversaId: conversa.id,
       verificadoRegras: autorizacao.verificadoPelasRegras,
+      area,
       payload: {
         titulo: proposta.titulo,
         descricao: proposta.descricao,
@@ -101,6 +106,7 @@ export class ServicoChamados {
     solicitanteEmail: string
     chaveIdempotencia: string
     payload: PayloadSubmissao
+    area?: string | null
   }): Promise<ResultadoCriacao> {
     return this.abrir({
       solicitanteEmail: dados.solicitanteEmail,
@@ -108,6 +114,7 @@ export class ServicoChamados {
       via: 'formulario',
       conversaId: null,
       verificadoRegras: false,
+      area: dados.area ?? null,
       payload: dados.payload,
     })
   }
@@ -156,13 +163,57 @@ export class ServicoChamados {
 
       // (4) Vínculo. Se falhar aqui, a submissão fica 'criado' SEM vínculo e a
       // reconciliação recupera — o chamado nunca fica órfão sem rastro (RNF-21).
-      await this.vinculos.criar({
-        issueKey: criado.issueKey,
-        solicitanteEmail: dados.solicitanteEmail,
-        conversaId: dados.conversaId,
-        via: dados.via,
-        verificadoRegras: dados.verificadoRegras,
-      })
+      //
+      // ⚠️ **A colisão de `UNIQUE (issue_key)` é caso PREVISTO, não erro.** Ela significa
+      // que este `issueKey` já tem vínculo — o que acontece de verdade quando o outbox
+      // reprocessa uma submissão cujo vínculo já havia sido criado, e quando a Atlassian
+      // devolve a mesma chave por idempotência do lado dela.
+      //
+      // O bug que isto corrige: a colisão subia como erro genérico e, por não ser
+      // `ErroAtlassian`, era classificada como **transitória** — a submissão voltava para
+      // `pendente` e o cron tentava **para sempre**, batendo na mesma constraint. Pego no
+      // app real em 07/08/2026.
+      //
+      // A distinção que importa: mesmo solicitante = já estava feito (idempotente). Outro
+      // solicitante = anomalia grave (a Atlassian devolveu uma chave que pertence a outra
+      // pessoa) e **não pode** ser aceita em silêncio — seria entregar o chamado de alguém
+      // para quem abriu este.
+      try {
+        await this.vinculos.criar({
+          issueKey: criado.issueKey,
+          solicitanteEmail: dados.solicitanteEmail,
+          conversaId: dados.conversaId,
+          via: dados.via,
+          verificadoRegras: dados.verificadoRegras,
+          area: dados.area,
+        })
+      } catch (erroVinculo) {
+        const existente = await this.vinculos.obterSemIsolamento_apenasReconciliacao(
+          criado.issueKey,
+        )
+        if (!existente) throw erroVinculo
+        if (existente.solicitanteEmail !== dados.solicitanteEmail) {
+          await this.auditoria.registrar({
+            atorEmail: dados.solicitanteEmail,
+            acao: 'chamado_criado',
+            recurso: criado.issueKey,
+            resultado: 'negado',
+            detalhe: { motivo: 'issue_key_ja_vinculada_a_outro_solicitante' },
+          })
+          throw new ErroAtlassian('chave de chamado já vinculada a outro solicitante', {
+            // **Definitivo**: reprocessar não muda nada, e insistir esconderia a anomalia.
+            transitorio: false,
+            recurso: criado.issueKey,
+          })
+        }
+        await this.auditoria.registrar({
+          atorEmail: dados.solicitanteEmail,
+          acao: 'vinculo_reconciliado',
+          recurso: criado.issueKey,
+          resultado: 'sucesso',
+          detalhe: { motivo: 'vinculo_ja_existia' },
+        })
+      }
 
       await this.auditoria.registrar({
         atorEmail: dados.solicitanteEmail,
@@ -219,6 +270,9 @@ export class ServicoChamados {
         conversaId: s.conversaId,
         via: s.via,
         verificadoRegras: s.verificadoRegras,
+        // ⚠️ A reconciliação NÃO recalcula a área pelo mapa atual: o vínculo perdido era
+        // de meses atrás, e o mapa de hoje diria a área de hoje (T-304 quer a de então).
+        // `null` é honesto; a pessoa corrige no recibo (T-305) se importar.
       })
       await this.auditoria.registrar({
         atorEmail: s.solicitanteEmail,
@@ -244,6 +298,9 @@ export class ServicoChamados {
         via: s.via,
         conversaId: s.conversaId,
         verificadoRegras: s.verificadoRegras,
+        // O reprocessamento não conhece a área: ela foi decidida na requisição original
+        // e vive no vínculo, que este caminho só cria se ainda não existir.
+        area: null,
         payload: s.payload,
       })
       if (r.estado === 'criado') criados += 1
@@ -265,14 +322,55 @@ export class ServicoChamados {
       })
       return null
     }
-    const chamado = await this.atlassian.obterChamado(issueKey)
-    await this.auditoria.registrar({
-      atorEmail: solicitanteEmail,
-      acao: 'chamado_lido',
-      recurso: issueKey,
-      resultado: 'sucesso',
-    })
-    return { chamado, vinculo }
+    // ⚠️ **A leitura DEGRADA, não quebra** (`RNF-19`). Antes, uma falha aqui subia até o
+    // roteador e virava **500**: a pessoa clicava no próprio chamado e lia "algo deu errado
+    // do nosso lado", sem nenhuma informação — numa queda do Jira, o app inteiro parecia
+    // quebrado justo na tela que ela mais precisa.
+    //
+    // A lista já fazia isso certo desde a Fase 1 (usa o payload do outbox e marca o status
+    // como indisponível). O detalhe não fazia, e a incoerência só apareceu testando contra
+    // o app real — nenhum teste local pegava, porque nos testes o chamado sempre existe.
+    //
+    // O que se mostra é o que NÓS gravamos: título, descrição e prioridade vêm do outbox.
+    // Só o status é honestamente marcado como indisponível.
+    try {
+      const chamado = await this.atlassian.obterChamado(issueKey)
+      await this.auditoria.registrar({
+        atorEmail: solicitanteEmail,
+        acao: 'chamado_lido',
+        recurso: issueKey,
+        resultado: 'sucesso',
+      })
+      return { chamado, vinculo, degradado: false as const }
+    } catch (erro) {
+      const submissao = await this.outbox.obterPorIssueKey(issueKey)
+      await this.auditoria.registrar({
+        atorEmail: solicitanteEmail,
+        acao: 'chamado_lido',
+        recurso: issueKey,
+        resultado: 'falha',
+        detalhe: {
+          motivo: 'atlassian_indisponivel',
+          // Sem o corpo da resposta (RNF-01) — `ErroAtlassian` já garante isso.
+          erro: erro instanceof Error ? erro.message : 'falha',
+          recuperadoDoOutbox: submissao !== null,
+        },
+      })
+      return {
+        vinculo,
+        degradado: true as const,
+        chamado: {
+          issueKey,
+          titulo: submissao?.payload.titulo ?? '',
+          descricao: submissao?.payload.descricao ?? '',
+          status: 'indisponivel',
+          prioridade: submissao?.payload.prioridade ?? null,
+          criadoEm: vinculo.criadoEm,
+          atualizadoEm: vinculo.criadoEm,
+          slaPrimeiraResposta: null,
+        },
+      }
+    }
   }
 
   /** Comentários públicos do chamado — isolamento + RF-32 em duas camadas. */

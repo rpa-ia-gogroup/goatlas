@@ -204,10 +204,166 @@ export const TABELAS = [
    )`,
   `CREATE INDEX IF NOT EXISTS idx_inventario_assentos_coletado ON inventario_assentos (coletado_em)`,
   `CREATE INDEX IF NOT EXISTS idx_inventario_assentos_conta ON inventario_assentos (account_id, produto, coletado_em)`,
+
+  /**
+   * Notificações (RF-44, RF-47, T-204).
+   *
+   * ⚠️ **A dedupe é do BANCO, não da aplicação.** Duas fontes independentes detectam
+   * a mesma mudança de propósito (webhook + polling, RF-47: notificação não pode
+   * depender de mecanismo único), e as duas chegam a instantes diferentes. Um
+   * `SELECT` antes do `INSERT` tem a mesma janela de corrida do outbox — os dois
+   * caminhos passam pelo `SELECT` e a pessoa recebe o aviso duas vezes.
+   *
+   * `carimbo_mudanca` é o carimbo **do Jira** (`updated`/`created` do evento), nunca
+   * `agora()`: relógio nosso produziria chaves diferentes para o mesmo fato, e a
+   * dedupe não deduparia nada.
+   */
+  `CREATE TABLE IF NOT EXISTS notificacoes (
+     id                  TEXT PRIMARY KEY,
+     issue_key           TEXT NOT NULL,
+     destinatario_email  TEXT NOT NULL,
+     tipo_evento         TEXT NOT NULL,
+     carimbo_mudanca     TEXT NOT NULL,
+     fonte               TEXT NOT NULL,
+     canal               TEXT,
+     destino             TEXT,
+     titulo              TEXT NOT NULL,
+     corpo               TEXT NOT NULL,
+     estado              TEXT NOT NULL DEFAULT 'pendente',
+     tentativas          INTEGER NOT NULL DEFAULT 0,
+     ultimo_erro         TEXT,
+     criado_em           TEXT NOT NULL,
+     atualizado_em       TEXT NOT NULL,
+     UNIQUE (issue_key, tipo_evento, carimbo_mudanca),
+     CHECK (estado IN ('pendente', 'enviada', 'falha', 'suprimida')),
+     CHECK (fonte IN ('webhook', 'polling', 'app')),
+     CHECK (tipo_evento IN ('chamado_criado', 'status_alterado', 'comentario_publico', 'sla_em_risco'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_notificacoes_estado ON notificacoes (estado, criado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_notificacoes_destinatario ON notificacoes (destinatario_email, criado_em)`,
+
+  /**
+   * Ações do próprio solicitante (RF-48, T-211).
+   *
+   * ⚠️ Comparar autor **não funciona** aqui: sob proxy total (`D-01`) todo comentário
+   * sai da conta de serviço, então o autor do comentário da pessoa e o do agente do
+   * time de tech são o mesmo. O que distingue é o app ter registrado a ação **no
+   * momento em que a fez** — daí a impressão digital do corpo normalizado.
+   */
+  `CREATE TABLE IF NOT EXISTS acoes_proprias (
+     id                 TEXT PRIMARY KEY,
+     issue_key          TEXT NOT NULL,
+     ator_email         TEXT NOT NULL,
+     tipo_evento        TEXT NOT NULL,
+     impressao_digital  TEXT NOT NULL,
+     criado_em          TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_acoes_proprias_busca
+     ON acoes_proprias (issue_key, tipo_evento, impressao_digital)`,
+
+  /**
+   * Preferência de canal (RF-45). Ausência de linha = o default de Q11, resolvido em
+   * `notificacoes/preferencias.ts` — não um canal inventado por linha faltante.
+   */
+  `CREATE TABLE IF NOT EXISTS preferencias_notificacao (
+     email          TEXT PRIMARY KEY,
+     canal          TEXT NOT NULL,
+     destino        TEXT,
+     atualizado_em  TEXT NOT NULL,
+     CHECK (canal IN ('chat', 'email', 'nenhum'))
+   )`,
+
+  /**
+   * Marca-d'água do polling (RF-47, RNF-15). Uma linha, chave fixa.
+   *
+   * ⚠️ Sem marca-d'água o polling vira **varredura completa** a cada rodada — a forma
+   * mais fácil de descobrir os burst limits não publicados da Atlassian do jeito ruim
+   * (`R-02`). O JQL é sempre `updated >= <marca>`.
+   */
+  `CREATE TABLE IF NOT EXISTS marca_agua_polling (
+     chave          TEXT PRIMARY KEY,
+     carimbo        TEXT NOT NULL,
+     atualizado_em  TEXT NOT NULL
+   )`,
+
+  /**
+   * Alertas de SLA já emitidos (RF-46, T-231). PK composta porque o cron roda de novo
+   * a cada janela: sem ela, o mesmo chamado em risco geraria alerta a cada rodada até
+   * alguém responder — o jeito garantido de o alerta ser ignorado.
+   */
+  `CREATE TABLE IF NOT EXISTS alertas_sla (
+     issue_key   TEXT NOT NULL,
+     limiar      TEXT NOT NULL,
+     criado_em   TEXT NOT NULL,
+     PRIMARY KEY (issue_key, limiar),
+     CHECK (limiar IN ('risco', 'estourado'))
+   )`,
+
+  /**
+   * Última avaliação de SLA por chamado (RF-46, RF-55, T-232).
+   *
+   * ⚠️ Existe para o **painel não chamar a Atlassian**. Saber se um chamado teve primeira
+   * resposta dentro do prazo exige ler os comentários dele; fazer isso para cada chamado
+   * no `GET /api/admin/metricas` transformaria abrir o console em dezenas de chamadas com
+   * a credencial única (`R-02`) — e a página ficaria lenta na proporção do sucesso do
+   * projeto.
+   *
+   * O cron de SLA já lê tudo isso para decidir se alerta. Gravar o resultado é grátis, e
+   * o painel passa a mostrar "avaliado na última rodada" em vez de "medido agora" —
+   * honesto e barato. `UPSERT` porque é um retrato, não histórico: o histórico de eventos
+   * está em `notificacoes` e `auditoria`.
+   */
+  `CREATE TABLE IF NOT EXISTS avaliacoes_sla (
+     issue_key       TEXT PRIMARY KEY,
+     estado          TEXT NOT NULL,
+     prazo_em        TEXT NOT NULL,
+     respondida_em   TEXT,
+     dentro_do_prazo INTEGER,
+     avaliado_em     TEXT NOT NULL,
+     CHECK (estado IN ('respondido', 'ok', 'risco', 'estourado'))
+   )`,
+] as const
+
+/**
+ * Colunas acrescentadas a tabelas que já existem em produção.
+ *
+ * `CREATE TABLE IF NOT EXISTS` não altera tabela existente: `env.DB` é persistente
+ * entre deploys, então a tabela criada na Fase 1 continua sem a coluna nova. Cada
+ * `ALTER` roda uma vez e falha nas seguintes com "duplicate column" — engolir **só**
+ * esse erro é o que torna a migração idempotente sem tabela de versão.
+ */
+const COLUNAS_ADICIONADAS = [
+  // T-304 / RF-19 — a área **no momento da criação** é o dado histórico correto,
+  // mesmo que a pessoa mude de área depois.
+  `ALTER TABLE vinculos ADD COLUMN area TEXT`,
+  // T-210 — o carimbo da última mudança já sincronizada, por chamado. A marca-d'água
+  // global diz o que **buscar**; esta coluna diz o que já foi visto naquele chamado.
+  `ALTER TABLE vinculos ADD COLUMN notificado_ate TEXT`,
+  /**
+   * T-210 — o último status já avisado.
+   *
+   * ⚠️ Sem esta coluna, "mudou de status" viraria "`updated` do Jira mudou" — e
+   * `updated` muda quando alguém edita a descrição, adiciona label ou mexe num campo
+   * qualquer. A pessoa receberia "seu chamado mudou para Em andamento" três vezes
+   * porque o agente ajustou o resumo três vezes.
+   */
+  `ALTER TABLE vinculos ADD COLUMN ultimo_status_notificado TEXT`,
 ] as const
 
 export async function migrar(db: Banco): Promise<void> {
   for (const sql of TABELAS) {
     await db.exec(sql, [])
+  }
+  for (const sql of COLUNAS_ADICIONADAS) {
+    try {
+      await db.exec(sql, [])
+    } catch (e) {
+      // Só "coluna já existe" é esperado. Qualquer outro erro de DDL é bug de schema
+      // e precisa subir — engolir tudo transformaria uma migração quebrada em app
+      // que roda pela metade.
+      if (!/duplicate column|already exists/i.test(e instanceof Error ? e.message : String(e))) {
+        throw e
+      }
+    }
   }
 }

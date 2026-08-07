@@ -13,6 +13,11 @@ export interface Identidade {
   readonly isAdmin: boolean
   /** App publicado em modo demonstração: nada é criado no Jira. */
   readonly modoDemo: boolean
+  /**
+   * Lê dado REAL e recusa toda escrita — o estado de desenvolvimento com credencial
+   * real. Diferente de `modoDemo`: aqui o que você lê é verdadeiro.
+   */
+  readonly somenteLeitura: boolean
 }
 
 export type EstadoVerificacao = 'pendente' | 'ok' | 'falhou'
@@ -49,6 +54,28 @@ export interface ChamadoResumo {
   readonly atualizadoEm: string | null
   readonly via: 'conversa' | 'formulario'
   readonly verificadoRegras: boolean
+  /** RF-19 - area no momento da abertura. `null` = mapa nao conhecia o e-mail. */
+  readonly area: string | null
+}
+
+export interface RespostaMeusChamados {
+  readonly itens: readonly ChamadoResumo[]
+  /**
+   * Status que EXISTEM nos chamados da pessoa (T-241).
+   *
+   * Vem do servidor porque os status sao do workflow do JSM - configuracao do projeto,
+   * nao do app. Uma lista fixa no front seria hardcode de configuracao alheia (`RNF-25`),
+   * e ficaria errada no dia em que o time de tech renomear uma coluna.
+   */
+  readonly statusDisponiveis: readonly string[]
+  /** Total antes do filtro - e o que permite dizer "3 de 12". */
+  readonly total: number
+}
+
+/** T-242 - acao que o workflow do JSM oferece ao cliente. Lista vazia = sem botao. */
+export interface TransicaoDisponivel {
+  readonly id: string
+  readonly nome: string
 }
 
 export interface ComentarioPublico {
@@ -70,7 +97,15 @@ export interface DetalheChamado {
   }
   readonly via: 'conversa' | 'formulario'
   readonly verificadoRegras: boolean
+  readonly area: string | null
   readonly comentarios: readonly ComentarioPublico[]
+  /**
+   * `true` = a Atlassian não respondeu e o que está na tela veio do que NÓS gravamos
+   * (`RNF-19`). O chamado existe; o estado dele é que não pôde ser lido.
+   */
+  readonly degradado: boolean
+  /** `true` = não deu para buscar as respostas. Diferente de "não há respostas ainda". */
+  readonly comentariosIndisponiveis: boolean
 }
 
 export interface TipoChamado {
@@ -179,6 +214,39 @@ export interface PaginaLida {
   readonly truncado: boolean
 }
 
+/* ---------- notificacao e preferencia (RF-44, RF-45) -------------------- */
+
+export type CanalNotificacao = 'chat' | 'email' | 'nenhum'
+
+export interface Preferencia {
+  readonly canal: CanalNotificacao
+  readonly destino: string | null
+  /** `false` = e o default da config, nao uma escolha da pessoa. */
+  readonly escolhidaPelaPessoa: boolean
+  /**
+   * `false` = **Q11 sem resposta**: ninguem definiu canal ainda.
+   *
+   * A tela precisa distinguir isso de "escolhi nao receber": as duas mostram `nenhum`, e
+   * so uma e decisao de quem esta lendo.
+   */
+  readonly canalPadraoDefinido: boolean
+}
+
+export type TipoEventoNotificacao =
+  | 'chamado_criado'
+  | 'status_alterado'
+  | 'comentario_publico'
+  | 'sla_em_risco'
+
+export interface AvisoRecebido {
+  readonly issueKey: string
+  readonly tipoEvento: TipoEventoNotificacao
+  readonly titulo: string
+  readonly estado: 'pendente' | 'enviada' | 'falha' | 'suprimida'
+  readonly canal: CanalNotificacao | null
+  readonly criadoEm: string
+}
+
 /** Espelha `ConfigValores` do servidor no que a tela de admin edita. */
 export interface ConfigValores {
   readonly dominios_permitidos: string[]
@@ -198,6 +266,26 @@ export interface ConfigValores {
   readonly ttl_conteudo_seg: number
   readonly limite_requisicoes_por_minuto: number
   readonly teto_custo_conversa_usd: number
+  readonly canal_notificacao_padrao: CanalNotificacao | null
+  readonly chat_webhook_url: string | null
+  readonly email_endpoint: string | null
+  readonly email_remetente: string | null
+  readonly base_publica_app: string | null
+  readonly sla_fracao_aviso: number
+  readonly emails_piloto: string[]
+  readonly areas_por_email: Record<string, string>
+  readonly baseline_assentos: BaselineAssentos | null
+  readonly retencao_conversas_dias: number | null
+  readonly retencao_auditoria_dias: number | null
+  readonly retencao_notificacoes_dias: number | null
+  readonly org_id: string | null
+  readonly assentos_ocioso_dias: number
+  readonly custo_mensal_por_produto: Record<string, number>
+}
+
+export interface BaselineAssentos {
+  readonly coletadoEm: string
+  readonly porProduto: Record<string, number>
 }
 
 /* ---------- mapa de lacunas (RF-42) ------------------------------------ */
@@ -239,6 +327,72 @@ export interface ResumoBuscasMetricas {
   readonly taxaSemResultadoPct: number | null
 }
 
+/* ---------- o painel completo de RF-55 (T-232, T-234, T-310) ----------- */
+
+export interface CalibragemRegra {
+  readonly regra: string
+  readonly thresholdAtual: number
+  readonly totalBloqueios: number
+  readonly overrides: number
+  readonly taxaOverridePct: number | null
+  /**
+   * T-310 - o que as pessoas escreveram ao insistir.
+   *
+   * Sem isto, a tela empurraria para mexer no threshold, que e o botao mais facil que
+   * existe ali - quando a resposta certa costuma ser escrever a pagina que falta.
+   */
+  readonly motivosDeOverride: readonly string[]
+  readonly paginasApontadas: readonly { readonly titulo: string; readonly vezes: number }[]
+}
+
+export interface ResumoSla {
+  readonly totalAvaliados: number
+  readonly respondidos: number
+  readonly dentroDoPrazo: number
+  /** `null` = ninguem respondeu nada ainda. Nunca `0`. */
+  readonly aderenciaPct: number | null
+  readonly emRisco: number
+  readonly estourados: number
+}
+
+export interface ResumoPainel {
+  readonly chamadosPorArea: readonly { readonly area: string | null; readonly total: number }[]
+  readonly chamadosPorPrioridade: Readonly<Record<string, number>>
+  readonly canal: {
+    readonly porVia: Readonly<Record<string, number>>
+    readonly totalPeloApp: number
+  }
+  readonly calibragem: readonly CalibragemRegra[]
+  readonly notificacoes: Readonly<
+    Record<'pendente' | 'enviada' | 'falha' | 'suprimida', number>
+  >
+  readonly telemetriaAtlassian: {
+    readonly total429: number
+    readonly totalRequisicoes: number
+    readonly taxa429Pct: number | null
+    readonly acimaDoLimiar: boolean
+  }
+  readonly ia: {
+    readonly conversas: number
+    readonly custoTotalUsd: number
+    readonly custoMedioUsd: number | null
+    readonly conversasNoTeto: number
+  }
+  readonly sla: ResumoSla
+  /** T-235: o número é PROXY, não medição (`D-20`). O painel diz isso na tela. */
+  readonly deflexaoResolvidaConhecida: false
+  readonly avisoDeflexao: string
+  readonly deflexaoAparente: {
+    readonly bloqueiosSemOverride: number
+    readonly semChamadoDepois: number
+    /** `null` = nenhum bloqueio ainda. Nunca `0%`. */
+    readonly taxaPct: number | null
+    readonly janelaDias: number
+    /** O viés declarado — vai JUNTO do número na tela, nunca em rodapé. */
+    readonly viesConhecido: string
+  }
+}
+
 export interface ResumoMetricas {
   readonly deflexaoPorRegra: readonly DeflexaoPorRegra[]
   readonly totalBloqueios: number
@@ -247,6 +401,10 @@ export interface ResumoMetricas {
   readonly taxaOverrideGlobalPct: number | null
   readonly chamadosPorVia: Readonly<Record<string, number>>
   readonly buscas: ResumoBuscasMetricas
+  readonly painel: ResumoPainel
+  readonly baselineAssentos: BaselineAssentos | null
+  readonly canalNotificacaoDefinido: boolean
+  readonly piloto: { readonly ligado: boolean; readonly pessoas: number }
 }
 
 /* ---------- governança de assentos (RF-51 a RF-54) --------------------- */
@@ -267,7 +425,11 @@ export interface ResumoCusto {
   readonly custoConfigurado: boolean
   readonly ocioso: {
     readonly usuarios: number
+    /** ⚠️ **TETO** da economia quando `economiaConfiavel` é `false`, não a economia. */
     readonly custoMensalUsd: number | null
+    /** `false` = preço escalonado sem curva configurada (T-134). A tela mostra a ressalva
+     * ao lado do número, porque é aqui que se decide cortar acesso de alguém. */
+    readonly economiaConfiavel: boolean
   }
 }
 
@@ -284,13 +446,29 @@ export interface ItemInventarioAssento {
   readonly ultimoAcessoEm: string | null
 }
 
+export interface EndpointNaoVerificado {
+  readonly metodo: string
+  readonly caminho: string
+  readonly risco: string
+}
+
 export interface RespostaAssentos {
-  /** `null` = a coleta diária ainda não rodou nenhuma vez. */
+  /** `null` = a coleta diaria ainda nao rodou nenhuma vez. */
   readonly coletadoEm: string | null
   readonly ociosoDesdeDias: number
   readonly limitacoesUltimoAcesso: LimitacoesUltimoAcesso
   readonly itens: readonly ItemInventarioAssento[]
   readonly custo: ResumoCusto
+  readonly organizacaoConfigurada: boolean
+  readonly usandoFakes: boolean
+  /**
+   * O que ainda nao foi verificado contra a API real (Q1).
+   *
+   * Vai **para a tela**: um console que promete revogar assento e falha no clique e pior
+   * que um console que avisa antes.
+   */
+  readonly endpointsNaoVerificados: readonly EndpointNaoVerificado[]
+  readonly baseline: BaselineAssentos | null
 }
 
 export type TipoRecomendacao = 'rebaixar_para_customer' | 'remover_ocioso'
@@ -404,7 +582,13 @@ export const api = {
       `/api/tipos-chamado/${encodeURIComponent(requestTypeId)}/campos`,
     ),
 
-  meusChamados: () => chamar<{ itens: ChamadoResumo[] }>('/api/chamados'),
+  meusChamados: (filtros: { status?: string; termo?: string } = {}) => {
+    const q = new URLSearchParams()
+    if (filtros.status) q.set('status', filtros.status)
+    if (filtros.termo) q.set('q', filtros.termo)
+    const sufixo = q.toString()
+    return chamar<RespostaMeusChamados>('/api/chamados' + (sufixo ? '?' + sufixo : ''))
+  },
 
   detalhe: (issueKey: string) =>
     chamar<DetalheChamado>(`/api/chamados/${encodeURIComponent(issueKey)}`),
@@ -414,6 +598,59 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ texto }),
     }),
+
+  /**
+   * T-240 - anexo do solicitante no proprio chamado.
+   *
+   * `FormData` sem `Content-Type` explicito de proposito: o `fetch` gera o boundary junto
+   * com o corpo, e declarar o tipo a mao produz um boundary que nao corresponde.
+   */
+  anexar: async (issueKey: string, arquivos: readonly File[]) => {
+    const form = new FormData()
+    for (const arquivo of arquivos) form.append('arquivo', arquivo)
+    const resposta = await fetch('/api/chamados/' + encodeURIComponent(issueKey) + '/anexos', {
+      method: 'POST',
+      body: form,
+    })
+    const dados = (await resposta.json().catch(() => null)) as
+      | { ok?: boolean; enviados?: string[]; erro?: string; mensagem?: string }
+      | null
+    if (!resposta.ok) {
+      throw new ErroApi(
+        dados?.mensagem ?? dados?.erro ?? 'Nao consegui anexar agora.',
+        'anexo',
+        resposta.status,
+      )
+    }
+    return { enviados: dados?.enviados ?? [] }
+  },
+
+  transicoes: (issueKey: string) =>
+    chamar<{ itens: TransicaoDisponivel[] }>(
+      '/api/chamados/' + encodeURIComponent(issueKey) + '/transicoes',
+    ),
+
+  transicionar: (issueKey: string, transicaoId: string) =>
+    chamar<{ ok: true }>('/api/chamados/' + encodeURIComponent(issueKey) + '/transicoes', {
+      method: 'POST',
+      body: JSON.stringify({ transicaoId }),
+    }),
+
+  corrigirArea: (issueKey: string, area: string | null) =>
+    chamar<{ ok: true; area: string | null; areasConhecidas: string[] }>(
+      '/api/chamados/' + encodeURIComponent(issueKey) + '/area',
+      { method: 'PUT', body: JSON.stringify({ area: area ?? '' }) },
+    ),
+
+  preferencia: () => chamar<Preferencia>('/api/preferencias'),
+
+  salvarPreferencia: (canal: CanalNotificacao, destino: string | null) =>
+    chamar<{ ok: true; canal: CanalNotificacao; destino: string | null }>('/api/preferencias', {
+      method: 'PUT',
+      body: JSON.stringify({ canal, destino }),
+    }),
+
+  meusAvisos: () => chamar<{ itens: AvisoRecebido[] }>('/api/notificacoes'),
 
   tiposChamado: () => chamar<{ itens: TipoChamado[] }>('/api/tipos-chamado'),
 
@@ -450,6 +687,24 @@ export const api = {
 
   adminRecomendacoesAssentos: () =>
     chamar<{ itens: Recomendacao[] }>('/api/admin/assentos/recomendacoes'),
+
+  /**
+   * T-131 - revogar produto. `emailConfirmado` e a **segunda** confirmacao.
+   *
+   * Nao e um "tem certeza?" clicavel: digitar o e-mail obriga a olhar QUEM esta sendo
+   * afetado. O erro a evitar nao e clicar sem querer - e revogar a linha errada de uma
+   * tabela que estava ordenada de outro jeito do que se esperava.
+   */
+  adminRevogarAssento: (dados: {
+    accountId: string
+    produto: string
+    email: string
+    emailConfirmado: string
+  }) =>
+    chamar<{ ok: true; aviso: string }>('/api/admin/assentos/revogar', {
+      method: 'POST',
+      body: JSON.stringify(dados),
+    }),
 
   adminAuditoria: (email?: string) =>
     chamar<{ itens: RegistroAuditoria[] }>(

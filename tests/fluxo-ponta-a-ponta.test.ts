@@ -10,6 +10,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
+import { linhasComoObjetos } from '@/lib/db/tipos'
 import { SqliteLocal } from '@/lib/db/sqlite-local'
 import { migrar } from '@/lib/db/schema'
 import { Config } from '@/lib/config'
@@ -128,7 +129,9 @@ describe('Definição de Pronto — o fluxo completo pela conversa', () => {
 
     // RF-58 — a auditoria conta a história inteira.
     const auditoria = await db.query(`SELECT DISTINCT acao FROM auditoria ORDER BY acao`, [])
-    const acoes = auditoria.rows.map((l) => l[0])
+    // ⚠️ Nunca indexar `rows` direto: a forma varia entre o shim de teste e o
+    // `env.DB` da plataforma — foi assim que toda leitura virou `{}` em produção.
+    const acoes = linhasComoObjetos<{ acao: string }>(auditoria).map((l) => l.acao)
     for (const esperada of [
       'conversa_iniciada',
       'mensagem_enviada',

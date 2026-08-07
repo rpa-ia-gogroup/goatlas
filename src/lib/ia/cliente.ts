@@ -80,7 +80,13 @@ export class ClienteIAHttp implements ClienteIA {
   private _custoAcumuladoUsd = 0
 
   constructor(private readonly opcoes: OpcoesClienteIA) {
-    this.fetchImpl = opcoes.fetchImpl ?? fetch
+    // ⚠️ **`fetch` PRECISA vir com `this` amarrado ao global.** Guardado numa propriedade e
+    // chamado como `this.fetchImpl(...)`, o `this` passa a ser este objeto, e o runtime dos
+    // Workers recusa com `Illegal invocation` — a chamada nem sai. No Node dos testes
+    // funciona, porque lá o `fetch` não confere o `this`: por isso 643 testes verdes
+    // conviviam com um cliente que não conseguia fazer uma única requisição em produção.
+    // Descoberto em 07/08/2026, no instante em que o modo demonstração saiu.
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis)
     this.timeoutMs = opcoes.timeoutMs ?? TIMEOUT_PADRAO_MS
   }
 
@@ -130,7 +136,12 @@ export class ClienteIAHttp implements ClienteIA {
     const controlador = new AbortController()
     const timer = setTimeout(() => controlador.abort(), this.timeoutMs)
     try {
-      const resposta = await this.fetchImpl(`${base}/chat/completions`, {
+      // ⚠️ A barra final é removida aqui, não na configuração. `LLM_BASE_URL` é digitado
+      // por uma pessoa no console do GoDeploy, e o jeito natural de copiar uma URL de
+      // navegador é COM a barra (`https://ai-proxy.gogroupbr.com/`). Sem isto o app monta
+      // `…//chat/completions` e o proxy responde 404 — erro de configuração que parece
+      // "a IA está fora do ar". Normalizar na borda custa uma linha.
+      const resposta = await this.fetchImpl(`${base.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${chave}`,

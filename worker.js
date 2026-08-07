@@ -22,6 +22,13 @@ function prefixarAutoria(corpo, autorNome, autorEmail) {
 
 ${corpo}`;
 }
+function ehComentarioDoSolicitante(corpo) {
+  return PREFIXO_GOATLAS.test(corpo.trimStart());
+}
+var PREFIXO_GOATLAS = /^\*\*.+?\*\* \(.+?@.+?\) via goatlas:\s*/;
+function removerPrefixoAutoria(corpo) {
+  return corpo.trimStart().replace(PREFIXO_GOATLAS, "");
+}
 
 // src/lib/atlassian/tipos.ts
 var SLA_PRIMEIRA_RESPOSTA_HORAS = {
@@ -46,7 +53,7 @@ var TransporteAtlassian = class {
   constructor(opcoes) {
     this.opcoes = opcoes;
     this.dormir = opcoes.dormir ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-    this.fetchImpl = opcoes.fetchImpl ?? fetch;
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
     this.aleatorio = opcoes.aleatorio ?? Math.random;
     this.maxTentativas = opcoes.maxTentativas ?? MAX_TENTATIVAS_PADRAO;
   }
@@ -79,8 +86,28 @@ var TransporteAtlassian = class {
   }
   async requisitar(caminho, init = {}) {
     const resposta = await this.enviar(caminho, init, "application/json");
-    const texto = await resposta.text();
-    return texto.length > 0 ? JSON.parse(texto) : null;
+    const texto2 = await resposta.text();
+    return texto2.length > 0 ? JSON.parse(texto2) : null;
+  }
+  /**
+   * Upload multipart — `attachTemporaryFile` do JSM (`RF-25`, T-240).
+   *
+   * ⚠️ Dois detalhes que a Atlassian não perdoa:
+   *
+   * 1. **`X-Atlassian-Token: no-check`** é obrigatório. Sem ele o upload é recusado
+   *    como possível CSRF, com um 403 genérico que não explica nada.
+   * 2. **Não se define `Content-Type`.** O `fetch` gera o boundary junto com o corpo;
+   *    declarar `multipart/form-data` à mão produz um boundary que não corresponde ao
+   *    do corpo, e a Atlassian responde 400 como se o arquivo estivesse errado.
+   */
+  async requisitarMultipart(caminho, form) {
+    const resposta = await this.enviar(
+      caminho,
+      { method: "POST", corpoBruto: form, headers: { "X-Atlassian-Token": "no-check" } },
+      "application/json"
+    );
+    const texto2 = await resposta.text();
+    return texto2.length > 0 ? JSON.parse(texto2) : null;
   }
   /**
    * Baixa **bytes**, não JSON — anexo de página (`RNF-02`: o navegador não fala com
@@ -128,7 +155,8 @@ var TransporteAtlassian = class {
           ...init.body ? { "Content-Type": "application/json" } : {},
           ...init.headers
         },
-        ...init.body === void 0 ? {} : { body: init.body }
+        ...init.body === void 0 ? {} : { body: init.body },
+        ...init.corpoBruto === void 0 ? {} : { body: init.corpoBruto }
       });
       if (resposta.ok) return resposta;
       if (resposta.status === 429) this._total429 += 1;
@@ -215,6 +243,20 @@ function montarJql(params) {
     `created >= -${params.janelaDias}d`,
     `statusCategory = Done`
   ].join(" AND ");
+}
+var JANELA_INICIAL_POLLING_MIN = 30;
+var MARGEM_POLLING_MIN = 2;
+function paraJql(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(
+    d.getUTCHours()
+  )}:${p(d.getUTCMinutes())}`;
+}
+function montarJqlAtualizados(desde, agoraMs) {
+  const desdeMs = desde ? Date.parse(desde) : Number.NaN;
+  const base = Number.isFinite(desdeMs) ? desdeMs - MARGEM_POLLING_MIN * 6e4 : agoraMs - JANELA_INICIAL_POLLING_MIN * 6e4;
+  return `reporter = currentUser() AND updated >= "${paraJql(base)}" ORDER BY updated ASC`;
 }
 var CAMPOS_DE_SISTEMA_JA_COBERTOS = /* @__PURE__ */ new Set(["summary", "description", "priority"]);
 function camposAdicionais(brutos) {
@@ -665,6 +707,62 @@ var ClienteAtlassianHttp = class {
       issueId: String(i.id ?? "")
     }));
   }
+  async buscarChamadosAtualizadosDesde(params) {
+    const jql = montarJqlAtualizados(params.desde, Date.now());
+    const dados = await this.transporte.requisitar(
+      `/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&maxResults=${params.limite}&fields=updated`
+    );
+    return (dados?.issues ?? []).map((i) => ({
+      issueKey: String(i.key ?? ""),
+      atualizadoEm: String(i.fields?.updated ?? "")
+    })).filter((i) => i.issueKey.length > 0);
+  }
+  /**
+   * Anexo em dois passos (RF-25, RF-34).
+   *
+   * ⚠️ O primeiro passo é **multipart com `X-Atlassian-Token: no-check`** — sem esse
+   * cabeçalho a Atlassian recusa o upload como possível CSRF, e o erro que ela devolve
+   * (403 genérico) não diz isso. É o tipo de detalhe que custa uma tarde.
+   */
+  async anexarArquivo(serviceDeskId, issueKey, arquivo) {
+    const form = new FormData();
+    form.append("file", new Blob([arquivo.bytes], { type: arquivo.tipo }), arquivo.nome);
+    const temporario = await this.transporte.requisitarMultipart(
+      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/attachTemporaryFile`,
+      form
+    );
+    const ids = (temporario?.temporaryAttachments ?? []).map((t) => typeof t.temporaryAttachmentId === "string" ? t.temporaryAttachmentId : null).filter((id) => id !== null);
+    if (ids.length === 0) {
+      throw new ErroAtlassian("upload tempor\xE1rio n\xE3o devolveu id de anexo", {
+        transitorio: true,
+        recurso: "attachTemporaryFile"
+      });
+    }
+    await this.transporte.requisitar(
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/attachment`,
+      {
+        method: "POST",
+        // `public: true` de propósito: é o anexo DO SOLICITANTE no próprio chamado, e
+        // anexo interno seria invisível para quem o mandou (`RF-34`).
+        body: JSON.stringify({ temporaryAttachmentIds: ids, public: true })
+      }
+    );
+  }
+  async listarTransicoes(issueKey) {
+    const dados = await this.transporte.requisitar(
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/transition`
+    );
+    return (dados?.values ?? []).map((t) => ({ id: String(t.id ?? ""), nome: String(t.name ?? "") })).filter((t) => t.id.length > 0);
+  }
+  async transicionar(issueKey, transicaoId) {
+    await this.transporte.requisitar(
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/transition`,
+      { method: "POST", body: JSON.stringify({ id: transicaoId }) }
+    );
+  }
+  telemetria() {
+    return this.contadores;
+  }
   async verificarSaude() {
     try {
       await this.transporte.requisitar("/rest/servicedeskapi/servicedesk?limit=1");
@@ -683,8 +781,8 @@ var FALHAS = Object.freeze({
   timeout: { status: 504, transitorio: true },
   rejeitado: { status: 400, transitorio: false }
 });
-function normalizar(texto) {
-  return texto.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+function normalizar(texto2) {
+  return texto2.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 }
 function palavrasDe(termo) {
   return normalizar(termo).split(/[^a-z0-9]+/).filter((p) => p.length > 0);
@@ -710,6 +808,9 @@ var ClienteAtlassianFake = class {
       historico: inicial.historico ?? [],
       comentarios: inicial.comentarios ?? /* @__PURE__ */ new Map(),
       chamados: inicial.chamados ?? /* @__PURE__ */ new Map(),
+      relogio: inicial.relogio ?? (() => (/* @__PURE__ */ new Date(0)).toISOString()),
+      transicoes: inicial.transicoes ?? /* @__PURE__ */ new Map(),
+      anexosDeChamado: inicial.anexosDeChamado ?? /* @__PURE__ */ new Map(),
       falhas: {
         criarChamado: "nenhum",
         buscarConfluence: "nenhum",
@@ -719,9 +820,54 @@ var ClienteAtlassianFake = class {
         obterCamposDoTipo: "nenhum",
         paginaRestrita: "nenhum",
         obterAnexo: "nenhum",
+        buscarAtualizados: "nenhum",
+        anexarArquivo: "nenhum",
+        transicionar: "nenhum",
         ...inicial.falhas
       }
     };
+  }
+  /**
+   * Avança o contador de chaves para além do que já existe — só demonstração/teste.
+   *
+   * ⚠️ O Worker é **stateless**: `contadorIssue` volta a zero a cada requisição, então o
+   * segundo chamado aberto na demonstração também nascia `GOATLAS-1` e batia no
+   * `UNIQUE (vinculos.issue_key)`. Pego no app real em 07/08/2026.
+   *
+   * Em produção nada disto existe: a chave é do JSM, que não repete.
+   */
+  ajustarContadorIssue(minimo) {
+    if (minimo > this.contadorIssue) this.contadorIssue = minimo;
+  }
+  /**
+   * Muda o chamado como o time de tech mudaria — só para teste e demonstração.
+   *
+   * Existe porque a Fase 3 precisa encenar o outro lado: status que muda, comentário
+   * que o agente escreve. Sem isso, o teste de notificação só conseguiria observar o
+   * que o próprio app faz — e é exatamente o que ele **não** deve notificar (`RF-48`).
+   */
+  simularMudancaDoTime(issueKey, mudanca) {
+    const atual = this.estado.chamados.get(issueKey);
+    if (atual) {
+      this.estado.chamados.set(issueKey, {
+        ...atual,
+        status: mudanca.status ?? atual.status,
+        atualizadoEm: mudanca.atualizadoEm ?? atual.atualizadoEm
+      });
+    }
+    if (mudanca.comentarioPublico) {
+      const atuais = this.estado.comentarios.get(issueKey) ?? [];
+      this.estado.comentarios.set(issueKey, [
+        ...atuais,
+        {
+          id: `t${atuais.length + 1}`,
+          corpo: mudanca.comentarioPublico.corpo,
+          autorNome: mudanca.comentarioPublico.autorNome,
+          criadoEm: mudanca.comentarioPublico.criadoEm,
+          publico: true
+        }
+      ]);
+    }
   }
   checar(modo, recurso) {
     if (modo === "nenhum") return;
@@ -754,8 +900,8 @@ var ClienteAtlassianFake = class {
       descricao: dados.descricao,
       status: "Aberto",
       prioridade: dados.prioridade,
-      criadoEm: (/* @__PURE__ */ new Date(0)).toISOString(),
-      atualizadoEm: (/* @__PURE__ */ new Date(0)).toISOString(),
+      criadoEm: this.estado.relogio(),
+      atualizadoEm: this.estado.relogio(),
       slaPrimeiraResposta: { prazo: null, cumprido: null }
     });
     return criado;
@@ -804,8 +950,8 @@ var ClienteAtlassianFake = class {
     const palavras = this.estado.filtrarPorTermo ? palavrasDe(params.termo) : [];
     return this.estado.paginas.filter((p) => {
       if (palavras.length === 0) return true;
-      const texto = normalizar(`${p.titulo} ${p.trecho}`);
-      return palavras.every((palavra) => texto.includes(palavra));
+      const texto2 = normalizar(`${p.titulo} ${p.trecho}`);
+      return palavras.every((palavra) => texto2.includes(palavra));
     }).filter((p) => permitidos.has(p.espaco)).filter((p) => !p.labels.some((l) => bloqueadas.has(l))).filter((p) => !this.estado.idsRestritos.has(p.id)).sort((a, b) => b.score - a.score).slice(0, params.limite);
   }
   async obterMetadadosPagina(idPagina) {
@@ -908,9 +1054,159 @@ var ClienteAtlassianFake = class {
     const c = this.porChave.get(chave);
     return c ? [c] : [];
   }
+  /**
+   * T-210 — chamados alterados desde um instante.
+   *
+   * O fake compara `atualizadoEm` do próprio estado. Ele **não** aplica a margem nem o
+   * formato de JQL: isso é responsabilidade do cliente real, e tem teste próprio
+   * (`montarJqlAtualizados`). Aqui o que interessa é o serviço de notificação receber a
+   * lista certa.
+   */
+  async buscarChamadosAtualizadosDesde(params) {
+    this.chamadas.push({ operacao: "buscarChamadosAtualizadosDesde", params });
+    this.checar(this.estado.falhas.buscarAtualizados, "buscarChamadosAtualizadosDesde");
+    const desdeMs = params.desde ? Date.parse(params.desde) : Number.NaN;
+    return [...this.estado.chamados.values()].filter((c) => {
+      if (!Number.isFinite(desdeMs)) return true;
+      const ms = Date.parse(c.atualizadoEm);
+      return Number.isFinite(ms) ? ms >= desdeMs : true;
+    }).map((c) => ({ issueKey: c.issueKey, atualizadoEm: c.atualizadoEm })).sort((a, b) => a.atualizadoEm.localeCompare(b.atualizadoEm)).slice(0, params.limite);
+  }
+  async anexarArquivo(serviceDeskId, issueKey, arquivo) {
+    this.chamadas.push({
+      operacao: "anexarArquivo",
+      // ⚠️ Os BYTES não vão para o registro: o teste que imprime `chamadas` num diff
+      // despejaria o arquivo inteiro.
+      params: { serviceDeskId, issueKey, nome: arquivo.nome, tipo: arquivo.tipo }
+    });
+    this.checar(this.estado.falhas.anexarArquivo, "anexarArquivo");
+    const atuais = this.estado.anexosDeChamado.get(issueKey) ?? [];
+    this.estado.anexosDeChamado.set(issueKey, [
+      ...atuais,
+      { nome: arquivo.nome, tipo: arquivo.tipo, tamanho: arquivo.bytes.byteLength }
+    ]);
+  }
+  async listarTransicoes(issueKey) {
+    this.chamadas.push({ operacao: "listarTransicoes", params: issueKey });
+    return (this.estado.transicoes.get(issueKey) ?? []).map(({ id, nome }) => ({ id, nome }));
+  }
+  async transicionar(issueKey, transicaoId) {
+    this.chamadas.push({ operacao: "transicionar", params: { issueKey, transicaoId } });
+    this.checar(this.estado.falhas.transicionar, "transicionar");
+    const disponiveis = this.estado.transicoes.get(issueKey) ?? [];
+    const alvo = disponiveis.find((t) => t.id === transicaoId);
+    if (!alvo) {
+      throw new ErroAtlassian("transi\xE7\xE3o n\xE3o dispon\xEDvel", {
+        status: 400,
+        transitorio: false,
+        recurso: issueKey
+      });
+    }
+    const atual = this.estado.chamados.get(issueKey);
+    if (atual) {
+      this.estado.chamados.set(issueKey, { ...atual, status: alvo.statusDestino });
+    }
+  }
+  telemetria() {
+    return { total429: 0, totalRequisicoes: 0 };
+  }
   async verificarSaude() {
     const algumaFalha = Object.values(this.estado.falhas).some((f) => f !== "nenhum");
     return algumaFalha ? { ok: false, detalhe: "fake com falha injetada" } : { ok: true, detalhe: "fake" };
+  }
+};
+
+// src/lib/atlassian/somente-leitura.ts
+var MENSAGEM_SOMENTE_LEITURA = "O goatlas est\xE1 em modo somente leitura: consulta \xE0 documenta\xE7\xE3o e aos chamados funciona, mas nada \xE9 criado ou alterado no Jira. Fale com o time de tech se precisar abrir um chamado agora.";
+var ClienteAtlassianSomenteLeitura = class {
+  constructor(real) {
+    this.real = real;
+  }
+  /**
+   * Toda escrita passa por aqui.
+   *
+   * `transitorio: false` de propósito: não é indisponibilidade, é recusa. Marcar como
+   * transitório faria o outbox reprocessar para sempre uma submissão que **nunca** vai
+   * ser aceita enquanto a trava estiver ligada.
+   */
+  recusar(operacao) {
+    throw new ErroAtlassian(MENSAGEM_SOMENTE_LEITURA, {
+      transitorio: false,
+      recurso: operacao
+    });
+  }
+  // --- ESCRITA: bloqueada -------------------------------------------------
+  async criarChamado(_dados) {
+    this.recusar("criarChamado");
+  }
+  // Os parâmetros são declarados mesmo sem uso: a assinatura idêntica à da interface é o
+  // que faz o compilador acusar quando um método de escrita novo aparecer em
+  // `ClienteAtlassian` e ninguém decidir de que lado dele ele fica.
+  async comentar(_issueKey, _corpo, _autorEmail, _autorNome) {
+    this.recusar("comentar");
+  }
+  async anexarArquivo(_serviceDeskId, _issueKey, _arquivo) {
+    this.recusar("anexarArquivo");
+  }
+  async transicionar(_issueKey, _transicaoId) {
+    this.recusar("transicionar");
+  }
+  // --- LEITURA: passa inteira ---------------------------------------------
+  listarTiposChamado() {
+    return this.real.listarTiposChamado();
+  }
+  obterCamposDoTipo(sd, rt) {
+    return this.real.obterCamposDoTipo(sd, rt);
+  }
+  obterChamado(issueKey) {
+    return this.real.obterChamado(issueKey);
+  }
+  listarComentariosPublicos(issueKey) {
+    return this.real.listarComentariosPublicos(issueKey);
+  }
+  buscarConfluence(params) {
+    return this.real.buscarConfluence(params);
+  }
+  obterMetadadosPagina(id) {
+    return this.real.obterMetadadosPagina(id);
+  }
+  obterEspaco(chave) {
+    return this.real.obterEspaco(chave);
+  }
+  listarFilhosDaPagina(params) {
+    return this.real.listarFilhosDaPagina(params);
+  }
+  paginaRestrita(id) {
+    return this.real.paginaRestrita(id);
+  }
+  obterCorpoStorage(id) {
+    return this.real.obterCorpoStorage(id);
+  }
+  obterAnexo(id, nome) {
+    return this.real.obterAnexo(id, nome);
+  }
+  buscarHistoricoTickets(params) {
+    return this.real.buscarHistoricoTickets(params);
+  }
+  buscarChamadosAtualizadosDesde(params) {
+    return this.real.buscarChamadosAtualizadosDesde(params);
+  }
+  buscarChamadosPorChaveIdempotencia(chave) {
+    return this.real.buscarChamadosPorChaveIdempotencia(chave);
+  }
+  /**
+   * ⚠️ Leitura, apesar do nome parecer escrita: só **consulta** quais transições o
+   * workflow oferece. Quem executa é `transicionar`, que está bloqueada.
+   */
+  listarTransicoes(issueKey) {
+    return this.real.listarTransicoes(issueKey);
+  }
+  telemetria() {
+    return this.real.telemetria();
+  }
+  async verificarSaude() {
+    const r = await this.real.verificarSaude();
+    return { ...r, detalhe: `${r.detalhe} \xB7 somente leitura` };
   }
 };
 
@@ -920,6 +1216,171 @@ var LIMITACOES_ULTIMO_ACESSO = Object.freeze({
   criterioAtivo: 'Considerado "ativo" quem visualizou uma p\xE1gina do produto por ao menos 2 segundos.'
 });
 var ErroOrganizacao = ErroAtlassian;
+var ENDPOINTS_NAO_VERIFICADOS = Object.freeze([
+  Object.freeze({
+    metodo: "GET",
+    caminho: "/admin/v1/orgs/{orgId}/users",
+    risco: "Nome dos campos e forma da pagina\xE7\xE3o (`links.next`) seguem a documenta\xE7\xE3o, n\xE3o uma resposta observada."
+  }),
+  Object.freeze({
+    metodo: "GET",
+    caminho: "/admin/v1/orgs/{orgId}/directory/users/{accountId}/last-active-dates",
+    risco: "Formato de `product_access[].last_active` (data ISO vs. epoch) n\xE3o confirmado."
+  }),
+  Object.freeze({
+    metodo: "DELETE",
+    caminho: "/admin/v1/orgs/{orgId}/directory/users/{accountId}/manage/product-access",
+    risco: "A revoga\xE7\xE3o POR PRODUTO \xE9 a menos verific\xE1vel das tr\xEAs: a documenta\xE7\xE3o p\xFAblica descreve a remo\xE7\xE3o de acesso do usu\xE1rio, e n\xE3o est\xE1 confirmado que o filtro por produto \xE9 aceito no corpo. Enquanto isso, a rota de admin trata erro como recusa e NUNCA reporta sucesso otimista."
+  })
+]);
+var BASE_BACKOFF_MS2 = 2e3;
+var TETO_BACKOFF_MS2 = 3e4;
+var MAX_TENTATIVAS_PADRAO2 = 4;
+var TransporteOrganizacao = class {
+  constructor(opcoes) {
+    this.opcoes = opcoes;
+    this.dormir = opcoes.dormir ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
+    this.aleatorio = opcoes.aleatorio ?? Math.random;
+    this.maxTentativas = opcoes.maxTentativas ?? MAX_TENTATIVAS_PADRAO2;
+  }
+  dormir;
+  fetchImpl;
+  aleatorio;
+  maxTentativas;
+  calcularEspera(tentativa, retryAfterSeg) {
+    if (retryAfterSeg !== null && retryAfterSeg > 0) return retryAfterSeg * 1e3;
+    const exponencial = Math.min(BASE_BACKOFF_MS2 * 2 ** (tentativa - 1), TETO_BACKOFF_MS2);
+    const jitter = exponencial * 0.25 * this.aleatorio();
+    return Math.round(exponencial - exponencial * 0.125 + jitter);
+  }
+  async requisitar(caminho, init = {}) {
+    let ultimoErro = null;
+    for (let tentativa = 1; tentativa <= this.maxTentativas; tentativa += 1) {
+      const resposta = await this.fetchImpl(`${this.opcoes.baseUrl}${caminho}`, {
+        method: init.method ?? "GET",
+        headers: {
+          // Bearer, não Basic: é OUTRA credencial, com OUTRO esquema (RNF-04).
+          Authorization: `Bearer ${this.opcoes.apiKey}`,
+          Accept: "application/json",
+          ...init.body ? { "Content-Type": "application/json" } : {}
+        },
+        ...init.body === void 0 ? {} : { body: init.body }
+      });
+      if (resposta.ok) {
+        const texto2 = await resposta.text();
+        return texto2.length > 0 ? JSON.parse(texto2) : null;
+      }
+      const transitorio = resposta.status === 429 || resposta.status >= 500;
+      ultimoErro = new ErroAtlassian(`Organizations API respondeu ${resposta.status}`, {
+        status: resposta.status,
+        transitorio,
+        recurso: caminho
+      });
+      if (!transitorio || tentativa === this.maxTentativas) throw ultimoErro;
+      const retryAfter = Number(resposta.headers.get("Retry-After"));
+      await this.dormir(
+        this.calcularEspera(tentativa, Number.isFinite(retryAfter) ? retryAfter : null)
+      );
+    }
+    throw ultimoErro ?? new ErroAtlassian("falha desconhecida", { transitorio: true, recurso: caminho });
+  }
+};
+var BASE_ORGANIZACAO = "https://api.atlassian.com";
+var MAX_PAGINAS_USUARIOS = 40;
+var TAMANHO_PAGINA = 100;
+var texto = (v) => typeof v === "string" && v.length > 0 ? v : null;
+function normalizarCarimbo(bruto) {
+  if (typeof bruto === "string" && bruto.length > 0) {
+    const ms = Date.parse(bruto);
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
+  if (typeof bruto === "number" && Number.isFinite(bruto) && bruto > 0) {
+    const ms = bruto < 1e11 ? bruto * 1e3 : bruto;
+    return new Date(ms).toISOString();
+  }
+  return null;
+}
+function produtosDe(bruto) {
+  if (!Array.isArray(bruto)) return [];
+  const saida = [];
+  for (const item of bruto) {
+    const chave = texto(item?.key);
+    if (!chave) continue;
+    saida.push({ chave, nome: texto(item?.name) ?? chave });
+  }
+  return saida;
+}
+var ClienteOrganizacaoHttp = class {
+  transporte;
+  constructor(opcoes) {
+    this.transporte = new TransporteOrganizacao({
+      ...opcoes,
+      baseUrl: opcoes.baseUrl ?? BASE_ORGANIZACAO
+    });
+  }
+  async listarUsuarios(orgId) {
+    const saida = [];
+    let caminho = `/admin/v1/orgs/${encodeURIComponent(orgId)}/users?limit=${TAMANHO_PAGINA}`;
+    for (let pagina = 0; pagina < MAX_PAGINAS_USUARIOS && caminho !== null; pagina += 1) {
+      const dados = await this.transporte.requisitar(caminho);
+      for (const bruto of Array.isArray(dados?.data) ? dados.data : []) {
+        const accountId = texto(bruto?.account_id);
+        if (!accountId) continue;
+        if (texto(bruto?.account_status) === "inactive") continue;
+        saida.push({
+          accountId,
+          email: texto(bruto?.email) ?? "",
+          nome: texto(bruto?.name) ?? texto(bruto?.email) ?? accountId,
+          produtos: produtosDe(bruto?.product_access)
+        });
+      }
+      caminho = proximaPagina(dados?.links?.next);
+    }
+    return saida;
+  }
+  async ultimoAcesso(orgId, accountId) {
+    const dados = await this.transporte.requisitar(
+      `/admin/v1/orgs/${encodeURIComponent(orgId)}/directory/users/${encodeURIComponent(
+        accountId
+      )}/last-active-dates`
+    );
+    const bruto = Array.isArray(dados?.data?.product_access) ? dados.data.product_access : [];
+    const porProduto = [];
+    for (const item of bruto) {
+      const produto = texto(item?.key);
+      if (!produto) continue;
+      porProduto.push({ produto, ultimoAcessoEm: normalizarCarimbo(item?.last_active) });
+    }
+    return { accountId, porProduto, coletadoEm: (/* @__PURE__ */ new Date()).toISOString() };
+  }
+  /**
+   * RF-57 (P2) — a única escrita.
+   *
+   * ⚠️ Ver `ENDPOINTS_NAO_VERIFICADOS`: é a chamada de contrato menos confirmado das
+   * três. Ela **não** engole erro: um `catch` aqui devolveria "revogado" para a tela
+   * enquanto o assento segue ativo, e o admin marcaria a economia como capturada.
+   */
+  async revogarProduto(orgId, accountId, produto) {
+    await this.transporte.requisitar(
+      `/admin/v1/orgs/${encodeURIComponent(orgId)}/directory/users/${encodeURIComponent(
+        accountId
+      )}/manage/product-access`,
+      { method: "DELETE", body: JSON.stringify({ productKey: produto }) }
+    );
+  }
+};
+function proximaPagina(bruto) {
+  const url = texto(bruto);
+  if (!url) return null;
+  try {
+    const alvo = new URL(url, BASE_ORGANIZACAO);
+    if (alvo.origin !== new URL(BASE_ORGANIZACAO).origin) return null;
+    return `${alvo.pathname}${alvo.search}`;
+  } catch {
+    return null;
+  }
+}
 
 // src/lib/atlassian/organizacao-fake.ts
 var FALHAS2 = Object.freeze({
@@ -1115,7 +1576,7 @@ var BASE_DIRETA = "https://api.openai.com/v1";
 var ClienteIAHttp = class {
   constructor(opcoes) {
     this.opcoes = opcoes;
-    this.fetchImpl = opcoes.fetchImpl ?? fetch;
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
     this.timeoutMs = opcoes.timeoutMs ?? TIMEOUT_PADRAO_MS;
   }
   fetchImpl;
@@ -1157,7 +1618,7 @@ var ClienteIAHttp = class {
     const controlador = new AbortController();
     const timer = setTimeout(() => controlador.abort(), this.timeoutMs);
     try {
-      const resposta = await this.fetchImpl(`${base}/chat/completions`, {
+      const resposta = await this.fetchImpl(`${base.replace(/\/+$/, "")}/chat/completions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${chave}`,
@@ -1444,9 +1905,13 @@ var ClienteIAIndisponivel = class {
 // src/lib/db/tipos.ts
 function linhasComoObjetos(r) {
   return r.rows.map((linha) => {
+    if (linha !== null && typeof linha === "object" && !Array.isArray(linha)) {
+      return linha;
+    }
+    const valores = linha;
     const obj = {};
     r.columns.forEach((coluna, i) => {
-      obj[coluna] = linha[i];
+      obj[coluna] = valores[i];
     });
     return obj;
   });
@@ -1491,19 +1956,19 @@ var AuditoriaBanco = class {
       ]
     );
   }
-  async listarRecentes(limite) {
+  async listarRecentes(limite2) {
     const r = await this.db.query(
       `SELECT id, ator_email, acao, recurso, resultado, detalhe_json, criado_em
          FROM auditoria ORDER BY criado_em DESC, rowid DESC LIMIT ?`,
-      [limite]
+      [limite2]
     );
     return linhasComoObjetos(r);
   }
-  async listarPorAtor(email, limite) {
+  async listarPorAtor(email, limite2) {
     const r = await this.db.query(
       `SELECT id, ator_email, acao, recurso, resultado, detalhe_json, criado_em
          FROM auditoria WHERE ator_email = ? ORDER BY criado_em DESC LIMIT ?`,
-      [email, limite]
+      [email, limite2]
     );
     return linhasComoObjetos(r);
   }
@@ -1527,6 +1992,19 @@ var CONFIG_PADRAO = Object.freeze({
   regra2_campo_agrupamento: "labels",
   regra2_exemplos_ajuste_operacional: [],
   regra2_limite_tickets: 20,
+  canal_notificacao_padrao: null,
+  chat_webhook_url: null,
+  email_endpoint: null,
+  email_remetente: null,
+  base_publica_app: null,
+  sla_fracao_aviso: 0.75,
+  // Vazio = piloto DESLIGADO (ver o comentário do campo — é a exceção deliberada).
+  emails_piloto: [],
+  areas_por_email: {},
+  baseline_assentos: null,
+  retencao_conversas_dias: null,
+  retencao_auditoria_dias: null,
+  retencao_notificacoes_dias: null,
   ttl_metadados_seg: 900,
   ttl_conteudo_seg: 300,
   limite_requisicoes_por_minuto: 30,
@@ -1550,6 +2028,13 @@ function valoresDoBootstrap(env) {
     parcial.campo_solicitante_id = env.GOATLAS_CAMPO_SOLICITANTE_ID;
   }
   if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID;
+  if (env.GOATLAS_BASE_PUBLICA) {
+    parcial.base_publica_app = env.GOATLAS_BASE_PUBLICA.trim().replace(/\/+$/, "");
+  }
+  const canal = (env.GOATLAS_CANAL_NOTIFICACAO ?? "").trim().toLowerCase();
+  if (canal === "chat" || canal === "email" || canal === "nenhum") {
+    parcial.canal_notificacao_padrao = canal;
+  }
   return parcial;
 }
 var Config = class {
@@ -1610,8 +2095,58 @@ function configDemo() {
     regra2_exemplos_ajuste_operacional: [
       "[EXEMPLO FICT\xCDCIO] Rodei o pipeline manualmente",
       "[EXEMPLO FICT\xCDCIO] Reparticionei a tabela para destravar"
-    ]
+    ],
+    /**
+     * Canal de aviso na demonstração: `chat`, contra o `CanalFake`.
+     *
+     * ⚠️ Não é a resposta de Q11 — é o oposto. Em produção este campo nasce `null`, os
+     * avisos ficam `suprimida` e o console mostra quantos ("havia 40 avisos e nenhum
+     * canal"). Aqui ele é preenchido porque a demonstração precisa mostrar a fila
+     * **funcionando**: com `null`, a tela de avisos ficaria vazia e o visitante concluiria
+     * que a notificação não foi construída.
+     *
+     * O que sustenta a distinção é `contexto.ts`: fora dos fakes, canal sem configuração
+     * vira `CanalIndisponivel`, nunca o dublê. Preencher aqui não abre caminho nenhum lá.
+     */
+    canal_notificacao_padrao: "chat",
+    /**
+     * Mapa de áreas fictício, para a métrica por área (`T-312`) ter o que mostrar.
+     *
+     * O e-mail é intencionalmente genérico: quem visita a demonstração entra com a própria
+     * conta Google, então ninguém casa com este mapa — e o painel mostra "Sem área", que é
+     * exatamente o comportamento de `T-303` (o app não chuta área).
+     */
+    areas_por_email: { "demonstracao@gocase.com": "CX" }
   };
+}
+async function repovoarChamadosDemo(fake, db) {
+  const r = await db.query(
+    `SELECT issue_key, payload_json FROM submissoes
+      WHERE estado = 'criado' AND issue_key IS NOT NULL
+      ORDER BY criado_em DESC LIMIT 50`,
+    []
+  );
+  let maiorNumero = 0;
+  for (const linha of linhasComoObjetos(r)) {
+    const numero = Number.parseInt(linha.issue_key.split("-").pop() ?? "", 10);
+    if (Number.isInteger(numero) && numero > maiorNumero) maiorNumero = numero;
+    if (fake.estado.chamados.has(linha.issue_key)) continue;
+    try {
+      const p = JSON.parse(linha.payload_json);
+      fake.estado.chamados.set(linha.issue_key, {
+        issueKey: linha.issue_key,
+        titulo: typeof p.titulo === "string" ? p.titulo : "",
+        descricao: typeof p.descricao === "string" ? p.descricao : "",
+        status: "Aberto",
+        prioridade: p.prioridade === "critica" || p.prioridade === "alta" || p.prioridade === "normal" ? p.prioridade : null,
+        criadoEm: (/* @__PURE__ */ new Date(0)).toISOString(),
+        atualizadoEm: (/* @__PURE__ */ new Date(0)).toISOString(),
+        slaPrimeiraResposta: { prazo: null, cumprido: null }
+      });
+    } catch {
+    }
+  }
+  fake.ajustarContadorIssue(maiorNumero);
 }
 function semearAtlassianDemo(fake) {
   fake.estado.tiposChamado = [
@@ -1899,11 +2434,149 @@ var TABELAS = [
      coletado_em       TEXT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS idx_inventario_assentos_coletado ON inventario_assentos (coletado_em)`,
-  `CREATE INDEX IF NOT EXISTS idx_inventario_assentos_conta ON inventario_assentos (account_id, produto, coletado_em)`
+  `CREATE INDEX IF NOT EXISTS idx_inventario_assentos_conta ON inventario_assentos (account_id, produto, coletado_em)`,
+  /**
+   * Notificações (RF-44, RF-47, T-204).
+   *
+   * ⚠️ **A dedupe é do BANCO, não da aplicação.** Duas fontes independentes detectam
+   * a mesma mudança de propósito (webhook + polling, RF-47: notificação não pode
+   * depender de mecanismo único), e as duas chegam a instantes diferentes. Um
+   * `SELECT` antes do `INSERT` tem a mesma janela de corrida do outbox — os dois
+   * caminhos passam pelo `SELECT` e a pessoa recebe o aviso duas vezes.
+   *
+   * `carimbo_mudanca` é o carimbo **do Jira** (`updated`/`created` do evento), nunca
+   * `agora()`: relógio nosso produziria chaves diferentes para o mesmo fato, e a
+   * dedupe não deduparia nada.
+   */
+  `CREATE TABLE IF NOT EXISTS notificacoes (
+     id                  TEXT PRIMARY KEY,
+     issue_key           TEXT NOT NULL,
+     destinatario_email  TEXT NOT NULL,
+     tipo_evento         TEXT NOT NULL,
+     carimbo_mudanca     TEXT NOT NULL,
+     fonte               TEXT NOT NULL,
+     canal               TEXT,
+     destino             TEXT,
+     titulo              TEXT NOT NULL,
+     corpo               TEXT NOT NULL,
+     estado              TEXT NOT NULL DEFAULT 'pendente',
+     tentativas          INTEGER NOT NULL DEFAULT 0,
+     ultimo_erro         TEXT,
+     criado_em           TEXT NOT NULL,
+     atualizado_em       TEXT NOT NULL,
+     UNIQUE (issue_key, tipo_evento, carimbo_mudanca),
+     CHECK (estado IN ('pendente', 'enviada', 'falha', 'suprimida')),
+     CHECK (fonte IN ('webhook', 'polling', 'app')),
+     CHECK (tipo_evento IN ('chamado_criado', 'status_alterado', 'comentario_publico', 'sla_em_risco'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_notificacoes_estado ON notificacoes (estado, criado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_notificacoes_destinatario ON notificacoes (destinatario_email, criado_em)`,
+  /**
+   * Ações do próprio solicitante (RF-48, T-211).
+   *
+   * ⚠️ Comparar autor **não funciona** aqui: sob proxy total (`D-01`) todo comentário
+   * sai da conta de serviço, então o autor do comentário da pessoa e o do agente do
+   * time de tech são o mesmo. O que distingue é o app ter registrado a ação **no
+   * momento em que a fez** — daí a impressão digital do corpo normalizado.
+   */
+  `CREATE TABLE IF NOT EXISTS acoes_proprias (
+     id                 TEXT PRIMARY KEY,
+     issue_key          TEXT NOT NULL,
+     ator_email         TEXT NOT NULL,
+     tipo_evento        TEXT NOT NULL,
+     impressao_digital  TEXT NOT NULL,
+     criado_em          TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_acoes_proprias_busca
+     ON acoes_proprias (issue_key, tipo_evento, impressao_digital)`,
+  /**
+   * Preferência de canal (RF-45). Ausência de linha = o default de Q11, resolvido em
+   * `notificacoes/preferencias.ts` — não um canal inventado por linha faltante.
+   */
+  `CREATE TABLE IF NOT EXISTS preferencias_notificacao (
+     email          TEXT PRIMARY KEY,
+     canal          TEXT NOT NULL,
+     destino        TEXT,
+     atualizado_em  TEXT NOT NULL,
+     CHECK (canal IN ('chat', 'email', 'nenhum'))
+   )`,
+  /**
+   * Marca-d'água do polling (RF-47, RNF-15). Uma linha, chave fixa.
+   *
+   * ⚠️ Sem marca-d'água o polling vira **varredura completa** a cada rodada — a forma
+   * mais fácil de descobrir os burst limits não publicados da Atlassian do jeito ruim
+   * (`R-02`). O JQL é sempre `updated >= <marca>`.
+   */
+  `CREATE TABLE IF NOT EXISTS marca_agua_polling (
+     chave          TEXT PRIMARY KEY,
+     carimbo        TEXT NOT NULL,
+     atualizado_em  TEXT NOT NULL
+   )`,
+  /**
+   * Alertas de SLA já emitidos (RF-46, T-231). PK composta porque o cron roda de novo
+   * a cada janela: sem ela, o mesmo chamado em risco geraria alerta a cada rodada até
+   * alguém responder — o jeito garantido de o alerta ser ignorado.
+   */
+  `CREATE TABLE IF NOT EXISTS alertas_sla (
+     issue_key   TEXT NOT NULL,
+     limiar      TEXT NOT NULL,
+     criado_em   TEXT NOT NULL,
+     PRIMARY KEY (issue_key, limiar),
+     CHECK (limiar IN ('risco', 'estourado'))
+   )`,
+  /**
+   * Última avaliação de SLA por chamado (RF-46, RF-55, T-232).
+   *
+   * ⚠️ Existe para o **painel não chamar a Atlassian**. Saber se um chamado teve primeira
+   * resposta dentro do prazo exige ler os comentários dele; fazer isso para cada chamado
+   * no `GET /api/admin/metricas` transformaria abrir o console em dezenas de chamadas com
+   * a credencial única (`R-02`) — e a página ficaria lenta na proporção do sucesso do
+   * projeto.
+   *
+   * O cron de SLA já lê tudo isso para decidir se alerta. Gravar o resultado é grátis, e
+   * o painel passa a mostrar "avaliado na última rodada" em vez de "medido agora" —
+   * honesto e barato. `UPSERT` porque é um retrato, não histórico: o histórico de eventos
+   * está em `notificacoes` e `auditoria`.
+   */
+  `CREATE TABLE IF NOT EXISTS avaliacoes_sla (
+     issue_key       TEXT PRIMARY KEY,
+     estado          TEXT NOT NULL,
+     prazo_em        TEXT NOT NULL,
+     respondida_em   TEXT,
+     dentro_do_prazo INTEGER,
+     avaliado_em     TEXT NOT NULL,
+     CHECK (estado IN ('respondido', 'ok', 'risco', 'estourado'))
+   )`
+];
+var COLUNAS_ADICIONADAS = [
+  // T-304 / RF-19 — a área **no momento da criação** é o dado histórico correto,
+  // mesmo que a pessoa mude de área depois.
+  `ALTER TABLE vinculos ADD COLUMN area TEXT`,
+  // T-210 — o carimbo da última mudança já sincronizada, por chamado. A marca-d'água
+  // global diz o que **buscar**; esta coluna diz o que já foi visto naquele chamado.
+  `ALTER TABLE vinculos ADD COLUMN notificado_ate TEXT`,
+  /**
+   * T-210 — o último status já avisado.
+   *
+   * ⚠️ Sem esta coluna, "mudou de status" viraria "`updated` do Jira mudou" — e
+   * `updated` muda quando alguém edita a descrição, adiciona label ou mexe num campo
+   * qualquer. A pessoa receberia "seu chamado mudou para Em andamento" três vezes
+   * porque o agente ajustou o resumo três vezes.
+   */
+  `ALTER TABLE vinculos ADD COLUMN ultimo_status_notificado TEXT`
 ];
 async function migrar(db) {
   for (const sql of TABELAS) {
     await db.exec(sql, []);
+  }
+  for (const sql of COLUNAS_ADICIONADAS) {
+    try {
+      await db.exec(sql, []);
+    } catch (e) {
+      if (!/duplicate column|already exists/i.test(e instanceof Error ? e.message : String(e))) {
+        throw e;
+      }
+    }
   }
 }
 
@@ -2143,7 +2816,7 @@ var RegistroConhecimento = class {
    * daqui que atravessa o isolamento por e-mail, então usá-lo numa rota de colaborador
    * precisa ser um bug **visível na revisão**, não um detalhe.
    */
-  async agregarLacunas_apenasAdmin(limite = 50) {
+  async agregarLacunas_apenasAdmin(limite2 = 50) {
     const porTermo = async (condicao) => {
       const r = await this.db.query(
         `SELECT termo_normalizado,
@@ -2155,7 +2828,7 @@ var RegistroConhecimento = class {
           GROUP BY termo_normalizado
           ORDER BY ocorrencias DESC, ultima_em DESC
           LIMIT ?`,
-        [limite]
+        [limite2]
       );
       return linhasComoObjetos(r).map((l) => ({
         termo: l.termo_normalizado,
@@ -2170,7 +2843,7 @@ var RegistroConhecimento = class {
         WHERE houve_override = 1 AND override_motivo IS NOT NULL
         ORDER BY override_em DESC
         LIMIT ?`,
-      [limite]
+      [limite2]
     );
     return {
       semResultado: await porTermo("resultados = 0"),
@@ -2264,11 +2937,11 @@ function regra2Disponivel(exemplos) {
 }
 
 // src/lib/agent/tools.ts
-function hashConteudo(texto) {
+function hashConteudo(texto2) {
   let h1 = 2166136261;
   let h2 = 16777619;
-  for (let i = 0; i < texto.length; i += 1) {
-    const c = texto.charCodeAt(i);
+  for (let i = 0; i < texto2.length; i += 1) {
+    const c = texto2.charCodeAt(i);
     h1 = Math.imul(h1 ^ c, 16777619) >>> 0;
     h2 = Math.imul(h2 + c, 2246822507) >>> 0;
   }
@@ -2832,15 +3505,15 @@ var Outbox = class {
       [erro2, transitorio ? "pendente" : "falha", this.agora(), id]
     );
   }
-  async listarPendentes(limite) {
+  async listarPendentes(limite2) {
     const r = await this.db.query(
       `SELECT ${COLUNAS} FROM submissoes WHERE estado = 'pendente' ORDER BY criado_em ASC LIMIT ?`,
-      [limite]
+      [limite2]
     );
     return linhasComoObjetos(r).map(daLinha2);
   }
   /** Submissões criadas no JSM que ficaram sem vínculo local — o pior caso (RNF-21). */
-  async listarCriadasSemVinculo(limite) {
+  async listarCriadasSemVinculo(limite2) {
     const r = await this.db.query(
       `SELECT ${COLUNAS}
          FROM submissoes s
@@ -2848,7 +3521,7 @@ var Outbox = class {
           AND s.issue_key IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM vinculos v WHERE v.issue_key = s.issue_key)
         ORDER BY s.criado_em ASC LIMIT ?`,
-      [limite]
+      [limite2]
     );
     return linhasComoObjetos(r).map(daLinha2);
   }
@@ -2862,10 +3535,14 @@ function daLinha3(l) {
     conversaId: l.conversa_id,
     via: l.via,
     verificadoRegras: l.verificado_regras === 1,
+    area: l.area ?? null,
+    notificadoAte: l.notificado_ate ?? null,
+    ultimoStatusNotificado: l.ultimo_status_notificado ?? null,
     criadoEm: l.criado_em
   };
 }
-var COLUNAS2 = `issue_key, solicitante_email, conversa_id, via, verificado_regras, criado_em`;
+var COLUNAS2 = `issue_key, solicitante_email, conversa_id, via, verificado_regras,
+                 area, notificado_ate, ultimo_status_notificado, criado_em`;
 var RepositorioVinculos = class {
   constructor(db, agora) {
     this.db = db;
@@ -2873,17 +3550,33 @@ var RepositorioVinculos = class {
   }
   async criar(dados) {
     await this.db.exec(
-      `INSERT INTO vinculos (issue_key, solicitante_email, conversa_id, via, verificado_regras, criado_em)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO vinculos
+         (issue_key, solicitante_email, conversa_id, via, verificado_regras, area, criado_em)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         dados.issueKey,
         dados.solicitanteEmail,
         dados.conversaId,
         dados.via,
         dados.verificadoRegras ? 1 : 0,
+        dados.area ?? null,
         this.agora()
       ]
     );
+  }
+  /**
+   * Correção manual da área pelo próprio solicitante (RF-19, T-305).
+   *
+   * Mesmo padrão de `RF-16` com a prioridade: o mapa de áreas envelhece, e pessoa que
+   * muda de área é a regra, não a exceção. O e-mail está no `WHERE` — corrigir a área
+   * do chamado de outra pessoa não é caso de uso.
+   */
+  async corrigirArea(issueKey, solicitanteEmail, area) {
+    const r = await this.db.exec(
+      `UPDATE vinculos SET area = ? WHERE issue_key = ? AND solicitante_email = ?`,
+      [area, issueKey, solicitanteEmail]
+    );
+    return r.rowsWritten > 0;
   }
   /**
    * O gate de RF-30 / RN-04.
@@ -2900,10 +3593,10 @@ var RepositorioVinculos = class {
     const linha = primeiraLinha(r);
     return linha ? daLinha3(linha) : null;
   }
-  async listarDoSolicitante(solicitanteEmail, limite) {
+  async listarDoSolicitante(solicitanteEmail, limite2) {
     const r = await this.db.query(
       `SELECT ${COLUNAS2} FROM vinculos WHERE solicitante_email = ? ORDER BY criado_em DESC LIMIT ?`,
-      [solicitanteEmail, limite]
+      [solicitanteEmail, limite2]
     );
     return linhasComoObjetos(r).map(daLinha3);
   }
@@ -2918,6 +3611,84 @@ var RepositorioVinculos = class {
     ]);
     const linha = primeiraLinha(r);
     return linha ? daLinha3(linha) : null;
+  }
+  /**
+   * Caminho de SISTEMA para descobrir a quem avisar (webhook e cron de polling, RF-47).
+   *
+   * Ignora o isolamento por construção — não há usuário na requisição para isolar
+   * contra. O nome carrega isso, como `obterSemIsolamento_apenasReconciliacao`: usar
+   * isto numa rota de colaborador é um bug de `RF-30` visível na revisão.
+   *
+   * ⚠️ O `issueKey` do webhook é **entrada não confiável**: qualquer um pode postar
+   * `{"issue":{"key":"TECH-1"}}`. O que impede o abuso é que a chave só serve para
+   * **achar o vínculo local** — sem vínculo, não há a quem notificar e nada acontece —
+   * e que a resposta do webhook é a mesma nos dois casos (`202`), para não virar
+   * oráculo de "este chamado está no goatlas?".
+   */
+  async obterParaNotificacao_semIsolamento(issueKey) {
+    return this.obterSemIsolamento_apenasReconciliacao(issueKey);
+  }
+  /** Marcadores de sincronização (T-210). Sistema, não usuário. */
+  async marcarSincronizado(issueKey, dados) {
+    const partes = [];
+    const params = [];
+    if (dados.notificadoAte !== void 0) {
+      partes.push("notificado_ate = ?");
+      params.push(dados.notificadoAte);
+    }
+    if (dados.ultimoStatusNotificado !== void 0) {
+      partes.push("ultimo_status_notificado = ?");
+      params.push(dados.ultimoStatusNotificado);
+    }
+    if (partes.length === 0) return;
+    params.push(issueKey);
+    await this.db.exec(`UPDATE vinculos SET ${partes.join(", ")} WHERE issue_key = ?`, params);
+  }
+  /**
+   * Chamados a sincronizar no polling — os que mudaram desde a marca-d'água.
+   *
+   * Recebe a lista de chaves que a Atlassian disse ter mudado e devolve **só** as que
+   * têm vínculo local. É o mesmo raciocínio do webhook: chamado do time de tech que
+   * nunca passou pelo goatlas não gera notificação para ninguém.
+   */
+  async filtrarComVinculo(issueKeys) {
+    if (issueKeys.length === 0) return [];
+    const marcadores = issueKeys.map(() => "?").join(", ");
+    const r = await this.db.query(
+      `SELECT ${COLUNAS2} FROM vinculos WHERE issue_key IN (${marcadores})`,
+      issueKeys
+    );
+    return linhasComoObjetos(r).map(daLinha3);
+  }
+  /**
+   * Candidatos ao alerta de SLA (RF-46, T-231).
+   *
+   * ⚠️ Filtra pelos chamados **recentes**, e o corte é generoso de propósito: o prazo
+   * máximo é 24h (`normal`), então tudo que passou de poucos dias já teve o alerta de
+   * `estourado` emitido — e a tabela `alertas_sla` impede a repetição de qualquer forma.
+   * Varrer todos os vínculos a cada rodada custaria duas chamadas à Atlassian por
+   * chamado histórico, para sempre (`R-02`).
+   *
+   * Não filtra por status: "resolvido" no JSM não quer dizer "alguém respondeu", e é a
+   * primeira resposta que este SLA cobra (`RN-08`). Quem decide é `avaliarSla`.
+   */
+  async listarParaAvaliacaoSla(limite2) {
+    const r = await this.db.query(
+      `SELECT ${COLUNAS2} FROM vinculos ORDER BY criado_em DESC LIMIT ?`,
+      [limite2]
+    );
+    return linhasComoObjetos(r).map(daLinha3);
+  }
+  /** Distribuição por área (RF-55, T-312). Área ausente conta como "sem área". */
+  async contarPorArea() {
+    const r = await this.db.query(
+      `SELECT area, COUNT(*) AS total FROM vinculos GROUP BY area ORDER BY total DESC`,
+      []
+    );
+    return linhasComoObjetos(r).map((l) => ({
+      area: l.area ?? null,
+      total: Number(l.total)
+    }));
   }
 };
 
@@ -2937,7 +3708,7 @@ var ServicoChamados = class {
    * existe caminho alternativo: é a diferença entre a regra ser garantia e ser
    * recomendação.
    */
-  async abrirPorConversa(conversa, serviceDeskId, chaveIdempotencia) {
+  async abrirPorConversa(conversa, serviceDeskId, chaveIdempotencia, area = null) {
     const autorizacao = autorizarCriacao(conversa);
     if (!autorizacao.ok) {
       await this.auditoria.registrar({
@@ -2957,6 +3728,7 @@ var ServicoChamados = class {
       via: "conversa",
       conversaId: conversa.id,
       verificadoRegras: autorizacao.verificadoPelasRegras,
+      area,
       payload: {
         titulo: proposta.titulo,
         descricao: proposta.descricao,
@@ -2982,6 +3754,7 @@ var ServicoChamados = class {
       via: "formulario",
       conversaId: null,
       verificadoRegras: false,
+      area: dados.area ?? null,
       payload: dados.payload
     });
   }
@@ -3019,13 +3792,42 @@ var ServicoChamados = class {
         ...dados.payload.camposDinamicos ? { camposDinamicos: dados.payload.camposDinamicos } : {}
       });
       await this.outbox.marcarCriado(submissaoId, criado.issueKey);
-      await this.vinculos.criar({
-        issueKey: criado.issueKey,
-        solicitanteEmail: dados.solicitanteEmail,
-        conversaId: dados.conversaId,
-        via: dados.via,
-        verificadoRegras: dados.verificadoRegras
-      });
+      try {
+        await this.vinculos.criar({
+          issueKey: criado.issueKey,
+          solicitanteEmail: dados.solicitanteEmail,
+          conversaId: dados.conversaId,
+          via: dados.via,
+          verificadoRegras: dados.verificadoRegras,
+          area: dados.area
+        });
+      } catch (erroVinculo) {
+        const existente = await this.vinculos.obterSemIsolamento_apenasReconciliacao(
+          criado.issueKey
+        );
+        if (!existente) throw erroVinculo;
+        if (existente.solicitanteEmail !== dados.solicitanteEmail) {
+          await this.auditoria.registrar({
+            atorEmail: dados.solicitanteEmail,
+            acao: "chamado_criado",
+            recurso: criado.issueKey,
+            resultado: "negado",
+            detalhe: { motivo: "issue_key_ja_vinculada_a_outro_solicitante" }
+          });
+          throw new ErroAtlassian("chave de chamado j\xE1 vinculada a outro solicitante", {
+            // **Definitivo**: reprocessar não muda nada, e insistir esconderia a anomalia.
+            transitorio: false,
+            recurso: criado.issueKey
+          });
+        }
+        await this.auditoria.registrar({
+          atorEmail: dados.solicitanteEmail,
+          acao: "vinculo_reconciliado",
+          recurso: criado.issueKey,
+          resultado: "sucesso",
+          detalhe: { motivo: "vinculo_ja_existia" }
+        });
+      }
       await this.auditoria.registrar({
         atorEmail: dados.solicitanteEmail,
         acao: "chamado_criado",
@@ -3065,8 +3867,8 @@ var ServicoChamados = class {
    * Varre submissões marcadas como criadas que não têm vínculo e o reconstrói.
    * É a rede que impede o pior caso do sistema de ser permanente.
    */
-  async reconciliarVinculos(limite) {
-    const orfas = await this.outbox.listarCriadasSemVinculo(limite);
+  async reconciliarVinculos(limite2) {
+    const orfas = await this.outbox.listarCriadasSemVinculo(limite2);
     let recuperados = 0;
     for (const s of orfas) {
       if (!s.issueKey) continue;
@@ -3076,6 +3878,9 @@ var ServicoChamados = class {
         conversaId: s.conversaId,
         via: s.via,
         verificadoRegras: s.verificadoRegras
+        // ⚠️ A reconciliação NÃO recalcula a área pelo mapa atual: o vínculo perdido era
+        // de meses atrás, e o mapa de hoje diria a área de hoje (T-304 quer a de então).
+        // `null` é honesto; a pessoa corrige no recibo (T-305) se importar.
       });
       await this.auditoria.registrar({
         atorEmail: s.solicitanteEmail,
@@ -3089,8 +3894,8 @@ var ServicoChamados = class {
     return recuperados;
   }
   /** Reprocessa o outbox — chamado pelo cron da plataforma (RNF-17). */
-  async reprocessarPendentes(limite) {
-    const pendentes = await this.outbox.listarPendentes(limite);
+  async reprocessarPendentes(limite2) {
+    const pendentes = await this.outbox.listarPendentes(limite2);
     let criados = 0;
     let aindaPendentes = 0;
     for (const s of pendentes) {
@@ -3100,6 +3905,9 @@ var ServicoChamados = class {
         via: s.via,
         conversaId: s.conversaId,
         verificadoRegras: s.verificadoRegras,
+        // O reprocessamento não conhece a área: ela foi decidida na requisição original
+        // e vive no vínculo, que este caminho só cria se ainda não existir.
+        area: null,
         payload: s.payload
       });
       if (r.estado === "criado") criados += 1;
@@ -3120,14 +3928,44 @@ var ServicoChamados = class {
       });
       return null;
     }
-    const chamado = await this.atlassian.obterChamado(issueKey);
-    await this.auditoria.registrar({
-      atorEmail: solicitanteEmail,
-      acao: "chamado_lido",
-      recurso: issueKey,
-      resultado: "sucesso"
-    });
-    return { chamado, vinculo };
+    try {
+      const chamado = await this.atlassian.obterChamado(issueKey);
+      await this.auditoria.registrar({
+        atorEmail: solicitanteEmail,
+        acao: "chamado_lido",
+        recurso: issueKey,
+        resultado: "sucesso"
+      });
+      return { chamado, vinculo, degradado: false };
+    } catch (erro2) {
+      const submissao = await this.outbox.obterPorIssueKey(issueKey);
+      await this.auditoria.registrar({
+        atorEmail: solicitanteEmail,
+        acao: "chamado_lido",
+        recurso: issueKey,
+        resultado: "falha",
+        detalhe: {
+          motivo: "atlassian_indisponivel",
+          // Sem o corpo da resposta (RNF-01) — `ErroAtlassian` já garante isso.
+          erro: erro2 instanceof Error ? erro2.message : "falha",
+          recuperadoDoOutbox: submissao !== null
+        }
+      });
+      return {
+        vinculo,
+        degradado: true,
+        chamado: {
+          issueKey,
+          titulo: submissao?.payload.titulo ?? "",
+          descricao: submissao?.payload.descricao ?? "",
+          status: "indisponivel",
+          prioridade: submissao?.payload.prioridade ?? null,
+          criadoEm: vinculo.criadoEm,
+          atualizadoEm: vinculo.criadoEm,
+          slaPrimeiraResposta: null
+        }
+      };
+    }
   }
   /** Comentários públicos do chamado — isolamento + RF-32 em duas camadas. */
   async listarComentariosDoSolicitante(issueKey, solicitanteEmail) {
@@ -3198,6 +4036,834 @@ var RepositorioInventario = class {
   }
 };
 
+// src/lib/notificacoes/dedupe.ts
+var COLUNAS3 = `id, issue_key, destinatario_email, tipo_evento, carimbo_mudanca, fonte,
+                 canal, destino, titulo, corpo, estado, tentativas, criado_em`;
+function daLinha4(l) {
+  return {
+    id: l.id,
+    issueKey: l.issue_key,
+    destinatarioEmail: l.destinatario_email,
+    tipoEvento: l.tipo_evento,
+    carimboMudanca: l.carimbo_mudanca,
+    fonte: l.fonte,
+    canal: l.canal,
+    destino: l.destino,
+    titulo: l.titulo,
+    corpo: l.corpo,
+    estado: l.estado,
+    tentativas: l.tentativas,
+    criadoEm: l.criado_em
+  };
+}
+function normalizarCarimbo2(bruto) {
+  const ms = Date.parse(bruto);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : bruto;
+}
+var RepositorioNotificacoes = class {
+  constructor(db, agora) {
+    this.db = db;
+    this.agora = agora;
+  }
+  /**
+   * Grava, ou reconhece que o fato já era conhecido.
+   *
+   * `nova: false` **não** é erro — é o caso normal quando webhook e polling veem a
+   * mesma coisa. Quem chama trata como "já cuidei disso".
+   */
+  async registrar(dados) {
+    const carimbo = normalizarCarimbo2(dados.carimboMudanca);
+    const agora = this.agora();
+    const corpo = dados.mensagem.link ? `${dados.mensagem.corpo}
+
+${dados.mensagem.link}` : dados.mensagem.corpo;
+    const r = await this.db.exec(
+      `INSERT INTO notificacoes
+         (id, issue_key, destinatario_email, tipo_evento, carimbo_mudanca, fonte, canal,
+          destino, titulo, corpo, estado, tentativas, criado_em, atualizado_em)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+       ON CONFLICT (issue_key, tipo_evento, carimbo_mudanca) DO NOTHING`,
+      [
+        dados.id,
+        dados.issueKey,
+        dados.destinatarioEmail,
+        dados.tipoEvento,
+        carimbo,
+        dados.fonte,
+        dados.canal,
+        dados.destino,
+        dados.mensagem.titulo,
+        corpo,
+        dados.estado,
+        agora,
+        agora
+      ]
+    );
+    if (r.rowsWritten > 0) return { nova: true, existente: null };
+    return { nova: false, existente: await this.obterPorChave(dados.issueKey, dados.tipoEvento, carimbo) };
+  }
+  async obterPorChave(issueKey, tipoEvento, carimboMudanca) {
+    const r = await this.db.query(
+      `SELECT ${COLUNAS3} FROM notificacoes
+        WHERE issue_key = ? AND tipo_evento = ? AND carimbo_mudanca = ?`,
+      [issueKey, tipoEvento, normalizarCarimbo2(carimboMudanca)]
+    );
+    const linha = primeiraLinha(r);
+    return linha ? daLinha4(linha) : null;
+  }
+  /** Fila de envio (T-225). Ordem de criação: aviso antigo primeiro. */
+  async listarPendentes(limite2) {
+    const r = await this.db.query(
+      `SELECT ${COLUNAS3} FROM notificacoes WHERE estado = 'pendente'
+        ORDER BY criado_em LIMIT ?`,
+      [limite2]
+    );
+    return linhasComoObjetos(r).map(daLinha4);
+  }
+  /** Notificações DE UMA PESSOA — o e-mail vai no `WHERE`, como em `vinculos.ts`. */
+  async listarDoDestinatario(email, limite2) {
+    const r = await this.db.query(
+      `SELECT ${COLUNAS3} FROM notificacoes WHERE destinatario_email = ?
+        ORDER BY criado_em DESC LIMIT ?`,
+      [email, limite2]
+    );
+    return linhasComoObjetos(r).map(daLinha4);
+  }
+  async marcarEnviada(id) {
+    await this.db.exec(
+      `UPDATE notificacoes SET estado = 'enviada', atualizado_em = ? WHERE id = ?`,
+      [this.agora(), id]
+    );
+  }
+  /**
+   * Falha de envio.
+   *
+   * ⚠️ Mesma classificação do outbox (`RNF-17`): transitório **continua pendente** e
+   * volta no próximo cron; só definitivo vira `falha`. Marcar indisponibilidade como
+   * definitiva é jogar o aviso no lixo porque o canal piscou.
+   */
+  async registrarTentativaFalha(id, erro2, transitorio, maxTentativas) {
+    await this.db.exec(
+      `UPDATE notificacoes
+          SET tentativas = tentativas + 1,
+              ultimo_erro = ?,
+              estado = CASE
+                WHEN ? = 0 THEN 'falha'
+                WHEN tentativas + 1 >= ? THEN 'falha'
+                ELSE 'pendente' END,
+              atualizado_em = ?
+        WHERE id = ?`,
+      [erro2.slice(0, 500), transitorio ? 1 : 0, maxTentativas, this.agora(), id]
+    );
+  }
+  /** Contagem por estado — insumo de RF-55 e da tela de admin. */
+  async contarPorEstado() {
+    const r = await this.db.query(
+      `SELECT estado, COUNT(*) AS total FROM notificacoes GROUP BY estado`,
+      []
+    );
+    const saida = {
+      pendente: 0,
+      enviada: 0,
+      falha: 0,
+      suprimida: 0
+    };
+    for (const linha of linhasComoObjetos(r)) {
+      saida[linha.estado] = Number(linha.total);
+    }
+    return saida;
+  }
+};
+var RepositorioAlertasSla = class {
+  constructor(db, agora) {
+    this.db = db;
+    this.agora = agora;
+  }
+  /** `true` = é a primeira vez que este limiar dispara neste chamado. */
+  async registrarSePrimeiraVez(issueKey, limiar) {
+    const r = await this.db.exec(
+      `INSERT INTO alertas_sla (issue_key, limiar, criado_em) VALUES (?, ?, ?)
+       ON CONFLICT (issue_key, limiar) DO NOTHING`,
+      [issueKey, limiar, this.agora()]
+    );
+    return r.rowsWritten > 0;
+  }
+};
+var RepositorioAvaliacoesSla = class {
+  constructor(db, agora) {
+    this.db = db;
+    this.agora = agora;
+  }
+  async registrar(dados) {
+    await this.db.exec(
+      `INSERT INTO avaliacoes_sla
+         (issue_key, estado, prazo_em, respondida_em, dentro_do_prazo, avaliado_em)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (issue_key) DO UPDATE SET
+         estado = excluded.estado,
+         prazo_em = excluded.prazo_em,
+         respondida_em = excluded.respondida_em,
+         dentro_do_prazo = excluded.dentro_do_prazo,
+         avaliado_em = excluded.avaliado_em`,
+      [
+        dados.issueKey,
+        dados.estado,
+        dados.prazoEm,
+        dados.respondidaEm,
+        dados.dentroDoPrazo === null ? null : dados.dentroDoPrazo ? 1 : 0,
+        this.agora()
+      ]
+    );
+  }
+  /** Agregado para o painel. Taxa sem nenhum respondido é `null`, nunca `0`. */
+  async resumir() {
+    const r = await this.db.query(
+      `SELECT estado, dentro_do_prazo, COUNT(*) AS total
+         FROM avaliacoes_sla GROUP BY estado, dentro_do_prazo`,
+      []
+    );
+    let totalAvaliados = 0;
+    let respondidos = 0;
+    let dentroDoPrazo = 0;
+    let emRisco = 0;
+    let estourados = 0;
+    for (const l of linhasComoObjetos(r)) {
+      const total = Number(l.total);
+      totalAvaliados += total;
+      if (l.estado === "respondido") {
+        respondidos += total;
+        if (l.dentro_do_prazo === 1) dentroDoPrazo += total;
+      }
+      if (l.estado === "risco") emRisco += total;
+      if (l.estado === "estourado") estourados += total;
+    }
+    return {
+      totalAvaliados,
+      respondidos,
+      dentroDoPrazo,
+      aderenciaPct: respondidos === 0 ? null : dentroDoPrazo / respondidos * 100,
+      emRisco,
+      estourados
+    };
+  }
+};
+var MarcaAguaPolling = class {
+  constructor(db, agora) {
+    this.db = db;
+    this.agora = agora;
+  }
+  async obter(chave = "jira") {
+    const r = await this.db.query(`SELECT carimbo FROM marca_agua_polling WHERE chave = ?`, [
+      chave
+    ]);
+    return primeiraLinha(r)?.carimbo ?? null;
+  }
+  async definir(carimbo, chave = "jira") {
+    await this.db.exec(
+      `INSERT INTO marca_agua_polling (chave, carimbo, atualizado_em) VALUES (?, ?, ?)
+       ON CONFLICT (chave) DO UPDATE SET
+         carimbo = excluded.carimbo, atualizado_em = excluded.atualizado_em`,
+      [chave, carimbo, this.agora()]
+    );
+  }
+};
+
+// src/lib/notificacoes/acoes.ts
+function normalizarParaImpressao(texto2) {
+  return removerPrefixoAutoria(texto2).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+function impressaoDigital(texto2) {
+  return hashConteudo(normalizarParaImpressao(texto2));
+}
+var RepositorioAcoesProprias = class {
+  constructor(db, agora, novoId) {
+    this.db = db;
+    this.agora = agora;
+    this.novoId = novoId;
+  }
+  /** Chamado NO MOMENTO da ação do app — nunca depois, nunca inferido. */
+  async registrar(dados) {
+    await this.db.exec(
+      `INSERT INTO acoes_proprias (id, issue_key, ator_email, tipo_evento, impressao_digital, criado_em)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        this.novoId(),
+        dados.issueKey,
+        dados.atorEmail,
+        dados.tipoEvento,
+        impressaoDigital(dados.conteudo),
+        this.agora()
+      ]
+    );
+  }
+  /**
+   * Este fato foi a própria pessoa?
+   *
+   * O `issue_key` está no `WHERE` junto da impressão: o mesmo texto em dois chamados
+   * diferentes são dois fatos diferentes, e casar só pelo hash suprimiria o
+   * comentário de um chamado por causa do outro.
+   */
+  async ehAcaoPropria(dados) {
+    const r = await this.db.query(
+      `SELECT 1 AS achou FROM acoes_proprias
+        WHERE issue_key = ? AND tipo_evento = ? AND impressao_digital = ? LIMIT 1`,
+      [dados.issueKey, dados.tipoEvento, impressaoDigital(dados.conteudo)]
+    );
+    return primeiraLinha(r) !== null;
+  }
+};
+
+// src/lib/notificacoes/tipos.ts
+var NOMES_CANAL = ["chat", "email", "nenhum"];
+var ehNomeCanal = (v) => typeof v === "string" && NOMES_CANAL.includes(v);
+var ErroCanal = class extends Error {
+  constructor(message, detalhe) {
+    super(message);
+    this.detalhe = detalhe;
+    this.name = "ErroCanal";
+  }
+};
+
+// src/lib/notificacoes/preferencias.ts
+var RepositorioPreferencias = class {
+  constructor(db, agora) {
+    this.db = db;
+    this.agora = agora;
+  }
+  /**
+   * A preferência efetiva.
+   *
+   * Ordem: escolha da pessoa → default da config (Q11) → `nenhum`. O último degrau é
+   * o fail-closed: sem resposta de Q11 e sem escolha, não se manda nada para lugar
+   * nenhum.
+   */
+  async obterEfetiva(email, padraoDaConfig) {
+    const r = await this.db.query(
+      `SELECT canal, destino FROM preferencias_notificacao WHERE email = ?`,
+      [email]
+    );
+    const linha = primeiraLinha(r);
+    if (linha) {
+      return { canal: linha.canal, destino: linha.destino, escolhidaPelaPessoa: true };
+    }
+    return {
+      canal: padraoDaConfig ?? "nenhum",
+      destino: null,
+      escolhidaPelaPessoa: false
+    };
+  }
+  async definir(email, canal, destino) {
+    await this.db.exec(
+      `INSERT INTO preferencias_notificacao (email, canal, destino, atualizado_em)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (email) DO UPDATE SET
+         canal = excluded.canal,
+         destino = excluded.destino,
+         atualizado_em = excluded.atualizado_em`,
+      [email, canal, destino, this.agora()]
+    );
+  }
+};
+function validarPreferencia(corpo) {
+  const canal = corpo?.canal;
+  if (!ehNomeCanal(canal)) {
+    return { erro: "Escolha um canal: chat, e-mail ou nenhum." };
+  }
+  const bruto = typeof corpo?.destino === "string" ? corpo.destino.trim() : "";
+  if (bruto.length === 0) return { canal, destino: null };
+  if (canal !== "email") {
+    return { erro: "Endere\xE7o alternativo s\xF3 vale para o canal de e-mail." };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bruto)) {
+    return { erro: "Informe um endere\xE7o de e-mail v\xE1lido." };
+  }
+  return { canal, destino: bruto.toLowerCase() };
+}
+
+// src/lib/notificacoes/mensagens.ts
+var ROTULO_PRIORIDADE2 = {
+  critica: "cr\xEDtica",
+  alta: "alta",
+  normal: "normal"
+};
+function linkDoChamado(baseApp, issueKey) {
+  if (!baseApp) return null;
+  const base = baseApp.replace(/\/+$/, "");
+  return `${base}/?chamado=${encodeURIComponent(issueKey)}`;
+}
+function mensagemChamadoCriado(dados) {
+  return {
+    titulo: `Chamado ${dados.issueKey} aberto`,
+    corpo: [
+      `Seu chamado **${dados.issueKey}** foi aberto: ${dados.titulo}`,
+      `Prioridade: ${ROTULO_PRIORIDADE2[dados.prioridade]}.`,
+      // ⚠️ RN-08 — "primeira resposta", nunca "prazo de resolução". E os 24h são
+      // PISO GARANTIDO (R-05): muita área responde bem antes.
+      `Prazo de **primeira resposta**: at\xE9 ${dados.slaPrimeiraRespostaHoras}h. Esse \xE9 o prazo m\xE1ximo garantido para algu\xE9m te responder \u2014 n\xE3o o prazo de solu\xE7\xE3o, e muita \xE1rea responde bem antes.`
+    ].join("\n"),
+    link: linkDoChamado(dados.baseApp, dados.issueKey)
+  };
+}
+function mensagemStatusAlterado(dados) {
+  return {
+    titulo: `Chamado ${dados.issueKey}: ${dados.status}`,
+    corpo: `O status do seu chamado **${dados.issueKey}** mudou para **${dados.status}**.`,
+    link: linkDoChamado(dados.baseApp, dados.issueKey)
+  };
+}
+var MAX_TRECHO_COMENTARIO = 280;
+function mensagemComentarioPublico(dados) {
+  const limpo = dados.corpo.replace(/\s+/g, " ").trim();
+  const trecho = limpo.length > MAX_TRECHO_COMENTARIO ? `${limpo.slice(0, MAX_TRECHO_COMENTARIO)}\u2026` : limpo;
+  return {
+    titulo: `Novo coment\xE1rio em ${dados.issueKey}`,
+    corpo: `**${dados.autorNome}** comentou no seu chamado **${dados.issueKey}**:
+
+${trecho}`,
+    link: linkDoChamado(dados.baseApp, dados.issueKey)
+  };
+}
+function mensagemSlaEmRisco(dados) {
+  return {
+    titulo: dados.estourado ? `Chamado ${dados.issueKey} sem primeira resposta no prazo` : `Chamado ${dados.issueKey} perto do prazo de primeira resposta`,
+    corpo: dados.estourado ? `O prazo de **primeira resposta** do chamado **${dados.issueKey}** passou e ningu\xE9m respondeu ainda.` : `Faltam cerca de ${dados.horasRestantes}h para o prazo de **primeira resposta** do chamado **${dados.issueKey}**.`,
+    link: linkDoChamado(dados.baseApp, dados.issueKey)
+  };
+}
+
+// src/lib/notificacoes/sla.ts
+var MS_POR_HORA = 36e5;
+function prazoEmMs(criadoEmMs, prioridade) {
+  return criadoEmMs + SLA_PRIMEIRA_RESPOSTA_HORAS[prioridade] * MS_POR_HORA;
+}
+function avaliarSla(dados) {
+  const horasDoPrazo = SLA_PRIMEIRA_RESPOSTA_HORAS[dados.prioridade];
+  const criadoMs = Date.parse(dados.criadoEm);
+  if (!Number.isFinite(criadoMs)) {
+    return {
+      estado: "ok",
+      prazoEm: new Date(dados.agoraMs + horasDoPrazo * MS_POR_HORA).toISOString(),
+      horasRestantes: horasDoPrazo,
+      horasDoPrazo
+    };
+  }
+  const limiteMs = prazoEmMs(criadoMs, dados.prioridade);
+  const prazoEm = new Date(limiteMs).toISOString();
+  if (dados.primeiraRespostaEm) {
+    return { estado: "respondido", prazoEm, horasRestantes: null, horasDoPrazo };
+  }
+  const restanteMs = limiteMs - dados.agoraMs;
+  const horasRestantes = Math.round(restanteMs / MS_POR_HORA * 10) / 10;
+  if (restanteMs <= 0) return { estado: "estourado", prazoEm, horasRestantes, horasDoPrazo };
+  const decorrido = 1 - restanteMs / (horasDoPrazo * MS_POR_HORA);
+  return {
+    estado: decorrido >= dados.fracaoAviso ? "risco" : "ok",
+    prazoEm,
+    horasRestantes,
+    horasDoPrazo
+  };
+}
+function primeiraRespostaDoTime(comentarios, ehDoSolicitante) {
+  const doTime = comentarios.filter((c) => !ehDoSolicitante(c.corpo)).map((c) => c.criadoEm).filter((c) => Number.isFinite(Date.parse(c))).sort();
+  return doTime[0] ?? null;
+}
+
+// src/lib/notificacoes/servico.ts
+var MAX_TENTATIVAS_ENVIO = 5;
+var ServicoNotificacoes = class {
+  constructor(notificacoes, alertasSla, avaliacoesSla, acoes, preferencias, vinculos, atlassian, canalPor, auditoria, novoId, agora) {
+    this.notificacoes = notificacoes;
+    this.alertasSla = alertasSla;
+    this.avaliacoesSla = avaliacoesSla;
+    this.acoes = acoes;
+    this.preferencias = preferencias;
+    this.vinculos = vinculos;
+    this.atlassian = atlassian;
+    this.canalPor = canalPor;
+    this.auditoria = auditoria;
+    this.novoId = novoId;
+    this.agora = agora;
+  }
+  /**
+   * Enfileira um aviso, aplicando as três travas na ordem certa.
+   *
+   * 1. **Ação própria** (`RF-48`) — a pessoa não é avisada do que ela mesma fez.
+   * 2. **Dedupe** (`RF-47`) — pela constraint, não por `SELECT`.
+   * 3. **Canal** (`RF-45`) — sem canal, `suprimida`, e isso aparece na métrica.
+   *
+   * A ordem importa: checar canal antes de ação própria gravaria "suprimida por falta
+   * de canal" para um aviso que nunca deveria existir, e a métrica de Q11 contaria
+   * avisos fantasmas.
+   */
+  async enfileirar(dados) {
+    if (dados.conteudoDaAcao !== void 0) {
+      const propria = await this.acoes.ehAcaoPropria({
+        issueKey: dados.issueKey,
+        tipoEvento: dados.tipoEvento,
+        conteudo: dados.conteudoDaAcao
+      });
+      if (propria) {
+        await this.notificacoes.registrar({
+          id: this.novoId(),
+          issueKey: dados.issueKey,
+          destinatarioEmail: dados.destinatarioEmail,
+          tipoEvento: dados.tipoEvento,
+          carimboMudanca: dados.carimboMudanca,
+          fonte: dados.fonte,
+          canal: null,
+          destino: null,
+          mensagem: dados.mensagem,
+          estado: "suprimida"
+        });
+        return "suprimida_acao_propria";
+      }
+    }
+    const preferencia = await this.preferencias.obterEfetiva(
+      dados.destinatarioEmail,
+      dados.valores.canalPadrao
+    );
+    const semCanal = preferencia.canal === "nenhum";
+    const destino = preferencia.destino ?? dados.destinatarioEmail;
+    const r = await this.notificacoes.registrar({
+      id: this.novoId(),
+      issueKey: dados.issueKey,
+      destinatarioEmail: dados.destinatarioEmail,
+      tipoEvento: dados.tipoEvento,
+      carimboMudanca: dados.carimboMudanca,
+      fonte: dados.fonte,
+      canal: semCanal ? null : preferencia.canal,
+      destino: semCanal ? null : destino,
+      mensagem: dados.mensagem,
+      estado: semCanal ? "suprimida" : "pendente"
+    });
+    if (!r.nova) return "duplicada";
+    return semCanal ? "sem_canal" : "nova";
+  }
+  /** Aviso de criação (RF-44). Chamado no momento em que o chamado nasce. */
+  async avisarCriacao(dados) {
+    return this.enfileirar({
+      issueKey: dados.issueKey,
+      destinatarioEmail: dados.solicitanteEmail,
+      tipoEvento: "chamado_criado",
+      carimboMudanca: dados.criadoEm,
+      // `app`: nem webhook nem polling — o app sabe da criação porque ele criou.
+      fonte: "app",
+      mensagem: mensagemChamadoCriado({
+        issueKey: dados.issueKey,
+        titulo: dados.titulo,
+        prioridade: dados.prioridade,
+        slaPrimeiraRespostaHoras: dados.slaPrimeiraRespostaHoras,
+        baseApp: dados.valores.baseApp
+      }),
+      valores: dados.valores
+    });
+  }
+  /**
+   * A sincronização — o único lugar que decide o que é novo num chamado.
+   *
+   * Devolve contagem em vez de lançar quando a Atlassian falha: uma indisponibilidade
+   * não pode derrubar a rodada dos outros chamados (`RNF-18`), e o polling volta na
+   * próxima janela porque a marca-d'água **só avança no que deu certo**.
+   */
+  async sincronizarChamado(issueKey, fonte, valores) {
+    const vinculo = await this.vinculos.obterParaNotificacao_semIsolamento(issueKey);
+    if (!vinculo) return { eventos: 0, ok: true };
+    let chamado;
+    let comentarios;
+    try {
+      chamado = await this.atlassian.obterChamado(issueKey);
+      comentarios = await this.atlassian.listarComentariosPublicos(issueKey);
+    } catch {
+      return { eventos: 0, ok: false };
+    }
+    let eventos = 0;
+    if (chamado.status && chamado.status !== vinculo.ultimoStatusNotificado) {
+      const r = await this.enfileirar({
+        issueKey,
+        destinatarioEmail: vinculo.solicitanteEmail,
+        tipoEvento: "status_alterado",
+        carimboMudanca: chamado.atualizadoEm,
+        fonte,
+        mensagem: mensagemStatusAlterado({
+          issueKey,
+          status: chamado.status,
+          baseApp: valores.baseApp
+        }),
+        // ⚠️ RF-48 também vale para status: quem clicou em "marcar como resolvido" no app
+        // não pode receber "seu chamado mudou para Resolvido" logo depois. A rota registra
+        // o status resultante como ação própria (ver `rotas.ts`), e é ele que casa aqui.
+        conteudoDaAcao: chamado.status,
+        valores
+      });
+      if (r === "nova") eventos += 1;
+      await this.vinculos.marcarSincronizado(issueKey, {
+        ultimoStatusNotificado: chamado.status
+      });
+    }
+    const desdeMs = vinculo.notificadoAte ? Date.parse(vinculo.notificadoAte) : Number.NEGATIVE_INFINITY;
+    let maiorCarimbo = vinculo.notificadoAte;
+    for (const c of comentarios) {
+      const ms = Date.parse(c.criadoEm);
+      if (!Number.isFinite(ms)) continue;
+      if (Number.isFinite(desdeMs) && ms <= desdeMs) continue;
+      const r = await this.enfileirar({
+        issueKey,
+        destinatarioEmail: vinculo.solicitanteEmail,
+        tipoEvento: "comentario_publico",
+        carimboMudanca: c.criadoEm,
+        fonte,
+        mensagem: mensagemComentarioPublico({
+          issueKey,
+          autorNome: c.autorNome,
+          corpo: c.corpo,
+          baseApp: valores.baseApp
+        }),
+        // ⚠️ A supressão de ação própria depende deste campo. Sob proxy total o autor
+        // não distingue nada (ver `acoes.ts`).
+        conteudoDaAcao: c.corpo,
+        valores
+      });
+      if (r === "nova") eventos += 1;
+      if (!maiorCarimbo || ms > Date.parse(maiorCarimbo)) maiorCarimbo = c.criadoEm;
+    }
+    if (maiorCarimbo !== vinculo.notificadoAte) {
+      await this.vinculos.marcarSincronizado(issueKey, { notificadoAte: maiorCarimbo });
+    }
+    return { eventos, ok: true };
+  }
+  /**
+   * Alerta de SLA de primeira resposta (RF-46, T-231).
+   *
+   * ⚠️ **O destino do alerta é decisão de produto em aberto** — a spec marca T-231 como
+   * bloqueada por isso. O que está resolvido: *quando* alertar (cálculo puro em
+   * `sla.ts`), *não repetir* (tabela `alertas_sla`) e *para quem*, no único destino que
+   * o app conhece com certeza hoje — o **solicitante**. O dia em que se decidir alertar
+   * o time de tech ou a liderança, é um destinatário a mais nesta função, com o mesmo
+   * enfileiramento; nada do cálculo muda.
+   */
+  async avaliarESinalizarSla(vinculo, valores) {
+    let chamado;
+    let comentarios;
+    try {
+      chamado = await this.atlassian.obterChamado(vinculo.issueKey);
+      comentarios = await this.atlassian.listarComentariosPublicos(vinculo.issueKey);
+    } catch {
+      return { estado: "indisponivel", alertou: false };
+    }
+    if (!chamado.prioridade) return { estado: "sem_prioridade", alertou: false };
+    const primeiraResposta = primeiraRespostaDoTime(comentarios, ehComentarioDoSolicitante);
+    const avaliacao = avaliarSla({
+      criadoEm: chamado.criadoEm,
+      prioridade: chamado.prioridade,
+      primeiraRespostaEm: primeiraResposta,
+      agoraMs: Date.parse(this.agora()),
+      fracaoAviso: valores.fracaoAvisoSla
+    });
+    await this.avaliacoesSla.registrar({
+      issueKey: vinculo.issueKey,
+      estado: avaliacao.estado,
+      prazoEm: avaliacao.prazoEm,
+      respondidaEm: primeiraResposta,
+      dentroDoPrazo: primeiraResposta === null ? null : Date.parse(primeiraResposta) <= Date.parse(avaliacao.prazoEm)
+    });
+    if (avaliacao.estado !== "risco" && avaliacao.estado !== "estourado") {
+      return { estado: avaliacao.estado, alertou: false };
+    }
+    const primeiraVez = await this.alertasSla.registrarSePrimeiraVez(
+      vinculo.issueKey,
+      avaliacao.estado
+    );
+    if (!primeiraVez) return { estado: avaliacao.estado, alertou: false };
+    await this.enfileirar({
+      issueKey: vinculo.issueKey,
+      destinatarioEmail: vinculo.solicitanteEmail,
+      tipoEvento: "sla_em_risco",
+      // O carimbo é o PRAZO, não `agora()`: é o que torna o alerta idempotente entre
+      // as duas fontes e entre rodadas.
+      carimboMudanca: avaliacao.prazoEm,
+      fonte: "app",
+      mensagem: mensagemSlaEmRisco({
+        issueKey: vinculo.issueKey,
+        horasRestantes: Math.max(0, Math.ceil(avaliacao.horasRestantes ?? 0)),
+        estourado: avaliacao.estado === "estourado",
+        baseApp: valores.baseApp
+      }),
+      valores
+    });
+    return { estado: avaliacao.estado, alertou: true };
+  }
+  /**
+   * Despacha a fila (T-225).
+   *
+   * Falha de envio **não perde** a notificação: transitório volta pendente, definitivo
+   * vira `falha` e fica visível. Mesma lógica do outbox de chamados — e pelo mesmo
+   * motivo, porque "o canal piscou" não pode virar "o aviso nunca existiu".
+   */
+  async despacharPendentes(limite2) {
+    const fila = await this.notificacoes.listarPendentes(limite2);
+    let enviadas = 0;
+    let falhas = 0;
+    for (const n of fila) {
+      const resultado = await this.despachar(n);
+      if (resultado) enviadas += 1;
+      else falhas += 1;
+    }
+    const restantes = await this.notificacoes.listarPendentes(limite2);
+    return { enviadas, falhas, pendentes: restantes.length };
+  }
+  async despachar(n) {
+    if (!n.canal || n.canal === "nenhum" || !n.destino) {
+      await this.notificacoes.registrarTentativaFalha(
+        n.id,
+        "sem canal ou destino",
+        false,
+        MAX_TENTATIVAS_ENVIO
+      );
+      return false;
+    }
+    try {
+      await this.canalPor(n.canal).enviar(n.destino, {
+        titulo: n.titulo,
+        corpo: n.corpo,
+        link: null
+      });
+      await this.notificacoes.marcarEnviada(n.id);
+      await this.auditoria.registrar({
+        atorEmail: "(cron)",
+        acao: "notificacao_enviada",
+        recurso: n.issueKey,
+        resultado: "sucesso",
+        // ⚠️ O CORPO não vai para a auditoria: ele carrega trecho de comentário de
+        // chamado, e auditoria é lida por admin (RNF-30, RF-30).
+        detalhe: { tipoEvento: n.tipoEvento, canal: n.canal }
+      });
+      return true;
+    } catch (e) {
+      const transitorio = e instanceof ErroCanal ? e.detalhe.transitorio : true;
+      await this.notificacoes.registrarTentativaFalha(
+        n.id,
+        e instanceof Error ? e.message : String(e),
+        transitorio,
+        MAX_TENTATIVAS_ENVIO
+      );
+      await this.auditoria.registrar({
+        atorEmail: "(cron)",
+        acao: "notificacao_enviada",
+        recurso: n.issueKey,
+        resultado: "falha",
+        detalhe: { tipoEvento: n.tipoEvento, canal: n.canal, transitorio }
+      });
+      return false;
+    }
+  }
+};
+
+// src/lib/notificacoes/canais.ts
+function textoPlano(m) {
+  const corpo = m.corpo.replace(/\*\*/g, "");
+  return m.link ? `${corpo}
+
+${m.link}` : corpo;
+}
+var CanalFake = class {
+  nome;
+  enviadas = [];
+  /** `'nenhum'` entrega; qualquer outro valor lança com aquela classificação. */
+  falha = "nenhum";
+  constructor(nome = "chat") {
+    this.nome = nome;
+  }
+  async enviar(destino, mensagem) {
+    if (this.falha !== "nenhum") {
+      throw new ErroCanal(`canal fake: ${this.falha}`, {
+        transitorio: this.falha === "transitorio"
+      });
+    }
+    this.enviadas.push({ destino, mensagem });
+  }
+  async verificarSaude() {
+    return { ok: this.falha === "nenhum", detalhe: "canal fake" };
+  }
+};
+var CanalGoogleChat = class {
+  constructor(opcoes) {
+    this.opcoes = opcoes;
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
+  }
+  nome = "chat";
+  fetchImpl;
+  async enviar(destino, mensagem) {
+    const url = destino || this.opcoes.endpoint;
+    if (!url) {
+      throw new ErroCanal("canal de chat sem destino configurado", { transitorio: false });
+    }
+    const resposta = await this.fetchImpl(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: `*${mensagem.titulo}*
+${textoPlano(mensagem)}` })
+    });
+    if (!resposta.ok) {
+      throw new ErroCanal(`canal de chat respondeu ${resposta.status}`, {
+        transitorio: resposta.status === 429 || resposta.status >= 500,
+        status: resposta.status
+      });
+    }
+  }
+  async verificarSaude() {
+    return this.opcoes.endpoint ? { ok: true, detalhe: "webhook de espa\xE7o configurado" } : { ok: false, detalhe: "sem webhook configurado (Q11)" };
+  }
+};
+var CanalEmail = class {
+  constructor(opcoes) {
+    this.opcoes = opcoes;
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
+  }
+  nome = "email";
+  fetchImpl;
+  async enviar(destino, mensagem) {
+    if (!this.opcoes.endpoint) {
+      throw new ErroCanal("canal de e-mail sem provedor configurado", { transitorio: false });
+    }
+    if (!destino) {
+      throw new ErroCanal("canal de e-mail sem destinat\xE1rio", { transitorio: false });
+    }
+    const resposta = await this.fetchImpl(this.opcoes.endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...this.opcoes.apiKey ? { Authorization: `Bearer ${this.opcoes.apiKey}` } : {}
+      },
+      body: JSON.stringify({
+        from: this.opcoes.remetente ?? "goatlas@gocase.com",
+        to: destino,
+        subject: mensagem.titulo,
+        text: textoPlano(mensagem)
+      })
+    });
+    if (!resposta.ok) {
+      throw new ErroCanal(`provedor de e-mail respondeu ${resposta.status}`, {
+        transitorio: resposta.status === 429 || resposta.status >= 500,
+        status: resposta.status
+      });
+    }
+  }
+  async verificarSaude() {
+    return this.opcoes.endpoint ? { ok: true, detalhe: "provedor configurado" } : { ok: false, detalhe: "sem provedor configurado (Q11)" };
+  }
+};
+var CanalIndisponivel = class {
+  nome = "nenhum";
+  async enviar() {
+    throw new ErroCanal("nenhum canal de notifica\xE7\xE3o configurado (Q11)", {
+      transitorio: false
+    });
+  }
+  async verificarSaude() {
+    return { ok: false, detalhe: "nenhum canal configurado (Q11 em aberto)" };
+  }
+};
+
 // src/lib/contexto.ts
 function novoIdPadrao() {
   return crypto.randomUUID();
@@ -3210,7 +4876,8 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   const valores = await config.carregar();
   const auditoria = new AuditoriaBanco(env.DB, agora, novoId);
   const usandoFakes = modoDemo || env.GOATLAS_USAR_FAKES === "1" || !env.ATLASSIAN_API_TOKEN;
-  const atlassian = reaproveitar.atlassian ? reaproveitar.atlassian : usandoFakes ? new ClienteAtlassianFake() : new ClienteAtlassianHttp({
+  const somenteLeitura = env.GOATLAS_SOMENTE_LEITURA === "1";
+  const atlassianBase = reaproveitar.atlassian ? reaproveitar.atlassian : usandoFakes ? new ClienteAtlassianFake() : new ClienteAtlassianHttp({
     baseUrl: env.ATLASSIAN_BASE_URL ?? "",
     email: env.ATLASSIAN_EMAIL ?? "",
     apiToken: env.ATLASSIAN_API_TOKEN ?? "",
@@ -3221,6 +4888,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     // continua indo na descrição enquanto isso (cinto e suspensório).
     campoSolicitanteId: valores.campo_solicitante_id
   });
+  const atlassian = somenteLeitura ? new ClienteAtlassianSomenteLeitura(atlassianBase) : atlassianBase;
   const ia = reaproveitar.ia ? reaproveitar.ia : usandoFakes ? new ClienteIAFake() : !env.LLM_API_KEY ? new ClienteIAIndisponivel() : new ClienteIAHttp({
     baseUrl: env.LLM_BASE_URL ?? null,
     apiKey: env.LLM_API_KEY,
@@ -3228,9 +4896,12 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     apiKeyFallback: env.LLM_FALLBACK ?? null,
     ...env.LLM_FALLBACK_MODEL ? { modeloFallback: env.LLM_FALLBACK_MODEL } : {}
   });
-  const organizacao = reaproveitar.organizacao ? reaproveitar.organizacao : usandoFakes ? new ClienteOrganizacaoFake() : null;
+  const organizacao = reaproveitar.organizacao ? reaproveitar.organizacao : usandoFakes ? new ClienteOrganizacaoFake() : env.ATLASSIAN_ORG_API_KEY ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY }) : null;
   if (modoDemo) {
-    if (atlassian instanceof ClienteAtlassianFake) semearAtlassianDemo(atlassian);
+    if (atlassianBase instanceof ClienteAtlassianFake) {
+      semearAtlassianDemo(atlassianBase);
+      await repovoarChamadosDemo(atlassianBase, env.DB);
+    }
     if (ia instanceof ClienteIAFake) semearIaDemo(ia);
   }
   const conversas = new RepositorioConversas(env.DB, agora);
@@ -3241,6 +4912,51 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora);
   const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId);
   const inventarioAssentos = new RepositorioInventario(env.DB, novoId);
+  const repoNotificacoes = new RepositorioNotificacoes(env.DB, agora);
+  const alertasSla = new RepositorioAlertasSla(env.DB, agora);
+  const avaliacoesSla = new RepositorioAvaliacoesSla(env.DB, agora);
+  const acoesProprias = new RepositorioAcoesProprias(env.DB, agora, novoId);
+  const preferencias = new RepositorioPreferencias(env.DB, agora);
+  const marcaAguaPolling = new MarcaAguaPolling(env.DB, agora);
+  const canaisFake = /* @__PURE__ */ new Map();
+  const canalPor = (nome) => {
+    if (usandoFakes) {
+      const existente = canaisFake.get(nome);
+      if (existente) return existente;
+      const novo = new CanalFake(nome);
+      canaisFake.set(nome, novo);
+      return novo;
+    }
+    if (nome === "chat") {
+      return valores.chat_webhook_url ? new CanalGoogleChat({ endpoint: valores.chat_webhook_url }) : new CanalIndisponivel();
+    }
+    if (nome === "email") {
+      return valores.email_endpoint ? new CanalEmail({
+        endpoint: valores.email_endpoint,
+        remetente: valores.email_remetente ?? "goatlas@gocase.com",
+        apiKey: env.EMAIL_API_KEY ?? null
+      }) : new CanalIndisponivel();
+    }
+    return new CanalIndisponivel();
+  };
+  const valoresNotificacao = {
+    canalPadrao: valores.canal_notificacao_padrao,
+    baseApp: valores.base_publica_app,
+    fracaoAvisoSla: valores.sla_fracao_aviso
+  };
+  const notificador = new ServicoNotificacoes(
+    repoNotificacoes,
+    alertasSla,
+    avaliacoesSla,
+    acoesProprias,
+    preferencias,
+    vinculos,
+    atlassian,
+    canalPor,
+    auditoria,
+    novoId,
+    agora
+  );
   return {
     db: env.DB,
     config,
@@ -3256,10 +4972,20 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     orquestrador,
     organizacao,
     inventarioAssentos,
+    notificacoes: repoNotificacoes,
+    acoesProprias,
+    preferencias,
+    marcaAguaPolling,
+    avaliacoesSla,
+    notificador,
+    canalPor,
+    valoresNotificacao,
+    segredoWebhook: env.GOATLAS_WEBHOOK_SEGREDO,
     agora,
     novoId,
     usandoFakes,
-    modoDemo
+    modoDemo,
+    somenteLeitura
   };
 }
 
@@ -3543,17 +5269,17 @@ function anotar(coletor, motivo, detalhe) {
 function tokenizar(entrada, coletor) {
   const tokens = [];
   let i = 0;
-  let texto = "";
+  let texto2 = "";
   const despejarTexto = () => {
-    if (texto !== "") {
-      tokens.push({ t: "texto", valor: decodificarEntidades(texto) });
-      texto = "";
+    if (texto2 !== "") {
+      tokens.push({ t: "texto", valor: decodificarEntidades(texto2) });
+      texto2 = "";
     }
   };
   while (i < entrada.length) {
     const c = entrada[i];
     if (c !== "<") {
-      texto += c;
+      texto2 += c;
       i += 1;
       continue;
     }
@@ -3578,7 +5304,7 @@ function tokenizar(entrada, coletor) {
     if (entrada.startsWith("</", i)) {
       const nome2 = lerNome(entrada, i + 2);
       if (nome2 === null) {
-        texto += c;
+        texto2 += c;
         i += 1;
         continue;
       }
@@ -3590,7 +5316,7 @@ function tokenizar(entrada, coletor) {
     }
     const nome = lerNome(entrada, i + 1);
     if (nome === null) {
-      texto += c;
+      texto2 += c;
       i += 1;
       continue;
     }
@@ -4326,6 +6052,158 @@ async function obterResumoMetricas(db) {
   return calcularMetricas(bloqueios, vias, resultadosBuscas);
 }
 
+// src/lib/governanca/painel.ts
+var LIMIAR_429_PCT = 2;
+var JANELA_DEFLEXAO_DIAS = 7;
+var AVISO_DEFLEXAO = "A taxa de deflex\xE3o conta quem foi bloqueado e n\xE3o abriu chamado. Ela \xE9 um TETO: n\xE3o distingue quem resolveu pela documenta\xE7\xE3o de quem desistiu e foi pedir por outro canal.";
+var VIES_DEFLEXAO = 'Quem foi pedir pelo canal antigo (chat, reuni\xE3o) conta aqui como "resolveu": o app n\xE3o v\xEA o que acontece fora dele. O n\xFAmero \xE9 um limite superior \u2014 cruze com a ader\xEAncia de canal antes de celebrar.';
+function taxaPct(numerador, denominador) {
+  return denominador === 0 ? null : numerador / denominador * 100;
+}
+function montarPainel(e) {
+  const porPrioridade = {};
+  for (const p of e.prioridades) {
+    const chave = p ?? "sem_prioridade";
+    porPrioridade[chave] = (porPrioridade[chave] ?? 0) + 1;
+  }
+  const porVia = {};
+  for (const via of e.vias) porVia[via] = (porVia[via] ?? 0) + 1;
+  const regras = [.../* @__PURE__ */ new Set([...Object.keys(e.thresholds), ...e.bloqueios.map((b) => b.regra)])];
+  const calibragem = regras.map((regra) => {
+    const daRegra = e.bloqueios.filter((b) => b.regra === regra);
+    const comOverride = daRegra.filter((b) => b.houveOverride);
+    const contagem = /* @__PURE__ */ new Map();
+    for (const b of comOverride) {
+      for (const titulo of b.paginas) {
+        contagem.set(titulo, (contagem.get(titulo) ?? 0) + 1);
+      }
+    }
+    return {
+      regra,
+      thresholdAtual: e.thresholds[regra] ?? 0,
+      totalBloqueios: daRegra.length,
+      overrides: comOverride.length,
+      taxaOverridePct: taxaPct(comOverride.length, daRegra.length),
+      motivosDeOverride: comOverride.map((b) => (b.overrideMotivo ?? "").trim()).filter((m) => m.length > 0),
+      paginasApontadas: [...contagem.entries()].map(([titulo, vezes]) => ({ titulo, vezes })).sort((a, b) => b.vezes - a.vezes)
+    };
+  });
+  const taxa429 = taxaPct(e.telemetria.total429, e.telemetria.totalRequisicoes);
+  return {
+    chamadosPorArea: e.chamadosPorArea,
+    chamadosPorPrioridade: porPrioridade,
+    canal: { porVia, totalPeloApp: e.vias.length },
+    calibragem,
+    notificacoes: e.notificacoes,
+    telemetriaAtlassian: {
+      ...e.telemetria,
+      taxa429Pct: taxa429,
+      acimaDoLimiar: taxa429 !== null && taxa429 > LIMIAR_429_PCT
+    },
+    ia: {
+      ...e.ia,
+      custoMedioUsd: e.ia.conversas === 0 ? null : e.ia.custoTotalUsd / e.ia.conversas
+    },
+    sla: e.sla,
+    deflexaoResolvidaConhecida: false,
+    avisoDeflexao: AVISO_DEFLEXAO,
+    deflexaoAparente: {
+      ...e.deflexao,
+      taxaPct: taxaPct(e.deflexao.semChamadoDepois, e.deflexao.bloqueiosSemOverride),
+      janelaDias: JANELA_DEFLEXAO_DIAS,
+      viesConhecido: VIES_DEFLEXAO
+    }
+  };
+}
+async function lerEntradaDoPainel(db, dados) {
+  const areaBrutas = await db.query(
+    `SELECT area, COUNT(*) AS total FROM vinculos GROUP BY area ORDER BY total DESC`,
+    []
+  );
+  const chamadosPorArea = linhasComoObjetos(areaBrutas).map(
+    (l) => ({ area: l.area ?? null, total: Number(l.total) })
+  );
+  const viasBrutas = await db.query(`SELECT via FROM vinculos`, []);
+  const vias = linhasComoObjetos(viasBrutas).map((l) => l.via);
+  const prioBrutas = await db.query(
+    `SELECT payload_json FROM submissoes WHERE estado = 'criado'`,
+    []
+  );
+  const prioridades = linhasComoObjetos(prioBrutas).map((l) => {
+    try {
+      const p = JSON.parse(l.payload_json);
+      return typeof p.prioridade === "string" ? p.prioridade : null;
+    } catch {
+      return null;
+    }
+  });
+  const bloqBrutas = await db.query(
+    `SELECT regra, houve_override, override_motivo, evidencia_json FROM bloqueios`,
+    []
+  );
+  const bloqueios = linhasComoObjetos(bloqBrutas).map((l) => ({
+    regra: l.regra,
+    houveOverride: l.houve_override === 1,
+    overrideMotivo: l.override_motivo,
+    paginas: titulosDaEvidencia(l.evidencia_json)
+  }));
+  const iaBrutas = await db.query(
+    `SELECT COUNT(*) AS conversas, COALESCE(SUM(custo_usd), 0) AS custo FROM conversas`,
+    []
+  );
+  const iaLinha = linhasComoObjetos(iaBrutas)[0];
+  return {
+    chamadosPorArea,
+    prioridades,
+    vias,
+    bloqueios,
+    deflexao: await contarDeflexaoAparente(db),
+    thresholds: dados.thresholds,
+    notificacoes: dados.notificacoes,
+    telemetria: dados.telemetria,
+    ia: {
+      conversas: Number(iaLinha?.conversas ?? 0),
+      custoTotalUsd: Number(iaLinha?.custo ?? 0),
+      // Contado a partir do estado, não de um flag novo: conversa encerrada por teto tem
+      // `estado = 'encerrado'` (ver `agent/estado.ts`).
+      conversasNoTeto: 0
+    },
+    sla: dados.sla
+  };
+}
+async function contarDeflexaoAparente(db) {
+  const r = await db.query(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(
+         CASE WHEN NOT EXISTS (
+           SELECT 1 FROM vinculos v
+            WHERE v.solicitante_email = c.solicitante_email
+              AND v.criado_em >= b.criado_em
+              AND v.criado_em < datetime(b.criado_em, '+' || ? || ' days')
+         ) THEN 1 ELSE 0 END
+       ) AS sem_chamado
+     FROM bloqueios b
+     JOIN conversas c ON c.id = b.conversa_id
+     WHERE b.houve_override = 0`,
+    [JANELA_DEFLEXAO_DIAS]
+  );
+  const linha = linhasComoObjetos(r)[0];
+  return {
+    bloqueiosSemOverride: Number(linha?.total ?? 0),
+    semChamadoDepois: Number(linha?.sem_chamado ?? 0)
+  };
+}
+function titulosDaEvidencia(bruto) {
+  if (!bruto) return [];
+  try {
+    const dados = JSON.parse(bruto);
+    return [...dados?.paginas ?? [], ...dados?.ticketsAjusteOperacional ?? []].map((p) => typeof p.titulo === "string" ? p.titulo : "").filter((t) => t.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 // src/lib/governanca/recomendacoes.ts
 var PRODUTO_SERVICE_DESK_AGENTE = "jira-servicedesk";
 function gerarRecomendacoes(itens, ociosoDesdeDias, agoraMs) {
@@ -4379,6 +6257,213 @@ function recomendacoesParaCsv(recomendacoes) {
   return [CABECALHO.join(","), ...linhas].join("\r\n");
 }
 
+// src/lib/notificacoes/webhook.ts
+var HEADER_WEBHOOK = "x-goatlas-webhook";
+var PARAM_WEBHOOK = "k";
+function segredoConfere(enviado, esperado) {
+  if (!esperado || esperado.length === 0) return false;
+  if (enviado === null) return false;
+  let diferenca = enviado.length ^ esperado.length;
+  const n = Math.max(enviado.length, esperado.length);
+  for (let i = 0; i < n; i += 1) {
+    diferenca |= (enviado.charCodeAt(i) || 0) ^ (esperado.charCodeAt(i) || 0);
+  }
+  return diferenca === 0;
+}
+function chaveDoPayload(corpo) {
+  if (!corpo || typeof corpo !== "object") return null;
+  const c = corpo;
+  const bruto = typeof c.issue?.key === "string" ? c.issue.key : typeof c.issueKey === "string" ? c.issueKey : null;
+  if (!bruto) return null;
+  return /^[A-Z][A-Z0-9_]{1,19}-\d{1,10}$/.test(bruto) ? bruto : null;
+}
+
+// src/lib/http/cron-auth.ts
+var JANELA_CRON_SEG = 300;
+function lerAssinaturaCron(bruto) {
+  let carimboSeg = null;
+  let assinaturaHex = null;
+  for (const parte of bruto.split(";")) {
+    const [chave, valor] = parte.split("=", 2);
+    if (chave === void 0 || valor === void 0) continue;
+    const nome = chave.trim();
+    const conteudo = valor.trim();
+    if (nome === "t" && /^\d{1,15}$/.test(conteudo)) {
+      carimboSeg = Number(conteudo);
+      continue;
+    }
+    if (/^[0-9a-f]{64}$/.test(conteudo)) assinaturaHex = conteudo;
+  }
+  if (carimboSeg === null || assinaturaHex === null) return null;
+  return { carimboSeg, assinaturaHex };
+}
+function mensagensCandidatas(dados) {
+  const t = String(dados.carimboSeg);
+  return [
+    { rotulo: "t.corpo", mensagem: `${t}.${dados.corpo}` },
+    { rotulo: "t", mensagem: t },
+    { rotulo: "t:corpo", mensagem: `${t}:${dados.corpo}` },
+    { rotulo: "corpo", mensagem: dados.corpo },
+    { rotulo: "t.caminho", mensagem: `${t}.${dados.caminho}` },
+    { rotulo: "t.metodo.caminho", mensagem: `${t}.${dados.metodo}.${dados.caminho}` },
+    { rotulo: "t+corpo", mensagem: `${t}${dados.corpo}` },
+    { rotulo: "t.metodo caminho", mensagem: `${t}.${dados.metodo} ${dados.caminho}` },
+    { rotulo: "caminho.t", mensagem: `${dados.caminho}.${t}` },
+    { rotulo: "t|caminho|corpo", mensagem: `${t}|${dados.caminho}|${dados.corpo}` }
+  ];
+}
+function chavesCandidatas(chave) {
+  const comoTexto = { rotulo: "ascii", bytes: new TextEncoder().encode(chave) };
+  if (!/^[0-9a-fA-F]{2,}$/.test(chave) || chave.length % 2 !== 0) return [comoTexto];
+  const bytes = new Uint8Array(chave.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = Number.parseInt(chave.slice(i * 2, i * 2 + 2), 16);
+  }
+  return [{ rotulo: "hex", bytes }, comoTexto];
+}
+async function hmacHex(chaveBytes, mensagem) {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    chaveBytes,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const bytes = await crypto.subtle.sign("HMAC", material, new TextEncoder().encode(mensagem));
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function hexConfere(a, b) {
+  let diferenca = a.length ^ b.length;
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i += 1) {
+    diferenca |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return diferenca === 0;
+}
+var ROTAS_QUE_EXIGEM_ASSINATURA = ["/api/cron/retencao"];
+async function verificarCron(dados) {
+  if (!dados.chave) return { ok: false, motivo: "chave_ausente" };
+  if (dados.headerEnviado === null) return { ok: false, motivo: "header_ausente" };
+  if (hexConfere(dados.headerEnviado, dados.chave)) return { ok: true, candidata: "chave_crua" };
+  const assinatura = lerAssinaturaCron(dados.headerEnviado);
+  if (!assinatura) return { ok: false, motivo: "formato_desconhecido" };
+  const idadeSeg = Math.abs(dados.agoraMs / 1e3 - assinatura.carimboSeg);
+  if (idadeSeg > JANELA_CRON_SEG) return { ok: false, motivo: "carimbo_fora_da_janela" };
+  const mensagens = mensagensCandidatas({
+    carimboSeg: assinatura.carimboSeg,
+    metodo: dados.metodo,
+    caminho: dados.caminho,
+    corpo: dados.corpo
+  });
+  for (const chave of chavesCandidatas(dados.chave)) {
+    for (const candidata of mensagens) {
+      const esperado = await hmacHex(chave.bytes, candidata.mensagem);
+      if (hexConfere(esperado, assinatura.assinaturaHex)) {
+        return { ok: true, candidata: `${chave.rotulo}/${candidata.rotulo}` };
+      }
+    }
+  }
+  if (ROTAS_QUE_EXIGEM_ASSINATURA.includes(dados.caminho)) {
+    return { ok: false, motivo: "presenca_insuficiente_para_rota_destrutiva" };
+  }
+  if (dados.identidadeDeUsuario) {
+    return { ok: false, motivo: "presenca_com_identidade_de_usuario" };
+  }
+  return { ok: true, candidata: "presenca_sem_identidade" };
+}
+
+// src/lib/piloto/areas.ts
+var MENSAGEM_FORA_DO_PILOTO = "O goatlas est\xE1 em piloto e ainda n\xE3o abrange a sua \xE1rea. Enquanto isso, siga pedindo pelo canal que voc\xEA j\xE1 usa hoje com o time de tech \u2014 e a gente avisa quando chegar a sua vez. A consulta \xE0 documenta\xE7\xE3o continua liberada para voc\xEA aqui mesmo.";
+function dentroDoPiloto(email, emailsPiloto) {
+  if (emailsPiloto.length === 0) return { dentro: true };
+  const alvo = email.trim().toLowerCase();
+  const lista2 = emailsPiloto.map((e) => e.trim().toLowerCase());
+  return lista2.includes(alvo) ? { dentro: true } : { dentro: false, mensagem: MENSAGEM_FORA_DO_PILOTO };
+}
+function areaDoEmail(email, mapa) {
+  const alvo = email.trim().toLowerCase();
+  for (const [chave, area] of Object.entries(mapa)) {
+    if (chave.trim().toLowerCase() === alvo) {
+      const limpa = area.trim();
+      return limpa.length > 0 ? limpa : null;
+    }
+  }
+  return null;
+}
+function areasConhecidas(mapa) {
+  return [...new Set(Object.values(mapa).map((a) => a.trim()).filter((a) => a.length > 0))].sort();
+}
+
+// src/lib/retencao.ts
+var PISO_AUDITORIA_DIAS = 180;
+function limite(agoraMs, dias) {
+  return new Date(agoraMs - dias * 864e5).toISOString();
+}
+async function aplicarRetencao(db, politica, agoraMs) {
+  let conversas = 0;
+  let mensagens = 0;
+  let notificacoes = 0;
+  let auditoria = 0;
+  let auditoriaClampada = false;
+  if (politica.conversasDias !== null) {
+    const corte = limite(agoraMs, politica.conversasDias);
+    const m = await db.exec(
+      `DELETE FROM mensagens WHERE conversa_id IN
+         (SELECT id FROM conversas WHERE criado_em < ?)`,
+      [corte]
+    );
+    mensagens = m.rowsWritten;
+    const c = await db.exec(`DELETE FROM conversas WHERE criado_em < ?`, [corte]);
+    conversas = c.rowsWritten;
+  }
+  if (politica.notificacoesDias !== null) {
+    const r = await db.exec(
+      // ⚠️ Só notificação JÁ RESOLVIDA. Apagar uma `pendente` é jogar no lixo um aviso
+      // que ninguém recebeu — a fila é curta, e uma pendente antiga é sinal de canal
+      // quebrado, que é justamente o que se quer ver.
+      `DELETE FROM notificacoes WHERE criado_em < ? AND estado IN ('enviada', 'falha', 'suprimida')`,
+      [limite(agoraMs, politica.notificacoesDias)]
+    );
+    notificacoes = r.rowsWritten;
+  }
+  if (politica.auditoriaDias !== null) {
+    const dias = Math.max(politica.auditoriaDias, PISO_AUDITORIA_DIAS);
+    auditoriaClampada = dias !== politica.auditoriaDias;
+    const r = await db.exec(`DELETE FROM auditoria WHERE criado_em < ?`, [limite(agoraMs, dias)]);
+    auditoria = r.rowsWritten;
+  }
+  return { conversas, mensagens, notificacoes, auditoria, auditoriaClampada };
+}
+
+// src/lib/http/anexo-entrada.ts
+var MAX_ANEXO_ENVIADO_BYTES = 8 * 1024 * 1024;
+var MAX_ANEXOS_POR_ENVIO = 3;
+function sanearNomeArquivo(bruto) {
+  const semCaminho = bruto.replace(/^.*[\\/]/, "");
+  const limpo = semCaminho.replace(/[\u0000-\u001f\u007f]/g, "").replace(/\.{2,}/g, ".").trim();
+  return limpo.length > 0 ? limpo.slice(0, 200) : "anexo";
+}
+async function validarAnexoEnviado(arquivo) {
+  if (!(arquivo instanceof File)) {
+    return { ok: false, mensagem: "Anexe um arquivo para enviar." };
+  }
+  if (arquivo.size === 0) {
+    return { ok: false, mensagem: "O arquivo est\xE1 vazio." };
+  }
+  if (arquivo.size > MAX_ANEXO_ENVIADO_BYTES) {
+    const mb = Math.floor(MAX_ANEXO_ENVIADO_BYTES / (1024 * 1024));
+    return { ok: false, mensagem: `O arquivo passa de ${mb} MB. Envie um menor ou um link.` };
+  }
+  return {
+    ok: true,
+    nome: sanearNomeArquivo(arquivo.name),
+    // Navegador que não declara tipo não vira erro: `octet-stream` é o que o próprio
+    // HTTP usa para "não sei", e o Jira lida com isso.
+    tipo: arquivo.type || "application/octet-stream",
+    bytes: await arquivo.arrayBuffer()
+  };
+}
+
 // src/lib/http/rotas.ts
 var PRIORIDADES = ["critica", "alta", "normal"];
 var ehPrioridade = (v) => typeof v === "string" && PRIORIDADES.includes(v);
@@ -4389,6 +6474,9 @@ async function tratarRequisicao(req, ctx, env) {
   if (caminho === "/api/health") return await tratarHealth(ctx);
   if (caminho.startsWith("/api/cron/")) {
     return await tratarCron(req, ctx, env, caminho);
+  }
+  if (caminho === "/api/webhook/jira") {
+    return await tratarWebhook(req, ctx, url);
   }
   const auth = await resolverIdentidade(req.headers, ctx.config);
   if (!auth.ok) {
@@ -4407,23 +6495,26 @@ async function tratarRequisicao(req, ctx, env) {
       email: eu.email,
       nome: eu.nome,
       isAdmin: eu.isAdmin,
-      modoDemo: ctx.modoDemo
+      modoDemo: ctx.modoDemo,
+      // A UI precisa avisar de forma permanente: sem isso, a pessoa tenta abrir chamado,
+      // toma a recusa e conclui que o app está quebrado.
+      somenteLeitura: ctx.somenteLeitura
     });
   }
   if (req.method === "POST" || caminho.startsWith("/api/confluence/")) {
-    const limite = await verificarLimite(
+    const limite2 = await verificarLimite(
       ctx.db,
       eu.email,
       ctx.valores.limite_requisicoes_por_minuto,
       Date.parse(ctx.agora())
     );
-    if (!limite.permitido) {
+    if (!limite2.permitido) {
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: "limite_excedido",
         recurso: caminho,
         resultado: "negado",
-        detalhe: { usadas: limite.usadas, limite: limite.limite }
+        detalhe: { usadas: limite2.usadas, limite: limite2.limite }
       });
       return ERROS.limiteRequisicoes();
     }
@@ -4458,8 +6549,8 @@ async function rotear(req, ctx, eu, caminho, url) {
   const mensagens = caminho.match(/^\/api\/conversas\/([^/]+)\/mensagens$/);
   if (mensagens && req.method === "POST") {
     const corpo = await lerJson(req);
-    const texto = typeof corpo?.texto === "string" ? corpo.texto.trim() : "";
-    if (!texto) return ERROS.dadosInvalidos("Escreva sua mensagem antes de enviar.");
+    const texto2 = typeof corpo?.texto === "string" ? corpo.texto.trim() : "";
+    if (!texto2) return ERROS.dadosInvalidos("Escreva sua mensagem antes de enviar.");
     const conversa = await ctx.conversas.obterDoSolicitante(mensagens[1], eu.email);
     if (!conversa) return ERROS.naoEncontrado();
     await ctx.auditoria.registrar({
@@ -4468,7 +6559,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       recurso: conversa.id,
       resultado: "sucesso"
     });
-    const r = await ctx.orquestrador.processarMensagem(conversa, texto, ctx.valores);
+    const r = await ctx.orquestrador.processarMensagem(conversa, texto2, ctx.valores);
     const depois = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email);
     return json({
       texto: r.texto,
@@ -4545,12 +6636,20 @@ async function rotear(req, ctx, eu, caminho, url) {
         "A abertura de chamados ainda n\xE3o foi configurada nesta instala\xE7\xE3o. Fale com o time de tech."
       );
     }
+    const piloto = await verificarPiloto(ctx, eu, caminho);
+    if (piloto) return piloto;
     const r = await ctx.chamados.abrirPorConversa(
       atual,
       serviceDeskId,
-      `conversa:${conversa.id}`
+      `conversa:${conversa.id}`,
+      areaDoEmail(eu.email, ctx.valores.areas_por_email)
     );
     if (r.estado === "criado") await ctx.conversas.definirEstado(conversa.id, "criado");
+    await avisarCriacao(ctx, r, {
+      solicitanteEmail: eu.email,
+      titulo: atual.proposta.titulo,
+      prioridade: atual.proposta.prioridade
+    });
     return json(respostaCriacao(r, atual.proposta.prioridade), 201);
   }
   if (caminho === "/api/chamados" && req.method === "POST") {
@@ -4563,11 +6662,14 @@ async function rotear(req, ctx, eu, caminho, url) {
         "A abertura de chamados ainda n\xE3o foi configurada nesta instala\xE7\xE3o. Fale com o time de tech."
       );
     }
+    const piloto = await verificarPiloto(ctx, eu, caminho);
+    if (piloto) return piloto;
     const chave = typeof corpo?.chaveIdempotencia === "string" && corpo.chaveIdempotencia.length > 0 ? `form:${eu.email}:${corpo.chaveIdempotencia}` : `form:${eu.email}:${ctx.novoId()}`;
     const camposDinamicos = extrairCamposDinamicos(corpo?.camposDinamicos);
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
+      area: areaDoEmail(eu.email, ctx.valores.areas_por_email),
       payload: {
         titulo: validada.proposta.titulo,
         descricao: validada.proposta.descricao,
@@ -4576,6 +6678,11 @@ async function rotear(req, ctx, eu, caminho, url) {
         prioridade: validada.proposta.prioridade,
         ...camposDinamicos ? { camposDinamicos } : {}
       }
+    });
+    await avisarCriacao(ctx, r, {
+      solicitanteEmail: eu.email,
+      titulo: validada.proposta.titulo,
+      prioridade: validada.proposta.prioridade
     });
     return json(respostaCriacao(r, validada.proposta.prioridade), 201);
   }
@@ -4597,6 +6704,50 @@ async function rotear(req, ctx, eu, caminho, url) {
     } catch {
       return ERROS.conteudoIndisponivel();
     }
+  }
+  if (caminho === "/api/preferencias") {
+    if (req.method === "GET") {
+      const p = await ctx.preferencias.obterEfetiva(
+        eu.email,
+        ctx.valores.canal_notificacao_padrao
+      );
+      return json({
+        canal: p.canal,
+        destino: p.destino,
+        escolhidaPelaPessoa: p.escolhidaPelaPessoa,
+        // A tela precisa distinguir "escolhi não receber" de "ninguém definiu canal
+        // ainda" (Q11): as duas mostram `nenhum`, e só uma é decisão da pessoa.
+        canalPadraoDefinido: ctx.valores.canal_notificacao_padrao !== null
+      });
+    }
+    if (req.method === "PUT") {
+      const corpo = await lerJson(req);
+      const validada = validarPreferencia(corpo);
+      if ("erro" in validada) return ERROS.dadosInvalidos(validada.erro);
+      await ctx.preferencias.definir(eu.email, validada.canal, validada.destino);
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "preferencia_alterada",
+        recurso: eu.email,
+        resultado: "sucesso",
+        // O DESTINO não vai para a auditoria: é endereço pessoal, e o admin lê isto.
+        detalhe: { canal: validada.canal, destinoAlternativo: validada.destino !== null }
+      });
+      return json({ ok: true, canal: validada.canal, destino: validada.destino });
+    }
+  }
+  if (caminho === "/api/notificacoes" && req.method === "GET") {
+    const itens = await ctx.notificacoes.listarDoDestinatario(eu.email, 50);
+    return json({
+      itens: itens.map((n) => ({
+        issueKey: n.issueKey,
+        tipoEvento: n.tipoEvento,
+        titulo: n.titulo,
+        estado: n.estado,
+        canal: n.canal,
+        criadoEm: n.criadoEm
+      }))
+    });
   }
   if (caminho === "/api/chamados" && req.method === "GET") {
     const vinculos = await ctx.vinculos.listarDoSolicitante(eu.email, 100);
@@ -4629,25 +6780,49 @@ async function rotear(req, ctx, eu, caminho, url) {
           prioridade: submissao?.payload.prioridade ?? null,
           atualizadoEm: null,
           via: v.via,
-          verificadoRegras: v.verificadoRegras
+          verificadoRegras: v.verificadoRegras,
+          area: v.area
         });
       }
     }
-    return json({ itens });
+    const filtroStatus = (url.searchParams.get("status") ?? "").trim().toLowerCase();
+    const termo = normalizarBusca(url.searchParams.get("q") ?? "");
+    const filtrados = itens.filter((i) => {
+      if (filtroStatus && (i.status ?? "").toLowerCase() !== filtroStatus) return false;
+      if (!termo) return true;
+      return normalizarBusca(`${i.issueKey} ${i.titulo ?? ""}`).includes(termo);
+    });
+    return json({
+      itens: filtrados,
+      // A tela monta o seletor a partir do que EXISTE, não de uma lista fixa: os status
+      // são do workflow do JSM (configuração do projeto), e chumbar "Aberto/Em
+      // andamento/Resolvido" aqui seria hardcode de configuração alheia (RNF-25).
+      statusDisponiveis: [...new Set(itens.map((i) => i.status).filter((s) => Boolean(s)))].sort(),
+      total: itens.length
+    });
   }
   const detalhe = caminho.match(/^\/api\/chamados\/([^/]+)$/);
   if (detalhe && req.method === "GET") {
     const r = await ctx.chamados.obterChamadoDoSolicitante(detalhe[1], eu.email);
     if (!r) return ERROS.chamadoNaoSeu();
-    const comentarios = await ctx.chamados.listarComentariosDoSolicitante(
-      detalhe[1],
-      eu.email
-    );
+    let comentarios = [];
+    let comentariosIndisponiveis = false;
+    try {
+      comentarios = await ctx.chamados.listarComentariosDoSolicitante(detalhe[1], eu.email);
+    } catch {
+      comentariosIndisponiveis = true;
+    }
     return json({
       chamado: r.chamado,
       via: r.vinculo.via,
       verificadoRegras: r.vinculo.verificadoRegras,
-      comentarios: comentarios ?? []
+      area: r.vinculo.area,
+      comentarios: comentarios ?? [],
+      // `RNF-19` — a tela precisa distinguir "não há resposta ainda" de "não consegui
+      // buscar as respostas". Sem estes campos, uma queda do Jira apareceria como um
+      // chamado sem histórico, o que é uma informação falsa.
+      degradado: r.degradado,
+      comentariosIndisponiveis
     });
   }
   const comentar = caminho.match(/^\/api\/chamados\/([^/]+)\/comentarios$/);
@@ -4655,9 +6830,15 @@ async function rotear(req, ctx, eu, caminho, url) {
     const vinculo = await ctx.vinculos.obterDoSolicitante(comentar[1], eu.email);
     if (!vinculo) return ERROS.chamadoNaoSeu();
     const corpo = await lerJson(req);
-    const texto = typeof corpo?.texto === "string" ? corpo.texto.trim() : "";
-    if (!texto) return ERROS.dadosInvalidos("Escreva o coment\xE1rio antes de enviar.");
-    await ctx.atlassian.comentar(comentar[1], texto, eu.email, eu.nome);
+    const texto2 = typeof corpo?.texto === "string" ? corpo.texto.trim() : "";
+    if (!texto2) return ERROS.dadosInvalidos("Escreva o coment\xE1rio antes de enviar.");
+    await ctx.atlassian.comentar(comentar[1], texto2, eu.email, eu.nome);
+    await ctx.acoesProprias.registrar({
+      issueKey: comentar[1],
+      atorEmail: eu.email,
+      tipoEvento: "comentario_publico",
+      conteudo: texto2
+    });
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: "comentario_criado",
@@ -4665,6 +6846,131 @@ async function rotear(req, ctx, eu, caminho, url) {
       resultado: "sucesso"
     });
     return json({ ok: true }, 201);
+  }
+  const anexarNoChamado = caminho.match(/^\/api\/chamados\/([^/]+)\/anexos$/);
+  if (anexarNoChamado && req.method === "POST") {
+    const issueKey = anexarNoChamado[1];
+    const vinculo = await ctx.vinculos.obterDoSolicitante(issueKey, eu.email);
+    if (!vinculo) return ERROS.chamadoNaoSeu();
+    const serviceDeskId = ctx.valores.service_desk_id;
+    if (!serviceDeskId) {
+      return ERROS.dadosInvalidos(
+        "O envio de anexos ainda n\xE3o foi configurado nesta instala\xE7\xE3o. Fale com o time de tech."
+      );
+    }
+    let form;
+    try {
+      form = await req.formData();
+    } catch {
+      return ERROS.dadosInvalidos("N\xE3o consegui ler o arquivo enviado. Tente novamente.");
+    }
+    const arquivos = form.getAll("arquivo").slice(0, MAX_ANEXOS_POR_ENVIO);
+    if (arquivos.length === 0) return ERROS.dadosInvalidos("Anexe um arquivo para enviar.");
+    const enviados = [];
+    for (const bruto of arquivos) {
+      const validado = await validarAnexoEnviado(bruto);
+      if (!validado.ok) return ERROS.dadosInvalidos(validado.mensagem);
+      try {
+        await ctx.atlassian.anexarArquivo(serviceDeskId, issueKey, {
+          nome: validado.nome,
+          tipo: validado.tipo,
+          bytes: validado.bytes
+        });
+        enviados.push(validado.nome);
+      } catch {
+        await ctx.auditoria.registrar({
+          atorEmail: eu.email,
+          acao: "anexo_enviado",
+          recurso: issueKey,
+          resultado: "falha",
+          detalhe: { nome: validado.nome, enviadosAntes: enviados.length }
+        });
+        return json(
+          {
+            ok: false,
+            enviados,
+            mensagem: enviados.length > 0 ? "Parte dos arquivos foi anexada. Tente enviar os que faltaram em instantes." : "N\xE3o consegui anexar agora. Tente novamente em instantes \u2014 seu chamado est\xE1 a salvo."
+          },
+          503
+        );
+      }
+    }
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "anexo_enviado",
+      recurso: issueKey,
+      resultado: "sucesso",
+      detalhe: { quantidade: enviados.length }
+    });
+    return json({ ok: true, enviados }, 201);
+  }
+  const transicoes = caminho.match(/^\/api\/chamados\/([^/]+)\/transicoes$/);
+  if (transicoes) {
+    const issueKey = transicoes[1];
+    const vinculo = await ctx.vinculos.obterDoSolicitante(issueKey, eu.email);
+    if (!vinculo) return ERROS.chamadoNaoSeu();
+    if (req.method === "GET") {
+      try {
+        return json({ itens: await ctx.atlassian.listarTransicoes(issueKey) });
+      } catch {
+        return ERROS.conteudoIndisponivel();
+      }
+    }
+    if (req.method === "POST") {
+      const corpo = await lerJson(req);
+      const transicaoId = typeof corpo?.transicaoId === "string" ? corpo.transicaoId : "";
+      if (!transicaoId) return ERROS.dadosInvalidos("Escolha uma a\xE7\xE3o.");
+      let disponiveis;
+      try {
+        disponiveis = await ctx.atlassian.listarTransicoes(issueKey);
+      } catch {
+        return ERROS.conteudoIndisponivel();
+      }
+      if (!disponiveis.some((t) => t.id === transicaoId)) {
+        return ERROS.dadosInvalidos("Essa a\xE7\xE3o n\xE3o est\xE1 dispon\xEDvel para este chamado.");
+      }
+      try {
+        await ctx.atlassian.transicionar(issueKey, transicaoId);
+      } catch {
+        await ctx.auditoria.registrar({
+          atorEmail: eu.email,
+          acao: "chamado_transicionado",
+          recurso: issueKey,
+          resultado: "falha",
+          detalhe: { transicaoId }
+        });
+        return ERROS.conteudoIndisponivel();
+      }
+      const nome = disponiveis.find((t) => t.id === transicaoId)?.nome ?? transicaoId;
+      let statusResultante = nome;
+      try {
+        statusResultante = (await ctx.atlassian.obterChamado(issueKey)).status || nome;
+      } catch {
+      }
+      await ctx.acoesProprias.registrar({
+        issueKey,
+        atorEmail: eu.email,
+        tipoEvento: "status_alterado",
+        conteudo: statusResultante
+      });
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "chamado_transicionado",
+        recurso: issueKey,
+        resultado: "sucesso",
+        detalhe: { transicaoId, nome }
+      });
+      return json({ ok: true });
+    }
+  }
+  const areaDoChamado = caminho.match(/^\/api\/chamados\/([^/]+)\/area$/);
+  if (areaDoChamado && req.method === "PUT") {
+    const corpo = await lerJson(req);
+    const bruta = typeof corpo?.area === "string" ? corpo.area.trim() : "";
+    const area = bruta.length > 0 ? bruta.slice(0, 60) : null;
+    const ok = await ctx.vinculos.corrigirArea(areaDoChamado[1], eu.email, area);
+    if (!ok) return ERROS.chamadoNaoSeu();
+    return json({ ok: true, area, areasConhecidas: areasConhecidas(ctx.valores.areas_por_email) });
   }
   if (caminho === "/api/confluence/busca" && req.method === "GET") {
     const termo = (url.searchParams.get("q") ?? "").trim().slice(0, MAX_TERMO_BUSCA);
@@ -4925,7 +7231,32 @@ async function rotear(req, ctx, eu, caminho, url) {
   }
   if (caminho === "/api/admin/metricas" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();
-    return json(await obterResumoMetricas(ctx.db));
+    const resumo = await obterResumoMetricas(ctx.db);
+    const painel = montarPainel(
+      await lerEntradaDoPainel(ctx.db, {
+        thresholds: {
+          regra1_confluence: ctx.valores.regra1_threshold_score,
+          regra2_ajuste_operacional: ctx.valores.regra2_threshold_recorrencia
+        },
+        notificacoes: await ctx.notificacoes.contarPorEstado(),
+        telemetria: ctx.atlassian.telemetria(),
+        sla: await ctx.avaliacoesSla.resumir()
+      })
+    );
+    return json({
+      ...resumo,
+      painel,
+      // T-311 — baseline da Fase 0. `null` = não coletado; a tela diz "sem baseline" em
+      // vez de comparar contra zero, que pareceria economia de 100%.
+      baselineAssentos: ctx.valores.baseline_assentos,
+      // Q11: sem canal definido, a tela precisa dizer POR QUE nada foi enviado.
+      canalNotificacaoDefinido: ctx.valores.canal_notificacao_padrao !== null,
+      // R-06: com piloto ligado, os números são de 1–2 áreas, não da empresa.
+      piloto: {
+        ligado: ctx.valores.emails_piloto.length > 0,
+        pessoas: ctx.valores.emails_piloto.length
+      }
+    });
   }
   if (caminho === "/api/admin/auditoria" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();
@@ -4948,7 +7279,68 @@ async function rotear(req, ctx, eu, caminho, url) {
       // RF-52 — a limitação oficial do dado vai NA TELA, não em rodapé de documento.
       limitacoesUltimoAcesso: LIMITACOES_ULTIMO_ACESSO,
       itens: snapshot.itens,
-      custo
+      custo,
+      // T-122/T-123/T-131 — o que ainda não foi verificado contra a API real (Q1) vai
+      // PARA A TELA. Um console que promete revogar assento e falha no clique é pior
+      // que um console que avisa antes.
+      organizacaoConfigurada: ctx.organizacao !== null,
+      usandoFakes: ctx.usandoFakes,
+      endpointsNaoVerificados: ctx.usandoFakes ? ENDPOINTS_NAO_VERIFICADOS : [],
+      // O2, T-311 — baseline da Fase 0. Ausente NÃO inventa número.
+      baseline: ctx.valores.baseline_assentos
+    });
+  }
+  if (caminho === "/api/admin/assentos/revogar" && req.method === "POST") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    const corpo = await lerJson(req);
+    const accountId = typeof corpo?.accountId === "string" ? corpo.accountId.trim() : "";
+    const produto = typeof corpo?.produto === "string" ? corpo.produto.trim() : "";
+    const emailConfirmado = typeof corpo?.emailConfirmado === "string" ? corpo.emailConfirmado.trim().toLowerCase() : "";
+    const emailEsperado = typeof corpo?.email === "string" ? corpo.email.trim().toLowerCase() : "";
+    if (!accountId || !produto || !emailEsperado) {
+      return ERROS.dadosInvalidos("Escolha a conta e o produto a revogar.");
+    }
+    if (emailConfirmado !== emailEsperado) {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "assento_revogado",
+        recurso: accountId,
+        resultado: "negado",
+        detalhe: { motivo: "confirmacao_nao_confere", produto }
+      });
+      return ERROS.dadosInvalidos(
+        "Para confirmar, digite exatamente o e-mail da pessoa cujo acesso ser\xE1 revogado."
+      );
+    }
+    if (!ctx.organizacao || !ctx.valores.org_id) {
+      return ERROS.dadosInvalidos(
+        "A governan\xE7a de assentos ainda n\xE3o foi configurada nesta instala\xE7\xE3o (falta a credencial de Org Admin)."
+      );
+    }
+    try {
+      await ctx.organizacao.revogarProduto(ctx.valores.org_id, accountId, produto);
+    } catch {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "assento_revogado",
+        recurso: accountId,
+        resultado: "falha",
+        detalhe: { produto, email: emailEsperado }
+      });
+      return ERROS.conteudoIndisponivel();
+    }
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "assento_revogado",
+      recurso: accountId,
+      resultado: "sucesso",
+      detalhe: { produto, email: emailEsperado }
+    });
+    return json({
+      ok: true,
+      // O inventário é um CACHE diário (T-124): o console continua mostrando o assento
+      // até a próxima coleta, e dizer isso evita o admin achar que a revogação falhou.
+      aviso: "Revogado. O invent\xE1rio desta tela \xE9 atualizado uma vez por dia \u2014 a linha s\xF3 desaparece na pr\xF3xima coleta."
     });
   }
   if (caminho === "/api/admin/assentos/recomendacoes" && req.method === "GET") {
@@ -4973,6 +7365,54 @@ async function rotear(req, ctx, eu, caminho, url) {
   }
   return ERROS.naoEncontrado();
 }
+async function verificarPiloto(ctx, eu, caminho) {
+  const decisao = dentroDoPiloto(eu.email, ctx.valores.emails_piloto);
+  if (decisao.dentro) return null;
+  await ctx.auditoria.registrar({
+    atorEmail: eu.email,
+    acao: "fora_do_piloto",
+    recurso: caminho,
+    resultado: "negado",
+    detalhe: { tamanhoDaLista: ctx.valores.emails_piloto.length }
+  });
+  return json({ erro: "fora_do_piloto", mensagem: decisao.mensagem }, 403);
+}
+async function avisarCriacao(ctx, resultado, dados) {
+  if (!resultado.issueKey || resultado.estado !== "criado" || resultado.duplicada) return;
+  try {
+    await ctx.notificador.avisarCriacao({
+      issueKey: resultado.issueKey,
+      solicitanteEmail: dados.solicitanteEmail,
+      titulo: dados.titulo,
+      prioridade: dados.prioridade,
+      slaPrimeiraRespostaHoras: SLA_PRIMEIRA_RESPOSTA_HORAS[dados.prioridade],
+      criadoEm: ctx.agora(),
+      valores: ctx.valoresNotificacao
+    });
+  } catch {
+  }
+}
+function descreverFormato(valor) {
+  const conjuntoDe = (s) => {
+    if (/^\d+$/.test(s)) return "digitos";
+    if (/^[0-9a-f]+$/.test(s)) return "hex-minusculo";
+    if (/^[0-9A-F]+$/.test(s)) return "hex-maiusculo";
+    if (/^[A-Za-z0-9_-]+$/.test(s)) return "base64url";
+    if (/^[A-Za-z0-9+/=]+$/.test(s)) return "base64";
+    return "misto";
+  };
+  return {
+    // Só os caracteres que NÃO são de conteúdo: `.`, `,`, `=`, `:` etc.
+    separadores: valor.replace(/[A-Za-z0-9_-]/g, ""),
+    segmentos: valor.split(/[^A-Za-z0-9_-]+/).filter((s) => s.length > 0).map((s) => ({ tamanho: s.length, conjunto: conjuntoDe(s) }))
+  };
+}
+function normalizarBusca(texto2) {
+  return texto2.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
+}
+var LIMITE_POLLING = 50;
+var LIMITE_ENVIO_NOTIFICACOES = 25;
+var LIMITE_ALERTAS_SLA = 30;
 var MIN_TERMO_BUSCA = 2;
 var MAX_TERMO_BUSCA = 200;
 var LIMITE_BUSCA_PADRAO = 10;
@@ -5043,6 +7483,42 @@ function validarProposta(corpo, tiposPermitidos) {
     }
   };
 }
+async function tratarWebhook(req, ctx, url) {
+  if (req.method !== "POST") return ERROS.naoEncontrado();
+  const enviado = req.headers.get(HEADER_WEBHOOK) ?? url.searchParams.get(PARAM_WEBHOOK);
+  if (!segredoConfere(enviado, ctx.segredoWebhook)) {
+    await ctx.auditoria.registrar({
+      atorEmail: "(webhook)",
+      acao: "webhook_recebido",
+      recurso: null,
+      resultado: "negado",
+      // ⚠️ O segredo enviado NÃO vai para a auditoria: ela é lida por admin, e um
+      // segredo quase certo no log é meio caminho andado para quem o vê.
+      detalhe: { motivo: ctx.segredoWebhook ? "segredo_invalido" : "segredo_nao_configurado" }
+    });
+    return ERROS.semPermissao();
+  }
+  const corpo = await lerJson(req);
+  const issueKey = chaveDoPayload(corpo);
+  if (!issueKey) {
+    await ctx.auditoria.registrar({
+      atorEmail: "(webhook)",
+      acao: "webhook_recebido",
+      resultado: "falha",
+      detalhe: { motivo: "sem_chave_valida" }
+    });
+    return json({ ok: true }, 202);
+  }
+  const r = await ctx.notificador.sincronizarChamado(issueKey, "webhook", ctx.valoresNotificacao);
+  await ctx.auditoria.registrar({
+    atorEmail: "(webhook)",
+    acao: "webhook_recebido",
+    recurso: issueKey,
+    resultado: r.ok ? "sucesso" : "falha",
+    detalhe: { eventos: r.eventos }
+  });
+  return json({ ok: true }, 202);
+}
 async function tratarHealth(ctx) {
   const [atlassian, ia] = await Promise.all([
     ctx.atlassian.verificarSaude(),
@@ -5060,6 +7536,7 @@ async function tratarHealth(ctx) {
       ok,
       usandoFakes: ctx.usandoFakes,
       modoDemo: ctx.modoDemo,
+      somenteLeitura: ctx.somenteLeitura,
       dependencias: { atlassian, ia, banco, sso: { ok: true, detalhe: "edge GoDeploy" } }
     },
     ok ? 200 : 503
@@ -5069,16 +7546,60 @@ async function tratarCron(req, ctx, env, caminho) {
   if (req.method !== "POST") return ERROS.naoEncontrado();
   const enviado = req.headers.get("x-godeploy-cron");
   const esperado = env.GODEPLOY_CRON_KEY;
-  if (!esperado || !enviado || enviado !== esperado) {
+  const corpoCron = await req.clone().text().catch(() => "");
+  const veredito = await verificarCron({
+    headerEnviado: enviado,
+    chave: esperado,
+    metodo: req.method,
+    caminho,
+    corpo: corpoCron,
+    agoraMs: Date.parse(ctx.agora()),
+    // O edge injeta este header quando há PESSOA na requisição. O gateway de cron não —
+    // e é o que impede um funcionário logado de disparar cron forjando o header.
+    identidadeDeUsuario: req.headers.get(HEADER_EMAIL)
+  });
+  if (!veredito.ok) {
     await ctx.auditoria.registrar({
       atorEmail: "(cron)",
       acao: "acesso_negado",
       recurso: caminho,
       resultado: "negado",
-      detalhe: { motivo: "cron_nao_autenticado" }
+      // ⚠️ **Diagnóstico sem vazar segredo.** A documentação da plataforma diz que o
+      // header é "assinado", e não está confirmado se o que chega é a chave crua ou uma
+      // assinatura derivada dela — se for assinatura, a comparação por igualdade nunca casa
+      // e o sintoma é idêntico a "esqueci de configurar". Estes três campos distinguem os
+      // casos na primeira rodada:
+      //
+      //   headerAusente → o cron não está batendo aqui (rota errada, ou o edge barrou)
+      //   chaveAusente  → falta o secret `GODEPLOY_CRON_KEY`
+      //   tamanhos diferentes → é OUTRO formato (assinatura, ou a chave errada)
+      //   tamanhos iguais e não casou → é a chave errada, mesmo formato
+      //
+      // O que vai para a auditoria é **comprimento**, nunca valor nem prefixo. Comprimento
+      // de segredo é vazamento desprezível; prefixo não é, e é por isso que ele fica fora.
+      detalhe: {
+        motivo: "cron_nao_autenticado",
+        // O motivo específico é o que separa "esqueci de configurar" de "alguém está
+        // tentando" — distinção que precisa existir na auditoria, não só no código.
+        detalhe: veredito.motivo,
+        tamanhoRecebido: enviado?.length ?? 0,
+        tamanhoEsperado: esperado?.length ?? 0
+      }
     });
+    console.log(
+      "[cron] recusado",
+      JSON.stringify({
+        caminho,
+        motivo: veredito.motivo,
+        headers: [...req.headers.keys()].sort(),
+        tamanhoRecebido: enviado?.length ?? 0,
+        tamanhoEsperado: esperado?.length ?? 0,
+        formatoRecebido: enviado === null ? null : descreverFormato(enviado)
+      })
+    );
     return ERROS.semPermissao();
   }
+  console.log("[cron] autenticado", JSON.stringify({ caminho, candidata: veredito.candidata }));
   if (caminho === "/api/cron/reprocessar-submissoes") {
     const r = await ctx.chamados.reprocessarPendentes(25);
     await ctx.auditoria.registrar({
@@ -5128,6 +7649,91 @@ async function tratarCron(req, ctx, env, caminho) {
       });
       return ERROS.conteudoIndisponivel();
     }
+  }
+  if (caminho === "/api/cron/polling-jira") {
+    const marca = await ctx.marcaAguaPolling.obter();
+    let alterados;
+    try {
+      alterados = await ctx.atlassian.buscarChamadosAtualizadosDesde({
+        desde: marca,
+        limite: LIMITE_POLLING
+      });
+    } catch {
+      await ctx.auditoria.registrar({
+        atorEmail: "(cron)",
+        acao: "polling_executado",
+        resultado: "falha",
+        detalhe: { motivo: "busca_indisponivel" }
+      });
+      return ERROS.conteudoIndisponivel();
+    }
+    const comVinculo = await ctx.vinculos.filtrarComVinculo(alterados.map((a) => a.issueKey));
+    let eventos = 0;
+    let falhas = 0;
+    let carimboSeguro = null;
+    const porChave = new Map(alterados.map((a) => [a.issueKey, a.atualizadoEm]));
+    for (const vinculo of comVinculo) {
+      const r = await ctx.notificador.sincronizarChamado(
+        vinculo.issueKey,
+        "polling",
+        ctx.valoresNotificacao
+      );
+      if (!r.ok) {
+        falhas += 1;
+        break;
+      }
+      eventos += r.eventos;
+      const carimbo = porChave.get(vinculo.issueKey);
+      if (carimbo) carimboSeguro = carimbo;
+    }
+    if (comVinculo.length === 0) await ctx.marcaAguaPolling.definir(ctx.agora());
+    else if (carimboSeguro) await ctx.marcaAguaPolling.definir(carimboSeguro);
+    await ctx.auditoria.registrar({
+      atorEmail: "(cron)",
+      acao: "polling_executado",
+      resultado: falhas > 0 ? "falha" : "sucesso",
+      detalhe: { alterados: alterados.length, nossos: comVinculo.length, eventos, falhas }
+    });
+    return json({ ok: true, alterados: alterados.length, nossos: comVinculo.length, eventos, falhas });
+  }
+  if (caminho === "/api/cron/enviar-notificacoes") {
+    const r = await ctx.notificador.despacharPendentes(LIMITE_ENVIO_NOTIFICACOES);
+    return json({ ok: true, ...r });
+  }
+  if (caminho === "/api/cron/alertas-sla") {
+    const abertos = await ctx.vinculos.listarParaAvaliacaoSla(LIMITE_ALERTAS_SLA);
+    let alertados = 0;
+    let avaliados = 0;
+    for (const vinculo of abertos) {
+      const r = await ctx.notificador.avaliarESinalizarSla(vinculo, ctx.valoresNotificacao);
+      avaliados += 1;
+      if (r.alertou) alertados += 1;
+    }
+    await ctx.auditoria.registrar({
+      atorEmail: "(cron)",
+      acao: "alerta_sla",
+      resultado: "sucesso",
+      detalhe: { avaliados, alertados }
+    });
+    return json({ ok: true, avaliados, alertados });
+  }
+  if (caminho === "/api/cron/retencao") {
+    const r = await aplicarRetencao(
+      ctx.db,
+      {
+        conversasDias: ctx.valores.retencao_conversas_dias,
+        auditoriaDias: ctx.valores.retencao_auditoria_dias,
+        notificacoesDias: ctx.valores.retencao_notificacoes_dias
+      },
+      Date.parse(ctx.agora())
+    );
+    await ctx.auditoria.registrar({
+      atorEmail: "(cron)",
+      acao: "retencao_executada",
+      resultado: "sucesso",
+      detalhe: { ...r, pisoAuditoriaDias: PISO_AUDITORIA_DIAS }
+    });
+    return json({ ok: true, ...r });
   }
   return ERROS.naoEncontrado();
 }

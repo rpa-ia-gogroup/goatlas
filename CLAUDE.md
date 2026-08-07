@@ -99,6 +99,29 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
 - **Falha de tool não silencia a regra** (**RNF-18**) — informa e marca o ticket
   como não verificado. Indisponibilidade nunca vira bypass.
 - **N8N está descartado.** Não propor voltar a ele.
+- **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
+  olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe
+  idêntica por construção; e é o que faz o corpo do webhook ser **ponteiro**, nunca
+  conteúdo. Não "otimizar" lendo `comment.body` do payload.
+- **`emails_piloto` vazio LIBERA todo mundo** (`D-16`) — a única allowlist do projeto cujo
+  vazio não nega, porque ela governa quem pode *pedir ajuda*, não exposição de conteúdo.
+  Vazio-nega aqui trancaria a empresa fora do canal de suporte no primeiro deploy.
+- **Retenção nunca expurga `vinculos`** (`D-17`) — seria apagar o acesso da pessoa ao
+  próprio chamado. E a auditoria tem piso de 180 dias, clampado mesmo se alguém configurar
+  menos.
+- **Q11 em aberto não vira canal inventado** (`D-19`) — o aviso é registrado como
+  `suprimida` e o console diz quantos. O default **não** é "e-mail para o corporativo".
+- **Os cinco defaults do MVP estão decididos** (`D-20`), e nenhum é acidente:
+  canal `nenhum` (o aviso vive na aba Avisos — Chat por espaço vazaria chamado de todos
+  numa sala) · piloto **desligado** (o gate só faz sentido depois de `T-333`/`T-334`) ·
+  T-235 como **proxy com o viés impresso ao lado do número** · alerta de SLA só para o
+  solicitante (o Jira nativo já alerta o agente; duas fontes de verdade sobre o mesmo prazo
+  é pior que uma) · retenção `null` (apagar dado pessoal é irreversível; `null` é o único
+  default que preserva a opção). Todos ajustáveis por config, sem deploy.
+- ⚠️ **`CONFIG_PADRAO` continua fail-closed mesmo com `D-20` decidido.** As decisões entram
+  por **env/bootstrap** (`GOATLAS_CANAL_NOTIFICACAO`, `GOATLAS_BASE_PUBLICA`), não mudando o
+  default do código: instalação nova não pode afirmar que alguém escolheu não enviar aviso.
+  Trocar o default "para simplificar" apaga a distinção que a tela de Avisos mostra.
 - **Imagem em URL externa não é renderizada** (`D-10`) — só anexo da página, e
   sempre pelo proxy. Não é (só) XSS: imagem externa numa página que qualquer pessoa
   edita é rastreador de leitura, e o IP de cada colega vaza para um terceiro sem
@@ -178,6 +201,46 @@ destes reabre um vazamento que já foi fechado.
   auditoria. Corpo diferente por motivo é oráculo, como o 403 seria em `RF-30`. Só
   indisponibilidade é distinguida (503): 404 mentiroso manda a pessoa abrir chamado
   por uma página que estava lá.
+- ⚠️ **O carimbo da dedupe é o do JIRA, nunca `agora()`** (`notificacoes/dedupe.ts`). Duas
+  fontes veem o mesmo fato em instantes diferentes; com o nosso relógio cada uma gravaria
+  uma chave distinta e a dedupe **não deduparia nada** — sem quebrar teste nenhum, só
+  entregando tudo em dobro para a pessoa. E o carimbo é normalizado para ISO/UTC antes de
+  virar chave: o webhook manda `Z`, o REST manda `-0300`, e é o mesmo instante.
+- ⚠️ **"Mudou de status" compara STATUS, não `updated`.** `updated` muda quando alguém
+  edita descrição, label ou qualquer campo — comparar por ele avisaria "mudou para Em
+  andamento" três vezes porque o agente ajustou o resumo três vezes. Daí a coluna
+  `vinculos.ultimo_status_notificado`.
+- ⚠️ **Ação própria não se detecta pelo AUTOR** (`notificacoes/acoes.ts`, `RF-48`). Sob
+  proxy total todo comentário sai da conta de serviço: o da pessoa e o do agente do time
+  têm o mesmo autor. O que distingue é o app ter registrado a ação **no momento em que a
+  fez** — impressão digital do texto normalizado, e a normalização **remove o prefixo de
+  `D-13`** primeiro, porque o texto volta da Atlassian já com ele. Nas transições, o que se
+  registra é o **status resultante**, não o nome da transição ("Marcar como resolvido" ≠
+  "Resolvido", e registrar o primeiro faria a supressão nunca casar).
+- ⚠️ **A marca-d'água do polling só avança no que deu certo.** Avançá-la apesar de uma
+  falha é perder a janela inteira: o chamado que a Atlassian não devolveu fica atrás da
+  marca e **nunca** é olhado de novo. É o erro que `RNF-17` proíbe no outbox, na versão
+  silenciosa. E `desde: null` significa *janela curta*, nunca "traga tudo" (`R-02`).
+- **SLA é hora corrida, em UTC, e de PRIMEIRA RESPOSTA** (`notificacoes/sla.ts`). Horário
+  útil seria mudança de requisito — qual calendário, qual fuso por área, o que fazer com
+  feriado regional. Se um dia mudar, muda **ali**, e o teste de `RF-46` é o que documenta a
+  escolha atual. "Respondido" é comentário público **sem** o prefixo de `D-13`; o teste
+  gera com `prefixarAutoria` e lê com `ehComentarioDoSolicitante`, para que divergir quebre
+  a suíte em vez de inflar a aderência.
+- **O painel de admin NÃO chama a Atlassian** (`avaliacoes_sla`). Saber se houve primeira
+  resposta exige ler os comentários de cada chamado; fazer isso ao abrir o console
+  deixaria a página lenta na proporção do sucesso do projeto. O cron de SLA já lê tudo
+  isso — gravar o retrato é grátis, e a tela diz "avaliado na última rodada".
+- **A calibragem mostra os MOTIVOS junto com a barra** (`governanca/painel.ts`, T-310). O
+  threshold é o único campo editável ali, então mostrar "66% de override" sozinho empurra
+  para mexer nele — quando a resposta certa costuma ser escrever a página que as pessoas
+  apontaram. As duas informações moram na mesma caixa de propósito.
+- **Anexo enviado é o caminho OPOSTO ao do proxy de leitura** (`http/anexo-entrada.ts`).
+  Lá o risco é `Content-Type` (SVG com script servido do nosso domínio); aqui é **recurso**
+  — sem disco nem streaming, o arquivo passa duas vezes pela memória do Worker. Por isso o
+  teto de envio (8 MB) é **menor** que o de leitura (12 MB), e não há allowlist de tipo: o
+  arquivo vai para o Jira, que aplica a própria política, e recusar `.zip` de log seria o
+  app achando que é antivírus.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -186,6 +249,64 @@ destes reabre um vazamento que já foi fechado.
   procurando por isso — e também prova, plantando um "segredo" no corpo de uma
   resposta de erro simulada, que as três camadas de transporte não o repassam na
   mensagem lançada nem a auditoria o persiste sem redigir.
+- 🚨 **`ATCTT` é chave de ORGANIZAÇÃO; `ATATT` é token de USUÁRIO** (`D-22`). São duas
+  famílias sem relação: `ATATT` (gerado em `id.atlassian.com/manage-profile/security/api-tokens`)
+  é o único que funciona em Basic auth contra `<site>.atlassian.net/rest/api/3/*` —
+  Confluence e JSM; `ATCTT` (gerado em `admin.atlassian.com` → API keys) só serve
+  `api.atlassian.com/admin/*`. ⚠️ **O `docs/DEPLOY.md` afirmou o inverso até 07/08/2026, e
+  foi essa instrução que causou o 401 do app** — a credencial não estava quebrada, estava na
+  gaveta errada. Um `ATCTT` em `ATLASSIAN_API_TOKEN` dá **401 por design**, com e-mail certo
+  e site certo, então os testes óbvios (e-mail · expiração · barra final) voltam todos
+  negativos para sempre. E o `ATLASSIAN_EMAIL` tem de ser o da conta que gerou o `ATATT`.
+- 🚨 **`ATATT` SCOPED também dá 401 na URL do site — e a Atlassian oferece scoped por
+  padrão.** Token **clássico** (sem escopos) usa `https://<site>.atlassian.net/rest/api/3/…`;
+  token **scoped** exige o gateway `https://api.atlassian.com/ex/jira/{cloudId}/…` e
+  `…/ex/confluence/{cloudId}/…`. Basic auth de scoped contra a URL do site devolve **401** —
+  **o mesmo sintoma do erro de família**, o que faz o diagnóstico parecer não ter avançado.
+  ⚠️ Consequência para nós: `ATLASSIAN_BASE_URL` é **uma só** e serve Jira **e** Confluence
+  (`/rest/api/3/…`, `/rest/servicedeskapi/…`, `/wiki/api/v2/…` no mesmo host). Sob scoped os
+  dois têm **gateways diferentes**, então adotar scoped **exige partir a base em duas** — é
+  mudança de código, não de config. Por isso o pedido é sempre **token clássico**. Fonte:
+  `support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/`
+  e o KB de 401 em conta de serviço.
+- 🚨 **`GET /admin/v1/orgs/{org}/users` lista SÓ conta gerenciada, e sem domínio
+  reivindicado isso é zero** (`D-22`, **confirmado por teste** em `D-23`). Devolve
+  `{"data": []}` com HTTP 200 — nenhuma exceção, console mostrando "0 assentos", ninguém
+  desconfiando da chamada. Mesma família do `env.DB` devolvendo `{}`. O endpoint certo é
+  **`POST /admin/v1/orgs/{org}/users/search`**, e nele: **`accountTypes: ["atlassian"]` é
+  obrigatório** (sem ele entram ~83 contas de app/bot) · o **cursor volta em `links.next` e
+  é reenviado no CORPO**, não seguido como URL · **`query`, `groupIds` e `productAccess`
+  respondem 200 SEM filtrar** — filtro que parece filtrar e não filtra é pior que filtro
+  ausente · **`accountStatus` não é status de suspensão** (volta `"active"` para conta
+  suspensa — medido nas 54 contas; quem responde é o filtro `isSuspended`, em duas
+  varreduras).
+- 🚨 **A Organizations API usa DUAS convenções de nome, e escolher a errada devolve lista
+  vazia com HTTP 200** (`D-23`). `users/search` responde em **camelCase** (`accountId`,
+  `accountStatus`); `last-active-dates` responde em **snake_case** (`product_access`,
+  `last_active`). O contrato estava em snake_case para os dois, então **as 54 contas eram
+  todas descartadas** por `accountId` ausente. ⚠️ Não unifique "para ficar consistente":
+  os dois formatos são reais e unificar quebra um lado com o mesmo sintoma silencioso.
+- 🚨 **`name`/`email` exigem `expand: ["NAME","EMAIL"]`, e o produto atribuído NÃO está no
+  `users/search`** — `expand: ["PRODUCT_ACCESS"]` responde **400**. Quem entrega produto é
+  `last-active-dates` (`product_access[].key`), que o cron já chama por conta. Por isso
+  `registrarColeta` itera a **união** das duas fontes: iterar só `usuario.produtos` gravava
+  **zero linha** e o inventário rodava vazio. E `last_active` é só a **data**;
+  `last_active_timestamp` é o ISO completo e vem primeiro.
+- 🚨 **O endpoint GLOBAL de tipos de chamado é EXPERIMENTAL e devolve 412.**
+  `GET /rest/servicedeskapi/requesttype` exige `X-ExperimentalApi: opt-in` — era o que
+  `listarTiposChamado` usava, então **listar tipos não funcionava em produção** e a
+  allowlist de `RF-28` não tinha como ser montada. A saída **não** foi ligar o opt-in
+  ("experimental" = pode mudar sem aviso, e isto é trava de roteamento): é o caminho
+  estável **por service desk** (`/servicedesk/{id}/requesttype`, 200 sem cabeçalho). ⚠️ Lá
+  o `serviceDeskId` **não vem em cada item** — tem de vir do laço, senão viraria `''`.
+- **Filtro que pode não filtrar é VERIFICADO, não acreditado** (`organizacao.ts`). Como
+  "responde 200 sem filtrar" é comportamento medido desta API, as duas varreduras de
+  `isSuspended` são comparadas: interseção não vazia prova que o filtro não separou nada, e
+  o resultado sai com `suspensaoConhecida: false` em vez de afirmar "nenhuma suspensa".
+  Contar conta suspensa como assento ativo infla o custo (`RF-53`) e recomenda revogar
+  acesso de quem já não tem acesso. E `parcial` existe porque o teto de páginas era atingido
+  **em silêncio** — apesar de o comentário do próprio código jurar o contrário. Coleta
+  parcial ou cega quanto a suspensão **não** é auditada como `sucesso`.
 - **A Organizations API tem TRANSPORTE PRÓPRIO** (`atlassian/organizacao.ts`,
   `RNF-04`) — não a mesma instância do cliente de Jira/Confluence. A credencial é
   **Org Admin**: "economizar" reaproveitando `atlassian/http.ts` (que já resolve
@@ -371,6 +492,48 @@ persistente.
 - ⚠️ **`updateApp` MESCLA assets, não substitui.** Para limpar caminho errado são
   dois deploys: `assets: []` e depois a lista certa. Confira com `getApp` +
   `include: ["manifest"]`.
+- 🚨 **`env.DB` devolve `rows` como array de OBJETOS, não colunas+arrays.** O shim de
+  teste (`sqlite-local.ts`) implementa a forma documentada; a plataforma entrega outra.
+  `linhasComoObjetos` aceita as duas desde 07/08/2026 — antes disso **toda leitura do banco
+  devolvia `{}` em produção**, sem erro nenhum: auditoria com 58 registros vazios, lista de
+  chamados vazia, config caindo nos defaults. Como os defaults vêm do bootstrap por env, o
+  app *parecia* funcionar. **Nunca indexe `rows` direto**; há teste das duas formas.
+- 🚨 **O header do cron é ASSINADO** (`t=<unix>;<rótulo>=<hmac-sha256-hex>`), não é a chave.
+  Comparar por igualdade dava 403 nas sete rotas com a chave certa. A verificação está em
+  `http/cron-auth.ts`, com janela de replay e comparação em tempo constante. ⚠️ **Qual
+  string é assinada continua desconhecido** — 10 construções × 2 leituras da chave, nenhuma
+  casou. A pergunta exata para a plataforma está em `docs/DEPLOY.md`; chutar não converge.
+  ✅ **Resolvido por outro caminho, e a assimetria é de propósito** (medido em 07/08/2026,
+  `version 18`): as seis rotas **idempotentes** aceitam por **presença** do header quando a
+  requisição **não traz identidade de usuário** — é isso que distingue o gateway da
+  plataforma de um funcionário logado forjando o header, e é seguro porque o desenho delas já
+  é idempotente (outbox por constraint, dedupe por chave do Jira, marca-d'água que só avança
+  no que deu certo). A rota **destrutiva** (`/api/cron/retencao`) **mantém HMAC obrigatório**
+  e por isso segue dando **403** — fail-closed deliberado, não defeito. Consequência aceita:
+  a retenção não roda, o que hoje é inócuo porque a política é `null` (`D-20`) e ela não
+  apagaria nada. ⚠️ **Diagnóstico de cron se faz com `listCronJobs`**, que mostra o status do
+  último disparo: foi assim que se descobriu que o `CLAUDE.md` afirmava "403 nas sete" muito
+  depois de seis terem voltado a funcionar. `404` = rota não deployada · `403` = gate ·
+  `500` = handler explodiu (aí é `getAppLogs`).
+- ⚠️ **Colisão de `UNIQUE (vinculos.issue_key)` é caso previsto, não erro** — e a
+  classificação importa: por não ser `ErroAtlassian`, ela caía no default **transitório** e
+  o cron reprocessava para sempre contra a mesma constraint. Mesmo solicitante =
+  idempotência; **outro** solicitante = recusa definitiva e auditada, porque aceitar seria
+  dar a alguém o vínculo do chamado de outra pessoa (`RF-30`).
+- **A leitura de chamado DEGRADA, no detalhe também.** A lista já usava o payload do outbox
+  desde a Fase 1; o detalhe subia a falha e virava **500** — a pessoa clicava no próprio
+  chamado durante uma queda do Jira e lia "algo deu errado". E "não há respostas" ≠ "não
+  consegui buscar as respostas": são frases opostas, e a errada faz ela achar que ninguém
+  olhou (`degradado` e `comentariosIndisponiveis` na resposta).
+- 🚨 **O edge fecha TUDO, inclusive o que foi escrito como rota pública.** Com
+  `visibility: authenticated`, `/api/webhook/jira` (`RF-48`) e `/api/health` (`RF-59`)
+  recebem **302** para o OAuth antes de chegarem ao worker — medido com `curl` em
+  07/08/2026, e a requisição **não aparece nos logs do app**. A Atlassian não faz esse
+  OAuth, então o webhook do Jira **não funciona hoje**. `setAppPublic` **não** é a saída
+  (abriria o app inteiro, e `RF-01` depende de o edge injetar a identidade); a saída é uma
+  exceção de rota na plataforma. Enquanto não existir, o **polling** entrega a notificação
+  com atraso de uma janela de cron — que é precisamente o motivo de `RF-47` exigir duas
+  fontes. Detalhe em `docs/DEPLOY.md`.
 - **Logout é do edge** (`https://<dominio-base>/auth/logout`) e **ignora parâmetro de
   redirect** — testado com `redirect`, `next`, `returnTo`, `return_to`, `r`,
   `continue`, `redirect_uri` e `callback`. Sempre leva ao domínio da plataforma; a UI
@@ -378,18 +541,20 @@ persistente.
 
 ## Estado do projeto
 
-**Fase 1 mergeada na `main`; Fase 2 começada.** Faseamento em
+**Fases 1 e 2 na `main`; Fases 3 e 4 com o código completo.** Faseamento em
 `docs/REQUISITOS.md` seção 12: Fase 0 diagnóstico (João, sem código) → Fase 1 MVP →
-**Fase 2 conhecimento e governança** → Fase 3 SLA e notificações → Fase 4 rollout.
-Progresso tarefa por tarefa em
-[`specs/001-mvp-chamados-e-agente/tasks.md`](specs/001-mvp-chamados-e-agente/tasks.md)
-e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governanca/tasks.md).
+Fase 2 conhecimento e governança → Fase 3 SLA e notificações → Fase 4 rollout.
+Progresso tarefa por tarefa nos quatro `tasks.md`:
+[001](specs/001-mvp-chamados-e-agente/tasks.md) ·
+[002](specs/002-confluence-e-governanca/tasks.md) ·
+[003](specs/003-sla-e-notificacoes/tasks.md) ·
+[004](specs/004-piloto-e-rollout/tasks.md).
 
 **No ar em modo demonstração: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**445 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**590 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -432,14 +597,17 @@ preencher no console de admin — nenhum código a mudar, nenhum deploy.
 `**Nome** (email) via goatlas:` usando a identidade do login corporativo Google
 — sem depender do console do goatlas, visível já no Jira nativo.
 
-**Q1 andou metade (`D-14`, 05/08/2026):** o trio Jira/Confluence
-(`ATLASSIAN_API_TOKEN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_BASE_URL`) e `GOATLAS_ORG_ID`
-estão registrados em `9c47f42f`; faltam `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY` e
-`GODEPLOY_CRON_KEY`. **Nada disso mudou comportamento** — `GOATLAS_MODO_DEMO=1` é o
-primeiro termo do `||` de `usandoFakes`. A ordem de virar produção, o que cada
-ausência silencia e as três confusões de credencial que já aconteceram (API token ≠
-chave de Organizations API · `cloudId` ≠ `orgId` · UUID só tem `0-9a-f`) estão em
-`docs/DEPLOY.md` e `D-14`.
+**Q1 está RESPONDIDA na parte de credencial (`D-23`, 07/08/2026).** O `ATATT` clássico
+funciona (`/rest/api/3/myself` → **200**), o `ATCTT` está em `ATLASSIAN_ORG_API_KEY`, e
+`GOATLAS_SERVICE_DESK_ID=4` (projeto `GN`, "Tickets Engenharia" — um dos 5 service desks
+do site, com 16 tipos de solicitação). **`T-063` saiu do bloqueio:** o que falta é
+*escolher* quais tipos entram na allowlist de `RF-28`, que é decisão de roteamento.
+
+⚠️ **Das "três confusões de credencial" do `D-14`, duas valem e uma era erro nosso:**
+API token ≠ chave de Organizations API (vale, e o `D-14` a descrevia **invertida** —
+ver `D-22`) · `cloudId` ≠ `orgId` (vale) · ~~UUID só tem `0-9a-f`~~ **falsa: org id da
+Atlassian não é UUID estrito**, o da Gocase tem `j`/`k` e responde 200 (`D-23`). Não
+"conserte" um org id com letras fora de hex — teste-o.
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), o **valor** do campo customizado "Solicitante" (**Q4** —
@@ -449,6 +617,68 @@ governança de assentos (Phase 3, detalhada acima), que depende de **Q1** para
 valer contra a API real. **Q5** não trava código, só o dado de
 `espacos_confluence`, sem o qual a busca devolve zero e diz `buscaConfigurada: false`
 — o mesmo raciocínio de **Q8** para `custo_mensal_por_produto`.
+
+### Fases 3 e 4 — o que ficou pronto, e o que falta de verdade
+
+**A Fase 3 (spec 003) está completa em código.** Webhook do Jira (`RF-48`) com segredo em
+tempo constante e resposta sempre `202`; polling incremental com marca-d'água (`RF-47`);
+dedupe pela constraint com o carimbo do Jira; supressão de ação própria (`RF-48`); camada
+de canal isolada com Google Chat, e-mail, fake e `CanalIndisponivel`; preferência por
+pessoa (`RF-45`) com a tela **Avisos**; SLA de primeira resposta como função pura
+(`RF-46`), cron de alerta sem repetição e retrato gravado para o painel; painel completo de
+`RF-55` com calibragem, aderência ao SLA, telemetria de 429 (`RF-60`) e custo de IA;
+anexos (`RF-25`/`RF-34`), filtro e busca na lista (`RF-35`), resolver/reabrir quando o
+workflow do JSM oferece (`RF-36`) e retenção (`RNF-33`).
+
+**A Fase 4 (spec 004) está completa no que é código:** gate de piloto com encaminhamento
+(`R-06`), mapa de áreas puro, área congelada no vínculo e corrigível pela pessoa
+(`RF-19`), leitura de calibragem com os motivos de override (`RF-50`) e baseline de
+assentos (`O2`).
+
+**T-122/T-123/T-131 saíram do bloqueio de Q1** (`D-18`): `ClienteOrganizacaoHttp` existe,
+com paginação, cursor de outro host descartado, teto de páginas e normalização de
+carimbo (segundos × milissegundos são 55 anos de diferença). O que **não** foi verificado
+está em `ENDPOINTS_NAO_VERIFICADOS` — e a tela de governança mostra a lista.
+
+**O 401 da Atlassian está diagnosticado, e a correção era nossa** (`D-22`, 07/08/2026, a
+partir de medição do João de 31/07): `ATLASSIAN_API_TOKEN` guarda um `ATCTT` (chave de
+org) onde `/rest/api/3/*` exige `ATATT` (token de usuário) — e o nosso próprio
+`docs/DEPLOY.md` mandava fazer exatamente isso. Falta **gerar o `ATATT`**; é a única
+ação humana que destrava Confluence e JSM reais. O `ATCTT` que já existe é a credencial
+certa para `ATLASSIAN_ORG_API_KEY`. No mesmo movimento, `listarUsuarios` trocou
+`GET /users` (que mede vazio sem domínio reivindicado) por `POST /users/search`, e passou
+a devolver `suspensas`/`suspensaoConhecida`/`parcial` em vez de uma lista que escondia
+duas incertezas. **Q5 respondida:** `GO`, `DTE`, `GN`, `datateam`, `Protheus` — e o
+espaço `TECH` que circulava **nunca existiu**.
+
+**O que falta não é código:**
+
+| O que | Quem | Por que não dá para adiantar |
+|---|---|---|
+| Escolher o canal (**Q11**) | João | É um campo de config (`D-19`). Enquanto for `null`, o aviso é registrado e suprimido, e o console mostra quantos |
+| Lista do piloto (**Q13**) | João | Campo de config. Vazio = piloto desligado (`D-16`) |
+| `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY`, `GODEPLOY_CRON_KEY`, `GOATLAS_WEBHOOK_SEGREDO` | João | Secrets. Cada ausência silencia uma parte, todas fail-closed — ver `docs/DEPLOY.md` |
+| Registrar o webhook no Jira | time de tech | Opcional: o polling notifica sozinho, com atraso de uma janela de cron |
+| Baseline de assentos (Fase 0) | João | Sem ele a tela diz "sem baseline" em vez de comparar contra zero |
+| **T-235** — distinguir "defletido e resolveu" de "desistiu e foi pro chat" | Produto | Mitigado, não resolvido: o painel devolve `deflexaoResolvidaConhecida: false` e trata o número como **teto** |
+| Destino do alerta de SLA | Produto | Hoje vai ao solicitante, o único destino que o app conhece. Outro destinatário é uma linha na mesma função |
+
+### O que só o app REAL revelou (07/08/2026)
+
+Quatro bugs passaram por **610 testes verdes** e apareceram no primeiro teste de ponta a
+ponta contra `goatlas.devgogroup.com`. Nenhum dava erro no lugar certo:
+
+| Bug | Por que o teste não pegava |
+|---|---|
+| `env.DB` devolve `rows` como objetos | O shim implementa a forma documentada; a plataforma usa outra. Sintoma era `{}`, não exceção |
+| Detalhe do chamado dava 500 numa queda | Nos testes o chamado sempre existia |
+| Demonstração perdia o chamado entre requisições | O Worker é stateless; o teste roda tudo num processo |
+| Colisão de `UNIQUE` virava retry infinito | A colisão só acontece quando o vínculo já existe, cenário que nenhum teste montava |
+
+**A lição que vale para as próximas fases:** o dublê implementa o contrato **documentado**,
+e onde a plataforma diverge da documentação o dublê esconde a divergência em vez de
+revelá-la. Teste de integração contra o app publicado não é luxo de fim de projeto — é a
+única coisa que vê essa classe de bug.
 
 ### Como testar sem credencial
 As duas camadas isoladas têm **fake** (`src/lib/atlassian/fake.ts`,

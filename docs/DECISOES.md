@@ -387,16 +387,24 @@ pronto; o app continua nos fakes.
 **Três confusões que apareceram no caminho, e que valem registro porque a próxima
 pessoa vai repetir:**
 
-1. **API token ≠ chave de Organizations API.** `ATCTT3x…` é prefixo de *API token*
-   (Basic auth, e-mail + token, `<site>.atlassian.net`). A `ATLASSIAN_ORG_API_KEY` é
-   gerada em `admin.atlassian.com` → API keys, usada como `Bearer` contra
-   `api.atlassian.com/admin`, e é ela que exige Org Admin. São credenciais de
-   superfícies distintas — daí o transporte próprio de `RNF-04`.
+1. **API token ≠ chave de Organizations API.** São credenciais de superfícies
+   distintas — daí o transporte próprio de `RNF-04`.
+   🚨 **A atribuição de prefixo escrita aqui em 05/08/2026 estava INVERTIDA, e foi ela
+   que causou o 401. Corrigida em `D-22` — leia lá antes de registrar qualquer
+   credencial.** `ATCTT` é a chave de **organização**; o token de **usuário** é
+   `ATATT`. O texto original mandava `ATCTT3x…` para `ATLASSIAN_API_TOKEN`, que é
+   exatamente o erro que ficou registrado no app.
 2. **`cloudId` ≠ `orgId`.** Os dois são UUID e convivem no `admin.atlassian.com`. A
    Organizations API quer o **orgId** (o da URL `admin.atlassian.com/o/<id>/`).
-3. **UUID só tem `0-9a-f`.** Um id com `j`/`k` está transcrito errado — não dá erro
-   de configuração, dá 404 na API muito depois. O valor de `GOATLAS_ORG_ID` hoje
-   registrado **não foi validado** e precisa ser reconferido.
+3. ~~**UUID só tem `0-9a-f`.** Um id com `j`/`k` está transcrito errado.~~
+   🚨 **ESTA CONFUSÃO NÃO EXISTE — foi um erro MEU, refutado por teste em 07/08/2026
+   (`D-23`).** O **org id da Atlassian não é UUID estrito**: ele tem `j` e `k` e está
+   **correto**. `GET /admin/v1/orgs/{orgId}` responde **200** e ecoa o próprio id de
+   volta. A heurística "parece UUID, logo só pode ter hex" é plausível e falsa, e eu a
+   propaguei para o `D-22`, o `CLAUDE.md` e o `DEPLOY.md` como se fosse medição —
+   exatamente o vício que este documento existe para evitar. O `cloudId` **é** UUID
+   estrito (`5c413fde-…`); os dois formatos convivem, e é isso que faz a confusão parecer
+   real. **A confusão 2 (`cloudId` ≠ `orgId`) continua valendo.**
 
 ⚠️ **Rotação pendente:** o token que virou `ATLASSIAN_API_TOKEN` transitou por chat
 antes de ser registrado. Rotacionar é `setAppSecret` na mesma chave, sem redeploy —
@@ -426,6 +434,565 @@ remover `GOATLAS_MODO_DEMO`.
 
 ---
 
+### D-15 · Webhook e polling não têm lógica própria: os dois disparam a MESMA sincronização
+
+**Contexto.** `RF-47` pede duas fontes de detecção de mudança justamente para que a
+notificação não dependa de mecanismo único: o webhook do Jira (rápido, mas depende de o
+time de tech registrá-lo e de a Atlassian entregar) e o polling por JQL (lento, mas
+nosso). O preço é o mesmo fato chegar duas vezes.
+
+**O desenho óbvio, e por que ele quebra.** O reflexo é cada fonte ler o que tem à mão: o
+webhook lê `comment.body` e `changelog` do payload, o polling lê o chamado pela API. Dois
+caminhos, duas leituras, **dois formatos de carimbo** — e a dedupe de `RF-47`, que é
+`(issueKey, tipoEvento, carimboMudança)`, para de funcionar exatamente onde precisa
+funcionar. O webhook chega às 10:00:01 com `2026-08-06T13:00:00.000Z`, o polling às
+10:04:30 com `2026-08-06T10:00:00.000-0300`; é o mesmo instante em dois formatos, e a
+chave sai diferente. Ninguém percebe em teste — só a pessoa, recebendo tudo em dobro.
+
+**Decisão.** As duas fontes só dizem **qual chamado olhar**. Quem decide o que é novo é
+`notificacoes/servico.ts#sincronizarChamado`, que relê da Atlassian sempre pelo mesmo
+caminho. A chave de dedupe passa a ser idêntica **por construção**, não por coincidência,
+e o carimbo é normalizado para ISO/UTC antes de virar chave.
+
+**O bônus é de segurança, e ele é grande.** O corpo do webhook é a única entrada não
+autenticada por SSO do app inteiro. Com este desenho ele vira **ponteiro**: sai dele uma
+chave de chamado, validada contra `^[A-Z][A-Z0-9_]{1,19}-\d{1,10}$`, e nada mais. Um
+evento forjado com `comment.body: "clique aqui https://…"` não tem como virar mensagem
+enviada, porque a mensagem é montada com o comentário que o app releu.
+
+**O que sustenta a rota pública:** segredo em comparação de **tempo constante** (um `===`
+num endpoint público vaza o prefixo correto pelo tempo de resposta); resposta **sempre
+202**, com ou sem vínculo local (um 404 para chamado desconhecido seria oráculo de "este
+chamado passou pelo goatlas?", a mesma classe de vazamento que o 404-em-vez-de-403 de
+`RF-30` fecha); e fail-closed — sem `GOATLAS_WEBHOOK_SEGREDO` a rota não funciona.
+
+**Custo aceito.** O polling faz duas chamadas à Atlassian por chamado alterado, e o
+webhook faz as mesmas duas de novo se chegar depois. Sob `R-02` (credencial única) isso é
+tráfego real, contido pela marca-d'água (`updated >= última`, nunca varredura), pelo teto
+de 50 chamados por rodada e pelo fato de a dedupe cortar o segundo evento antes de
+qualquer envio.
+
+---
+
+### D-16 · `emails_piloto` é a única allowlist do projeto cujo VAZIO libera
+
+**Contexto.** Em todo lugar do goatlas, allowlist vazia **nega** — é `RNF-07`, e é o que
+impede o app de expor um espaço do Confluence no dia em que alguém esquecer de configurar.
+
+**A exceção.** `config.emails_piloto` (`R-06`, T-302) faz o oposto: **vazia = piloto
+desligado, todo mundo pode abrir chamado**.
+
+**Por quê.** A diferença é o que a lista governa. As outras governam **exposição de
+conteúdo**, e ali vazio-nega evita vazamento. Esta governa **quem pode pedir ajuda**.
+Vazio-nega aqui significaria que subir o app antes de alguém preencher a lista **tranca a
+empresa inteira fora do canal de suporte** — um incidente, não uma proteção. O fail-closed
+correto para esta lista é o oposto do das outras.
+
+**Como isso não vira pegadinha.** O comportamento está escrito em três lugares que quem
+mexe vai ler: o comentário do campo em `ConfigValores`, o topo de `piloto/areas.ts`, e a
+ajuda do campo no console de admin. E há teste afirmando os dois lados.
+
+**E quem fica fora recebe encaminhamento, não 403 cru** (`RNF-30`): a mensagem diz para
+onde ir no meio-tempo. A **consulta à documentação continua liberada** para quem está
+fora — ela não abre chamado, deflete, e barrá-la seria barrar exatamente o que o projeto
+quer que aconteça.
+
+---
+
+### D-17 · Retenção nunca expurga `vinculos`, e a auditoria tem piso de 180 dias
+
+**Contexto.** `RNF-33` pede retenção definida, e a Fase 3 é onde o volume de dado pessoal
+cresce: além de vínculo e conversa, passam a existir preferência de canal, histórico de
+notificação e trecho de comentário gravado no corpo da mensagem.
+
+**Decisão, em três partes:**
+
+1. **`null` = guardar.** Nenhum expurgo acontece por default. Apagar é irreversível e
+   precisa de alguém tendo decidido — não de um número que veio no código.
+2. **`vinculos` nunca é expurgado por cron.** Apagar um vínculo é apagar o **acesso da
+   pessoa ao próprio chamado** (`RF-30`, `RN-04`): o chamado continua no JSM e fica
+   invisível para quem o abriu, que é exatamente o pior caso que `RNF-21` existe para
+   impedir. Retenção de vínculo é decisão de negócio com aviso ao usuário, não uma linha
+   de cron.
+3. **A auditoria tem piso** (`PISO_AUDITORIA_DIAS = 180`). Configurar 7 dias
+   silenciosamente destruiria a capacidade de responder "em março alguém acessou a página
+   X?" — então o valor é **clampado**, e a resposta do cron diz que foi.
+
+Notificação ainda `pendente` também não é apagada: é aviso que ninguém recebeu, e uma
+pendente antiga é sinal de canal quebrado — justamente o que se quer ver.
+
+---
+
+### D-18 · A implementação da Organizations API existe, e o que não foi verificado está declarado EM CÓDIGO
+
+**Contexto.** T-122/T-123/T-131 estavam bloqueadas por **Q1**: sem credencial de Org
+Admin, escrever a chamada real seria código não verificável. O bloqueio virou impasse — o
+console de governança inteiro já existia contra o fake, e a única coisa que faltava era a
+camada que ninguém podia testar.
+
+**Decisão.** Escrever a implementação (`ClienteOrganizacaoHttp`), testá-la contra `fetch`
+simulado no que **é nosso** — caminho montado, paginação seguida, campos traduzidos, erro
+sem corpo cru, backoff no 429, `links.next` de outro host descartado, teto de páginas
+contra laço infinito — e **declarar explicitamente** o que os testes não provam.
+
+`ENDPOINTS_NAO_VERIFICADOS`, em `atlassian/organizacao.ts`, lista os três endpoints com o
+risco de cada um. Não é comentário: a tela de governança **mostra a lista** quando o app
+está em fakes. Um console que promete revogar assento e falha no clique é pior que um
+console que avisa antes.
+
+**O menos verificável dos três é a revogação por produto** (`DELETE
+…/manage/product-access` com o produto no corpo): a documentação pública descreve remover
+acesso do usuário, e não está confirmado que o filtro por produto é aceito. Por isso a
+rota de admin **nunca reporta sucesso otimista** — erro da Atlassian volta como erro, e o
+inventário continua mostrando o assento até a próxima coleta (o console diz isso ao
+confirmar).
+
+**A dupla confirmação é digitar o e-mail**, não um "tem certeza?" clicável. Um diálogo
+adiciona um clique; digitar obriga a olhar QUEM está sendo afetado. O erro a evitar não é
+clicar sem querer — é revogar a linha errada de uma tabela ordenada de outro jeito do que
+se esperava.
+
+---
+
+### D-19 · Q11 em aberto não vira canal inventado: o aviso é registrado e SUPRIMIDO
+
+**Contexto.** `RF-45` pede notificação, e **Q11** (qual canal) não tem resposta. O atalho
+tentador é "manda e-mail para o e-mail corporativo por enquanto" — parece inofensivo e é
+uma decisão de produto disfarçada de conveniência: notificação não pedida em canal não
+combinado é o começo do treinamento para ignorar as notificações do app.
+
+**Decisão.** `canal_notificacao_padrao` nasce `null`, e nesse estado a notificação é
+**registrada como `suprimida`**, não descartada. A diferença importa: com registro, o
+console mostra "havia 40 avisos a dar e nenhum canal definido"; sem registro, a tela
+mostra silêncio e ninguém descobre que Q11 estava travando a fase inteira. No dia da
+resposta, é **um campo no console de admin** e a fila passa a sair — sem deploy (`RF-49`).
+
+**E canal sem configuração NEGA, nunca simula** — `CanalIndisponivel`, mesmo raciocínio de
+`ClienteIAIndisponivel` (T-132). Se o lugar do canal não configurado fosse um dublê, a
+fila esvaziaria em produção marcando "enviada" com ninguém recebendo nada.
+
+**A demonstração é a exceção explícita:** `configDemo()` preenche `chat` contra o
+`CanalFake`, porque com `null` a tela de avisos ficaria vazia e o visitante concluiria que
+a notificação não foi construída. O que sustenta a distinção é `contexto.ts` — fora dos
+fakes, o dublê não é alcançável.
+
+---
+
+### D-20 · Defaults do MVP: cinco decisões tomadas por delegação, todas ajustáveis por config
+
+**Data:** 07/08/2026 · **Quem:** Kaique delegou explicitamente ("tente apenas considerar o
+contexto do projeto e tudo que já sabe pra decidir") · **Status:** fechadas, revisáveis
+
+O código das Fases 3 e 4 estava pronto e **cinco perguntas abertas seguravam o MVP** — não
+por falta de implementação, por falta de escolha. Cada uma abaixo foi decidida para um MVP
+que funcione hoje e se ajuste depois **sem deploy** (`RF-49`). Nenhuma é irreversível.
+
+#### 1 · Q11 → o canal é `nenhum`, e isso é uma DECISÃO, não uma pendência
+
+Os avisos **vivem na aba Avisos** do app. Nada é enviado para fora.
+
+**Por que não Google Chat, que era o candidato natural:** o webhook do Chat entrega num
+**espaço**, não numa pessoa. Ligar isso publicaria "o chamado TECH-12 da Ana recebeu um
+comentário" numa sala com outras pessoas dentro — o oposto de `RF-30`, que é a trava mais
+básica do app. Chat por espaço só serviria para um canal do próprio time de tech, que é
+outro caso de uso.
+
+**Por que não e-mail ainda:** o Worker não tem SMTP (restrição da plataforma), então
+e-mail exige um **provedor HTTP** que ninguém contratou. Com `canal = email` e sem
+`email_endpoint`, cada aviso iria para `falha` depois de cinco tentativas — pior que não
+enviar, porque enche a fila de erro e some com o aviso.
+
+**O que muda quando houver provedor:** um campo no console (`email_endpoint` +
+`EMAIL_API_KEY`) e `canal_notificacao_padrao = email`. Zero código. E o e-mail é
+**por pessoa**, com o endereço que o login corporativo já dá — sem novo cadastro.
+
+⚠️ **`nenhum` decidido ≠ ninguém decidiu**, e a distinção é visível: a tela mostra "os
+avisos vivem aqui" no primeiro caso e "o canal ainda não foi definido nesta instalação" no
+segundo. É por isso que `CONFIG_PADRAO` **continua** `null` — instalação nova não pode
+afirmar que alguém escolheu. A decisão entra por `GOATLAS_CANAL_NOTIFICACAO`, por ambiente.
+
+#### 2 · Q13 → o piloto começa DESLIGADO
+
+`emails_piloto` fica vazia, e por `D-16` isso libera todo mundo.
+
+**Por quê:** o gate de piloto só faz sentido quando existe um "para onde ir no meio-tempo"
+combinado — a mensagem de encaminhamento aponta para *o canal que você já usa hoje*, e isso
+pressupõe que os líderes saibam que o app existe (`T-333`) e que as áreas foram escolhidas
+(`T-334`). Ligar a lista antes disso adiciona fricção sem nenhum ganho: barra pessoas de um
+app que ainda não foi anunciado.
+
+Ligar depois é digitar e-mails num campo. **Desligar depois de ter barrado alguém é mais
+caro** — a pessoa já foi embora.
+
+#### 3 · T-235 → um proxy definido, com o viés impresso ao lado do número
+
+Não é medição, e o nome do campo diz: `deflexaoAparente`.
+
+**Definição:** bloqueio **sem override** cujo solicitante **não abriu chamado nos 7 dias
+seguintes**. Sete dias porque o prazo máximo de primeira resposta é 24h — quem ainda não
+voltou uma semana depois resolveu, ou desistiu.
+
+**O viés, que vai no payload e na tela, não em rodapé:** quem foi pedir pelo chat conta
+aqui como "resolveu". O número **superestima**, sempre. Por isso ele aparece **ao lado** do
+total bruto em vez de substituí-lo, e por isso `deflexaoResolvidaConhecida` continua
+`false`.
+
+**Por que isto é melhor que não medir:** sem número nenhum, a pergunta "a deflexão está
+funcionando?" fica sem resposta e alguém a responde de memória. Com um teto declarado, a
+conversa passa a ser sobre o teto — e ele fica **honesto na direção certa**: se o proxy diz
+40%, o real é *no máximo* 40%. E ele melhora sozinho conforme a aderência de canal (`O5`)
+sobe, porque a fuga para o chat encolhe.
+
+**Medir de verdade continua em aberto**, e a via é perguntar à pessoa — o que exige decidir
+quando perguntar sem virar mais um formulário.
+
+#### 4 · Destino do alerta de SLA → o solicitante, e só ele
+
+**Por quê:** alertar o time de tech exige saber quem é dono da fila, e isso é `T-331`
+(automação de roteamento no Jira, dono ainda indefinido). Pior: o **Jira nativo já tem SLA
+para agentes** — mandar um segundo alerta pelo goatlas criaria duas fontes de verdade sobre
+o mesmo prazo, e a que o time olha é a do Jira.
+
+O solicitante é o único destinatário que o app conhece com certeza e para quem o aviso é
+informação nova ("ninguém te respondeu ainda, e o prazo está acabando"). Acrescentar outro
+destinatário é uma linha em `avaliarESinalizarSla`.
+
+#### 5 · Retenção → continua `null` (guardar), e isso é escolha
+
+**Por quê:** definir prazo de expurgo de dado pessoal é decisão com peso jurídico, e o
+default errado é irreversível — dado apagado não volta. `null` é o único default que
+preserva a opção.
+
+O que **já está decidido** e não depende de ninguém: `vinculos` nunca é expurgado
+(`D-17`), a auditoria tem piso de 180 dias, e notificação `pendente` não é apagada. Quando
+os prazos forem definidos, são três campos no console.
+
+**Sugestão registrada para quando a conversa acontecer:** conversas 365 dias, notificações
+180, auditoria mantida. Sugestão, não default — está aqui para a decisão começar de algum
+lugar, não para ser aplicada em silêncio.
+
+#### O que ficou fora, e por que não é meu para decidir
+
+- **`baseline_assentos`** — é um número medido na Fase 0, não uma escolha. Inventar
+  baseline é inventar economia.
+- **Retenção/treinamento do provedor de IA** (`Q6`) — conformidade (`RNF-34`), com
+  conteúdo interno trafegando. Não é decisão de engenharia.
+- **As 7 tarefas `[HUMANO]` da spec 004** — todas são conversas com pessoas.
+
+---
+
+### D-22 · O 401 era a família da credencial, e o endpoint de usuários estava medido como vazio
+**Data:** 07/08/2026 · **Quem:** João Victor (medição) + Kaique (correção) · **Status:** aceita
+
+Diagnóstico entregue pelo João a partir de medição de 31/07/2026 no tenant
+`goengenharia`. Ele derruba a hipótese que estávamos perseguindo e corrige duas coisas
+nossas — uma de documentação, uma de código.
+
+> Numeração: `D-21` está tomada por `fix/override-obrigatorio`, ainda não mergeada.
+
+#### 1. São duas famílias de autenticação, e o `D-14` as trocou
+
+| Família | Prefixo | Onde se gera | Onde funciona |
+|---|---|---|---|
+| Chave de **organização** | `ATCTT` | `admin.atlassian.com` → Settings → API keys | **só** `api.atlassian.com/admin/*` |
+| Token de **usuário** | `ATATT` | `id.atlassian.com/manage-profile/security/api-tokens` | `<site>.atlassian.net/rest/api/3/*` |
+
+Não têm relação entre si; escopo de uma não afeta a outra. O que está registrado hoje
+em `ATLASSIAN_API_TOKEN` é um `ATCTT`, e Basic auth contra `/rest/api/3/*` com ele
+**retorna 401 por design** — com o e-mail certo, sem barra final, no site correto.
+
+⚠️ **Verificado em fonte primária, não só no memo** (07/08/2026). A atribuição de prefixo
+foi conferida na documentação da Atlassian e em relato independente: `ATCTT` são *access
+tokens* / criados na seção de admin; `ATATT` são *API tokens*, scoped e clássicos. O memo
+estava certo — mas a checagem era devida, porque o `D-14` também "estava certo" por um dia.
+
+🚨 **E há uma segunda armadilha, que o memo não menciona e que derrubaria o próximo
+token: `ATATT` SCOPED não funciona na URL do site.**
+
+| Tipo de `ATATT` | Base que aceita |
+|---|---|
+| **Clássico** (sem escopos) | `https://<site>.atlassian.net/rest/api/3/…` |
+| **Scoped** | `https://api.atlassian.com/ex/jira/{cloudId}/…` · `…/ex/confluence/{cloudId}/…` |
+
+Basic auth de token scoped contra a URL do site devolve **401** — **o mesmo sintoma** do
+erro de família, o que faria parecer que o diagnóstico não avançou. E a Atlassian hoje
+oferece scoped como caminho padrão na tela de criação.
+
+**Consequência de desenho:** `ATLASSIAN_BASE_URL` é **uma só** e serve Jira e Confluence no
+mesmo host (`/rest/api/3/…`, `/rest/servicedeskapi/…`, `/wiki/api/v2/…`). Sob scoped os dois
+têm gateways **distintos**, então adotar scoped **exige partir a base em duas** — mudança de
+código, não de config, e mais uma razão para pedir **clássico**. Existe pedido público
+(`CLOUD-12617`) para scoped aceitar a URL do site; enquanto não existir, clássico é a
+escolha.
+
+🚨 **A causa raiz não foi um engano de quem registrou: foi o nosso próprio documento.**
+`docs/DEPLOY.md` e o `D-14` afirmavam que `ATCTT3x…` era o *API token* e devia ir em
+`ATLASSIAN_API_TOKEN`. Quem seguiu a instrução acertou o procedimento e errou o
+resultado. Os três testes que passamos uma tarde considerando (e-mail errado · token
+expirado · base URL com barra) eram todos negativos, e continuariam negativos para
+sempre — **rodar o `curl` de novo não acrescenta informação**, e é por isso que o item
+está fechado em vez de "a verificar".
+
+**Consequência prática:** a credencial que temos não está quebrada, está na gaveta
+errada. O `ATCTT` é exatamente o que `ATLASSIAN_ORG_API_KEY` quer — e o memo mede `200`
+com ele contra `/admin/v1/orgs/{org}/*`. Falta gerar um `ATATT` para o trio de site.
+
+#### 2. `GET /admin/v1/orgs/{orgId}/users` devolve lista vazia neste tenant
+
+Medido: `{"data": []}`, HTTP 200. A causa não é permissão — o João é org admin **e**
+site admin. É que aquele endpoint lista **só contas gerenciadas**, e uma org só tem
+contas gerenciadas depois de reivindicar um domínio. A org não reivindicou nenhum
+(`/orgs/{org}/domains` → `{"data": []}`), então há **zero**. Uma única causa explica
+três sintomas que pareciam independentes: lista vazia, `403 "Caller must be a verified
+org admin of targeted account"` na escrita, e log de auditoria sem eventos de gestão.
+
+**`ClienteOrganizacaoHttp` usava esse endpoint.** Trocado por
+`POST /admin/v1/orgs/{orgId}/users/search`. É a pior classe de erro que existe neste
+projeto: HTTP 200, nenhuma exceção, console mostrando "0 assentos" — e ninguém
+desconfiando da chamada. Mesma família do `env.DB` devolvendo `{}`.
+
+**Três armadilhas medidas do `users/search`, nenhuma das quais dá erro:**
+
+- **`accountTypes: ["atlassian"]` é obrigatório** — sem ele entram ~83 contas de
+  app/bot, que não são pessoas e não consomem assento de gente.
+- **`query`, `groupIds` e `productAccess` NÃO filtram** — respondem 200 com a lista
+  inteira. Um filtro que parece filtrar e não filtra é pior que um filtro ausente.
+- **`accountStatus` não é status de suspensão** — volta `"active"` até para conta
+  suspensa. Quem responde é o **filtro** `isSuspended`, em duas varreduras.
+
+#### 3. O que isso obrigou a mudar no desenho, além do endpoint
+
+A armadilha do "filtro que responde 200 sem filtrar" é um comportamento **medido**
+desta API. Se `isSuspended` for um deles, as duas varreduras devolvem o mesmo conjunto
+— e isso é **detectável**: interseção não vazia significa que o filtro não separou
+nada. Daí `suspensaoConhecida`. Contar conta suspensa como assento ativo infla o custo
+(`RF-53`) e gera recomendação de revogar acesso de quem já não tem acesso.
+
+E `parcial`: o teto de `MAX_PAGINAS_USUARIOS` era atingido **em silêncio**, apesar de o
+comentário do código afirmar que a coleta parcial "nunca é silenciada". Era. Inventário
+truncado vira recomendação de rebaixar quem a página seguinte mostraria ativo — e a
+tela não tinha como saber que estava vendo um pedaço. Coleta parcial ou com suspensão
+desconhecida **não** é auditada como `sucesso`.
+
+Mesmo raciocínio de `deflexaoResolvidaConhecida` (`D-20`/T-235) e de "taxa sem dado é
+`null`, nunca `0%`": o número que não se mediu não vira zero.
+
+#### 4. Q5 — o espaço `TECH` não existe
+
+Era exemplo genérico, e virou premissa por repetição. Levantados por evidência real:
+`GO`, `DTE`, `GN`, `datateam`, `Protheus` (engenharia), além de `PROD`, `GDPC`, `CG`,
+`CG1`, `NC`, `AG`, `IA`, `IO` e outros. **É um piso, não a lista completa** — vem do
+índice do RAG, então espaço sem conteúdo indexado ou restrito não aparece. A lista
+autoritativa sai de `GET /wiki/api/v2/spaces` (que também exige `ATATT`) ou do
+diretório de espaços na UI.
+
+**Escolhidos para a allowlist inicial:** `GO`, `DTE`, `GN`, `datateam`, `Protheus`.
+Continua sendo decisão de exposição (`RN-06`, `D-01`) e revisável sem deploy (`RF-49`).
+
+#### 5. O que segue aberto
+
+- **`ATATT` não existe ainda** — é a ação humana que destrava Confluence e JSM reais.
+- **Escrita de governança é 0%** e não depende de credencial: **nenhuma** chave de API,
+  com escopo nenhum, opera sobre conta não gerenciada. Só reivindicar o domínio
+  `gocase.com` destrava — ou mudar grupo via `ATATT` + `/rest/api/3/group/user`.
+  Suspender continua fora dos dois caminhos.
+- ~~**`GOATLAS_ORG_ID` provavelmente está corrompido.**~~ 🚨 **Falso — refutado por teste
+  em `D-23`.** O org id está correto; org id da Atlassian não é UUID estrito.
+- **Os códigos HTTP são de 31/07** e não foram reexecutados em 07/08 (o sandbox do João
+  bloqueou o `curl`). ✅ **Reexecutados por mim em 07/08 à tarde — ver `D-23`.**
+
+---
+
+### D-23 · A passada com credencial real: 4 bugs nossos, e uma afirmação minha refutada
+**Data:** 07/08/2026 (tarde) · **Quem:** Kaique · **Status:** aceita
+
+O João mandou o pacote completo (`ATATT` clássico + `ATCTT` + org id + cloudId). Com ele
+na mão, rodei contra a Atlassian **real** o que até então era contrato documentado. O
+resultado confirma a lição que o `CLAUDE.md` já registrava — *o dublê implementa o
+contrato documentado, e onde o outro lado diverge ele esconde a divergência* — agora com
+quatro ocorrências novas de uma vez.
+
+#### 0. Antes dos bugs: eu estava errado sobre o org id
+
+`ATLASSIAN_ORG_ID=8a130dbc-06bc-1a05-jjk7-9822046115j1` tem `j` e `k`, e eu afirmei em
+três documentos que estava "quase certamente errado". **Teste:**
+
+```
+GET /admin/v1/orgs/8a130dbc-06bc-1a05-jjk7-9822046115j1  →  200
+  {"data":{"id":"8a130dbc-06bc-1a05-jjk7-9822046115j1","attributes":{"name":"goengenharia"}}}
+GET /admin/v1/orgs  →  200, uma org, exatamente esse id
+```
+
+**Org id da Atlassian não é UUID estrito.** O João já havia escrito isso num comentário do
+`.env`, com a URL do admin console como evidência, e eu mantive a suspeita. A confusão 3
+do `D-14` foi **desfeita**, não corrigida: ela nunca existiu. O `cloudId` (`5c413fde-…`)
+**é** UUID estrito, e é essa coexistência que faz a heurística parecer válida.
+
+Lição concreta: "parece UUID, logo só pode ter hex" é dedução sobre formato, não medição —
+e eu a propaguei como se fosse medida. É o mesmo erro que o `D-22` critica no `D-14`.
+
+#### 1. ✅ O 401 morreu
+
+```
+GET goengenharia.atlassian.net/rest/api/3/myself  (Basic, ATATT clássico)  →  200
+```
+
+O `ATATT` foi gerado no botão certo (`ATLASSIAN_TOKEN_TYPE=classic`), então a base do site
+continua valendo e **nada de código muda** — o alerta de token scoped do `D-22` continua
+válido como prevenção, e foi evitado antes de custar uma tarde.
+
+#### 2. 🚨 `listarTiposChamado` não funcionava em produção
+
+```
+GET /rest/servicedeskapi/requesttype                    →  412  "This API is experimental"
+GET /rest/servicedeskapi/requesttype  + X-ExperimentalApi: opt-in  →  200
+GET /rest/servicedeskapi/servicedesk/4/requesttype      →  200  (sem cabeçalho nenhum)
+```
+
+O endpoint **global** é experimental. Era o que usávamos, então a allowlist de `RF-28` não
+tinha como ser montada e o formulário sem IA não sabia que tipos oferecer.
+
+**Não ligamos o opt-in.** "Experimental" é a Atlassian avisando que pode mudar sem aviso, e
+a allowlist de tipos é trava de roteamento — chamado na fila errada é o custo. O caminho
+estável é **por service desk**: uma chamada para listar os desks, uma por desk. Custa mais
+chamadas, pagas uma vez por TTL de cache, e o `serviceDeskId` passa a vir do laço (o
+endpoint por desk não o repete em cada item, e `String(undefined ?? '')` daria `''`).
+
+#### 3. 🚨 A mesma API usa DUAS convenções de nome, e isso zerava o inventário
+
+| Endpoint | Convenção | Medido |
+|---|---|---|
+| `POST /admin/v1/orgs/{org}/users/search` | **camelCase** | `accountId`, `accountStatus`, `accountType`, `statusInUserbase` |
+| `GET .../users/{id}/last-active-dates` | **snake_case** | `product_access`, `last_active`, `last_active_timestamp` |
+
+Nosso contrato estava em `snake_case` para os dois. Efeito no `users/search`: `accountId`
+ausente descarta a linha, então **as 54 contas reais eram todas descartadas** — HTTP 200,
+lista vazia, zero exceção. Terceira ocorrência desta classe no projeto (`env.DB`
+devolvendo `{}` e o `GET /users` vazio foram as outras).
+
+⚠️ **Não "normalizar para ficar consistente":** os dois formatos são reais, e unificar
+quebra um dos lados com o mesmo sintoma silencioso.
+
+#### 4. 🚨 `name` e `email` exigem `expand`; e o produto atribuído NÃO está lá
+
+```
+POST /users/search {accountTypes:["atlassian"],isSuspended:false,limit:100}
+  →  200, 54 contas, só accountId/accountType/accountStatus/statusInUserbase
+POST /users/search {... expand:["NAME","EMAIL"]}        →  200, com name/nickname/email
+POST /users/search {... expand:["PRODUCT_ACCESS"]}      →  400 INVALID_PARAM
+```
+
+E `accountStatus` veio `"active"` nas 54 — confirmando que ele **não** é status de
+suspensão, como o `D-22` já dizia.
+
+**Onde o produto vive de verdade:** `last-active-dates`, que devolve `product_access` com
+`key` por produto (`confluence`, `jira-core`, `jira-software`) **e** o último acesso. O
+cron já chamava esse endpoint por conta — faltava usar a informação. `registrarColeta`
+iterava `usuario.produtos` (sempre vazio) e gravava **zero linha**: o inventário existia,
+rodava, respondia 200 e não continha nada. Agora itera a **união** das duas fontes.
+
+E `last_active` é só a **data** (`"2026-08-03"`), enquanto `last_active_timestamp` é ISO
+completo — o primeiro joga o horário para meia-noite UTC, o que não muda "ocioso há 60
+dias" mas muda o limiar de quem acessou hoje de manhã.
+
+#### 5. ✅ O `GET /users` vazio, confirmado
+
+```
+GET /admin/v1/orgs/{org}/users?limit=100  →  200  {"data":[]}
+```
+
+Exatamente como o João mediu em 31/07. A troca de endpoint do `D-22` estava certa.
+
+#### 6. O JSM existe — 5 service desks, e o do time de tech é o `GN`
+
+| `serviceDeskId` | Projeto | Nome |
+|---|---|---|
+| **4** | **`GN`** | **Tickets Engenharia** ← é este |
+| 9 | `GOSHOP` | Gobeaute Support |
+| 11 | `JTK` | Jump Ventures Support |
+| 7 | `SHPF` | SHPF |
+| 8 | `OMI2020` | Opsgenie Migrated Incidents |
+
+O `GN` tem **16 tipos de solicitação**. `GOATLAS_SERVICE_DESK_ID=4` foi registrado.
+**`T-063` sai do bloqueio de Q1**: falta escolher quais tipos entram na allowlist
+(`RF-28`) — decisão de roteamento, não de credencial.
+
+Candidatos naturais para o piloto: `70` (Relatar um bug), `134` (Relatar um problema
+(Sistema)), `108` (Solicitar acesso/permissão a um Sistema), `68` (Outras questões /
+dúvidas). ⚠️ **`69` ("Solicitação enviada por e-mail") deve ficar fora** — é o tipo de
+entrada por e-mail do próprio JSM, não um formulário para pessoa escolher.
+
+#### 7. Q5 corrigida: a lista real desmente os nomes que eu supus
+
+O `D-22` recomendou `GO`, `DTE`, `GN`, `datateam`, `Protheus` a partir do índice do RAG. A
+lista autoritativa (32 espaços) mostra que **`GO` é "Go Shopify"** — nada a ver com
+documentação de engenharia. E ficaram de fora os que mais parecem certos:
+
+| Key | Nome | Tipo |
+|---|---|---|
+| `GT` | **GO Tecnologia** | `knowledge_base` |
+| `DTE` | Documentação Técnica Engenharia | `global` |
+| `GN` | Tickets Engenharia | `global` |
+| `DE` | Devops | `global` |
+| `GI` | GO INFRA | `global` |
+| `dicas` | Dicas / Documentações | `global` |
+| `GLPI` | GLPI (helpdesk antigo) | `knowledge_base` |
+
+⚠️ **`type: knowledge_base` importa:** é o tipo que a Atlassian usa para espaço ligado a
+service desk — feito para deflexão. `GT`, `IO`, `IA`, `Protheus`, `CG1`, `GLPI` e
+`Goconnect360` são desse tipo.
+
+**A allowlist NÃO foi definida ainda** — `GOATLAS_ESPACOS_CONFLUENCE` segue vazio de
+propósito. Escolher continua sendo decisão de exposição (`RN-06`, `D-01`), e agora ela se
+faz sobre a lista real em vez de sobre suposição de assunto.
+
+#### 8. Q8 respondida — e o `custo.ts` está errado por construção
+
+O `HANDOFF-GODEPLOY.md` mede o preço real: **73 assentos** (5 JSM · 35 Jira · 33
+Confluence), e a curva do JSM é **escalonada**. Na faixa 1–100 os valores medidos são USD
+9,05 e 6,70 por assento.
+
+🚨 **O preço por assento SOBE quando você corta assentos** (efeito de faixa). Nosso
+`custo.ts` multiplica contagem × custo fixo por produto, então **superestima a economia de
+cortar** — exatamente o número que o console usa para recomendar rebaixamento. Vira
+`T-134`.
+
+#### 9. Nomes de variável: não mudamos nenhum lado
+
+O `.env` do João usa `ATLASSIAN_USER_TOKEN` e `ATLASSIAN_ORG_ID`; nós lemos
+`ATLASSIAN_API_TOKEN` e `GOATLAS_ORG_ID`. **Decisão: manter os dois como estão** e mapear
+no momento de registrar o secret.
+
+`ATLASSIAN_USER_TOKEN` é um nome melhor — nomearia a família e teria evitado o 401. Mas
+renomear o nosso tem um risco concreto e assimétrico: `usandoFakes` é
+`modoDemo || GOATLAS_USAR_FAKES || !env.ATLASSIAN_API_TOKEN`. Se o código passar a ler o
+nome novo e o secret antigo for removido antes do deploy, o worker publicado vê
+`!ATLASSIAN_API_TOKEN` e **cai nos fakes silenciosamente, com credencial real
+configurada** — a falha de `T-132` de novo, pela porta dos nomes. O ganho é de clareza e
+já foi obtido documentando a família; o risco é operacional.
+
+E `GOATLAS_*` × `ATLASSIAN_*` distingue **bootstrap de config** (editável depois no console,
+`RF-49`) de **credencial** — apagar essa distinção para casar com o `.env` de outro projeto
+seria trocar uma convenção interna por uma coincidência externa.
+
+⚠️ **O `LEIA-ME` do pacote diz "copie o `.env` para a raiz do app". Isso não se aplica
+aqui:** em produção o goatlas não lê `.env` nenhum (são secrets do GoDeploy), e dois nomes
+divergem.
+
+#### 10. O pacote NÃO entra no repositório
+
+`goatlas-kaique/` foi adicionado ao `.gitignore` **inteiro**, não só o `.env`. O
+`HANDOFF-GODEPLOY.md` traz nome de funcionário, composição de grupo e valor de licença; o
+`.gitignore` cobria `.env` e deixaria os `.md` e o `.json` commitáveis. O que vale do
+pacote está destilado aqui.
+
+**Rotação pendente:** o João rotaciona o `ATCTT` depois da validação, e ofereceu trocá-lo
+por uma chave com **escopo de leitura**. Vale aceitar — a única escrita que o app faria é
+`T-131`, que não funciona hoje de todo jeito (conta não gerenciada), então guardamos uma
+chave de escrita total na org sem usar.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
@@ -433,16 +1000,16 @@ implementado antes da resposta.
 
 | # | Pergunta | Quem decide | Bloqueia |
 |---|---|---|---|
-| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | **Parcial — ver D-14.** O trio Jira/Confluence está registrado; faltam `ATLASSIAN_ORG_API_KEY` (T-122/T-123/T-131) e `LLM_API_KEY`. T-063 depende ainda de um projeto **JSM** |
+| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | ✅ **RESPONDIDA na parte de credencial — `D-23`, 07/08/2026.** `ATATT` clássico validado (`/rest/api/3/myself` → 200), `ATCTT` em `ATLASSIAN_ORG_API_KEY`, org id validado, `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"). **T-063 saiu do bloqueio** — falta escolher os tipos da allowlist de `RF-28`, que é roteamento. ⚠️ **Pendências que não são "qual credencial":** a conta é **pessoal do João** (contra `RNF-03` — conta de serviço dedicada continua a fazer), o `ATCTT` precisa de **rotação** e pode virar chave só-leitura, e a **escrita** de governança exige reivindicar o domínio, não credencial |
 | Q2 | Qual campo do Jira delimita "mesmo tipo de ticket" para a Regra 2 — label, componente ou tipo de issue? | João + time de tech | RF-10, RF-11 (o agrupamento do `check_jira_history`) |
 | Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | RF-14 — e sem ele a Regra 2 classifica mal (é pré-requisito, não refinamento) |
 | Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | **Só o valor** — `campo_solicitante_id` já é config (RNF-25), editável sem deploy assim que a resposta chegar. RF-21, RNF-21 (reconciliação) |
-| Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | RF-37, RF-38 e o `search_confluence` da Regra 1 |
+| Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | **Lista autoritativa em mãos (`D-23`): 32 espaços, com nome e tipo.** ⚠️ O `TECH` que circulava **nunca existiu**, e a recomendação do `D-22` estava furada: **`GO` é "Go Shopify"**, não engenharia. Candidatos reais: `GT` (GO Tecnologia, `knowledge_base`), `DTE`, `GN`, `DE` (Devops), `GI` (GO INFRA), `dicas`, `GLPI`. **A escolha continua pendente** — `GOATLAS_ESPACOS_CONFLUENCE` está vazio de propósito, e agora se decide sobre a lista real |
 | Q6 | ~~Qual API de IA?~~ Resta: qual a **política de retenção/treinamento** do provedor atrás do proxy corporativo? | João | **Provedor decidido — ver D-05.** O que resta bloqueia o *rollout* (conformidade **RNF-34**), não a arquitetura |
 | Q7 | Quais domínios de e-mail além de `@gocase.com` são válidos? | João | RF-01, RF-05 (allowlist de domínio no servidor) |
-| Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | RF-53 (custo mensal e assentos ociosos) |
+| Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | ✅ **Respondida em `D-23`**: 73 assentos (5 JSM · 35 Jira · 33 Confluence), e a curva do JSM é **escalonada** — faixa 1–100 medida em USD 9,05 e 6,70. 🚨 **E isso quebra o `custo.ts`**, que multiplica contagem × custo fixo: o preço por assento **sobe** quando se corta, então a economia projetada está **superestimada** — justo o número que recomenda rebaixar. Vira **T-134** |
 | Q9 | Como comunicar o SLA de 24h às áreas que hoje têm retorno em 2h30 sem soar como piora? | João + Produto | Não bloqueia código; bloqueia **rollout** (R-05) |
 | Q10 | O time de tech está ciente de que o reporter dos chamados vai mudar? | João | Não bloqueia código; bloqueia **rollout** (R-03) |
-| Q11 | Google Chat, e-mail ou ambos na v1 de notificações? | João | RF-45 (Fase 3) |
+| Q11 | Google Chat, e-mail ou ambos na v1 de notificações? | João | **Decidida para o MVP em `D-20`: `nenhum`** — o aviso vive na aba Avisos. Chat por espaço foi recusado (vazaria chamado de todos numa sala, contra `RF-30`); e-mail entra quando houver provedor HTTP. Ver também `D-19`. Os dois canais estão implementados e testados; o que falta é *escolher*, e a escolha é um campo de config. Enquanto `canal_notificacao_padrao` for `null`, o aviso é registrado e suprimido, e o console diz quantos |
 | Q12 | ~~O GoDeploy já oferece SSO Google pronto?~~ | Kaique | **Respondida — ver D-02** |
-| Q13 | Quais 1–2 áreas entram no piloto? | João | Fase 4 (sugestão do documento: CX + Produção) |
+| Q13 | Quais 1–2 áreas entram no piloto? | João | **Decidida para o MVP em `D-20`: piloto DESLIGADO** — o gate só faz sentido depois de `T-333`/`T-334`. Ver também `D-16`. O gate existe e `emails_piloto` vazio mantém o piloto desligado; falta a lista (sugestão do documento: CX + Produção) |

@@ -16,6 +16,8 @@
 import type { ClienteAtlassianFake } from './atlassian/fake'
 import type { ClienteIAFake } from './ia/fake'
 import type { ConfigValores } from './config'
+import type { Banco } from './db/tipos'
+import { linhasComoObjetos } from './db/tipos'
 
 export const AVISO_DEMO =
   'Modo demonstração: os dados são fictícios e nada é criado no Jira. Chamados abertos aqui não chegam ao time de tech.'
@@ -36,7 +38,95 @@ export function configDemo(): Partial<ConfigValores> {
       '[EXEMPLO FICTÍCIO] Rodei o pipeline manualmente',
       '[EXEMPLO FICTÍCIO] Reparticionei a tabela para destravar',
     ],
+    /**
+     * Canal de aviso na demonstração: `chat`, contra o `CanalFake`.
+     *
+     * ⚠️ Não é a resposta de Q11 — é o oposto. Em produção este campo nasce `null`, os
+     * avisos ficam `suprimida` e o console mostra quantos ("havia 40 avisos e nenhum
+     * canal"). Aqui ele é preenchido porque a demonstração precisa mostrar a fila
+     * **funcionando**: com `null`, a tela de avisos ficaria vazia e o visitante concluiria
+     * que a notificação não foi construída.
+     *
+     * O que sustenta a distinção é `contexto.ts`: fora dos fakes, canal sem configuração
+     * vira `CanalIndisponivel`, nunca o dublê. Preencher aqui não abre caminho nenhum lá.
+     */
+    canal_notificacao_padrao: 'chat',
+    /**
+     * Mapa de áreas fictício, para a métrica por área (`T-312`) ter o que mostrar.
+     *
+     * O e-mail é intencionalmente genérico: quem visita a demonstração entra com a própria
+     * conta Google, então ninguém casa com este mapa — e o painel mostra "Sem área", que é
+     * exatamente o comportamento de `T-303` (o app não chuta área).
+     */
+    areas_por_email: { 'demonstracao@gocase.com': 'CX' },
   }
+}
+
+/**
+ * Repovoa o fake com os chamados que o BANCO já conhece — só na demonstração.
+ *
+ * ## O problema, que só aparece no app publicado
+ *
+ * O Worker é **stateless**: cada requisição monta um contexto novo, com um
+ * `ClienteAtlassianFake` novo e vazio. O vínculo persiste (está em `env.DB`), mas o
+ * *chamado* vivia na memória do fake da requisição anterior e não existe mais.
+ *
+ * Resultado, medido no app real em 07/08/2026: a pessoa abre um chamado, vê "Chamado
+ * aberto", e no clique seguinte o próprio chamado aparece como **indisponível**. O
+ * comportamento é tecnicamente correto (`RNF-19` degradando), e como demonstração é
+ * péssimo: parece que o app perdeu o chamado.
+ *
+ * ⚠️ **Só roda em `modoDemo`.** Em produção o chamado está no JSM de verdade e nada disto
+ * é necessário; se rodasse, estaria inventando estado de Atlassian a partir do nosso banco,
+ * que é exatamente o tipo de "conveniência" que faz um app mentir sobre o mundo externo.
+ *
+ * O que se reconstrói é o que NÓS gravamos no outbox — título, descrição, prioridade. O
+ * status volta como `Aberto`, porque é o estado em que o chamado nasceu e o único que o
+ * banco justifica afirmar.
+ */
+export async function repovoarChamadosDemo(
+  fake: ClienteAtlassianFake,
+  db: Banco,
+): Promise<void> {
+  const r = await db.query(
+    `SELECT issue_key, payload_json FROM submissoes
+      WHERE estado = 'criado' AND issue_key IS NOT NULL
+      ORDER BY criado_em DESC LIMIT 50`,
+    [],
+  )
+  let maiorNumero = 0
+  for (const linha of linhasComoObjetos<{ issue_key: string; payload_json: string }>(r)) {
+    // O contador do fake reinicia a cada requisição (Worker stateless), então sem isto o
+    // segundo chamado da demonstração nasce com a chave do primeiro e bate no
+    // `UNIQUE (vinculos.issue_key)`.
+    const numero = Number.parseInt(linha.issue_key.split('-').pop() ?? '', 10)
+    if (Number.isInteger(numero) && numero > maiorNumero) maiorNumero = numero
+    if (fake.estado.chamados.has(linha.issue_key)) continue
+    try {
+      const p = JSON.parse(linha.payload_json) as {
+        titulo?: unknown
+        descricao?: unknown
+        prioridade?: unknown
+      }
+      fake.estado.chamados.set(linha.issue_key, {
+        issueKey: linha.issue_key,
+        titulo: typeof p.titulo === 'string' ? p.titulo : '',
+        descricao: typeof p.descricao === 'string' ? p.descricao : '',
+        status: 'Aberto',
+        prioridade:
+          p.prioridade === 'critica' || p.prioridade === 'alta' || p.prioridade === 'normal'
+            ? p.prioridade
+            : null,
+        criadoEm: new Date(0).toISOString(),
+        atualizadoEm: new Date(0).toISOString(),
+        slaPrimeiraResposta: { prazo: null, cumprido: null },
+      })
+    } catch {
+      // Payload corrompido não derruba a demonstração: aquele chamado só continua
+      // aparecendo como indisponível, que é o comportamento honesto.
+    }
+  }
+  fake.ajustarContadorIssue(maiorNumero)
 }
 
 export function semearAtlassianDemo(fake: ClienteAtlassianFake): void {

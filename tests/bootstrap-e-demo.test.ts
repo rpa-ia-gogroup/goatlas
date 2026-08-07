@@ -19,6 +19,8 @@ import { tratarRequisicao } from '@/lib/http/rotas'
 import { HEADER_EMAIL } from '@/lib/auth'
 import { AVISO_DEMO, TIPO_CHAMADO_DEMO } from '@/lib/demo'
 import { ClienteAtlassianHttp } from '@/lib/atlassian/cliente'
+import { ClienteAtlassianFake } from '@/lib/atlassian/fake'
+import { linhasComoObjetos } from '@/lib/db/tipos'
 
 const ANA = 'ana@gocase.com'
 const CHEFE = 'kaique.breno@gocase.com'
@@ -211,11 +213,20 @@ describe('RF-21 / Q4 — campo_solicitante_id é CONFIG, nunca hardcoded', () =>
   })
 })
 
-describe('RNF-19 — Atlassian fora, a lista ainda mostra conteúdo', () => {
-  it('título e prioridade vêm do NOSSO registro quando o chamado não é legível', async () => {
-    // No Worker o fake é recriado a cada requisição, então o chamado criado numa
-    // requisição não é legível na seguinte — o mesmo efeito de a Atlassian estar
-    // fora. Antes isso mostrava "título indisponível"; agora usa o outbox.
+describe('RNF-19 — Atlassian fora, a lista E o detalhe ainda mostram conteúdo', () => {
+  /**
+   * ⚠️ A queda é simulada **explicitamente**, e isso é uma correção de teste.
+   *
+   * Antes, este teste dependia de um acidente: no Worker o fake é recriado a cada
+   * requisição, então o chamado criado numa requisição não era legível na seguinte, e a
+   * lista caía na degradação. Quando `repovoarChamadosDemo` passou a reconstruir o fake a
+   * partir do outbox (para a demonstração parar de parecer que perde chamado), o acidente
+   * desapareceu — e com ele a cobertura de `RNF-19`.
+   *
+   * Um teste que depende de efeito colateral testa o efeito colateral. Agora ele injeta a
+   * falha, que é o cenário real: a Atlassian fora do ar.
+   */
+  async function abrirChamado() {
     const criado = await chamar('/api/chamados', {
       metodo: 'POST',
       corpo: {
@@ -227,16 +238,82 @@ describe('RNF-19 — Atlassian fora, a lista ainda mostra conteúdo', () => {
       },
     })
     expect(criado.status).toBe(201)
+    return (criado.corpo as { issueKey: string }).issueKey
+  }
 
-    const meus = await chamar('/api/chamados')
+  /** Monta o contexto com a leitura de chamado e de comentários DERRUBADAS. */
+  async function comAtlassianFora(caminho: string) {
+    const ctx = await montarContexto({ DB: db, ...ENV_DEMO })
+    const fake = ctx.atlassian as ClienteAtlassianFake
+    // Sem o chamado no estado, `obterChamado` lança — é o que a Atlassian fora produz.
+    fake.estado.chamados.clear()
+    fake.estado.falhas.listarComentarios = 'indisponivel'
+    const r = await tratarRequisicao(
+      new Request(`https://goatlas.devgogroup.com${caminho}`, {
+        headers: { [HEADER_EMAIL]: ANA },
+      }),
+      ctx,
+      {},
+    )
+    return { status: r.status, corpo: (await r.json().catch(() => null)) as never }
+  }
+
+  it('a LISTA usa o título e a prioridade do nosso registro', async () => {
+    await abrirChamado()
+    const meus = await comAtlassianFora('/api/chamados')
     const itens = (meus.corpo as { itens: { titulo: string; status: string; prioridade: string }[] })
       .itens
     expect(itens).toHaveLength(1)
     expect(itens[0]?.titulo).toBe('Etiquetas saindo cortadas')
     expect(itens[0]?.prioridade).toBe('alta')
-    // O status é honestamente marcado como indisponível — o que não sabemos, não
-    // inventamos.
+    // O status é honestamente marcado como indisponível — o que não sabemos, não inventamos.
     expect(itens[0]?.status).toBe('indisponivel')
+  })
+
+  it('o DETALHE degrada em vez de dar 500 — era um bug, pego só no app real', async () => {
+    // 🚨 Antes desta correção a pessoa clicava no próprio chamado e lia "algo deu errado do
+    // nosso lado", sem nenhuma informação. A lista degradava certo desde a Fase 1; o
+    // detalhe não, e a incoerência nunca apareceu em teste porque nos testes o chamado
+    // sempre existia.
+    const issueKey = await abrirChamado()
+    const r = await comAtlassianFora(`/api/chamados/${issueKey}`)
+    expect(r.status).toBe(200)
+    const corpo = r.corpo as {
+      degradado: boolean
+      comentariosIndisponiveis: boolean
+      chamado: { titulo: string; status: string; prioridade: string }
+    }
+    expect(corpo.degradado).toBe(true)
+    expect(corpo.chamado.titulo).toBe('Etiquetas saindo cortadas')
+    expect(corpo.chamado.prioridade).toBe('alta')
+    expect(corpo.chamado.status).toBe('indisponivel')
+    // "Não há respostas" e "não consegui buscar as respostas" são frases opostas.
+    expect(corpo.comentariosIndisponiveis).toBe(true)
+  })
+
+  it('a falha de leitura fica AUDITADA, sem o corpo da resposta da Atlassian', async () => {
+    const issueKey = await abrirChamado()
+    await comAtlassianFora(`/api/chamados/${issueKey}`)
+    const linhas = linhasComoObjetos<{ resultado: string; detalhe_json: string }>(
+      await db.query(
+        `SELECT resultado, detalhe_json FROM auditoria
+          WHERE acao = 'chamado_lido' AND resultado = 'falha'`,
+        [],
+      ),
+    )
+    expect(linhas).toHaveLength(1)
+    expect(linhas[0]?.detalhe_json).toContain('atlassian_indisponivel')
+    expect(linhas[0]?.detalhe_json).toContain('recuperadoDoOutbox')
+  })
+
+  it('a demonstração NÃO perde o chamado entre requisições', async () => {
+    // O outro lado da moeda: com o fake repovoado do outbox, o chamado aberto continua
+    // legível na requisição seguinte. Sem isso, a demonstração mostrava "indisponível"
+    // no clique seguinte à abertura, e parecia que o app tinha perdido o chamado.
+    await abrirChamado()
+    const meus = await chamar('/api/chamados')
+    const itens = (meus.corpo as { itens: { status: string }[] }).itens
+    expect(itens[0]?.status).toBe('Aberto')
   })
 })
 
