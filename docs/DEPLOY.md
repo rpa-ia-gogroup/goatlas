@@ -158,10 +158,31 @@ A rota exige o header assinado `X-Godeploy-Cron` conferido contra
 o contrário deixaria a rota aberta justamente na instalação que esqueceu de
 configurar.
 
-### Webhook do Jira (RF-48) — a única rota pública do app
+### Webhook do Jira (RF-48)
 
-Quem registra é o **time de tech**, no Jira: `Configurações do sistema → Webhooks`,
-apontando para
+🚨 **MEDIDO EM 07/08/2026, NO APP REAL: o webhook NÃO é alcançável de fora hoje.**
+
+Com `visibility: authenticated`, o edge do GoDeploy intercepta **tudo** antes do worker e
+responde **302** para o OAuth — inclusive `/api/webhook/jira` e `/api/health`. Conferido
+com `curl` contra `https://goatlas.devgogroup.com`: a requisição **não aparece nos logs do
+app**, porque nunca chegou ao worker. A Atlassian não faz o OAuth do GoDeploy, então ela
+receberia o mesmo 302 e o evento se perderia.
+
+**Isso não derruba a Fase 3, e não é acidente:** `RF-47` exige que a notificação **não
+dependa de mecanismo único**, e é exatamente por isso que o polling existe e fica **sempre
+ligado**. Com o webhook bloqueado, a notificação chega com o atraso de uma janela de cron
+(5 minutos na sugestão acima) em vez de em segundos. Todo o resto funciona igual.
+
+**As três saídas, e por que duas não servem:**
+
+| Saída | Veredito |
+|---|---|
+| `setAppPublic` no app | ❌ **Não.** Tornaria o app **inteiro** público, e `RF-01`/`RF-05` dependem de o edge injetar `x-godeploy-user-email`. Sem o edge, não há identidade — é trocar um atraso de 5 minutos por um app aberto |
+| Exceção de rota no edge (só `/api/webhook/*` público) | ⏳ **A perguntar à plataforma.** É a saída certa se existir. O código já está pronto para ela: o segredo próprio, a comparação de tempo constante e o `202` uniforme existem justamente porque essa rota é desenhada para viver fora do SSO |
+| Ficar só com o polling | ✅ **É o estado atual, e é aceitável.** Notificação em até 5 minutos, sem nenhuma superfície pública |
+
+Quando a exceção existir, quem registra é o **time de tech**, no Jira: `Configurações do
+sistema → Webhooks`, apontando para
 
 ```
 https://<dominio-do-app>/api/webhook/jira?k=<GOATLAS_WEBHOOK_SEGREDO>
@@ -180,8 +201,14 @@ aceito no cabeçalho `x-goatlas-webhook`, para quem preferir não pôr nada na U
    e relê tudo da Atlassian. Testar mandando um `comment.body` inventado não produz
    notificação com aquele texto — e é de propósito.
 
-**O webhook é opcional.** Sem ele, o polling notifica sozinho, com atraso de uma janela
-de cron. É o que `RF-47` pede: notificação não pode depender de mecanismo único.
+**O webhook é opcional** — e hoje, na prática, desligado pelo edge (ver o aviso acima).
+Sem ele o polling notifica sozinho. É o que `RF-47` pede: notificação não pode depender de
+mecanismo único, e este é o caso em que essa exigência pagou.
+
+⚠️ **`/api/health` está no mesmo barco.** Ele foi escrito como rota pública de propósito
+(`RF-59` — precisa responder mesmo com o SSO ou a config quebrados), e o edge o fecha do
+mesmo jeito. Para monitoração externa vale a mesma exceção de rota; de dentro, com sessão,
+ele responde normalmente.
 
 ---
 

@@ -423,6 +423,15 @@ persistente.
 - ⚠️ **`updateApp` MESCLA assets, não substitui.** Para limpar caminho errado são
   dois deploys: `assets: []` e depois a lista certa. Confira com `getApp` +
   `include: ["manifest"]`.
+- 🚨 **O edge fecha TUDO, inclusive o que foi escrito como rota pública.** Com
+  `visibility: authenticated`, `/api/webhook/jira` (`RF-48`) e `/api/health` (`RF-59`)
+  recebem **302** para o OAuth antes de chegarem ao worker — medido com `curl` em
+  07/08/2026, e a requisição **não aparece nos logs do app**. A Atlassian não faz esse
+  OAuth, então o webhook do Jira **não funciona hoje**. `setAppPublic` **não** é a saída
+  (abriria o app inteiro, e `RF-01` depende de o edge injetar a identidade); a saída é uma
+  exceção de rota na plataforma. Enquanto não existir, o **polling** entrega a notificação
+  com atraso de uma janela de cron — que é precisamente o motivo de `RF-47` exigir duas
+  fontes. Detalhe em `docs/DEPLOY.md`.
 - **Logout é do edge** (`https://<dominio-base>/auth/logout`) e **ignora parâmetro de
   redirect** — testado com `redirect`, `next`, `returnTo`, `return_to`, `r`,
   `continue`, `redirect_uri` e `callback`. Sempre leva ao domínio da plataforma; a UI
