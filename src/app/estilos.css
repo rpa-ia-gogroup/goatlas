@@ -390,19 +390,31 @@
   box-shadow: var(--shadow-sm);
 }
 
+/**
+ * UMA coluna, UMA margem esquerda — inclusive no desktop.
+ *
+ * A versão anterior virava grade de duas colunas acima de 520px, com o rótulo
+ * alinhado à direita e centralizado na vertical. Três defeitos de uma vez:
+ *
+ * 1. Rótulo à direita deixa a borda esquerda dos rótulos serrilhada (`DESCRIÇÃO`,
+ *    `ÁREA`, `PRIORIDADE`, `PRAZO` têm larguras diferentes), e o olho precisa
+ *    procurar onde cada um começa;
+ * 2. `align-self: center` fazia o rótulo flutuar no meio de valores altos — o
+ *    `PRAZO` parava na altura da segunda linha da explicação, parecendo solto;
+ * 3. o título e o botão ficavam na margem do cartão enquanto os valores começavam
+ *    depois da coluna de 8rem — **três** margens esquerdas na mesma tela.
+ *
+ * Uma coluna resolve os três, e faz o desktop usar o mesmo desenho do celular, que
+ * é o que mobile-first quer dizer (`RNF-28`). A hierarquia passa a vir do ritmo
+ * vertical e do peso do texto, não de uma coluna de rótulos.
+ */
+/* ⚠️ Espaçamento por MARGEM, não por `gap`. Um `gap` de flex/grid separa rótulo do
+   valor tanto quanto separa um par do próximo — e aí o rótulo fica à mesma distância
+   do valor que ele nomeia e do valor de cima, que não é dele. O par precisa estar
+   colado e os pares, afastados: é a proximidade que agrupa, já que não há mais
+   coluna de rótulos fazendo esse trabalho. */
 .recibo dl {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3);
-}
-@media (min-width: 520px) {
-  .recibo dl {
-    grid-template-columns: 8rem minmax(0, 1fr);
-    column-gap: var(--space-4);
-  }
-  .recibo dt {
-    text-align: right;
-  }
+  display: block;
 }
 .recibo dt {
   font-size: 0.6875rem;
@@ -410,22 +422,39 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
-  align-self: center;
+  margin-bottom: 6px;
 }
 .recibo dd {
   font-size: var(--fs-body);
+  line-height: 1.55;
   color: var(--go-text-primary);
+  margin: 0 0 var(--space-4);
+}
+.recibo dd:last-child {
+  margin-bottom: 0;
+}
+/* Campo de uma palavra não precisa da largura do cartão — esticado até a borda ele
+   promete mais escolha do que os três valores que tem. O teto é generoso o bastante
+   para o alvo de toque e some no celular, onde a largura já é essa. */
+.recibo dd .campo select {
+  max-width: 20rem;
 }
 
+/* O número é o dado; a frase de RN-08 é a ressalva que impede o número de virar
+   promessa de solução. Tamanhos diferentes para que se leiam como duas coisas. */
 .prazo {
-  font-weight: var(--fw-semibold);
+  font-size: 1.5rem;
+  font-weight: var(--fw-extrabold);
+  line-height: 1.1;
   color: var(--go-text-heading);
 }
 /* RN-08 — "primeira resposta" nunca fica implícito. */
 .prazo small {
   display: block;
+  margin-top: 4px;
   font-weight: var(--fw-regular);
   font-size: var(--fs-caption);
+  line-height: 1.5;
   color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
 }
 

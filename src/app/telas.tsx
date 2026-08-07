@@ -315,7 +315,7 @@ export function CaminhoOverride({
  * reconhecer o que sai dali. A prioridade é **editável**: priorização automática sem
  * revisão vira jogo, e as pessoas aprendem as palavras que produzem "Crítica".
  */
-function ReciboConfirmacao({
+export function ReciboConfirmacao({
   conversaId,
   propostaInicial,
   aoCriar,
@@ -375,15 +375,23 @@ function ReciboConfirmacao({
               value={prioridade}
               onChange={(e) => setPrioridade(e.target.value as Prioridade)}
             >
+              {/* ⚠️ Só o rótulo. O critério vinha junto ("Alta — Funcionalidade
+                  comprometida, com solução alternativa temporária") e nenhuma
+                  largura de select comportava isso: truncava no meio da palavra,
+                  escondendo justamente o texto que ajuda a decidir. Ele desceu para
+                  a dica, onde aparece inteiro e acompanha a seleção — e é lá que
+                  importa, na hora de conferir se a sugestão cabe no caso (RF-16). */}
               {PRIORIDADES.map((op) => (
                 <option key={op.valor} value={op.valor}>
-                  {op.rotulo} — {op.criterio}
+                  {op.rotulo}
                 </option>
               ))}
             </select>
             <span className="dica">
-              Sugerimos {prioridadePor(propostaInicial.prioridade).rotulo.toLowerCase()}. Ajuste se
-              não bate com o seu caso.
+              {p.criterio}.{' '}
+              {prioridade === propostaInicial.prioridade
+                ? `Sugerimos ${prioridadePor(propostaInicial.prioridade).rotulo.toLowerCase()} — ajuste se não bate com o seu caso.`
+                : `A sugestão era ${prioridadePor(propostaInicial.prioridade).rotulo.toLowerCase()}.`}
             </span>
           </div>
         </dd>
