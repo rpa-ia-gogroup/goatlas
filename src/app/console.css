@@ -17,13 +17,6 @@
   gap: var(--space-5);
 }
 
-/* A largura de leitura (760px) é a medida certa para texto corrido; para uma
-   trilha de 220px ao lado de campos, não. Só o console pede isto. */
-@media (min-width: 900px) {
-  .painel-largo {
-    max-width: 1060px;
-  }
-}
 
 .console-topo .dica {
   margin-top: var(--space-2);

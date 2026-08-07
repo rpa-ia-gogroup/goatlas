@@ -86,9 +86,7 @@ export function App() {
         </p>
       )}
 
-      {/* O console de administração é a única tela com trilha lateral: 760px daria
-          540px de conteúdo ao lado dela. As outras seguem na largura de leitura. */}
-      <main className={tela.nome === 'admin' ? 'painel painel-largo' : 'painel'}>
+      <main className="painel">
         {erroAuth ? (
           <Aviso atencao>{erroAuth}</Aviso>
         ) : (

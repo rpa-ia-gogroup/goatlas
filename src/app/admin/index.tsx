@@ -129,6 +129,17 @@ export function TelaAdmin() {
     )
   }, [])
 
+  /**
+   * Trocar de seção limpa os recados da anterior. Sem isto, "Domínios de e-mail
+   * aceitos salvo" continuava no alto enquanto a pessoa já editava outra coisa —
+   * confirmação de uma ação que não é mais a que está na tela.
+   */
+  function irPara(destino: SecaoDoConsole) {
+    setSecao(destino)
+    setAviso(null)
+    setErro(null)
+  }
+
   async function salvar(chave: string, valor: unknown, rotulo: string) {
     setSalvando(chave)
     setErro(null)
@@ -176,7 +187,7 @@ export function TelaAdmin() {
                       type="button"
                       className="trilha-item"
                       aria-current={s.id === secao ? 'true' : undefined}
-                      onClick={() => setSecao(s.id)}
+                      onClick={() => irPara(s.id)}
                     >
                       <span>{s.rotulo}</span>
                       {estado && <MarcaDeEstado estado={estado} />}
@@ -199,7 +210,7 @@ export function TelaAdmin() {
         {erro && <Aviso atencao>{erro}</Aviso>}
 
         {secao === 'visao' ? (
-          <VisaoGeral capacidades={capacidades} aoIr={setSecao} />
+          <VisaoGeral capacidades={capacidades} aoIr={irPara} />
         ) : (
           <div className="pilha">
             {atual.campos.map((c) => (
