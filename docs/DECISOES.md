@@ -1075,6 +1075,37 @@ chave de escrita total na org sem usar.
 
 ---
 
+### D-24 · A staging foi adiada, e a trava que protege a produção hoje é outra
+**Data:** 07/08/2026 · **Quem:** Kaique · **Status:** aceita, com prazo
+
+Desvio consciente da **regra 10** ("staging antes de produção"). O app de staging foi
+criado (`3936ca2d`) e **não** foi terminado; o deploy foi direto na produção
+(`9c47f42f`, `version 20`).
+
+**Por que o desvio se sustenta hoje:** a regra 10 existe para proteger o time de tech de
+chamado indevido e a fila real de efeito colateral. O que impede isso agora **não é a
+staging** — é `GOATLAS_SOMENTE_LEITURA=1`, que recusa **toda** escrita no decorador do
+cliente (`atlassian/somente-leitura.ts`), não com um `if` espalhado por rota. Somando a
+isso: a produção já rodava código com o bug do 412, e nenhum usuário real depende dela
+ainda. O pior caso do deploy era a tela que já estava quebrada.
+
+**A staging ficou incompleta por um motivo concreto**, não por pressa: `LLM_API_KEY` só
+existe como secret da produção, e **valor de secret não é legível por MCP**. Sem ela a
+staging cai em `ClienteIAIndisponivel` (`T-132`) e **não exercita o agente** — que é
+justamente a parte mais nova. Uma staging que valida login, Confluence e console, mas não
+a conversa, custa um segundo app para manter em sincronia e não cobre o risco que importa.
+
+🚨 **O prazo é explícito: a staging passa a ser obrigatória ANTES de desligar
+`GOATLAS_SOMENTE_LEITURA`.** É naquele instante que a regra 10 volta a ter dente — o
+primeiro chamado real nasce na fila do time de tech, e `criarChamado` (`T-063`) nunca
+executou contra o JSM. Terminar a staging exige o `LLM_API_KEY` em mãos.
+
+**Também pendente:** `3936ca2d` está no ar com o `ATATT` e o `ATCTT` configurados e
+somente leitura ligado. É um app com credencial que ninguém mantém — ou se termina, ou se
+apaga. Não deixar assim.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

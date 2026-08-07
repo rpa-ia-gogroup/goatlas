@@ -565,11 +565,20 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 [003](specs/003-sla-e-notificacoes/tasks.md) ·
 [004](specs/004-piloto-e-rollout/tasks.md).
 
-**No ar em modo demonstração: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
-ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
-chega ao time de tech.
+**No ar em SOMENTE LEITURA: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
+`version 20`, deploy de 07/08/2026). Login Google pelo edge, admin por allowlist.
+⚠️ **Já não é modo demonstração** (`GOATLAS_MODO_DEMO` saiu): o app lê Confluence e Jira
+**de verdade** com o `ATATT` validado, e o que impede efeito colateral é
+`GOATLAS_SOMENTE_LEITURA=1`, que recusa toda escrita no decorador do cliente.
+Config apontada para o real: `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"),
+tipos `70,134,108,68`, espaços `GT,DTE,GN`.
 
-**590 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+🚨 **Desligar `GOATLAS_SOMENTE_LEITURA` é o go-live, e tem pré-requisito:** a staging
+(`3936ca2d`, criada e **incompleta** — falta o `LLM_API_KEY`) passa a ser obrigatória
+antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
+de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
+
+**698 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,

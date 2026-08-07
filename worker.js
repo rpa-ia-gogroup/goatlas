@@ -259,6 +259,7 @@ function montarJqlAtualizados(desde, agoraMs) {
   return `reporter = currentUser() AND updated >= "${paraJql(base)}" ORDER BY updated ASC`;
 }
 var CAMPOS_DE_SISTEMA_JA_COBERTOS = /* @__PURE__ */ new Set(["summary", "description", "priority"]);
+var MAX_SERVICE_DESKS = 20;
 function camposAdicionais(brutos) {
   const resultado = [];
   for (const bruto of brutos) {
@@ -300,13 +301,27 @@ var ClienteAtlassianHttp = class {
   async listarTiposChamado() {
     const cacheado = this.cacheMetadados.obter("tiposChamado");
     if (cacheado) return cacheado;
-    const dados = await this.transporte.requisitar("/rest/servicedeskapi/requesttype");
-    const tipos = (dados?.values ?? []).map((v) => ({
-      id: String(v.id ?? ""),
-      serviceDeskId: String(v.serviceDeskId ?? ""),
-      nome: String(v.name ?? ""),
-      descricao: typeof v.description === "string" ? v.description : null
-    }));
+    const desks = await this.transporte.requisitar("/rest/servicedeskapi/servicedesk");
+    const idsDesk = (desks?.values ?? []).map((d) => String(d.id ?? "")).filter((id) => id.length > 0).slice(0, MAX_SERVICE_DESKS);
+    const tipos = [];
+    for (const serviceDeskId of idsDesk) {
+      const dados = await this.transporte.requisitar(
+        `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype`
+      );
+      for (const v of dados?.values ?? []) {
+        const id = String(v.id ?? "");
+        if (!id) continue;
+        tipos.push({
+          id,
+          // ⚠️ Vem do laço, não do corpo: o endpoint por desk **não repete**
+          // `serviceDeskId` em cada item, e `String(undefined ?? '')` daria `''` —
+          // um tipo sem desk é um tipo com que não se cria chamado nenhum.
+          serviceDeskId,
+          nome: String(v.name ?? ""),
+          descricao: typeof v.description === "string" ? v.description : null
+        });
+      }
+    }
     this.cacheMetadados.definir("tiposChamado", tipos, this.opcoes.ttlMetadadosSeg);
     return tipos;
   }
@@ -1218,9 +1233,9 @@ var LIMITACOES_ULTIMO_ACESSO = Object.freeze({
 var ErroOrganizacao = ErroAtlassian;
 var ENDPOINTS_NAO_VERIFICADOS = Object.freeze([
   Object.freeze({
-    metodo: "GET",
-    caminho: "/admin/v1/orgs/{orgId}/users",
-    risco: "Nome dos campos e forma da pagina\xE7\xE3o (`links.next`) seguem a documenta\xE7\xE3o, n\xE3o uma resposta observada."
+    metodo: "POST",
+    caminho: "/admin/v1/orgs/{orgId}/users/search",
+    risco: '\u2705 VERIFICADO contra a Atlassian real em 07/08/2026: devolve 54 contas, campos em camelCase, `expand:["NAME","EMAIL"]` obrigat\xF3rio para nome/e-mail. \u{1F6A8} O que FALTA n\xE3o \xE9 verifica\xE7\xE3o, \xE9 caminho: **o produto atribu\xEDdo a cada conta n\xE3o existe neste endpoint** (`expand:["PRODUCT_ACCESS"]` responde 400). Sem ele o invent\xE1rio de assentos grava zero linha, e portanto custo (`RF-53`) e assento ocioso (`RF-52`) n\xE3o t\xEAm insumo. A via prov\xE1vel \xE9 derivar de grupos (`jira-servicedesk`/`jira-software`/`conf`), que \xE9 proxy imperfeito \u2014 ver T-133 e `D-22`.'
   }),
   Object.freeze({
     metodo: "GET",
@@ -1319,25 +1334,101 @@ var ClienteOrganizacaoHttp = class {
       baseUrl: opcoes.baseUrl ?? BASE_ORGANIZACAO
     });
   }
+  /**
+   * Inventário de contas da organização — RF-51, T-122.
+   *
+   * ## Por que `POST /users/search` e não `GET /users`
+   *
+   * `GET /admin/v1/orgs/{orgId}/users` lista **só contas gerenciadas**, e uma org só
+   * tem contas gerenciadas depois de reivindicar um domínio. A org da Gocase não
+   * reivindicou nenhum: aquele endpoint devolve `{"data": []}` — medido em
+   * 31/07/2026. Zero contas, HTTP 200, nenhum erro. É a pior forma de estar errado,
+   * porque o console mostraria "0 assentos" e ninguém desconfiaria da chamada.
+   *
+   * ## Três armadilhas medidas, e nenhuma dá erro
+   *
+   * 1. **`accountTypes: ['atlassian']` é obrigatório.** Sem ele entram ~83 contas de
+   *    app/bot, que não são pessoas e não consomem assento de gente.
+   * 2. **`query`, `groupIds` e `productAccess` NÃO filtram** — respondem 200 com a
+   *    lista inteira. Usar um deles achando que restringe produz um resultado que
+   *    parece filtrado e não é. Só `accountTypes`, `accountIds` e `isSuspended`
+   *    filtram de verdade; por isso nenhum outro é enviado aqui.
+   * 3. **`account_status` não é status de suspensão** — volta `"active"` até para
+   *    conta suspensa. Quem responde é o **filtro** `isSuspended`, e é por isso que
+   *    há duas varreduras.
+   *
+   * ## E se o filtro de suspensão também não filtrar?
+   *
+   * A armadilha 2 mostra que "filtro que não filtra" é um comportamento real desta
+   * API. Se `isSuspended` for um deles, as duas varreduras devolvem o **mesmo
+   * conjunto** — e isso é detectável: interseção não vazia significa que o filtro não
+   * separou nada. Nesse caso o resultado sai com `suspensaoConhecida: false` em vez de
+   * afirmar que ninguém está suspenso. Contar conta suspensa como assento ativo infla
+   * o custo e gera recomendação de revogar acesso de quem já não tem acesso.
+   */
   async listarUsuarios(orgId) {
-    const saida = [];
-    let caminho = `/admin/v1/orgs/${encodeURIComponent(orgId)}/users?limit=${TAMANHO_PAGINA}`;
-    for (let pagina = 0; pagina < MAX_PAGINAS_USUARIOS && caminho !== null; pagina += 1) {
-      const dados = await this.transporte.requisitar(caminho);
+    const ativas = await this.varrer(orgId, false);
+    const suspensas = await this.varrer(orgId, true);
+    const idsAtivas = new Set(ativas.usuarios.map((u) => u.accountId));
+    const sobrepostas = suspensas.usuarios.filter((u) => idsAtivas.has(u.accountId)).length;
+    const suspensaoConhecida = sobrepostas === 0;
+    return {
+      usuarios: ativas.usuarios,
+      // `0` sem `suspensaoConhecida` seria a afirmação errada; quem lê o campo tem de
+      // olhar os dois juntos, e o nome do outro campo existe para forçar isso.
+      suspensas: suspensaoConhecida ? suspensas.usuarios.length : 0,
+      suspensaoConhecida,
+      parcial: ativas.parcial || suspensas.parcial
+    };
+  }
+  /**
+   * Uma varredura paginada, com o recorte de suspensão fixo.
+   *
+   * ⚠️ **O cursor volta em `links.next` e é reenviado no CORPO**, não seguido como
+   * URL: é um `POST`, e a próxima página é o mesmo caminho com `cursor` no JSON.
+   * Seguir `links.next` como caminho faria a segunda página virar um `POST` para uma
+   * URL com query string que o endpoint não lê — 200 com a primeira página de novo, ou
+   * seja, laço até o teto sem nunca avançar.
+   */
+  async varrer(orgId, isSuspended) {
+    const caminho = `/admin/v1/orgs/${encodeURIComponent(orgId)}/users/search`;
+    const usuarios = [];
+    let cursor = null;
+    let pagina = 0;
+    for (; pagina < MAX_PAGINAS_USUARIOS; pagina += 1) {
+      const dados = await this.transporte.requisitar(caminho, {
+        method: "POST",
+        body: JSON.stringify({
+          // Só os três filtros que a medição confirmou. Ver armadilha 2.
+          accountTypes: ["atlassian"],
+          isSuspended,
+          limit: TAMANHO_PAGINA,
+          // ⚠️ Sem este expand a resposta NÃO traz `name` nem `email` — só ids e status.
+          // `PRODUCT_ACCESS` não entra na lista: responde 400 (ver `UsuarioBruto`).
+          expand: ["NAME", "EMAIL"],
+          ...cursor === null ? {} : { cursor }
+        })
+      });
       for (const bruto of Array.isArray(dados?.data) ? dados.data : []) {
-        const accountId = texto(bruto?.account_id);
+        const accountId = texto(bruto?.accountId);
         if (!accountId) continue;
-        if (texto(bruto?.account_status) === "inactive") continue;
-        saida.push({
+        if (texto(bruto?.accountStatus) === "inactive") continue;
+        usuarios.push({
           accountId,
           email: texto(bruto?.email) ?? "",
           nome: texto(bruto?.name) ?? texto(bruto?.email) ?? accountId,
-          produtos: produtosDe(bruto?.product_access)
+          // ⚠️ **Sempre vazio hoje**, e isso é honesto em vez de inventado: o produto
+          // atribuído NÃO vem deste endpoint (ver `UsuarioBruto.productAccess`). Enquanto
+          // for assim, `registrarColeta` grava zero linha por conta — o inventário fica
+          // vazio e a tela diz "sem coleta", que é melhor que um inventário que existe e
+          // está errado. Resolver isto é T-133 (`D-22`).
+          produtos: produtosDe(bruto?.productAccess)
         });
       }
-      caminho = proximaPagina(dados?.links?.next);
+      cursor = cursorDaProximaPagina(dados?.links?.next);
+      if (cursor === null) return { usuarios, parcial: false };
     }
-    return saida;
+    return { usuarios, parcial: true };
   }
   async ultimoAcesso(orgId, accountId) {
     const dados = await this.transporte.requisitar(
@@ -1350,7 +1441,10 @@ var ClienteOrganizacaoHttp = class {
     for (const item of bruto) {
       const produto = texto(item?.key);
       if (!produto) continue;
-      porProduto.push({ produto, ultimoAcessoEm: normalizarCarimbo(item?.last_active) });
+      porProduto.push({
+        produto,
+        ultimoAcessoEm: normalizarCarimbo(item?.last_active_timestamp) ?? normalizarCarimbo(item?.last_active)
+      });
     }
     return { accountId, porProduto, coletadoEm: (/* @__PURE__ */ new Date()).toISOString() };
   }
@@ -1370,13 +1464,14 @@ var ClienteOrganizacaoHttp = class {
     );
   }
 };
-function proximaPagina(bruto) {
+function cursorDaProximaPagina(bruto) {
   const url = texto(bruto);
   if (!url) return null;
   try {
     const alvo = new URL(url, BASE_ORGANIZACAO);
     if (alvo.origin !== new URL(BASE_ORGANIZACAO).origin) return null;
-    return `${alvo.pathname}${alvo.search}`;
+    const cursor = alvo.searchParams.get("cursor");
+    return cursor !== null && cursor.length > 0 ? cursor : null;
   } catch {
     return null;
   }
@@ -1394,6 +1489,9 @@ var ClienteOrganizacaoFake = class {
     this.estado = {
       usuarios: inicial.usuarios ?? [],
       ultimoAcesso: inicial.ultimoAcesso ?? /* @__PURE__ */ new Map(),
+      suspensas: inicial.suspensas ?? 0,
+      suspensaoConhecida: inicial.suspensaoConhecida ?? true,
+      parcial: inicial.parcial ?? false,
       falhas: {
         listarUsuarios: "nenhum",
         ultimoAcesso: "nenhum",
@@ -1407,9 +1505,20 @@ var ClienteOrganizacaoFake = class {
     const { status, transitorio } = FALHAS2[modo];
     throw new ErroOrganizacao(`fake organiza\xE7\xE3o: ${modo}`, { status, transitorio, recurso });
   }
+  /**
+   * ⚠️ O fake expõe `suspensas`/`suspensaoConhecida`/`parcial` como estado
+   * **roteirizável**, e não como constante otimista. Um dublê que respondesse sempre
+   * `suspensaoConhecida: true` esconderia justamente o caso que a tela precisa saber
+   * mostrar — o mesmo raciocínio do fake de busca ignorar o termo por padrão.
+   */
   async listarUsuarios(_orgId) {
     this.checar(this.estado.falhas.listarUsuarios, "listarUsuarios");
-    return this.estado.usuarios;
+    return {
+      usuarios: this.estado.usuarios,
+      suspensas: this.estado.suspensas,
+      suspensaoConhecida: this.estado.suspensaoConhecida,
+      parcial: this.estado.parcial
+    };
   }
   async ultimoAcesso(_orgId, accountId) {
     this.checar(this.estado.falhas.ultimoAcesso, "ultimoAcesso");
@@ -1988,6 +2097,7 @@ var CONFIG_PADRAO = Object.freeze({
   org_id: null,
   assentos_ocioso_dias: 90,
   custo_mensal_por_produto: {},
+  curva_preco_por_produto: {},
   regra1_threshold_score: 0.75,
   regra2_threshold_recorrencia: 3,
   regra2_janela_dias: 90,
@@ -4045,7 +4155,14 @@ var RepositorioInventario = class {
       const porProduto = new Map(
         (ultimoAcesso?.porProduto ?? []).map((p) => [p.produto, p.ultimoAcessoEm])
       );
-      for (const produto of usuario.produtos) {
+      const chaves = /* @__PURE__ */ new Set([
+        ...usuario.produtos.map((p) => p.chave),
+        ...porProduto.keys()
+      ]);
+      const produtos = [...chaves].map(
+        (chave) => usuario.produtos.find((p) => p.chave === chave) ?? { chave, nome: chave }
+      );
+      for (const produto of produtos) {
         await this.db.exec(
           `INSERT INTO inventario_assentos
              (id, account_id, email, nome, produto, ultimo_acesso_em, coletado_em)
@@ -6024,7 +6141,20 @@ function assentoOcioso(ultimoAcessoEm, ociosoDesdeDias, agoraMs) {
   const diasDesdeUltimoAcesso = (agoraMs - Date.parse(ultimoAcessoEm)) / (1e3 * 60 * 60 * 24);
   return diasDesdeUltimoAcesso >= ociosoDesdeDias;
 }
-function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
+function precoNaFaixa(faixas, quantidade) {
+  for (const f of faixas) {
+    if (f.ate === null || quantidade <= f.ate) return f.precoUnitarioUsd;
+  }
+  return null;
+}
+function economiaComCurva(faixas, atual, remover) {
+  const depois = Math.max(0, atual - remover);
+  const precoAntes = precoNaFaixa(faixas, atual);
+  const precoDepois = precoNaFaixa(faixas, depois);
+  if (precoAntes === null || precoDepois === null) return null;
+  return Math.max(0, atual * precoAntes - depois * precoDepois);
+}
+function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs, curvaPorProduto = {}) {
   const porProdutoMap = /* @__PURE__ */ new Map();
   for (const item of itens) {
     const atual = porProdutoMap.get(item.produto) ?? { usuarios: 0, ociosos: 0 };
@@ -6037,6 +6167,7 @@ function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
   let todosPrecificados = porProdutoMap.size > 0;
   let totalMensalUsd = 0;
   let ociosoCustoMensalUsd = 0;
+  let economiaConfiavel = true;
   for (const [produto, { usuarios, ociosos }] of porProdutoMap) {
     const preco = precoMensalPorProduto[produto];
     const custoMensalUsd = preco === void 0 ? null : usuarios * preco;
@@ -6046,7 +6177,14 @@ function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
       todosPrecificados = false;
     } else {
       totalMensalUsd += usuarios * preco;
-      ociosoCustoMensalUsd += ociosos * preco;
+      const curva = curvaPorProduto[produto];
+      const comCurva = curva ? economiaComCurva(curva, usuarios, ociosos) : null;
+      if (comCurva === null) {
+        if (ociosos > 0) economiaConfiavel = false;
+        ociosoCustoMensalUsd += ociosos * preco;
+      } else {
+        ociosoCustoMensalUsd += comCurva;
+      }
     }
   }
   return {
@@ -6055,7 +6193,9 @@ function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
     custoConfigurado: todosPrecificados,
     ocioso: {
       usuarios: ociososUsuarios,
-      custoMensalUsd: todosPrecificados ? ociosoCustoMensalUsd : null
+      custoMensalUsd: todosPrecificados ? ociosoCustoMensalUsd : null,
+      // Sem nenhum assento ocioso não há economia a estimar, então não há o que ressalvar.
+      economiaConfiavel: ociososUsuarios === 0 ? true : economiaConfiavel
     }
   };
 }
@@ -7331,7 +7471,8 @@ async function rotear(req, ctx, eu, caminho, url) {
       snapshot.itens,
       ctx.valores.custo_mensal_por_produto,
       ctx.valores.assentos_ocioso_dias,
-      Date.parse(ctx.agora())
+      Date.parse(ctx.agora()),
+      ctx.valores.curva_preco_por_produto
     );
     return json({
       coletadoEm: snapshot.coletadoEm,
@@ -7680,9 +7821,9 @@ async function tratarCron(req, ctx, env, caminho) {
     }
     const orgId = ctx.valores.org_id;
     try {
-      const usuarios = await ctx.organizacao.listarUsuarios(orgId);
+      const varredura = await ctx.organizacao.listarUsuarios(orgId);
       const entradas = [];
-      for (const usuario of usuarios) {
+      for (const usuario of varredura.usuarios) {
         try {
           entradas.push({
             usuario,
@@ -7696,10 +7837,26 @@ async function tratarCron(req, ctx, env, caminho) {
       await ctx.auditoria.registrar({
         atorEmail: "(cron)",
         acao: "inventario_coletado",
-        resultado: "sucesso",
-        detalhe: { usuarios: usuarios.length, registros: r.registros }
+        // ⚠️ Coleta incompleta ou com suspensão desconhecida **não** é `sucesso`. Ela
+        // grava o que deu, mas marcá-la como sucesso apagaria o único registro de que
+        // o inventário daquele dia não é a organização inteira — e é sobre esse
+        // inventário que a tela recomenda revogar assento.
+        resultado: varredura.parcial || !varredura.suspensaoConhecida ? "falha" : "sucesso",
+        detalhe: {
+          usuarios: varredura.usuarios.length,
+          registros: r.registros,
+          suspensas: varredura.suspensas,
+          suspensaoConhecida: varredura.suspensaoConhecida,
+          parcial: varredura.parcial
+        }
       });
-      return json({ ok: true, ...r });
+      return json({
+        ok: true,
+        ...r,
+        suspensas: varredura.suspensas,
+        suspensaoConhecida: varredura.suspensaoConhecida,
+        parcial: varredura.parcial
+      });
     } catch (e) {
       await ctx.auditoria.registrar({
         atorEmail: "(cron)",
