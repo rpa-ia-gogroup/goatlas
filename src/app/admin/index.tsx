@@ -279,8 +279,22 @@ function VisaoGeral({
             <MarcaDeEstado estado={c.estado} />
           </div>
           <p>{c.consequencia}</p>
-          <button type="button" className="botao botao-discreto" onClick={() => aoIr(c.secao)}>
-            Ajustar {c.nome.toLowerCase()} →
+          {/*
+            O cartão INTEIRO é o alvo de clique — o botão estica sobre ele por um
+            `::after`. Antes era um link pendurado embaixo repetindo o título do
+            cartão ("Ajustar entrada no app" logo abaixo de "Entrada no app"), que
+            além de redundante quebrava em duas linhas e se centralizava sozinho.
+
+            O rótulo visível fica curto; o nome acessível continua completo, senão
+            um leitor de tela anuncia cinco botões "Ajustar" indistinguíveis.
+          */}
+          <button
+            type="button"
+            className="capacidade-acao"
+            aria-label={`Ajustar ${c.nome.toLowerCase()}`}
+            onClick={() => aoIr(c.secao)}
+          >
+            Ajustar <span aria-hidden="true">→</span>
           </button>
         </li>
       ))}
