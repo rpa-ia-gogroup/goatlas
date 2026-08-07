@@ -12,13 +12,14 @@ import {
   PRIORIDADES,
   prioridadePor,
   type CampoRequestType,
-  type ChamadoResumo,
   type DetalheChamado,
   type EstadoVerificacao,
   type Prioridade,
   type Proposta,
+  type RespostaMeusChamados,
   type ResultadoCriacao,
   type TipoChamado,
+  type TransicaoDisponivel,
 } from './api'
 import {
   Aviso,
@@ -379,7 +380,83 @@ function ChamadoAberto({
           </button>
         </div>
       </section>
+
+      {resultado.issueKey && <CorrigirArea issueKey={resultado.issueKey} />}
     </div>
+  )
+}
+
+/**
+ * Correção da área — RF-19, T-305.
+ *
+ * Mesmo padrão de `RF-16` com a prioridade: o app **sugere** e a pessoa corrige antes de
+ * o dado virar métrica. O mapa de e-mail → área envelhece, e pessoa que muda de área é a
+ * regra, não a exceção — sem esta caixa, a única forma de arrumar seria um admin editando
+ * configuração, e a métrica por área (`T-312`) ficaria errada em silêncio.
+ *
+ * Fica **fechada** por padrão: quem acabou de abrir chamado quer saber que ele foi aberto,
+ * não preencher mais um campo. Aparece como uma frase discreta com o caminho de saída.
+ */
+function CorrigirArea({ issueKey }: { issueKey: string }) {
+  const [aberto, setAberto] = useState(false)
+  const [area, setArea] = useState('')
+  const [salvo, setSalvo] = useState<string | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+
+  if (salvo !== null) {
+    return (
+      <p className="dica" aria-live="polite">
+        Área do chamado: <strong>{salvo || 'não informada'}</strong>.
+      </p>
+    )
+  }
+
+  if (!aberto) {
+    return (
+      <div className="acoes">
+        <button type="button" className="botao botao-discreto" onClick={() => setAberto(true)}>
+          Corrigir a minha área
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <form
+      className="recibo"
+      onSubmit={async (e) => {
+        e.preventDefault()
+        try {
+          const r = await api.corrigirArea(issueKey, area.trim() || null)
+          setSalvo(r.area ?? '')
+        } catch (err) {
+          setErro(err instanceof ErroApi ? err.message : 'Não conseguimos salvar a área.')
+        }
+      }}
+    >
+      <div className="campo">
+        <label htmlFor="area-chamado">Sua área</label>
+        <input
+          id="area-chamado"
+          value={area}
+          onChange={(e) => setArea(e.target.value)}
+          placeholder="Ex.: CX, Produção, Growth"
+        />
+        <span className="dica">
+          Serve para o time de tech ver de onde vêm os pedidos. Deixe vazio se preferir não
+          informar — em branco é melhor que uma área errada.
+        </span>
+      </div>
+      {erro && <Aviso atencao>{erro}</Aviso>}
+      <div className="acoes">
+        <button type="submit" className="botao botao-primario">
+          Salvar área
+        </button>
+        <button type="button" className="botao botao-discreto" onClick={() => setAberto(false)}>
+          Deixar como está
+        </button>
+      </div>
+    </form>
   )
 }
 
@@ -392,20 +469,51 @@ export function TelaMeusChamados({
   aoAbrirDetalhe: (issueKey: string) => void
   aoConversar: () => void
 }) {
-  const [itens, setItens] = useState<ChamadoResumo[] | null>(null)
+  const [resposta, setResposta] = useState<RespostaMeusChamados | null>(null)
   const [erro, setErro] = useState<string | null>(null)
+  // Rascunho separado do que já foi aplicado: o filtro roda no servidor (status e
+  // título vivem no Jira), e disparar uma requisição por tecla digitada gastaria o
+  // orçamento da credencial única (R-02) para nada.
+  const [termo, setTermo] = useState('')
+  const [status, setStatus] = useState('')
+  const [buscando, setBuscando] = useState(false)
+
+  async function carregar(filtros: { status?: string; termo?: string } = {}) {
+    setBuscando(true)
+    try {
+      setResposta(await api.meusChamados(filtros))
+      setErro(null)
+    } catch (e) {
+      setErro(
+        e instanceof ErroApi ? e.message : 'Não conseguimos carregar seus chamados.',
+      )
+    } finally {
+      setBuscando(false)
+    }
+  }
 
   useEffect(() => {
-    api
-      .meusChamados()
-      .then((r) => setItens(r.itens))
-      .catch((e) => setErro(e instanceof ErroApi ? e.message : 'Não conseguimos carregar seus chamados.'))
+    void carregar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (erro) return <Aviso atencao>{erro}</Aviso>
-  if (!itens) return <p className="carregando">Carregando seus chamados…</p>
+  function aplicar(e: FormEvent) {
+    e.preventDefault()
+    void carregar({
+      ...(status ? { status } : {}),
+      ...(termo.trim() ? { termo: termo.trim() } : {}),
+    })
+  }
 
-  if (itens.length === 0) {
+  if (erro) return <Aviso atencao>{erro}</Aviso>
+  if (!resposta) return <p className="carregando">Carregando seus chamados…</p>
+
+  const filtrando = Boolean(status || termo.trim())
+
+  // Vazio de verdade (nunca abriu chamado) é convite para agir. Vazio por filtro é
+  // outra coisa: a pessoa TEM chamados, e dizer "nenhum chamado por aqui" faria ela
+  // achar que perdeu o histórico.
+  if (resposta.total === 0) {
     return (
       <Vazio
         titulo="Nenhum chamado por aqui"
@@ -422,8 +530,50 @@ export function TelaMeusChamados({
   return (
     <div className="pilha">
       <h1 className="titulo-secao">Meus chamados</h1>
+
+      <form className="filtros" onSubmit={aplicar}>
+        <div className="campo">
+          <label htmlFor="busca-chamados">Procurar</label>
+          <input
+            id="busca-chamados"
+            value={termo}
+            onChange={(e) => setTermo(e.target.value)}
+            placeholder="palavra do título ou o número do chamado"
+          />
+        </div>
+        <div className="campo">
+          <label htmlFor="filtro-status">Status</label>
+          <select
+            id="filtro-status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="">Todos</option>
+            {/* Montado com o que EXISTE nos chamados da pessoa: os status são do
+                workflow do JSM, e uma lista fixa aqui ficaria errada no dia em que o
+                time de tech renomear uma coluna. */}
+            {resposta.statusDisponiveis.map((s) => (
+              <option key={s} value={s}>
+                {rotuloStatus(s)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button type="submit" className="botao botao-contorno" disabled={buscando}>
+          {buscando ? 'Filtrando…' : 'Filtrar'}
+        </button>
+      </form>
+
+      {filtrando && (
+        <p className="contagem-resultados" aria-live="polite">
+          {resposta.itens.length} de {resposta.total}{' '}
+          {resposta.total === 1 ? 'chamado' : 'chamados'}
+          {resposta.itens.length === 0 && ' — nenhum com esses filtros.'}
+        </p>
+      )}
+
       <ul className="chamados">
-        {itens.map((c) => (
+        {resposta.itens.map((c) => (
           <li key={c.issueKey}>
             <button type="button" className="chamado" onClick={() => aoAbrirDetalhe(c.issueKey)}>
               <span className="chamado-topo">
@@ -436,6 +586,7 @@ export function TelaMeusChamados({
               <span className="chamado-meta">
                 <SeloPrioridade prioridade={c.prioridade} />
                 <SeloVerificacao verificado={c.verificadoRegras} via={c.via} />
+                {c.area && <Selo variante="contorno">{c.area}</Selo>}
               </span>
             </button>
           </li>
@@ -457,6 +608,13 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
   const [erro, setErro] = useState<string | null>(null)
   const [comentario, setComentario] = useState('')
   const [enviando, setEnviando] = useState(false)
+  // T-242 — `null` = ainda carregando; `[]` = o workflow do JSM não oferece nenhuma
+  // transição ao cliente, que é o caso NORMAL e não um erro. A tela some com o bloco.
+  const [transicoes, setTransicoes] = useState<readonly TransicaoDisponivel[] | null>(null)
+  const [transicionando, setTransicionando] = useState<string | null>(null)
+  const [arquivos, setArquivos] = useState<File[]>([])
+  const [anexando, setAnexando] = useState(false)
+  const [avisoAcao, setAvisoAcao] = useState<string | null>(null)
 
   async function carregar() {
     try {
@@ -468,8 +626,52 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
 
   useEffect(() => {
     void carregar()
+    // As ações não bloqueiam o chamado: lista indisponível vira "nenhuma ação", e a
+    // pessoa continua vendo e comentando (RNF-18).
+    api
+      .transicoes(issueKey)
+      .then((r) => setTransicoes(r.itens))
+      .catch(() => setTransicoes([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issueKey])
+
+  async function anexar(e: FormEvent) {
+    e.preventDefault()
+    if (arquivos.length === 0) return
+    setAnexando(true)
+    setErro(null)
+    try {
+      const r = await api.anexar(issueKey, arquivos)
+      setArquivos([])
+      setAvisoAcao(
+        r.enviados.length === 1
+          ? 'Arquivo anexado ao chamado.'
+          : `${r.enviados.length} arquivos anexados ao chamado.`,
+      )
+      await carregar()
+    } catch (err) {
+      setErro(err instanceof ErroApi ? err.message : 'Não conseguimos anexar agora.')
+    } finally {
+      setAnexando(false)
+    }
+  }
+
+  async function transicionar(id: string, nome: string) {
+    setTransicionando(id)
+    setErro(null)
+    try {
+      await api.transicionar(issueKey, id)
+      setAvisoAcao(`Chamado atualizado: ${nome}.`)
+      await carregar()
+      setTransicoes((await api.transicoes(issueKey)).itens)
+    } catch (err) {
+      setErro(
+        err instanceof ErroApi ? err.message : 'Não conseguimos atualizar o chamado agora.',
+      )
+    } finally {
+      setTransicionando(null)
+    }
+  }
 
   async function comentar(e: FormEvent) {
     e.preventDefault()
@@ -518,9 +720,74 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
         <SeloVerificacao verificado={dados.verificadoRegras} via={dados.via} />
       </div>
 
+      {avisoAcao && <Aviso>{avisoAcao}</Aviso>}
+
       <section className="recibo">
         <span className="eyebrow">Descrição</span>
         <TextoDoAgente texto={dados.chamado.descricao} />
+      </section>
+
+      {/* T-242 / RF-36 — só o que o workflow do JSM oferece ao cliente. Sem transição
+          exposta, o bloco não existe: o app não inventa ação que o projeto não tem. */}
+      {transicoes && transicoes.length > 0 && (
+        <section className="pilha">
+          <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
+            Ações
+          </h2>
+          <div className="acoes">
+            {transicoes.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="botao botao-contorno"
+                onClick={() => void transicionar(t.id, t.nome)}
+                disabled={transicionando !== null}
+              >
+                {transicionando === t.id ? 'Atualizando…' : t.nome}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* T-240 / RF-25 — anexo do solicitante. Fica depois da descrição e antes da
+          conversa: anexar é complemento do pedido, não uma resposta. */}
+      <section className="pilha">
+        <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
+          Anexos
+        </h2>
+        <form className="zona-anexo" onSubmit={anexar}>
+          <label htmlFor="anexo-chamado">Anexar print, planilha ou documento</label>
+          <input
+            id="anexo-chamado"
+            type="file"
+            multiple
+            onChange={(e) => setArquivos(Array.from(e.target.files ?? []))}
+            disabled={anexando}
+          />
+          <span className="dica">
+            Até 3 arquivos por envio, de no máximo 8 MB cada. Quem trabalha o chamado vê
+            os anexos junto com a sua descrição.
+          </span>
+          {arquivos.length > 0 && (
+            <ul className="lista-anexos">
+              {arquivos.map((a) => (
+                <li key={a.name}>
+                  {a.name} · {Math.max(1, Math.round(a.size / 1024))} KB
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="acoes">
+            <button
+              type="submit"
+              className="botao botao-primario"
+              disabled={anexando || arquivos.length === 0}
+            >
+              {anexando ? 'Enviando…' : 'Anexar'}
+            </button>
+          </div>
+        </form>
       </section>
 
       <section className="pilha">

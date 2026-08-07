@@ -426,6 +426,150 @@ remover `GOATLAS_MODO_DEMO`.
 
 ---
 
+### D-15 · Webhook e polling não têm lógica própria: os dois disparam a MESMA sincronização
+
+**Contexto.** `RF-47` pede duas fontes de detecção de mudança justamente para que a
+notificação não dependa de mecanismo único: o webhook do Jira (rápido, mas depende de o
+time de tech registrá-lo e de a Atlassian entregar) e o polling por JQL (lento, mas
+nosso). O preço é o mesmo fato chegar duas vezes.
+
+**O desenho óbvio, e por que ele quebra.** O reflexo é cada fonte ler o que tem à mão: o
+webhook lê `comment.body` e `changelog` do payload, o polling lê o chamado pela API. Dois
+caminhos, duas leituras, **dois formatos de carimbo** — e a dedupe de `RF-47`, que é
+`(issueKey, tipoEvento, carimboMudança)`, para de funcionar exatamente onde precisa
+funcionar. O webhook chega às 10:00:01 com `2026-08-06T13:00:00.000Z`, o polling às
+10:04:30 com `2026-08-06T10:00:00.000-0300`; é o mesmo instante em dois formatos, e a
+chave sai diferente. Ninguém percebe em teste — só a pessoa, recebendo tudo em dobro.
+
+**Decisão.** As duas fontes só dizem **qual chamado olhar**. Quem decide o que é novo é
+`notificacoes/servico.ts#sincronizarChamado`, que relê da Atlassian sempre pelo mesmo
+caminho. A chave de dedupe passa a ser idêntica **por construção**, não por coincidência,
+e o carimbo é normalizado para ISO/UTC antes de virar chave.
+
+**O bônus é de segurança, e ele é grande.** O corpo do webhook é a única entrada não
+autenticada por SSO do app inteiro. Com este desenho ele vira **ponteiro**: sai dele uma
+chave de chamado, validada contra `^[A-Z][A-Z0-9_]{1,19}-\d{1,10}$`, e nada mais. Um
+evento forjado com `comment.body: "clique aqui https://…"` não tem como virar mensagem
+enviada, porque a mensagem é montada com o comentário que o app releu.
+
+**O que sustenta a rota pública:** segredo em comparação de **tempo constante** (um `===`
+num endpoint público vaza o prefixo correto pelo tempo de resposta); resposta **sempre
+202**, com ou sem vínculo local (um 404 para chamado desconhecido seria oráculo de "este
+chamado passou pelo goatlas?", a mesma classe de vazamento que o 404-em-vez-de-403 de
+`RF-30` fecha); e fail-closed — sem `GOATLAS_WEBHOOK_SEGREDO` a rota não funciona.
+
+**Custo aceito.** O polling faz duas chamadas à Atlassian por chamado alterado, e o
+webhook faz as mesmas duas de novo se chegar depois. Sob `R-02` (credencial única) isso é
+tráfego real, contido pela marca-d'água (`updated >= última`, nunca varredura), pelo teto
+de 50 chamados por rodada e pelo fato de a dedupe cortar o segundo evento antes de
+qualquer envio.
+
+---
+
+### D-16 · `emails_piloto` é a única allowlist do projeto cujo VAZIO libera
+
+**Contexto.** Em todo lugar do goatlas, allowlist vazia **nega** — é `RNF-07`, e é o que
+impede o app de expor um espaço do Confluence no dia em que alguém esquecer de configurar.
+
+**A exceção.** `config.emails_piloto` (`R-06`, T-302) faz o oposto: **vazia = piloto
+desligado, todo mundo pode abrir chamado**.
+
+**Por quê.** A diferença é o que a lista governa. As outras governam **exposição de
+conteúdo**, e ali vazio-nega evita vazamento. Esta governa **quem pode pedir ajuda**.
+Vazio-nega aqui significaria que subir o app antes de alguém preencher a lista **tranca a
+empresa inteira fora do canal de suporte** — um incidente, não uma proteção. O fail-closed
+correto para esta lista é o oposto do das outras.
+
+**Como isso não vira pegadinha.** O comportamento está escrito em três lugares que quem
+mexe vai ler: o comentário do campo em `ConfigValores`, o topo de `piloto/areas.ts`, e a
+ajuda do campo no console de admin. E há teste afirmando os dois lados.
+
+**E quem fica fora recebe encaminhamento, não 403 cru** (`RNF-30`): a mensagem diz para
+onde ir no meio-tempo. A **consulta à documentação continua liberada** para quem está
+fora — ela não abre chamado, deflete, e barrá-la seria barrar exatamente o que o projeto
+quer que aconteça.
+
+---
+
+### D-17 · Retenção nunca expurga `vinculos`, e a auditoria tem piso de 180 dias
+
+**Contexto.** `RNF-33` pede retenção definida, e a Fase 3 é onde o volume de dado pessoal
+cresce: além de vínculo e conversa, passam a existir preferência de canal, histórico de
+notificação e trecho de comentário gravado no corpo da mensagem.
+
+**Decisão, em três partes:**
+
+1. **`null` = guardar.** Nenhum expurgo acontece por default. Apagar é irreversível e
+   precisa de alguém tendo decidido — não de um número que veio no código.
+2. **`vinculos` nunca é expurgado por cron.** Apagar um vínculo é apagar o **acesso da
+   pessoa ao próprio chamado** (`RF-30`, `RN-04`): o chamado continua no JSM e fica
+   invisível para quem o abriu, que é exatamente o pior caso que `RNF-21` existe para
+   impedir. Retenção de vínculo é decisão de negócio com aviso ao usuário, não uma linha
+   de cron.
+3. **A auditoria tem piso** (`PISO_AUDITORIA_DIAS = 180`). Configurar 7 dias
+   silenciosamente destruiria a capacidade de responder "em março alguém acessou a página
+   X?" — então o valor é **clampado**, e a resposta do cron diz que foi.
+
+Notificação ainda `pendente` também não é apagada: é aviso que ninguém recebeu, e uma
+pendente antiga é sinal de canal quebrado — justamente o que se quer ver.
+
+---
+
+### D-18 · A implementação da Organizations API existe, e o que não foi verificado está declarado EM CÓDIGO
+
+**Contexto.** T-122/T-123/T-131 estavam bloqueadas por **Q1**: sem credencial de Org
+Admin, escrever a chamada real seria código não verificável. O bloqueio virou impasse — o
+console de governança inteiro já existia contra o fake, e a única coisa que faltava era a
+camada que ninguém podia testar.
+
+**Decisão.** Escrever a implementação (`ClienteOrganizacaoHttp`), testá-la contra `fetch`
+simulado no que **é nosso** — caminho montado, paginação seguida, campos traduzidos, erro
+sem corpo cru, backoff no 429, `links.next` de outro host descartado, teto de páginas
+contra laço infinito — e **declarar explicitamente** o que os testes não provam.
+
+`ENDPOINTS_NAO_VERIFICADOS`, em `atlassian/organizacao.ts`, lista os três endpoints com o
+risco de cada um. Não é comentário: a tela de governança **mostra a lista** quando o app
+está em fakes. Um console que promete revogar assento e falha no clique é pior que um
+console que avisa antes.
+
+**O menos verificável dos três é a revogação por produto** (`DELETE
+…/manage/product-access` com o produto no corpo): a documentação pública descreve remover
+acesso do usuário, e não está confirmado que o filtro por produto é aceito. Por isso a
+rota de admin **nunca reporta sucesso otimista** — erro da Atlassian volta como erro, e o
+inventário continua mostrando o assento até a próxima coleta (o console diz isso ao
+confirmar).
+
+**A dupla confirmação é digitar o e-mail**, não um "tem certeza?" clicável. Um diálogo
+adiciona um clique; digitar obriga a olhar QUEM está sendo afetado. O erro a evitar não é
+clicar sem querer — é revogar a linha errada de uma tabela ordenada de outro jeito do que
+se esperava.
+
+---
+
+### D-19 · Q11 em aberto não vira canal inventado: o aviso é registrado e SUPRIMIDO
+
+**Contexto.** `RF-45` pede notificação, e **Q11** (qual canal) não tem resposta. O atalho
+tentador é "manda e-mail para o e-mail corporativo por enquanto" — parece inofensivo e é
+uma decisão de produto disfarçada de conveniência: notificação não pedida em canal não
+combinado é o começo do treinamento para ignorar as notificações do app.
+
+**Decisão.** `canal_notificacao_padrao` nasce `null`, e nesse estado a notificação é
+**registrada como `suprimida`**, não descartada. A diferença importa: com registro, o
+console mostra "havia 40 avisos a dar e nenhum canal definido"; sem registro, a tela
+mostra silêncio e ninguém descobre que Q11 estava travando a fase inteira. No dia da
+resposta, é **um campo no console de admin** e a fila passa a sair — sem deploy (`RF-49`).
+
+**E canal sem configuração NEGA, nunca simula** — `CanalIndisponivel`, mesmo raciocínio de
+`ClienteIAIndisponivel` (T-132). Se o lugar do canal não configurado fosse um dublê, a
+fila esvaziaria em produção marcando "enviada" com ninguém recebendo nada.
+
+**A demonstração é a exceção explícita:** `configDemo()` preenche `chat` contra o
+`CanalFake`, porque com `null` a tela de avisos ficaria vazia e o visitante concluiria que
+a notificação não foi construída. O que sustenta a distinção é `contexto.ts` — fora dos
+fakes, o dublê não é alcançável.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
@@ -433,7 +577,7 @@ implementado antes da resposta.
 
 | # | Pergunta | Quem decide | Bloqueia |
 |---|---|---|---|
-| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | **Parcial — ver D-14.** O trio Jira/Confluence está registrado; faltam `ATLASSIAN_ORG_API_KEY` (T-122/T-123/T-131) e `LLM_API_KEY`. T-063 depende ainda de um projeto **JSM** |
+| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | **Parcial — ver D-14.** O trio Jira/Confluence está registrado; faltam `ATLASSIAN_ORG_API_KEY` e `LLM_API_KEY`. **T-122/T-123/T-131 saíram do bloqueio — ver D-18:** estão implementadas e testadas contra `fetch` simulado, com os endpoints não verificados declarados em código e na tela. T-063 depende ainda de um projeto **JSM** |
 | Q2 | Qual campo do Jira delimita "mesmo tipo de ticket" para a Regra 2 — label, componente ou tipo de issue? | João + time de tech | RF-10, RF-11 (o agrupamento do `check_jira_history`) |
 | Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | RF-14 — e sem ele a Regra 2 classifica mal (é pré-requisito, não refinamento) |
 | Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | **Só o valor** — `campo_solicitante_id` já é config (RNF-25), editável sem deploy assim que a resposta chegar. RF-21, RNF-21 (reconciliação) |
@@ -443,6 +587,6 @@ implementado antes da resposta.
 | Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | RF-53 (custo mensal e assentos ociosos) |
 | Q9 | Como comunicar o SLA de 24h às áreas que hoje têm retorno em 2h30 sem soar como piora? | João + Produto | Não bloqueia código; bloqueia **rollout** (R-05) |
 | Q10 | O time de tech está ciente de que o reporter dos chamados vai mudar? | João | Não bloqueia código; bloqueia **rollout** (R-03) |
-| Q11 | Google Chat, e-mail ou ambos na v1 de notificações? | João | RF-45 (Fase 3) |
+| Q11 | Google Chat, e-mail ou ambos na v1 de notificações? | João | **Não bloqueia mais código — ver D-19.** Os dois canais estão implementados e testados; o que falta é *escolher*, e a escolha é um campo de config. Enquanto `canal_notificacao_padrao` for `null`, o aviso é registrado e suprimido, e o console diz quantos |
 | Q12 | ~~O GoDeploy já oferece SSO Google pronto?~~ | Kaique | **Respondida — ver D-02** |
-| Q13 | Quais 1–2 áreas entram no piloto? | João | Fase 4 (sugestão do documento: CX + Produção) |
+| Q13 | Quais 1–2 áreas entram no piloto? | João | **Não bloqueia mais código — ver D-16.** O gate existe e `emails_piloto` vazio mantém o piloto desligado; falta a lista (sugestão do documento: CX + Produção) |

@@ -36,6 +36,27 @@ export function configDemo(): Partial<ConfigValores> {
       '[EXEMPLO FICTÍCIO] Rodei o pipeline manualmente',
       '[EXEMPLO FICTÍCIO] Reparticionei a tabela para destravar',
     ],
+    /**
+     * Canal de aviso na demonstração: `chat`, contra o `CanalFake`.
+     *
+     * ⚠️ Não é a resposta de Q11 — é o oposto. Em produção este campo nasce `null`, os
+     * avisos ficam `suprimida` e o console mostra quantos ("havia 40 avisos e nenhum
+     * canal"). Aqui ele é preenchido porque a demonstração precisa mostrar a fila
+     * **funcionando**: com `null`, a tela de avisos ficaria vazia e o visitante concluiria
+     * que a notificação não foi construída.
+     *
+     * O que sustenta a distinção é `contexto.ts`: fora dos fakes, canal sem configuração
+     * vira `CanalIndisponivel`, nunca o dublê. Preencher aqui não abre caminho nenhum lá.
+     */
+    canal_notificacao_padrao: 'chat',
+    /**
+     * Mapa de áreas fictício, para a métrica por área (`T-312`) ter o que mostrar.
+     *
+     * O e-mail é intencionalmente genérico: quem visita a demonstração entra com a própria
+     * conta Google, então ninguém casa com este mapa — e o painel mostra "Sem área", que é
+     * exatamente o comportamento de `T-303` (o app não chuta área).
+     */
+    areas_por_email: { 'demonstracao@gocase.com': 'CX' },
   }
 }
 

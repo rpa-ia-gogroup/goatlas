@@ -70,10 +70,15 @@ e só então remova o modo demo:
 | `LLM_API_KEY` | `ClienteIAIndisponivel`: `/api/health` responde **503** dizendo o motivo, o agente recusa, e o formulário mínimo (`D-04`) segue abrindo chamado. **Antes de T-132 isto era `ClienteIAFake` — Atlassian real com IA falsa** |
 | `GOATLAS_TIPOS_CHAMADO` + `GOATLAS_SERVICE_DESK_ID` | Allowlist vazia → `RF-28` descarta toda proposta → ninguém abre chamado |
 | `GOATLAS_ESPACOS_CONFLUENCE` (**Q5**) | Busca devolve zero com `buscaConfigurada: false`; a deflexão da Regra 1 morre |
-| `GODEPLOY_CRON_KEY` | As três rotas de cron ficam fechadas (reprocessamento, reconciliação, inventário) |
+| `GODEPLOY_CRON_KEY` | **Todas** as rotas de cron ficam fechadas — inclusive o polling do Jira e o envio de notificação, que são o que faz a Fase 3 funcionar |
+| `GOATLAS_WEBHOOK_SEGREDO` | `POST /api/webhook/jira` responde 403 a tudo (fail-closed). O polling sozinho continua notificando — é por isso que `RF-47` pede duas fontes |
+| `EMAIL_API_KEY` | Só importa se o canal escolhido for e-mail. Sem ela o canal recusa em vez de fingir envio |
+| `config.canal_notificacao_padrao` (**Q11**) | Aviso é **registrado e suprimido**, e o console mostra quantos. Não é secret: é campo de config, editável sem deploy (`D-19`) |
+| `config.base_publica_app` | As notificações saem **sem link**. O cron não tem `Request` de onde derivar o host, então este valor não é descobrível |
 
 Os dois do meio dão para preencher no console de admin depois, sem deploy (`RF-49`).
-`LLM_API_KEY` e `GODEPLOY_CRON_KEY` são secret — exigem `setAppSecret`.
+`LLM_API_KEY`, `GODEPLOY_CRON_KEY`, `GOATLAS_WEBHOOK_SEGREDO` e `EMAIL_API_KEY` são
+secret — exigem `setAppSecret`.
 
 **Confira o health antes de anunciar o app:** `GET /api/health` devolve 503 com
 `dependencias.ia.ok = false` enquanto a chave de IA não existir. É o sinal de que o
@@ -134,16 +139,49 @@ npm run test && npm run build && npm run build:worker
 O cron é do **GoDeploy**, não do app (o Worker não tem processo longo). Depois do
 primeiro deploy, registre:
 
+⚠️ **A ordem importa em um caso:** registre `polling-jira` **antes** de
+`enviar-notificacoes`. Ao contrário, a primeira rodada de envio encontra a fila vazia e
+parece que o cron não funcionou — o que leva alguém a mexer no que estava certo.
+
 | Rota | Sugestão | Para quê |
 |---|---|---|
 | `POST /api/cron/reprocessar-submissoes` | `*/5 * * * *` | `RNF-17` — chamado que ficou pendente por falha da Atlassian |
 | `POST /api/cron/reconciliar-vinculos` | `0 * * * *` | `RNF-21` — vínculo órfão (criado no JSM, vínculo perdido) |
 | `POST /api/cron/coletar-inventario` | diário, ex. `0 6 * * *` | `RF-51`/`RF-52` — a Organizations API não serve consulta interativa (T-124). Sem `ATLASSIAN_ORG_API_KEY`/`org_id` configurados, a rota responde `ok` com `organizacao_nao_configurada` — não é erro, é ausência de credencial (**Q1**) |
+| `POST /api/cron/polling-jira` | `*/5 * * * *` | `RF-47` — detecção de mudança que **não depende do webhook**. ⚠️ Sempre ligado, mesmo com o webhook registrado: a dedupe existe justamente para os dois conviverem, e notificação com mecanismo único falha em silêncio. A marca-d'água só avança no que deu certo |
+| `POST /api/cron/enviar-notificacoes` | `*/5 * * * *` | `T-225` — despacha a fila. Falha transitória volta para `pendente`; só definitiva vira `falha` (mesma lógica do outbox) |
+| `POST /api/cron/alertas-sla` | `0 * * * *` | `RF-46` — alerta de **primeira resposta**. `alertas_sla` impede repetir o mesmo alerta a cada rodada, e a rodada grava o retrato que o painel de admin lê (sem isso, abrir o console varreria a Atlassian) |
+| `POST /api/cron/retencao` | diário, ex. `0 4 * * *` | `RNF-33` — expurgo. **Com a política toda `null` (o default) ele não apaga nada**, e é assim que deve ficar até alguém decidir os prazos. Nunca toca `vinculos`; a auditoria tem piso de 180 dias (`D-17`) |
 
 A rota exige o header assinado `X-Godeploy-Cron` conferido contra
 `GODEPLOY_CRON_KEY`. **Sem a chave configurada a rota é fechada** (fail-closed) —
 o contrário deixaria a rota aberta justamente na instalação que esqueceu de
 configurar.
+
+### Webhook do Jira (RF-48) — a única rota pública do app
+
+Quem registra é o **time de tech**, no Jira: `Configurações do sistema → Webhooks`,
+apontando para
+
+```
+https://<dominio-do-app>/api/webhook/jira?k=<GOATLAS_WEBHOOK_SEGREDO>
+```
+
+Eventos: criação e atualização de issue, e criação de comentário. O segredo também é
+aceito no cabeçalho `x-goatlas-webhook`, para quem preferir não pôr nada na URL.
+
+⚠️ **Três coisas para não estranhar quando testar:**
+
+1. **A resposta é sempre `202`**, com ou sem vínculo local. Um 404 para chamado
+   desconhecido seria oráculo de "este chamado passou pelo goatlas?" (`D-15`).
+2. **Segredo errado dá `403` com corpo idêntico ao de segredo ausente**, e a comparação é
+   de tempo constante. A tentativa fica na auditoria — **sem** o segredo enviado.
+3. **O corpo do evento é ponteiro, não conteúdo.** O app tira dele só a chave do chamado
+   e relê tudo da Atlassian. Testar mandando um `comment.body` inventado não produz
+   notificação com aquele texto — e é de propósito.
+
+**O webhook é opcional.** Sem ele, o polling notifica sozinho, com atraso de uma janela
+de cron. É o que `RF-47` pede: notificação não pode depender de mecanismo único.
 
 ---
 

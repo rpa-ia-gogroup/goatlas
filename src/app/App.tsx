@@ -12,6 +12,7 @@ import { api, ErroApi, type Identidade } from './api'
 import { Aviso } from './componentes'
 import { TelaConversa, TelaDetalhe, TelaFormulario, TelaMeusChamados } from './telas'
 import { TelaAdmin } from './admin'
+import { TelaAvisos } from './avisos'
 import { entradaDaUrl, TelaDocumentacao, type EntradaDocumentacao } from './confluence'
 
 type Tela =
@@ -19,6 +20,7 @@ type Tela =
   | { nome: 'documentacao' }
   | { nome: 'chamados' }
   | { nome: 'formulario' }
+  | { nome: 'avisos' }
   | { nome: 'admin' }
   | { nome: 'detalhe'; issueKey: string }
 
@@ -29,6 +31,10 @@ const ABAS: readonly { nome: Tela['nome']; rotulo: string; soAdmin?: boolean }[]
   { nome: 'documentacao', rotulo: 'Documentação' },
   { nome: 'chamados', rotulo: 'Meus chamados' },
   { nome: 'formulario', rotulo: 'Abrir direto' },
+  // Depois de "Meus chamados" de propósito: a aba de avisos é ajuste de preferência,
+  // não caminho para resolver nada. Quem chega no app tem um problema, não uma
+  // configuração a mexer.
+  { nome: 'avisos', rotulo: 'Avisos' },
   // A aba só aparece para admin — mas quem garante o acesso é o gate do SERVIDOR
   // em cada rota `/api/admin/*`. Esconder no cliente é conveniência, não segurança.
   { nome: 'admin', rotulo: 'Configuração', soAdmin: true },
@@ -125,6 +131,7 @@ export function App() {
             {tela.nome === 'formulario' && (
               <TelaFormulario aoAbrirChamado={() => setTela({ nome: 'chamados' })} />
             )}
+            {tela.nome === 'avisos' && <TelaAvisos />}
             {tela.nome === 'admin' && <TelaAdmin />}
             {tela.nome === 'detalhe' && (
               <TelaDetalhe

@@ -99,6 +99,18 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
 - **Falha de tool não silencia a regra** (**RNF-18**) — informa e marca o ticket
   como não verificado. Indisponibilidade nunca vira bypass.
 - **N8N está descartado.** Não propor voltar a ele.
+- **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
+  olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe
+  idêntica por construção; e é o que faz o corpo do webhook ser **ponteiro**, nunca
+  conteúdo. Não "otimizar" lendo `comment.body` do payload.
+- **`emails_piloto` vazio LIBERA todo mundo** (`D-16`) — a única allowlist do projeto cujo
+  vazio não nega, porque ela governa quem pode *pedir ajuda*, não exposição de conteúdo.
+  Vazio-nega aqui trancaria a empresa fora do canal de suporte no primeiro deploy.
+- **Retenção nunca expurga `vinculos`** (`D-17`) — seria apagar o acesso da pessoa ao
+  próprio chamado. E a auditoria tem piso de 180 dias, clampado mesmo se alguém configurar
+  menos.
+- **Q11 em aberto não vira canal inventado** (`D-19`) — o aviso é registrado como
+  `suprimida` e o console diz quantos. O default **não** é "e-mail para o corporativo".
 - **Imagem em URL externa não é renderizada** (`D-10`) — só anexo da página, e
   sempre pelo proxy. Não é (só) XSS: imagem externa numa página que qualquer pessoa
   edita é rastreador de leitura, e o IP de cada colega vaza para um terceiro sem
@@ -178,6 +190,46 @@ destes reabre um vazamento que já foi fechado.
   auditoria. Corpo diferente por motivo é oráculo, como o 403 seria em `RF-30`. Só
   indisponibilidade é distinguida (503): 404 mentiroso manda a pessoa abrir chamado
   por uma página que estava lá.
+- ⚠️ **O carimbo da dedupe é o do JIRA, nunca `agora()`** (`notificacoes/dedupe.ts`). Duas
+  fontes veem o mesmo fato em instantes diferentes; com o nosso relógio cada uma gravaria
+  uma chave distinta e a dedupe **não deduparia nada** — sem quebrar teste nenhum, só
+  entregando tudo em dobro para a pessoa. E o carimbo é normalizado para ISO/UTC antes de
+  virar chave: o webhook manda `Z`, o REST manda `-0300`, e é o mesmo instante.
+- ⚠️ **"Mudou de status" compara STATUS, não `updated`.** `updated` muda quando alguém
+  edita descrição, label ou qualquer campo — comparar por ele avisaria "mudou para Em
+  andamento" três vezes porque o agente ajustou o resumo três vezes. Daí a coluna
+  `vinculos.ultimo_status_notificado`.
+- ⚠️ **Ação própria não se detecta pelo AUTOR** (`notificacoes/acoes.ts`, `RF-48`). Sob
+  proxy total todo comentário sai da conta de serviço: o da pessoa e o do agente do time
+  têm o mesmo autor. O que distingue é o app ter registrado a ação **no momento em que a
+  fez** — impressão digital do texto normalizado, e a normalização **remove o prefixo de
+  `D-13`** primeiro, porque o texto volta da Atlassian já com ele. Nas transições, o que se
+  registra é o **status resultante**, não o nome da transição ("Marcar como resolvido" ≠
+  "Resolvido", e registrar o primeiro faria a supressão nunca casar).
+- ⚠️ **A marca-d'água do polling só avança no que deu certo.** Avançá-la apesar de uma
+  falha é perder a janela inteira: o chamado que a Atlassian não devolveu fica atrás da
+  marca e **nunca** é olhado de novo. É o erro que `RNF-17` proíbe no outbox, na versão
+  silenciosa. E `desde: null` significa *janela curta*, nunca "traga tudo" (`R-02`).
+- **SLA é hora corrida, em UTC, e de PRIMEIRA RESPOSTA** (`notificacoes/sla.ts`). Horário
+  útil seria mudança de requisito — qual calendário, qual fuso por área, o que fazer com
+  feriado regional. Se um dia mudar, muda **ali**, e o teste de `RF-46` é o que documenta a
+  escolha atual. "Respondido" é comentário público **sem** o prefixo de `D-13`; o teste
+  gera com `prefixarAutoria` e lê com `ehComentarioDoSolicitante`, para que divergir quebre
+  a suíte em vez de inflar a aderência.
+- **O painel de admin NÃO chama a Atlassian** (`avaliacoes_sla`). Saber se houve primeira
+  resposta exige ler os comentários de cada chamado; fazer isso ao abrir o console
+  deixaria a página lenta na proporção do sucesso do projeto. O cron de SLA já lê tudo
+  isso — gravar o retrato é grátis, e a tela diz "avaliado na última rodada".
+- **A calibragem mostra os MOTIVOS junto com a barra** (`governanca/painel.ts`, T-310). O
+  threshold é o único campo editável ali, então mostrar "66% de override" sozinho empurra
+  para mexer nele — quando a resposta certa costuma ser escrever a página que as pessoas
+  apontaram. As duas informações moram na mesma caixa de propósito.
+- **Anexo enviado é o caminho OPOSTO ao do proxy de leitura** (`http/anexo-entrada.ts`).
+  Lá o risco é `Content-Type` (SVG com script servido do nosso domínio); aqui é **recurso**
+  — sem disco nem streaming, o arquivo passa duas vezes pela memória do Worker. Por isso o
+  teto de envio (8 MB) é **menor** que o de leitura (12 MB), e não há allowlist de tipo: o
+  arquivo vai para o Jira, que aplica a própria política, e recusar `.zip` de log seria o
+  app achando que é antivírus.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -378,18 +430,20 @@ persistente.
 
 ## Estado do projeto
 
-**Fase 1 mergeada na `main`; Fase 2 começada.** Faseamento em
+**Fases 1 e 2 na `main`; Fases 3 e 4 com o código completo.** Faseamento em
 `docs/REQUISITOS.md` seção 12: Fase 0 diagnóstico (João, sem código) → Fase 1 MVP →
-**Fase 2 conhecimento e governança** → Fase 3 SLA e notificações → Fase 4 rollout.
-Progresso tarefa por tarefa em
-[`specs/001-mvp-chamados-e-agente/tasks.md`](specs/001-mvp-chamados-e-agente/tasks.md)
-e [`specs/002-confluence-e-governanca/tasks.md`](specs/002-confluence-e-governanca/tasks.md).
+Fase 2 conhecimento e governança → Fase 3 SLA e notificações → Fase 4 rollout.
+Progresso tarefa por tarefa nos quatro `tasks.md`:
+[001](specs/001-mvp-chamados-e-agente/tasks.md) ·
+[002](specs/002-confluence-e-governanca/tasks.md) ·
+[003](specs/003-sla-e-notificacoes/tasks.md) ·
+[004](specs/004-piloto-e-rollout/tasks.md).
 
 **No ar em modo demonstração: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
 ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
 chega ao time de tech.
 
-**445 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**590 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -449,6 +503,40 @@ governança de assentos (Phase 3, detalhada acima), que depende de **Q1** para
 valer contra a API real. **Q5** não trava código, só o dado de
 `espacos_confluence`, sem o qual a busca devolve zero e diz `buscaConfigurada: false`
 — o mesmo raciocínio de **Q8** para `custo_mensal_por_produto`.
+
+### Fases 3 e 4 — o que ficou pronto, e o que falta de verdade
+
+**A Fase 3 (spec 003) está completa em código.** Webhook do Jira (`RF-48`) com segredo em
+tempo constante e resposta sempre `202`; polling incremental com marca-d'água (`RF-47`);
+dedupe pela constraint com o carimbo do Jira; supressão de ação própria (`RF-48`); camada
+de canal isolada com Google Chat, e-mail, fake e `CanalIndisponivel`; preferência por
+pessoa (`RF-45`) com a tela **Avisos**; SLA de primeira resposta como função pura
+(`RF-46`), cron de alerta sem repetição e retrato gravado para o painel; painel completo de
+`RF-55` com calibragem, aderência ao SLA, telemetria de 429 (`RF-60`) e custo de IA;
+anexos (`RF-25`/`RF-34`), filtro e busca na lista (`RF-35`), resolver/reabrir quando o
+workflow do JSM oferece (`RF-36`) e retenção (`RNF-33`).
+
+**A Fase 4 (spec 004) está completa no que é código:** gate de piloto com encaminhamento
+(`R-06`), mapa de áreas puro, área congelada no vínculo e corrigível pela pessoa
+(`RF-19`), leitura de calibragem com os motivos de override (`RF-50`) e baseline de
+assentos (`O2`).
+
+**T-122/T-123/T-131 saíram do bloqueio de Q1** (`D-18`): `ClienteOrganizacaoHttp` existe,
+com paginação, `links.next` de outro host descartado, teto de páginas e normalização de
+carimbo (segundos × milissegundos são 55 anos de diferença). O que **não** foi verificado
+está em `ENDPOINTS_NAO_VERIFICADOS` — e a tela de governança mostra a lista.
+
+**O que falta não é código:**
+
+| O que | Quem | Por que não dá para adiantar |
+|---|---|---|
+| Escolher o canal (**Q11**) | João | É um campo de config (`D-19`). Enquanto for `null`, o aviso é registrado e suprimido, e o console mostra quantos |
+| Lista do piloto (**Q13**) | João | Campo de config. Vazio = piloto desligado (`D-16`) |
+| `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY`, `GODEPLOY_CRON_KEY`, `GOATLAS_WEBHOOK_SEGREDO` | João | Secrets. Cada ausência silencia uma parte, todas fail-closed — ver `docs/DEPLOY.md` |
+| Registrar o webhook no Jira | time de tech | Opcional: o polling notifica sozinho, com atraso de uma janela de cron |
+| Baseline de assentos (Fase 0) | João | Sem ele a tela diz "sem baseline" em vez de comparar contra zero |
+| **T-235** — distinguir "defletido e resolveu" de "desistiu e foi pro chat" | Produto | Mitigado, não resolvido: o painel devolve `deflexaoResolvidaConhecida: false` e trata o número como **teto** |
+| Destino do alerta de SLA | Produto | Hoje vai ao solicitante, o único destino que o app conhece. Outro destinatário é uma linha na mesma função |
 
 ### Como testar sem credencial
 As duas camadas isoladas têm **fake** (`src/lib/atlassian/fake.ts`,
