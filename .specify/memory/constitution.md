@@ -1,7 +1,7 @@
 ---
 # Constituição do Projeto — regras inegociáveis que governam todo o SDD.
 project: "goatlas"
-version: 1.0.0
+version: 1.0.1
 ratified: "2026-08-03"
 requirements_source: "docs/REQUISITOS.md"
 ---
@@ -22,8 +22,8 @@ O código serve à especificação, não o contrário. Nada **não-trivial** é
 implementado sem uma spec aprovada (`WHAT`/`WHY`) e um plano (`HOW`).
 
 **Neste projeto** a fonte da verdade dos requisitos é
-[`docs/REQUISITOS.md`](../../docs/REQUISITOS.md) (RF-01…RF-60, RNF-01…RNF-35,
-RN-01…RN-10, R-01…R-11, Q1…Q13). As specs em `specs/<NNN>-<slug>/` **não copiam**
+[`docs/REQUISITOS.md`](../../docs/REQUISITOS.md) (RF-01…RF-63, RNF-01…RNF-35,
+RN-01…RN-11, R-01…R-11, Q1…Q13). As specs em `specs/<NNN>-<slug>/` **não copiam**
 esses requisitos: elas **referenciam os IDs** e os refinam em cenários testáveis,
 edge cases e critérios de aceite. Requisito é do documento; comportamento
 verificável é da spec.
