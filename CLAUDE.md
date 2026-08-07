@@ -86,7 +86,9 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   real. **RNF-22** mantém a migração viável — não achate o cliente Atlassian.
 - **Bloqueio não é parede** (**RF-13**, **RN-07**) — sempre há override, e o
   override é registrado. Override é sinal de documentação ruim, não de usuário
-  teimoso. Não transformar em recusa.
+  teimoso. Não transformar em recusa. ⚠️ **As duas metades valem** (`D-21`): o
+  botão é o único caminho de saída, e o bloqueio dura até ele ser usado.
+  "Simplificar" deixando a conversa seguir sozinha reabre o bypass.
 - **SLA é de primeira resposta, não de resolução** (**RN-08**), e os 24h são
   **piso garantido**, não novo prazo (**R-05** — áreas com retorno atual de 2h30).
 - **A prioridade sugerida pela IA é editável antes de criar** (**RF-16**).
@@ -329,6 +331,17 @@ destes reabre um vazamento que já foi fechado.
   tentou) mas o chamado nasce `verificadoRegras: false`. Não rodar continua
   recusando. É a diferença entre "indisponibilidade não vira bypass" e
   "indisponibilidade vira parede" — o requisito pede o primeiro.
+- ⚠️ **`bloqueio` é do TURNO; `temBloqueioPendente` é da CONVERSA** (`agent/`,
+  `D-21`). O primeiro só diz se uma regra disparou agora — e na mensagem seguinte
+  nenhuma dispara de novo, porque a busca já rodou. Usar só ele para decidir se
+  monta proposta era um bypass real: bastava mandar outra mensagem para o chamado
+  nascer **sem `override_registrado`**, e quem escapava assim não entrava na taxa
+  de override, então o painel mostrava deflexão alta justamente onde ela falhou. A
+  UI tem o mesmo par: `bloqueado` faria o botão de override sumir no turno
+  seguinte — é `bloqueioPendente` que o mantém, e sem ele a trava viraria a parede
+  que `RF-13` proíbe. E quando o bloqueio está pendente, o **servidor** acrescenta
+  o lembrete do botão: o modelo não sabe que a proposta não vai nascer e escreve
+  "montei o chamado abaixo" com nada abaixo.
 - **A sanitização devolve ÁRVORE TIPADA, não string de HTML** (`confluence/`).
   Nenhum nó de `No` carrega saco de atributos, então não existe onde um `onerror`
   viajar: o pior caso é um nó que o renderizador não conhece. É isto que torna

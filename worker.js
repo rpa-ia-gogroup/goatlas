@@ -1476,6 +1476,8 @@ Voc\xEA **n\xE3o** cria o chamado. Voc\xEA monta a proposta e a pessoa confirma.
 ## Quando a resposta j\xE1 existe
 N\xE3o diga "negado" nem "n\xE3o posso abrir". Mostre o que encontrou, explique em uma frase por que parece resolver o caso, e deixe claro que, se n\xE3o resolver, voc\xEA abre o chamado na sequ\xEAncia. Se a documenta\xE7\xE3o n\xE3o serviu, isso \xE9 problema da documenta\xE7\xE3o \u2014 registre e siga.
 
+Depois de um bloqueio desses, **n\xE3o anuncie que montou o chamado** enquanto a pessoa n\xE3o tiver usado o bot\xE3o "Isso n\xE3o resolve meu caso". Ela precisa dizer o que faltou na documenta\xE7\xE3o, e \xE9 isso que libera a proposta. Dizer "montei o chamado abaixo" antes disso descreve uma tela que ela n\xE3o est\xE1 vendo. Continue conversando normalmente; aponte o bot\xE3o quando ela quiser seguir.
+
 ## Prioridade e prazo
 Sugira a prioridade a partir do impacto que a pessoa descreveu:
 - **Cr\xEDtica** \u2014 sistema fora do ar, impacto direto em vendas ou opera\xE7\xE3o. Primeira resposta em 4h.
@@ -2737,6 +2739,27 @@ var RepositorioConversas = class {
     await this.definirEstado(conversaId, "coletando");
     return r.rowsWritten;
   }
+  /**
+   * Existe bloqueio ainda NÃO sobreposto? — RF-13, RN-07.
+   *
+   * É o que faz o bloqueio durar mais que o turno em que disparou. Sem isto a
+   * regra só valia para a resposta imediata: bastava mandar outra mensagem
+   * qualquer para o servidor montar a proposta, porque nenhuma regra dispara de
+   * novo (a busca já rodou) e `bloqueio` volta `null` no turno seguinte. O
+   * chamado nascia sem `override_registrado` entre o bloqueio e a criação — a
+   * saída existia, mas não ficava registrada, que é metade do que RN-07 pede.
+   *
+   * O efeito colateral era pior que o furo: quem escapava pelo chat não entrava
+   * na taxa de override, então o painel mostrava deflexão alta justamente
+   * quando ela falhou.
+   */
+  async temBloqueioPendente(conversaId) {
+    const r = await this.db.query(
+      `SELECT 1 FROM bloqueios WHERE conversa_id = ? AND houve_override = 0 LIMIT 1`,
+      [conversaId]
+    );
+    return r.rows.length > 0;
+  }
   async listarBloqueios(conversaId) {
     const r = await this.db.query(
       `SELECT regra, motivo, houve_override FROM bloqueios WHERE conversa_id = ? ORDER BY criado_em ASC`,
@@ -2917,7 +2940,11 @@ function montarMensagemBloqueio(veredito) {
       "",
       links,
       "",
-      "Se essas p\xE1ginas n\xE3o resolvem o **seu** caso, me diga o que ficou de fora e eu abro o chamado na sequ\xEAncia. Isso tamb\xE9m me ajuda a sinalizar que a documenta\xE7\xE3o precisa melhorar."
+      // ⚠️ A copy aponta o BOTÃO, não a caixa de mensagem. A versão anterior dizia
+      // "me diga o que ficou de fora" e convidava a digitar no chat — o caminho que
+      // não registra o override. Duas portas, uma só registrada, e a copy indicando
+      // justamente a outra: o motivo de a taxa de deflexão parecer melhor do que era.
+      'Se essas p\xE1ginas n\xE3o resolvem o **seu** caso, use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo. Vou pedir uma frase sobre o que faltou \u2014 \xE9 ela que manda a documenta\xE7\xE3o para a fila de melhoria \u2014 e sigo com o chamado na sequ\xEAncia.'
     ].join("\n");
   }
   const ev = veredito.evidencia;
@@ -2929,7 +2956,7 @@ function montarMensagemBloqueio(veredito) {
     "",
     "Abrir de novo provavelmente traria o mesmo ajuste tempor\xE1rio. Faz mais sentido tratar a causa \u2014 posso registrar isso como um chamado de causa raiz, com o hist\xF3rico anexado.",
     "",
-    "Se o seu caso \xE9 diferente dos anteriores, me diga o que muda e eu abro normalmente."
+    'Se o seu caso \xE9 diferente dos anteriores, use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo e me conte o que muda \u2014 abro o chamado na sequ\xEAncia.'
   ].join("\n");
 }
 function regra2Disponivel(exemplos) {
@@ -3240,6 +3267,9 @@ var Orquestrador = class {
         return {
           texto: "Esta conversa ficou longa e vou precisar encerr\xE1-la por aqui. Voc\xEA pode abrir o chamado pelo formul\xE1rio, ou come\xE7ar uma conversa nova com o resumo do que ficou pendente.",
           bloqueado: false,
+          // Teto de custo não apaga bloqueio: se havia um pendente, o caminho de
+          // override continua na tela mesmo com a conversa encerrada.
+          bloqueioPendente: await this.conversas.temBloqueioPendente(atual.id),
           regraBloqueio: null,
           toolsExecutadas: executadas,
           toolsRecusadas: recusadas,
@@ -3296,13 +3326,16 @@ var Orquestrador = class {
       }
       if (bloqueio) break;
     }
-    if (!bloqueio && !atual.proposta && this.verificacoesConcluidas(atual)) {
+    const bloqueioPendente = await this.conversas.temBloqueioPendente(atual.id);
+    if (!bloqueio && !bloqueioPendente && !atual.proposta && this.verificacoesConcluidas(atual)) {
       custoTurno += await this.tentarMontarProposta(atual, config);
       const relido = await this.conversas.obter(atual.id);
       if (relido) atual = relido;
     }
     await this.conversas.somarCusto(atual.id, custoTurno);
-    const textoFinal = bloqueio?.texto ?? ultimoTexto;
+    const textoFinal = bloqueio?.texto ?? (bloqueioPendente ? `${ultimoTexto}
+
+S\xF3 n\xE3o consigo abrir o chamado ainda: para isso preciso registrar o que a documenta\xE7\xE3o n\xE3o cobriu. Use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo e me conte em uma frase.` : ultimoTexto);
     await this.conversas.adicionarMensagem(
       this.novoId(),
       atual.id,
@@ -3314,6 +3347,11 @@ var Orquestrador = class {
     return {
       texto: textoFinal,
       bloqueado: bloqueio !== null,
+      // Persiste entre turnos, ao contrário de `bloqueado`. É por ele que a UI
+      // decide mostrar o caminho de override: se dependesse de `bloqueado`, o
+      // botão sumiria na mensagem seguinte e o bloqueio viraria parede — o
+      // oposto do que RN-07 pede.
+      bloqueioPendente,
       regraBloqueio: bloqueio?.regra ?? null,
       toolsExecutadas: executadas,
       toolsRecusadas: recusadas,
@@ -3331,6 +3369,7 @@ var Orquestrador = class {
   async montarPropostaAgora(conversa, config) {
     if (conversa.proposta) return true;
     if (!this.verificacoesConcluidas(conversa)) return false;
+    if (await this.conversas.temBloqueioPendente(conversa.id)) return false;
     const custo = await this.tentarMontarProposta(conversa, config);
     if (custo > 0) await this.conversas.somarCusto(conversa.id, custo);
     return Boolean((await this.conversas.obter(conversa.id))?.proposta);
@@ -6564,6 +6603,9 @@ async function rotear(req, ctx, eu, caminho, url) {
     return json({
       texto: r.texto,
       bloqueado: r.bloqueado,
+      // RF-13 / RN-07 — persiste entre turnos; é dele que a UI tira o caminho de
+      // override. `bloqueado` sozinho fazia o botão sumir na mensagem seguinte.
+      bloqueioPendente: r.bloqueioPendente,
       regraBloqueio: r.regraBloqueio,
       // RNF-12: a UI precisa mostrar progresso das duas verificações.
       verificacoes: {

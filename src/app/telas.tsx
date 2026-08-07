@@ -80,7 +80,11 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
       const r = await api.enviarMensagem(id, texto)
       setConfluence(r.verificacoes.confluence)
       setHistorico(r.verificacoes.historico)
-      setBloqueado(r.bloqueado)
+      // ⚠️ `bloqueioPendente`, não `bloqueado`: o segundo vale só para o turno que
+      // acabou, e usá-lo aqui fazia o caminho de override sumir assim que a pessoa
+      // mandava outra mensagem — deixando-a sem saída agora que o servidor não
+      // monta proposta enquanto o bloqueio não for sobreposto (RN-07).
+      setBloqueado(r.bloqueioPendente)
       setProposta(r.proposta)
       setFalas((f) => [...f, { de: 'agente', texto: r.texto }])
     } catch (e) {
@@ -202,14 +206,18 @@ function CaminhoOverride({ aoConfirmar }: { aoConfirmar: (motivo: string) => voi
 
   return (
     <form
-      className="recibo"
+      className="justificativa"
       onSubmit={(e) => {
         e.preventDefault()
         if (motivo.trim()) aoConfirmar(motivo.trim())
       }}
     >
+      {/* O sobretítulo existe para dizer o QUE este campo é antes de a pessoa
+          começar a escrever. Sem ele, uma caixa de texto embaixo de uma conversa
+          lê como mais uma mensagem — foi assim que confundiu na primeira vez. */}
+      <span className="justificativa-titulo">Corrigir a recomendação</span>
       <div className="campo">
-        <label htmlFor="motivo-override">O que ficou de fora?</label>
+        <label htmlFor="motivo-override">Por que essas páginas não resolvem o seu caso?</label>
         <textarea
           id="motivo-override"
           value={motivo}
@@ -217,8 +225,8 @@ function CaminhoOverride({ aoConfirmar }: { aoConfirmar: (motivo: string) => voi
           placeholder="Ex.: a página trata da loja física, e meu caso é o e-commerce"
         />
         <span className="dica">
-          Isso vai para a fila de melhoria da documentação — é assim que a próxima pessoa acha a
-          resposta certa.
+          Isto não é uma mensagem para o agente: vai para a fila de melhoria da documentação, e é
+          assim que a próxima pessoa acha a resposta certa.
         </span>
       </div>
       <div className="acoes">

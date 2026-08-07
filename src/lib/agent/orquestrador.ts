@@ -25,6 +25,12 @@ export interface TurnoResultado {
   readonly texto: string
   /** `true` quando uma regra bloqueou neste turno (RF-12). */
   readonly bloqueado: boolean
+  /**
+   * `true` enquanto existir bloqueio sem override — inclusive de turnos
+   * anteriores (RF-13, RN-07). Enquanto for `true` nenhuma proposta é montada,
+   * e é ele que mantém o caminho de override na tela.
+   */
+  readonly bloqueioPendente: boolean
   readonly regraBloqueio: string | null
   readonly toolsExecutadas: readonly string[]
   readonly toolsRecusadas: readonly string[]
@@ -81,6 +87,9 @@ export class Orquestrador {
           texto:
             'Esta conversa ficou longa e vou precisar encerrá-la por aqui. Você pode abrir o chamado pelo formulário, ou começar uma conversa nova com o resumo do que ficou pendente.',
           bloqueado: false,
+          // Teto de custo não apaga bloqueio: se havia um pendente, o caminho de
+          // override continua na tela mesmo com a conversa encerrada.
+          bloqueioPendente: await this.conversas.temBloqueioPendente(atual.id),
           regraBloqueio: null,
           toolsExecutadas: executadas,
           toolsRecusadas: recusadas,
@@ -154,7 +163,12 @@ export class Orquestrador {
     // as duas verificações já aconteceram, nada bloqueou, e ainda não há proposta.
     // Não é o modelo que decide QUANDO propor; ele só preenche o conteúdo. E o que
     // sai daqui é sugestão: exibida e editável antes de criar (RF-16).
-    if (!bloqueio && !atual.proposta && this.verificacoesConcluidas(atual)) {
+    //
+    // ⚠️ `bloqueio` é só DESTE turno. `temBloqueioPendente` olha os turnos
+    // anteriores: bloqueio sem override não deixa a proposta nascer, por mais
+    // mensagens que venham. É o que impede o bypass por conversa (RN-07).
+    const bloqueioPendente = await this.conversas.temBloqueioPendente(atual.id)
+    if (!bloqueio && !bloqueioPendente && !atual.proposta && this.verificacoesConcluidas(atual)) {
       custoTurno += await this.tentarMontarProposta(atual, config)
       const relido = await this.conversas.obter(atual.id)
       if (relido) atual = relido
@@ -162,7 +176,16 @@ export class Orquestrador {
 
     await this.conversas.somarCusto(atual.id, custoTurno)
 
-    const textoFinal = bloqueio?.texto ?? ultimoTexto
+    // Bloqueio pendente de turno ANTERIOR: o modelo não sabe que o servidor não vai
+    // montar proposta, e escreve "montei o chamado abaixo" com nada abaixo. Texto
+    // que contradiz a tela faz a pessoa duvidar do que está lendo — e o pior é que
+    // ela conclui que travou, quando o caminho está a um clique. O lembrete é do
+    // SERVIDOR, determinístico, pelo mesmo motivo que a mensagem de bloqueio é.
+    const textoFinal =
+      bloqueio?.texto ??
+      (bloqueioPendente
+        ? `${ultimoTexto}\n\nSó não consigo abrir o chamado ainda: para isso preciso registrar o que a documentação não cobriu. Use o botão "Isso não resolve meu caso" logo abaixo e me conte em uma frase.`
+        : ultimoTexto)
     await this.conversas.adicionarMensagem(
       this.novoId(),
       atual.id,
@@ -175,6 +198,11 @@ export class Orquestrador {
     return {
       texto: textoFinal,
       bloqueado: bloqueio !== null,
+      // Persiste entre turnos, ao contrário de `bloqueado`. É por ele que a UI
+      // decide mostrar o caminho de override: se dependesse de `bloqueado`, o
+      // botão sumiria na mensagem seguinte e o bloqueio viraria parede — o
+      // oposto do que RN-07 pede.
+      bloqueioPendente,
       regraBloqueio: bloqueio?.regra ?? null,
       toolsExecutadas: executadas,
       toolsRecusadas: recusadas,
@@ -193,6 +221,11 @@ export class Orquestrador {
   async montarPropostaAgora(conversa: Conversa, config: ConfigValores): Promise<boolean> {
     if (conversa.proposta) return true
     if (!this.verificacoesConcluidas(conversa)) return false
+    // Segunda camada da trava de RN-07. A rota de override já limpou os
+    // bloqueios antes de chamar aqui, então em uso normal isto nunca reprova —
+    // ele existe para que um caminho FUTURO que chame este método sem passar
+    // pelo override não vire o bypass que acabamos de fechar.
+    if (await this.conversas.temBloqueioPendente(conversa.id)) return false
     const custo = await this.tentarMontarProposta(conversa, config)
     if (custo > 0) await this.conversas.somarCusto(conversa.id, custo)
     return Boolean((await this.conversas.obter(conversa.id))?.proposta)

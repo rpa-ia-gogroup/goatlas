@@ -36,6 +36,8 @@ export type Prioridade = 'critica' | 'alta' | 'normal'
 export interface RespostaTurno {
   readonly texto: string
   readonly bloqueado: boolean
+  /** Bloqueio sem override, inclusive de turnos anteriores (RF-13, RN-07). */
+  readonly bloqueioPendente: boolean
   readonly regraBloqueio: string | null
   readonly verificacoes: {
     readonly confluence: EstadoVerificacao

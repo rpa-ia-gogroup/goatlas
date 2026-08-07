@@ -207,6 +207,85 @@ describe('RF-13 / RN-07 — bloqueio é orientação, não parede', () => {
     const bloqueios = await conversas.listarBloqueios('c1')
     expect(bloqueios[0]?.houveOverride).toBe(true)
   })
+
+  /**
+   * Roteiro que faz as DUAS verificações no primeiro turno e bloqueia nele.
+   *
+   * É o formato que expõe o furo: com as duas tools concluídas,
+   * `verificacoesConcluidas` fica verdadeiro, e a partir do segundo turno nada
+   * mais dispara regra (a busca já rodou). Um roteiro que só chama uma tool
+   * passaria no teste sem provar nada — a proposta não nasceria de qualquer
+   * forma, por falta de verificação.
+   */
+  const ROTEIRO_BLOQUEIA_COM_TUDO_VERIFICADO: readonly TurnoRoteirizado[] = [
+    {
+      texto: 'Deixa eu verificar.',
+      toolsPropostas: [
+        { nome: 'search_confluence', argumentos: { topico: 'pipeline' } },
+        { nome: 'check_jira_history', argumentos: { tipoProblema: 'pipeline' } },
+      ],
+    },
+    { texto: 'Entendi, sigo com o chamado.' },
+  ]
+
+  it('BURLA — insistir pelo chat NÃO substitui o override: sem proposta e sem registro', async () => {
+    montar(ROTEIRO_BLOQUEIA_COM_TUDO_VERIFICADO)
+    const c = await conversas.criar('c1', ANA)
+
+    const primeiro = await orquestrador.processarMensagem(c, 'o pipeline não rodou', CONFIG)
+    expect(primeiro.bloqueado).toBe(true)
+    expect(primeiro.bloqueioPendente).toBe(true)
+
+    // A pessoa ignora o botão e simplesmente manda outra mensagem. Antes desta
+    // trava, ESTE turno montava a proposta: nenhuma regra dispara de novo, então
+    // `bloqueio` voltava null e o servidor tratava como caminho livre.
+    const atual = (await conversas.obter('c1'))!
+    const segundo = await orquestrador.processarMensagem(atual, 'isso não resolve meu caso', CONFIG)
+
+    expect(segundo.bloqueado).toBe(false) // nada bloqueou NESTE turno...
+    expect(segundo.bloqueioPendente).toBe(true) // ...mas o bloqueio anterior continua de pé
+    expect((await conversas.obter('c1'))?.proposta).toBeNull()
+
+    // O modelo escreveu "sigo com o chamado" e o servidor não vai montar nada:
+    // sem o lembrete, a tela contradiz o texto e a pessoa acha que travou.
+    expect(segundo.texto).toContain('Isso não resolve meu caso')
+
+    // E o que o furo custava: nenhum override registrado entre o bloqueio e a
+    // criação, então a taxa de override não contava quem escapou por aqui.
+    const bloqueios = await conversas.listarBloqueios('c1')
+    expect(bloqueios[0]?.houveOverride).toBe(false)
+    const overrides = await db.query(
+      `SELECT 1 FROM auditoria WHERE acao = 'override_registrado'`,
+      [],
+    )
+    expect(overrides.rows).toHaveLength(0)
+  })
+
+  it('depois do override registrado, a proposta nasce — não virou parede', async () => {
+    montar(ROTEIRO_BLOQUEIA_COM_TUDO_VERIFICADO)
+    // `rt-1` é o tipo que o fake propõe; sem ele na allowlist a proposta seria
+    // descartada por RF-28 e o teste passaria a medir a coisa errada.
+    const configComTipo: ConfigValores = { ...CONFIG, tipos_chamado_permitidos: ['rt-1'] }
+    const c = await conversas.criar('c1', ANA)
+    await orquestrador.processarMensagem(c, 'o pipeline não rodou', configComTipo)
+
+    await conversas.registrarOverride('c1', 'a página é da loja física, meu caso é o site')
+    const liberada = (await conversas.obter('c1'))!
+    expect(await orquestrador.montarPropostaAgora(liberada, configComTipo)).toBe(true)
+    expect((await conversas.obter('c1'))?.proposta).not.toBeNull()
+  })
+
+  it('BURLA — `montarPropostaAgora` recusa enquanto o bloqueio estiver de pé (2ª camada)', async () => {
+    montar(ROTEIRO_BLOQUEIA_COM_TUDO_VERIFICADO)
+    const c = await conversas.criar('c1', ANA)
+    await orquestrador.processarMensagem(c, 'o pipeline não rodou', CONFIG)
+
+    // Chamada direta, pulando a rota de override — é o caminho que um handler
+    // futuro poderia abrir sem perceber.
+    const bloqueada = (await conversas.obter('c1'))!
+    expect(await orquestrador.montarPropostaAgora(bloqueada, CONFIG)).toBe(false)
+    expect((await conversas.obter('c1'))?.proposta).toBeNull()
+  })
 })
 
 describe('RF-10 — Regra 2 com classificação e cache', () => {

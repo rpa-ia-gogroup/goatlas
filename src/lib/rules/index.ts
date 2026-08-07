@@ -175,7 +175,11 @@ export function montarMensagemBloqueio(veredito: Veredito & { bloquear: true }):
       '',
       links,
       '',
-      'Se essas páginas não resolvem o **seu** caso, me diga o que ficou de fora e eu abro o chamado na sequência. Isso também me ajuda a sinalizar que a documentação precisa melhorar.',
+      // ⚠️ A copy aponta o BOTÃO, não a caixa de mensagem. A versão anterior dizia
+      // "me diga o que ficou de fora" e convidava a digitar no chat — o caminho que
+      // não registra o override. Duas portas, uma só registrada, e a copy indicando
+      // justamente a outra: o motivo de a taxa de deflexão parecer melhor do que era.
+      'Se essas páginas não resolvem o **seu** caso, use o botão "Isso não resolve meu caso" logo abaixo. Vou pedir uma frase sobre o que faltou — é ela que manda a documentação para a fila de melhoria — e sigo com o chamado na sequência.',
     ].join('\n')
   }
 
@@ -191,7 +195,7 @@ export function montarMensagemBloqueio(veredito: Veredito & { bloquear: true }):
     '',
     'Abrir de novo provavelmente traria o mesmo ajuste temporário. Faz mais sentido tratar a causa — posso registrar isso como um chamado de causa raiz, com o histórico anexado.',
     '',
-    'Se o seu caso é diferente dos anteriores, me diga o que muda e eu abro normalmente.',
+    'Se o seu caso é diferente dos anteriores, use o botão "Isso não resolve meu caso" logo abaixo e me conte o que muda — abro o chamado na sequência.',
   ].join('\n')
 }
 

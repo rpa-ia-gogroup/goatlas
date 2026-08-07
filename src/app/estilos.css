@@ -334,6 +334,46 @@
   box-shadow: var(--shadow-md);
 }
 
+/* ---------- justificativa do override (RF-13, RN-07) ------------------- */
+
+/**
+ * Este campo tem de NÃO parecer o compositor de mensagem.
+ *
+ * Ele apareceu logo abaixo de uma conversa, com a mesma moldura branca e a mesma
+ * caixa de texto, e foi lido como "outro chat" — a pessoa não tinha como saber
+ * que o texto daqui vai para outro lugar (auditoria e fila de documentação), não
+ * para o agente. Três diferenças deliberadas, nenhuma delas só cor:
+ *
+ * 1. **Espinha lime à esquerda** em vez de moldura fechada — marca de anotação
+ *    presa ao bloqueio, não de bloco novo de conversa;
+ * 2. **Sobretítulo** dizendo o que o campo é, antes de a pessoa escrever;
+ * 3. **Fundo creme** na caixa de texto, contra o branco do compositor.
+ */
+.justificativa {
+  background: var(--go-white);
+  border-left: 4px solid var(--go-lime);
+  border-radius: var(--radius-sm) var(--radius-lg) var(--radius-lg) var(--radius-sm);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  box-shadow: var(--shadow-sm);
+}
+
+.justificativa-titulo {
+  font-size: 0.6875rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--go-text-heading);
+}
+
+/* Creme contra o branco do compositor: a caixa não é a mesma caixa. */
+.justificativa .campo textarea {
+  background: var(--go-cream);
+  min-height: 88px;
+}
+
 /* ---------- recibo de confirmação (RF-18) ------------------------------ */
 
 /**

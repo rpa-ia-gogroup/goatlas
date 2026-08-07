@@ -249,6 +249,28 @@ export class RepositorioConversas {
     return r.rowsWritten
   }
 
+  /**
+   * Existe bloqueio ainda NÃO sobreposto? — RF-13, RN-07.
+   *
+   * É o que faz o bloqueio durar mais que o turno em que disparou. Sem isto a
+   * regra só valia para a resposta imediata: bastava mandar outra mensagem
+   * qualquer para o servidor montar a proposta, porque nenhuma regra dispara de
+   * novo (a busca já rodou) e `bloqueio` volta `null` no turno seguinte. O
+   * chamado nascia sem `override_registrado` entre o bloqueio e a criação — a
+   * saída existia, mas não ficava registrada, que é metade do que RN-07 pede.
+   *
+   * O efeito colateral era pior que o furo: quem escapava pelo chat não entrava
+   * na taxa de override, então o painel mostrava deflexão alta justamente
+   * quando ela falhou.
+   */
+  async temBloqueioPendente(conversaId: string): Promise<boolean> {
+    const r = await this.db.query(
+      `SELECT 1 FROM bloqueios WHERE conversa_id = ? AND houve_override = 0 LIMIT 1`,
+      [conversaId],
+    )
+    return r.rows.length > 0
+  }
+
   async listarBloqueios(conversaId: string): Promise<
     readonly { regra: string; motivo: string; houveOverride: boolean }[]
   > {
