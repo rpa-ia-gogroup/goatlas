@@ -1537,7 +1537,26 @@ async function tratarCron(
       acao: 'acesso_negado',
       recurso: caminho,
       resultado: 'negado',
-      detalhe: { motivo: 'cron_nao_autenticado' },
+      // ⚠️ **Diagnóstico sem vazar segredo.** A documentação da plataforma diz que o
+      // header é "assinado", e não está confirmado se o que chega é a chave crua ou uma
+      // assinatura derivada dela — se for assinatura, a comparação por igualdade nunca casa
+      // e o sintoma é idêntico a "esqueci de configurar". Estes três campos distinguem os
+      // casos na primeira rodada:
+      //
+      //   headerAusente → o cron não está batendo aqui (rota errada, ou o edge barrou)
+      //   chaveAusente  → falta o secret `GODEPLOY_CRON_KEY`
+      //   tamanhos diferentes → é OUTRO formato (assinatura, ou a chave errada)
+      //   tamanhos iguais e não casou → é a chave errada, mesmo formato
+      //
+      // O que vai para a auditoria é **comprimento**, nunca valor nem prefixo. Comprimento
+      // de segredo é vazamento desprezível; prefixo não é, e é por isso que ele fica fora.
+      detalhe: {
+        motivo: 'cron_nao_autenticado',
+        headerAusente: enviado === null,
+        chaveAusente: !esperado,
+        tamanhoRecebido: enviado?.length ?? 0,
+        tamanhoEsperado: esperado?.length ?? 0,
+      },
     })
     return ERROS.semPermissao()
   }

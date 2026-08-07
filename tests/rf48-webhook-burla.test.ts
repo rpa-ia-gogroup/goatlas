@@ -525,3 +525,65 @@ describe('T-210 — a marca-d\'água só avança no que deu certo', () => {
     expect(await ctx.marcaAguaPolling.obter()).toBe(AGORA)
   })
 })
+
+// =============================================================================
+// Diagnóstico do cron — sem vazar segredo
+// =============================================================================
+
+describe('cron recusado registra o DIAGNÓSTICO, não o segredo', () => {
+  async function tentarCron(headers: Record<string, string>, chave?: string) {
+    return tratarRequisicao(
+      new Request('https://x/api/cron/polling-jira', { method: 'POST', headers }),
+      ctx,
+      chave === undefined ? {} : { GODEPLOY_CRON_KEY: chave },
+    )
+  }
+
+  async function ultimoDetalhe(): Promise<Record<string, unknown>> {
+    const linhas = linhasComoObjetos<{ detalhe_json: string }>(
+      await db.query(
+        `SELECT detalhe_json FROM auditoria WHERE acao = 'acesso_negado'
+          ORDER BY criado_em DESC, id DESC LIMIT 1`,
+        [],
+      ),
+    )
+    return JSON.parse(linhas[0]?.detalhe_json ?? '{}') as Record<string, unknown>
+  }
+
+  it('sem header: `headerAusente` — o cron não está batendo aqui', async () => {
+    expect((await tentarCron({}, 'chave-certa')).status).toBe(403)
+    const d = await ultimoDetalhe()
+    expect(d.headerAusente).toBe(true)
+    expect(d.chaveAusente).toBe(false)
+  })
+
+  it('sem secret: `chaveAusente` — falta configurar, não é chave errada', async () => {
+    expect((await tentarCron({ 'x-godeploy-cron': 'qualquer' })).status).toBe(403)
+    const d = await ultimoDetalhe()
+    expect(d.chaveAusente).toBe(true)
+  })
+
+  it('tamanhos DIFERENTES apontam formato diferente (assinatura, p.ex.)', async () => {
+    // É esta linha que responde "o header é a chave crua ou uma assinatura?" na primeira
+    // rodada de cron em produção, sem ninguém precisar logar o valor.
+    await tentarCron({ 'x-godeploy-cron': 'a'.repeat(64) }, 'gdk_curta')
+    const d = await ultimoDetalhe()
+    expect(d.tamanhoRecebido).toBe(64)
+    expect(d.tamanhoEsperado).toBe('gdk_curta'.length)
+  })
+
+  it('⚠️ o VALOR e o PREFIXO nunca vão para a auditoria — só o comprimento', async () => {
+    await tentarCron({ 'x-godeploy-cron': 'gdk_SEGREDO_QUE_NAO_PODE_VAZAR' }, 'gdk_OUTRO_SEGREDO')
+    const linhas = linhasComoObjetos<{ detalhe_json: string }>(
+      await db.query(`SELECT detalhe_json FROM auditoria WHERE acao = 'acesso_negado'`, []),
+    )
+    for (const linha of linhas) {
+      expect(linha.detalhe_json).not.toContain('SEGREDO')
+      expect(linha.detalhe_json).not.toContain('gdk_')
+    }
+  })
+
+  it('com a chave certa, a rota funciona', async () => {
+    expect((await tentarCron({ 'x-godeploy-cron': CRON_KEY }, CRON_KEY)).status).toBe(200)
+  })
+})

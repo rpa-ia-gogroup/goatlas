@@ -75,14 +75,21 @@ e só então remova o modo demo:
 | `EMAIL_API_KEY` | Só importa se o canal escolhido for e-mail. Sem ela o canal recusa em vez de fingir envio |
 | `GOATLAS_CANAL_NOTIFICACAO` (**Q11**) | Sem ele, o aviso é registrado e suprimido e a tela diz "ninguém definiu canal". **Com `nenhum`** (a decisão de `D-20`) o efeito é o mesmo, mas a tela passa a dizer "os avisos vivem aqui" — a diferença é a decisão, não o comportamento. Não é secret: é URL/enum |
 | `GOATLAS_BASE_PUBLICA` | As notificações saem **sem link**. O cron não tem `Request` de onde derivar o host, então este valor não é descobrível. Barra final é tolerada |
-| `LLM_BASE_URL` + `LLM_MODEL` | Sem eles a chave de IA sozinha não liga nada: `LLM_BASE_URL` é a base compatível com OpenAI do proxy corporativo (`ai-proxy.gogroupbr.com`, ver `D-05`) e o cliente concatena `/chat/completions`. Barra final é tolerada desde `D-20` |
+| `LLM_BASE_URL` + `LLM_MODEL` | Sem eles a chave de IA sozinha não liga nada. **Valor medido em 07/08/2026, não inferido:** `https://ai-proxy.gogroupbr.com/v1` — `/v1/chat/completions` responde **401** (rota existe, pede auth) e `/chat/completions` responde **404**. A URL **sem** `/v1` daria 404 parecendo "a IA caiu". Barra final é tolerada (`D-20`) |
 
-**Os valores de `D-20`, para copiar:**
+**Os valores não sensíveis, para copiar** (já registrados em `9c47f42f`):
 
 ```
 GOATLAS_BASE_PUBLICA      = https://goatlas.devgogroup.com
 GOATLAS_CANAL_NOTIFICACAO = nenhum
+LLM_BASE_URL              = https://ai-proxy.gogroupbr.com/v1
+LLM_MODEL                 = gpt-5.4-mini
 ```
+
+⚠️ **Como descobrir o `/v1` sem chave, se um dia o proxy mudar:** `curl -o /dev/null -w
+"%{http_code}" <base>/v1/models` — **401** significa "rota existe, falta auth" e **404**
+significa "não é aqui". Distinguir os dois com um `curl` é mais rápido que debugar um
+`ClienteIAIndisponivel` que na verdade era caminho errado.
 
 ⚠️ Estes dois **não são secret** — são URL e enum. Estão como env porque variam por
 ambiente (staging tem outro host), não porque sejam sensíveis.
@@ -168,6 +175,29 @@ A rota exige o header assinado `X-Godeploy-Cron` conferido contra
 `GODEPLOY_CRON_KEY`. **Sem a chave configurada a rota é fechada** (fail-closed) —
 o contrário deixaria a rota aberta justamente na instalação que esqueceu de
 configurar.
+
+⚠️ **A plataforma NÃO provisiona `GODEPLOY_CRON_KEY`** — conferido no `godaily`, onde ela
+foi criada à mão junto com os outros secrets. E cuidado com a **confusão de credencial**:
+uma chave de prefixo `gdk_` parece ser da **plataforma** (a que deploya e lê secrets de
+todos os seus apps), não do cron deste app. Guardar uma dessas num env de app exporia,
+dentro do app, algo com muito mais poder do que ele precisa — é a mesma família de troca
+já registrada em `D-14`.
+
+**Como saber se casou, sem logar segredo nenhum:** o `detalhe_json` da auditoria de
+`acesso_negado` traz `headerAusente`, `chaveAusente`, `tamanhoRecebido` e
+`tamanhoEsperado` — **comprimentos, nunca valores**. Basta olhar a auditoria depois da
+primeira rodada:
+
+| O que aparece | O que significa |
+|---|---|
+| `headerAusente: true` | O cron não está chegando à rota (rota errada, ou o edge barrou) |
+| `chaveAusente: true` | Falta o secret `GODEPLOY_CRON_KEY` |
+| tamanhos **diferentes** | O header é de **outro formato** — provavelmente uma assinatura derivada, não a chave crua |
+| tamanhos **iguais** e recusou | É a chave errada, mesmo formato |
+| nada na auditoria e `200` no log | Funcionou |
+
+Essa distinção existe porque o sintoma dos quatro casos é idêntico (403), e adivinhar entre
+eles custa mais que quatro campos de diagnóstico.
 
 ### Webhook do Jira (RF-48)
 
