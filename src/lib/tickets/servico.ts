@@ -34,6 +34,8 @@ export interface DadosAbertura {
   readonly via: ViaAbertura
   readonly conversaId: string | null
   readonly verificadoRegras: boolean
+  /** RF-19, T-304 — congelada no vínculo. `null` = mapa não conhece o e-mail. */
+  readonly area: string | null
   readonly payload: PayloadSubmissao
 }
 
@@ -57,6 +59,8 @@ export class ServicoChamados {
     conversa: Conversa,
     serviceDeskId: string,
     chaveIdempotencia: string,
+    /** RF-19, T-304 — área do solicitante no momento da criação. */
+    area: string | null = null,
   ): Promise<ResultadoCriacao> {
     const autorizacao = autorizarCriacao(conversa)
     if (!autorizacao.ok) {
@@ -78,6 +82,7 @@ export class ServicoChamados {
       via: 'conversa',
       conversaId: conversa.id,
       verificadoRegras: autorizacao.verificadoPelasRegras,
+      area,
       payload: {
         titulo: proposta.titulo,
         descricao: proposta.descricao,
@@ -101,6 +106,7 @@ export class ServicoChamados {
     solicitanteEmail: string
     chaveIdempotencia: string
     payload: PayloadSubmissao
+    area?: string | null
   }): Promise<ResultadoCriacao> {
     return this.abrir({
       solicitanteEmail: dados.solicitanteEmail,
@@ -108,6 +114,7 @@ export class ServicoChamados {
       via: 'formulario',
       conversaId: null,
       verificadoRegras: false,
+      area: dados.area ?? null,
       payload: dados.payload,
     })
   }
@@ -162,6 +169,7 @@ export class ServicoChamados {
         conversaId: dados.conversaId,
         via: dados.via,
         verificadoRegras: dados.verificadoRegras,
+        area: dados.area,
       })
 
       await this.auditoria.registrar({
@@ -219,6 +227,9 @@ export class ServicoChamados {
         conversaId: s.conversaId,
         via: s.via,
         verificadoRegras: s.verificadoRegras,
+        // ⚠️ A reconciliação NÃO recalcula a área pelo mapa atual: o vínculo perdido era
+        // de meses atrás, e o mapa de hoje diria a área de hoje (T-304 quer a de então).
+        // `null` é honesto; a pessoa corrige no recibo (T-305) se importar.
       })
       await this.auditoria.registrar({
         atorEmail: s.solicitanteEmail,
@@ -244,6 +255,9 @@ export class ServicoChamados {
         via: s.via,
         conversaId: s.conversaId,
         verificadoRegras: s.verificadoRegras,
+        // O reprocessamento não conhece a área: ela foi decidida na requisição original
+        // e vive no vínculo, que este caminho só cria se ainda não existir.
+        area: null,
         payload: s.payload,
       })
       if (r.estado === 'criado') criados += 1

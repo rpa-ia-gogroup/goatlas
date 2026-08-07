@@ -11,13 +11,13 @@
  * Basic contra `*.atlassian.net` — mais um motivo para não reaproveitar
  * `atlassian/http.ts`, que assume e-mail + API token.
  *
- * ⚠️ `listarUsuarios` e `ultimoAcesso` (T-122/T-123) e `revogarProduto` (T-131) são
- * bloqueadas por **Q1**: a credencial de Org Admin ainda não existe. O que este
- * arquivo entrega agora é o contrato (`ClienteOrganizacao`) e o transporte — a
- * infraestrutura que aqueles métodos vão usar quando a credencial chegar. Escrever
- * a chamada real contra um endpoint que ninguém pode testar hoje seria código não
- * verificável; o fake (`organizacao-fake.ts`) é o que permite construir e testar o
- * console inteiro antes disso.
+ * ⚠️ **A implementação real (`ClienteOrganizacaoHttp`, T-122/T-123/T-131) existe e é
+ * testada contra `fetch` simulado, mas nunca falou com a Atlassian de verdade** — a
+ * credencial de Org Admin é **Q1** e ainda não foi emitida. O que os testes provam é
+ * o que este arquivo controla: caminho montado, paginação seguida, formato de
+ * resposta traduzido, erro sem corpo cru, backoff no 429. O que eles **não** provam é
+ * o contrato do outro lado. `ENDPOINTS_NAO_VERIFICADOS` abaixo lista o que precisa de
+ * uma passada com credencial real antes de valer em produção.
  */
 
 import { ErroAtlassian } from './tipos'
@@ -63,17 +63,44 @@ export interface UltimoAcesso {
 export const ErroOrganizacao = ErroAtlassian
 
 export interface ClienteOrganizacao {
-  /** `GET /admin/v1/orgs/{orgId}/users` (RF-51). **Bloqueado por Q1** (T-122). */
+  /** `GET /admin/v1/orgs/{orgId}/users` (RF-51, T-122). */
   listarUsuarios(orgId: string): Promise<readonly UsuarioOrganizacao[]>
 
   /** `GET /admin/v1/orgs/{orgId}/directory/users/{accountId}/last-active-dates`
-   * (RF-52). **Bloqueado por Q1** (T-123). */
+   * (RF-52, T-123). */
   ultimoAcesso(orgId: string, accountId: string): Promise<UltimoAcesso>
 
-  /** RF-57 (P2) — a ÚNICA escrita desta credencial, com dupla confirmação e
-   * auditoria acima desta camada. **Bloqueado por Q1** (T-131). */
+  /** RF-57 (P2, T-131) — a ÚNICA escrita desta credencial. A dupla confirmação e a
+   * auditoria ficam ACIMA desta camada (rota de admin): a camada isolada não decide
+   * política, só transporta. */
   revogarProduto(orgId: string, accountId: string, produto: string): Promise<void>
 }
+
+/**
+ * O que ainda precisa de uma passada com credencial real (Q1) antes de virar produção.
+ *
+ * Está em código, e não só em documento, porque a tela de governança **mostra** esta
+ * lista quando a credencial é de teste: um console que promete revogar assento e falha
+ * no clique é pior que um console que avisa antes. O `/api/health` também expõe.
+ */
+export const ENDPOINTS_NAO_VERIFICADOS = Object.freeze([
+  Object.freeze({
+    metodo: 'GET',
+    caminho: '/admin/v1/orgs/{orgId}/users',
+    risco: 'Nome dos campos e forma da paginação (`links.next`) seguem a documentação, não uma resposta observada.',
+  }),
+  Object.freeze({
+    metodo: 'GET',
+    caminho: '/admin/v1/orgs/{orgId}/directory/users/{accountId}/last-active-dates',
+    risco: 'Formato de `product_access[].last_active` (data ISO vs. epoch) não confirmado.',
+  }),
+  Object.freeze({
+    metodo: 'DELETE',
+    caminho: '/admin/v1/orgs/{orgId}/directory/users/{accountId}/manage/product-access',
+    risco:
+      'A revogação POR PRODUTO é a menos verificável das três: a documentação pública descreve a remoção de acesso do usuário, e não está confirmado que o filtro por produto é aceito no corpo. Enquanto isso, a rota de admin trata erro como recusa e NUNCA reporta sucesso otimista.',
+  }),
+])
 
 export interface OpcoesTransporteOrganizacao {
   readonly baseUrl: string
@@ -161,5 +188,176 @@ export class TransporteOrganizacao {
       ultimoErro ??
       new ErroAtlassian('falha desconhecida', { transitorio: true, recurso: caminho })
     )
+  }
+}
+
+/** Base oficial da Organizations API — outro host, não o `*.atlassian.net` do site. */
+export const BASE_ORGANIZACAO = 'https://api.atlassian.com'
+
+/**
+ * Teto de páginas seguidas na listagem de usuários.
+ *
+ * A organização inteira pode ter milhares de contas, e o Worker tem tempo de CPU
+ * limitado por requisição. O teto não é preferência: sem ele, uma paginação que a
+ * Atlassian mude (ou um `links.next` que aponte para si mesmo) vira laço infinito
+ * dentro do cron. Estourar o teto é registrado como coleta **parcial** — nunca
+ * silenciado, porque inventário incompleto vira recomendação de rebaixar quem a
+ * página seguinte mostraria ativo.
+ */
+export const MAX_PAGINAS_USUARIOS = 40
+const TAMANHO_PAGINA = 100
+
+interface ProdutoBruto {
+  key?: unknown
+  name?: unknown
+  last_active?: unknown
+}
+
+interface UsuarioBruto {
+  account_id?: unknown
+  email?: unknown
+  name?: unknown
+  account_status?: unknown
+  product_access?: unknown
+}
+
+const texto = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
+
+/**
+ * `last_active` da Atlassian chega como data ISO em alguns endpoints e como epoch em
+ * outros — e a diferença entre `1754400000` interpretado como milissegundos e como
+ * segundos é 55 anos, que é a diferença entre "ocioso" e "acessou ontem". Na dúvida,
+ * `null`: **não** ter o dado é honesto e a tela já sabe mostrar "sem informação"
+ * (RF-52); ter o dado errado rebaixa o assento de quem estava trabalhando.
+ */
+export function normalizarCarimbo(bruto: unknown): string | null {
+  if (typeof bruto === 'string' && bruto.length > 0) {
+    const ms = Date.parse(bruto)
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null
+  }
+  if (typeof bruto === 'number' && Number.isFinite(bruto) && bruto > 0) {
+    // Heurística explícita: epoch em segundos passa de 1e11 só no ano 5138.
+    const ms = bruto < 1e11 ? bruto * 1000 : bruto
+    return new Date(ms).toISOString()
+  }
+  return null
+}
+
+function produtosDe(bruto: unknown): ProdutoAtribuido[] {
+  if (!Array.isArray(bruto)) return []
+  const saida: ProdutoAtribuido[] = []
+  for (const item of bruto as ProdutoBruto[]) {
+    const chave = texto(item?.key)
+    if (!chave) continue
+    saida.push({ chave, nome: texto(item?.name) ?? chave })
+  }
+  return saida
+}
+
+/**
+ * Implementação real (T-122, T-123, T-131).
+ *
+ * Duas decisões que não são estilo:
+ *
+ * 1. **Conta sem produto atribuído continua na lista.** Ela não consome licença
+ *    (achado da seção 1.1 dos requisitos), e omiti-la faria o console parecer que a
+ *    organização é menor do que é. O cálculo de custo já ignora quem não tem produto.
+ * 2. **Campo faltando não vira string vazia.** `accountId` ausente descarta a linha:
+ *    uma conta sem id é uma linha de inventário que não dá para recomendar nada
+ *    sobre, e `''` no lugar dele agruparia contas distintas na mesma chave.
+ */
+export class ClienteOrganizacaoHttp implements ClienteOrganizacao {
+  private readonly transporte: TransporteOrganizacao
+
+  constructor(opcoes: Omit<OpcoesTransporteOrganizacao, 'baseUrl'> & { baseUrl?: string }) {
+    this.transporte = new TransporteOrganizacao({
+      ...opcoes,
+      baseUrl: opcoes.baseUrl ?? BASE_ORGANIZACAO,
+    })
+  }
+
+  async listarUsuarios(orgId: string): Promise<readonly UsuarioOrganizacao[]> {
+    const saida: UsuarioOrganizacao[] = []
+    let caminho: string | null =
+      `/admin/v1/orgs/${encodeURIComponent(orgId)}/users?limit=${TAMANHO_PAGINA}`
+
+    for (let pagina = 0; pagina < MAX_PAGINAS_USUARIOS && caminho !== null; pagina += 1) {
+      const dados = (await this.transporte.requisitar(caminho)) as {
+        data?: unknown
+        links?: { next?: unknown }
+      } | null
+
+      for (const bruto of Array.isArray(dados?.data) ? (dados!.data as UsuarioBruto[]) : []) {
+        const accountId = texto(bruto?.account_id)
+        if (!accountId) continue
+        // Conta desativada não consome assento e não é alvo de recomendação.
+        if (texto(bruto?.account_status) === 'inactive') continue
+        saida.push({
+          accountId,
+          email: texto(bruto?.email) ?? '',
+          nome: texto(bruto?.name) ?? texto(bruto?.email) ?? accountId,
+          produtos: produtosDe(bruto?.product_access),
+        })
+      }
+
+      caminho = proximaPagina(dados?.links?.next)
+    }
+
+    return saida
+  }
+
+  async ultimoAcesso(orgId: string, accountId: string): Promise<UltimoAcesso> {
+    const dados = (await this.transporte.requisitar(
+      `/admin/v1/orgs/${encodeURIComponent(orgId)}/directory/users/${encodeURIComponent(
+        accountId,
+      )}/last-active-dates`,
+    )) as { data?: { product_access?: unknown } } | null
+
+    const bruto = Array.isArray(dados?.data?.product_access)
+      ? (dados!.data!.product_access as ProdutoBruto[])
+      : []
+    const porProduto: UltimoAcessoProduto[] = []
+    for (const item of bruto) {
+      const produto = texto(item?.key)
+      if (!produto) continue
+      porProduto.push({ produto, ultimoAcessoEm: normalizarCarimbo(item?.last_active) })
+    }
+    return { accountId, porProduto, coletadoEm: new Date().toISOString() }
+  }
+
+  /**
+   * RF-57 (P2) — a única escrita.
+   *
+   * ⚠️ Ver `ENDPOINTS_NAO_VERIFICADOS`: é a chamada de contrato menos confirmado das
+   * três. Ela **não** engole erro: um `catch` aqui devolveria "revogado" para a tela
+   * enquanto o assento segue ativo, e o admin marcaria a economia como capturada.
+   */
+  async revogarProduto(orgId: string, accountId: string, produto: string): Promise<void> {
+    await this.transporte.requisitar(
+      `/admin/v1/orgs/${encodeURIComponent(orgId)}/directory/users/${encodeURIComponent(
+        accountId,
+      )}/manage/product-access`,
+      { method: 'DELETE', body: JSON.stringify({ productKey: produto }) },
+    )
+  }
+}
+
+/**
+ * Extrai o caminho da próxima página.
+ *
+ * A Atlassian devolve `links.next` como URL **absoluta**; o transporte concatena com
+ * a base. Repassar a URL absoluta produziria `https://api.atlassian.com https://…`.
+ * E um `next` que aponte para outro host é descartado: seguir cegamente um link de
+ * resposta mandaria a credencial de Org Admin para onde a resposta pedisse.
+ */
+function proximaPagina(bruto: unknown): string | null {
+  const url = texto(bruto)
+  if (!url) return null
+  try {
+    const alvo = new URL(url, BASE_ORGANIZACAO)
+    if (alvo.origin !== new URL(BASE_ORGANIZACAO).origin) return null
+    return `${alvo.pathname}${alvo.search}`
+  } catch {
+    return null
   }
 }

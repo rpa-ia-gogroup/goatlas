@@ -75,3 +75,39 @@ export function filtrarPublicos(itens: readonly unknown[]): readonly ComentarioP
 export function prefixarAutoria(corpo: string, autorNome: string, autorEmail: string): string {
   return `**${autorNome}** (${autorEmail}) via goatlas:\n\n${corpo}`
 }
+
+/**
+ * O comentário foi escrito pelo solicitante, via app?
+ *
+ * ⚠️ **É o par de `prefixarAutoria`, e a dependência não é óbvia.** O cálculo de SLA
+ * (`notificacoes/sla.ts`) precisa saber qual comentário público é resposta **do time de
+ * tech** — e sob proxy total (`D-01`) o autor perante a API é o mesmo nos dois casos.
+ * O que sobra para distinguir é o prefixo que o próprio app escreveu.
+ *
+ * A spec 001 §10 diz que o formato do prefixo pode mudar. Se mudar aqui sem mudar lá,
+ * comentário do solicitante passa a contar como primeira resposta do time e a aderência
+ * ao SLA sobe sem ninguém ter respondido nada — por isso o teste de `RF-46` gera com
+ * `prefixarAutoria` e lê com esta função, para que divergência quebre a suíte.
+ */
+export function ehComentarioDoSolicitante(corpo: string): boolean {
+  return PREFIXO_GOATLAS.test(corpo.trimStart())
+}
+
+const PREFIXO_GOATLAS = /^\*\*.+?\*\* \(.+?@.+?\) via goatlas:\s*/
+
+/**
+ * Remove o prefixo de autoria, deixando só o que a pessoa escreveu.
+ *
+ * ⚠️ Existe por causa da supressão de ação própria (`RF-48`, `notificacoes/acoes.ts`). A
+ * impressão digital é gravada quando a pessoa **envia** o comentário — texto puro — e
+ * conferida quando o comentário **volta** da Atlassian, já com o prefixo que
+ * `prefixarAutoria` acrescentou. Sem tirar o prefixo antes de normalizar, as duas pontas
+ * geram hashes diferentes, a supressão nunca casa, e cada pessoa é notificada do próprio
+ * comentário — o bug que faz gente desligar a notificação e nunca mais ver as que
+ * importam.
+ *
+ * Corpo sem prefixo volta inalterado: comentário do time de tech não tem o que remover.
+ */
+export function removerPrefixoAutoria(corpo: string): string {
+  return corpo.trimStart().replace(PREFIXO_GOATLAS, '')
+}

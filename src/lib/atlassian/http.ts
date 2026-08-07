@@ -86,6 +86,27 @@ export class TransporteAtlassian {
   }
 
   /**
+   * Upload multipart — `attachTemporaryFile` do JSM (`RF-25`, T-240).
+   *
+   * ⚠️ Dois detalhes que a Atlassian não perdoa:
+   *
+   * 1. **`X-Atlassian-Token: no-check`** é obrigatório. Sem ele o upload é recusado
+   *    como possível CSRF, com um 403 genérico que não explica nada.
+   * 2. **Não se define `Content-Type`.** O `fetch` gera o boundary junto com o corpo;
+   *    declarar `multipart/form-data` à mão produz um boundary que não corresponde ao
+   *    do corpo, e a Atlassian responde 400 como se o arquivo estivesse errado.
+   */
+  async requisitarMultipart(caminho: string, form: FormData): Promise<unknown> {
+    const resposta = await this.enviar(
+      caminho,
+      { method: 'POST', corpoBruto: form, headers: { 'X-Atlassian-Token': 'no-check' } },
+      'application/json',
+    )
+    const texto = await resposta.text()
+    return texto.length > 0 ? (JSON.parse(texto) as unknown) : null
+  }
+
+  /**
    * Baixa **bytes**, não JSON — anexo de página (`RNF-02`: o navegador não fala com
    * a Atlassian, então o app re-serve).
    *
@@ -129,7 +150,13 @@ export class TransporteAtlassian {
    */
   private async enviar(
     caminho: string,
-    init: { method?: string; body?: string; headers?: Record<string, string> },
+    init: {
+      method?: string
+      body?: string
+      /** `FormData` — o `fetch` gera o boundary; nunca declarar `Content-Type`. */
+      corpoBruto?: FormData
+      headers?: Record<string, string>
+    },
     aceitar: string,
   ): Promise<Response> {
     const url = `${this.opcoes.baseUrl}${caminho}`
@@ -146,6 +173,7 @@ export class TransporteAtlassian {
           ...init.headers,
         },
         ...(init.body === undefined ? {} : { body: init.body }),
+        ...(init.corpoBruto === undefined ? {} : { body: init.corpoBruto }),
       })
 
       if (resposta.ok) return resposta

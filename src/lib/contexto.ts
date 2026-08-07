@@ -11,7 +11,7 @@ import { ClienteAtlassianHttp } from './atlassian/cliente'
 import { ClienteAtlassianFake } from './atlassian/fake'
 import type { ClienteAtlassian } from './atlassian/tipos'
 import { ClienteOrganizacaoFake } from './atlassian/organizacao-fake'
-import type { ClienteOrganizacao } from './atlassian/organizacao'
+import { ClienteOrganizacaoHttp, type ClienteOrganizacao } from './atlassian/organizacao'
 import { ClienteIAHttp } from './ia/cliente'
 import { ClienteIAFake } from './ia/fake'
 import { ClienteIAIndisponivel } from './ia/indisponivel'
@@ -29,6 +29,17 @@ import { Outbox } from './tickets/outbox'
 import { RepositorioVinculos } from './tickets/vinculos'
 import { ServicoChamados } from './tickets/servico'
 import { RepositorioInventario } from './governanca/inventario'
+import {
+  MarcaAguaPolling,
+  RepositorioAlertasSla,
+  RepositorioAvaliacoesSla,
+  RepositorioNotificacoes,
+} from './notificacoes/dedupe'
+import { RepositorioAcoesProprias } from './notificacoes/acoes'
+import { RepositorioPreferencias } from './notificacoes/preferencias'
+import { ServicoNotificacoes, type ValoresNotificacao } from './notificacoes/servico'
+import { CanalEmail, CanalFake, CanalGoogleChat, CanalIndisponivel } from './notificacoes/canais'
+import type { Canal, NomeCanal } from './notificacoes/tipos'
 
 /** O que o GoDeploy injeta. `DB` é a plataforma; o resto são secrets. */
 export interface EnvGoDeploy extends BootstrapEnv {
@@ -43,6 +54,14 @@ export interface EnvGoDeploy extends BootstrapEnv {
   readonly LLM_FALLBACK?: string
   readonly LLM_FALLBACK_MODEL?: string
   readonly GODEPLOY_CRON_KEY?: string
+  /**
+   * RF-48 — segredo que a Atlassian estampa no webhook do Jira. Sem ele a rota de
+   * webhook **não funciona** (fail-closed): o contrário deixaria aberta justamente a
+   * única superfície pública do app.
+   */
+  readonly GOATLAS_WEBHOOK_SEGREDO?: string
+  /** Q11 — chave do provedor de e-mail transacional (Workers não têm SMTP). */
+  readonly EMAIL_API_KEY?: string
   /** `1` usa os fakes — para desenvolvimento antes de Q1. Nunca em produção real. */
   readonly GOATLAS_USAR_FAKES?: string
   /**
@@ -68,12 +87,32 @@ export interface Contexto {
   readonly chamados: ServicoChamados
   readonly orquestrador: Orquestrador
   /**
-   * `null` fora dos fakes: a credencial de Org Admin ainda não existe (Q1), e não
-   * há `ClienteOrganizacaoHttp` para instanciar — T-122/T-123 é o que a criará.
-   * Rota de governança trata `null` como "não configurado", nunca como erro.
+   * `null` = **não configurada** (sem `ATLASSIAN_ORG_API_KEY`). A rota de governança
+   * trata isso como ausência de configuração, nunca como erro — é a diferença entre
+   * "ninguém emitiu a credencial de Org Admin ainda" (Q1) e "a governança quebrou".
    */
   readonly organizacao: ClienteOrganizacao | null
   readonly inventarioAssentos: RepositorioInventario
+  /** Fase 3 — notificação, dedupe e alerta de SLA (RF-44 a RF-48). */
+  readonly notificacoes: RepositorioNotificacoes
+  readonly acoesProprias: RepositorioAcoesProprias
+  readonly preferencias: RepositorioPreferencias
+  readonly marcaAguaPolling: MarcaAguaPolling
+  readonly avaliacoesSla: RepositorioAvaliacoesSla
+  readonly notificador: ServicoNotificacoes
+  /**
+   * Resolve o canal pelo nome (RF-45).
+   *
+   * Exposto no contexto porque em modo fake ele devolve **a mesma instância** de
+   * `CanalFake` a cada chamada — é assim que o teste injeta falha de canal e depois
+   * afirma sobre o que foi "entregue", do mesmo jeito que `ClienteAtlassianFake` sustenta
+   * os testes das fases anteriores.
+   */
+  readonly canalPor: (nome: NomeCanal) => Canal
+  /** Os valores derivados da config que o serviço de notificação usa. */
+  readonly valoresNotificacao: ValoresNotificacao
+  /** Segredo do webhook do Jira (RF-48) — só existe aqui, como os outros secrets. */
+  readonly segredoWebhook: string | undefined
   readonly agora: () => string
   readonly novoId: () => string
   readonly usandoFakes: boolean
@@ -150,14 +189,17 @@ export async function montarContexto(
           ...(env.LLM_FALLBACK_MODEL ? { modeloFallback: env.LLM_FALLBACK_MODEL } : {}),
         })
 
-  // `null` fora dos fakes: a credencial de Org Admin é Q1, e não há
-  // `ClienteOrganizacaoHttp` para instanciar ainda (T-122/T-123). A rota de
-  // governança trata `null` como "não configurado", nunca como erro (RNF-18).
+  // A governança é a única camada com credencial de Org Admin (RNF-04) e a única com
+  // três estados em vez de dois: fake · real · **não configurada**. `null` continua
+  // significando "não configurada" — sem `ATLASSIAN_ORG_API_KEY` não existe cliente,
+  // e a rota trata isso como ausência de configuração, nunca como erro (RNF-18).
   const organizacao: ClienteOrganizacao | null = reaproveitar.organizacao
     ? reaproveitar.organizacao
     : usandoFakes
       ? new ClienteOrganizacaoFake()
-      : null
+      : env.ATLASSIAN_ORG_API_KEY
+        ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY })
+        : null
 
   if (modoDemo) {
     // Os fakes são semeados a cada montagem porque o Worker é stateless: o estado
@@ -176,6 +218,68 @@ export async function montarContexto(
   const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId)
   const inventarioAssentos = new RepositorioInventario(env.DB, novoId)
 
+  // --- Fase 3: notificação (RF-44 a RF-48) ----------------------------------
+  const repoNotificacoes = new RepositorioNotificacoes(env.DB, agora)
+  const alertasSla = new RepositorioAlertasSla(env.DB, agora)
+  const avaliacoesSla = new RepositorioAvaliacoesSla(env.DB, agora)
+  const acoesProprias = new RepositorioAcoesProprias(env.DB, agora, novoId)
+  const preferencias = new RepositorioPreferencias(env.DB, agora)
+  const marcaAguaPolling = new MarcaAguaPolling(env.DB, agora)
+
+  /**
+   * Resolve o canal pelo nome.
+   *
+   * ⚠️ Fora dos fakes, canal sem configuração vira `CanalIndisponivel` — **nunca** o
+   * fake. É o mesmo raciocínio de `ClienteIAIndisponivel` (T-132): se o lugar do canal
+   * não configurado fosse um dublê, a fila esvaziaria em produção marcando "enviada"
+   * com ninguém recebendo nada. Ausência de configuração nega e denuncia.
+   */
+  const canaisFake = new Map<NomeCanal, Canal>()
+  const canalPor = (nome: NomeCanal): Canal => {
+    if (usandoFakes) {
+      const existente = canaisFake.get(nome)
+      if (existente) return existente
+      const novo = new CanalFake(nome)
+      canaisFake.set(nome, novo)
+      return novo
+    }
+    if (nome === 'chat') {
+      return valores.chat_webhook_url
+        ? new CanalGoogleChat({ endpoint: valores.chat_webhook_url })
+        : new CanalIndisponivel()
+    }
+    if (nome === 'email') {
+      return valores.email_endpoint
+        ? new CanalEmail({
+            endpoint: valores.email_endpoint,
+            remetente: valores.email_remetente ?? 'goatlas@gocase.com',
+            apiKey: env.EMAIL_API_KEY ?? null,
+          })
+        : new CanalIndisponivel()
+    }
+    return new CanalIndisponivel()
+  }
+
+  const valoresNotificacao: ValoresNotificacao = {
+    canalPadrao: valores.canal_notificacao_padrao,
+    baseApp: valores.base_publica_app,
+    fracaoAvisoSla: valores.sla_fracao_aviso,
+  }
+
+  const notificador = new ServicoNotificacoes(
+    repoNotificacoes,
+    alertasSla,
+    avaliacoesSla,
+    acoesProprias,
+    preferencias,
+    vinculos,
+    atlassian,
+    canalPor,
+    auditoria,
+    novoId,
+    agora,
+  )
+
   return {
     db: env.DB,
     config,
@@ -191,6 +295,15 @@ export async function montarContexto(
     orquestrador,
     organizacao,
     inventarioAssentos,
+    notificacoes: repoNotificacoes,
+    acoesProprias,
+    preferencias,
+    marcaAguaPolling,
+    avaliacoesSla,
+    notificador,
+    canalPor,
+    valoresNotificacao,
+    segredoWebhook: env.GOATLAS_WEBHOOK_SEGREDO,
     agora,
     novoId,
     usandoFakes,

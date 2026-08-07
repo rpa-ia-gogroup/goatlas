@@ -338,6 +338,50 @@ export interface ClienteAtlassian {
   /** Reconciliação de vínculos órfãos pelo campo "Solicitante" (RNF-21). */
   buscarChamadosPorChaveIdempotencia(chave: string): Promise<readonly ChamadoCriado[]>
 
+  /**
+   * Chamados alterados **desde** um instante — polling incremental (RF-47, T-210).
+   *
+   * ⚠️ `desde: null` NÃO significa "traga tudo". A implementação recua uma janela curta
+   * a partir de agora: varredura completa é a forma mais fácil de descobrir os burst
+   * limits não publicados da Atlassian do jeito ruim (`R-02`, `RNF-15`), e no primeiro
+   * boot não há histórico de notificação para recuperar de qualquer forma.
+   */
+  buscarChamadosAtualizadosDesde(params: {
+    readonly desde: string | null
+    readonly limite: number
+  }): Promise<readonly { readonly issueKey: string; readonly atualizadoEm: string }[]>
+
+  /**
+   * Anexa arquivo a um chamado — RF-25, RF-34, T-240.
+   *
+   * São **dois passos** no JSM e não há como pular: `attachTemporaryFile` devolve só
+   * `temporaryAttachmentIds`, e é um segundo `POST` que os converte em anexo do
+   * chamado. O primeiro passo é multipart e exige `X-Atlassian-Token: no-check`.
+   */
+  anexarArquivo(
+    serviceDeskId: string,
+    issueKey: string,
+    arquivo: { readonly nome: string; readonly tipo: string; readonly bytes: ArrayBuffer },
+  ): Promise<void>
+
+  /**
+   * Transições que o workflow do JSM oferece **ao cliente** (RF-36, T-242).
+   *
+   * Lista vazia é resposta normal, não erro: se o projeto não expõe transição ao
+   * customer, a UI simplesmente não mostra o botão. O app não inventa transição que o
+   * workflow não tem — isso é configuração do projeto, não do app.
+   */
+  listarTransicoes(issueKey: string): Promise<readonly { readonly id: string; readonly nome: string }[]>
+
+  transicionar(issueKey: string, transicaoId: string): Promise<void>
+
+  /**
+   * RF-60 — taxa de 429 acumulada. Sob API token é a **única** telemetria de orçamento
+   * que existe (`RNF-15`): a Atlassian não publica o limite e só manda os cabeçalhos
+   * `X-RateLimit-*` em respostas 429.
+   */
+  telemetria(): { readonly total429: number; readonly totalRequisicoes: number }
+
   /** Health check (RF-59). */
   verificarSaude(): Promise<{ readonly ok: boolean; readonly detalhe: string }>
 }

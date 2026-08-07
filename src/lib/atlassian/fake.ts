@@ -134,7 +134,26 @@ export interface EstadoFake {
      */
     paginaRestrita: ModoFalha
     obterAnexo: ModoFalha
+    /** T-210 — polling fora do ar não pode avançar a marca-d'água. */
+    buscarAtualizados: ModoFalha
+    /** T-240 — anexo falha sem derrubar a criação do chamado (RNF-18). */
+    anexarArquivo: ModoFalha
+    /** T-242 — projeto sem transição exposta ao cliente é caso normal, não falha. */
+    transicionar: ModoFalha
   }
+  /**
+   * Relógio do fake, para `criadoEm`/`atualizadoEm` do chamado criado.
+   *
+   * O default é a **epoch** por compatibilidade com os testes das fases anteriores, que
+   * afirmam sobre esse valor. Quem testa SLA (`RF-46`) precisa de uma data plausível — um
+   * chamado criado em 1970 está estourado por construção, o que esconderia a diferença
+   * entre "dentro do prazo" e "sem prazo calculável".
+   */
+  relogio: () => string
+  /** T-242 — transições que o "workflow" oferece ao cliente. Vazio = sem botão. */
+  transicoes: Map<string, { id: string; nome: string; statusDestino: string }[]>
+  /** T-240 — anexos recebidos por chamado, para o teste afirmar sobre eles. */
+  anexosDeChamado: Map<string, { nome: string; tipo: string; tamanho: number }[]>
 }
 
 export interface RegistroChamada {
@@ -178,6 +197,9 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       historico: inicial.historico ?? [],
       comentarios: inicial.comentarios ?? new Map(),
       chamados: inicial.chamados ?? new Map(),
+      relogio: inicial.relogio ?? (() => new Date(0).toISOString()),
+      transicoes: inicial.transicoes ?? new Map(),
+      anexosDeChamado: inicial.anexosDeChamado ?? new Map(),
       falhas: {
         criarChamado: 'nenhum',
         buscarConfluence: 'nenhum',
@@ -187,8 +209,45 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
         obterCamposDoTipo: 'nenhum',
         paginaRestrita: 'nenhum',
         obterAnexo: 'nenhum',
+        buscarAtualizados: 'nenhum',
+        anexarArquivo: 'nenhum',
+        transicionar: 'nenhum',
         ...inicial.falhas,
       },
+    }
+  }
+
+  /**
+   * Muda o chamado como o time de tech mudaria — só para teste e demonstração.
+   *
+   * Existe porque a Fase 3 precisa encenar o outro lado: status que muda, comentário
+   * que o agente escreve. Sem isso, o teste de notificação só conseguiria observar o
+   * que o próprio app faz — e é exatamente o que ele **não** deve notificar (`RF-48`).
+   */
+  simularMudancaDoTime(
+    issueKey: string,
+    mudanca: { status?: string; comentarioPublico?: { corpo: string; autorNome: string; criadoEm: string }; atualizadoEm?: string },
+  ): void {
+    const atual = this.estado.chamados.get(issueKey)
+    if (atual) {
+      this.estado.chamados.set(issueKey, {
+        ...atual,
+        status: mudanca.status ?? atual.status,
+        atualizadoEm: mudanca.atualizadoEm ?? atual.atualizadoEm,
+      })
+    }
+    if (mudanca.comentarioPublico) {
+      const atuais = this.estado.comentarios.get(issueKey) ?? []
+      this.estado.comentarios.set(issueKey, [
+        ...atuais,
+        {
+          id: `t${atuais.length + 1}`,
+          corpo: mudanca.comentarioPublico.corpo,
+          autorNome: mudanca.comentarioPublico.autorNome,
+          criadoEm: mudanca.comentarioPublico.criadoEm,
+          publico: true,
+        },
+      ])
     }
   }
 
@@ -234,8 +293,8 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       descricao: dados.descricao,
       status: 'Aberto',
       prioridade: dados.prioridade,
-      criadoEm: new Date(0).toISOString(),
-      atualizadoEm: new Date(0).toISOString(),
+      criadoEm: this.estado.relogio(),
+      atualizadoEm: this.estado.relogio(),
       slaPrimeiraResposta: { prazo: null, cumprido: null },
     })
     return criado
@@ -435,6 +494,82 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     this.chamadas.push({ operacao: 'buscarChamadosPorChaveIdempotencia', params: chave })
     const c = this.porChave.get(chave)
     return c ? [c] : []
+  }
+
+  /**
+   * T-210 — chamados alterados desde um instante.
+   *
+   * O fake compara `atualizadoEm` do próprio estado. Ele **não** aplica a margem nem o
+   * formato de JQL: isso é responsabilidade do cliente real, e tem teste próprio
+   * (`montarJqlAtualizados`). Aqui o que interessa é o serviço de notificação receber a
+   * lista certa.
+   */
+  async buscarChamadosAtualizadosDesde(params: {
+    desde: string | null
+    limite: number
+  }): Promise<readonly { issueKey: string; atualizadoEm: string }[]> {
+    this.chamadas.push({ operacao: 'buscarChamadosAtualizadosDesde', params })
+    this.checar(this.estado.falhas.buscarAtualizados, 'buscarChamadosAtualizadosDesde')
+    const desdeMs = params.desde ? Date.parse(params.desde) : Number.NaN
+    return [...this.estado.chamados.values()]
+      .filter((c) => {
+        if (!Number.isFinite(desdeMs)) return true
+        const ms = Date.parse(c.atualizadoEm)
+        return Number.isFinite(ms) ? ms >= desdeMs : true
+      })
+      .map((c) => ({ issueKey: c.issueKey, atualizadoEm: c.atualizadoEm }))
+      .sort((a, b) => a.atualizadoEm.localeCompare(b.atualizadoEm))
+      .slice(0, params.limite)
+  }
+
+  async anexarArquivo(
+    serviceDeskId: string,
+    issueKey: string,
+    arquivo: { nome: string; tipo: string; bytes: ArrayBuffer },
+  ): Promise<void> {
+    this.chamadas.push({
+      operacao: 'anexarArquivo',
+      // ⚠️ Os BYTES não vão para o registro: o teste que imprime `chamadas` num diff
+      // despejaria o arquivo inteiro.
+      params: { serviceDeskId, issueKey, nome: arquivo.nome, tipo: arquivo.tipo },
+    })
+    this.checar(this.estado.falhas.anexarArquivo, 'anexarArquivo')
+    const atuais = this.estado.anexosDeChamado.get(issueKey) ?? []
+    this.estado.anexosDeChamado.set(issueKey, [
+      ...atuais,
+      { nome: arquivo.nome, tipo: arquivo.tipo, tamanho: arquivo.bytes.byteLength },
+    ])
+  }
+
+  async listarTransicoes(issueKey: string): Promise<readonly { id: string; nome: string }[]> {
+    this.chamadas.push({ operacao: 'listarTransicoes', params: issueKey })
+    // Sem falha injetada aqui de propósito: lista vazia (projeto que não expõe
+    // transição ao cliente) é o caso NORMAL de `RF-36`, não uma indisponibilidade.
+    return (this.estado.transicoes.get(issueKey) ?? []).map(({ id, nome }) => ({ id, nome }))
+  }
+
+  async transicionar(issueKey: string, transicaoId: string): Promise<void> {
+    this.chamadas.push({ operacao: 'transicionar', params: { issueKey, transicaoId } })
+    this.checar(this.estado.falhas.transicionar, 'transicionar')
+    const disponiveis = this.estado.transicoes.get(issueKey) ?? []
+    const alvo = disponiveis.find((t) => t.id === transicaoId)
+    if (!alvo) {
+      throw new ErroAtlassian('transição não disponível', {
+        status: 400,
+        transitorio: false,
+        recurso: issueKey,
+      })
+    }
+    const atual = this.estado.chamados.get(issueKey)
+    if (atual) {
+      this.estado.chamados.set(issueKey, { ...atual, status: alvo.statusDestino })
+    }
+  }
+
+  telemetria(): { total429: number; totalRequisicoes: number } {
+    // O fake não faz HTTP: `0/0` é honesto. Inventar número aqui faria a tela de
+    // telemetria (T-234) parecer que há medição de orçamento em modo demonstração.
+    return { total429: 0, totalRequisicoes: 0 }
   }
 
   async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {

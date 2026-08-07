@@ -63,6 +63,68 @@ export interface ConfigValores {
   /** R-08 — limita quantos tickets a Regra 2 lê por conversa. */
   regra2_limite_tickets: number
 
+  // --- Fase 3: notificações, SLA e métricas (spec 003) ----------------------
+  /**
+   * RF-45, Q11 — canal padrão de notificação. `null` = **Q11 não respondida**.
+   *
+   * ⚠️ Neste estado a notificação é registrada e **suprimida**, não descartada: o
+   * console mostra "havia 40 avisos a dar e nenhum canal definido", e no dia da resposta
+   * de Q11 basta preencher este campo (`RF-49`, sem deploy). O default **não** é
+   * "e-mail para o corporativo": notificação não pedida em canal não combinado é o
+   * começo do treinamento para ignorar as notificações do app.
+   */
+  canal_notificacao_padrao: 'chat' | 'email' | 'nenhum' | null
+  /** RF-45, Q11 — webhook do espaço no Google Chat. Vazio = canal de chat indisponível. */
+  chat_webhook_url: string | null
+  /** RF-45, Q11 — endpoint HTTP do provedor de e-mail (Workers não têm SMTP). */
+  email_endpoint: string | null
+  email_remetente: string | null
+  /**
+   * Base pública do app, para o link nas notificações. `null` = mensagem sem link.
+   *
+   * Não é derivável no cron: lá não existe `Request` de onde tirar o host. E linkar
+   * `atlassian.net` derrubaria o clique de quem não tem assento — o mesmo raciocínio da
+   * deflexão em `rules/`.
+   */
+  base_publica_app: string | null
+  /**
+   * RF-46 — fração do prazo a partir da qual o SLA de **primeira resposta** entra em
+   * risco. `0.75` = avisa aos 75%. Configurável porque o número certo só aparece com o
+   * volume real da fila (Fase 4).
+   */
+  sla_fracao_aviso: number
+
+  // --- Fase 4: piloto e rollout (spec 004) ---------------------------------
+  /**
+   * R-06, Q13 — e-mails do piloto. **Vazio tem significado especial aqui:** vazio =
+   * piloto desligado, todo mundo pode abrir chamado (o comportamento das Fases 1-3).
+   *
+   * ⚠️ É a única allowlist do projeto cujo vazio NÃO nega. E é deliberado: as outras
+   * governam **exposição de conteúdo** (`RNF-07`), onde vazio-nega evita vazamento;
+   * esta governa **quem pode pedir ajuda**, onde vazio-nega significaria que um deploy
+   * antes de alguém preencher a lista tranca a empresa inteira fora do canal de
+   * suporte. O fail-closed correto para esta lista é o oposto do das outras.
+   */
+  emails_piloto: string[]
+  /** RF-19, T-303 — mapa `e-mail → área`. Fora do mapa = **sem área**, nunca chutada. */
+  areas_por_email: Record<string, string>
+  /**
+   * O2, T-311 — retrato de assentos antes do projeto, para o antes × depois.
+   * `null` = Fase 0 não rodou; a tela mostra "sem baseline", nunca um número inventado.
+   */
+  baseline_assentos: { readonly coletadoEm: string; readonly porProduto: Record<string, number> } | null
+  /**
+   * RNF-33, T-243 — retenção em dias por tipo de dado. `null` = **guardar**.
+   *
+   * O default é guardar (e não um número "seguro") porque apagar vínculo é apagar o
+   * acesso da pessoa ao próprio chamado (`RF-30`): a retenção precisa ser uma decisão
+   * tomada, não um efeito colateral de um default. `conversas` e `auditoria` podem ser
+   * expurgadas sem esse dano — e a auditoria tem piso próprio, ver `retencao.ts`.
+   */
+  retencao_conversas_dias: number | null
+  retencao_auditoria_dias: number | null
+  retencao_notificacoes_dias: number | null
+
   /** RNF-13 — TTL de cache. */
   ttl_metadados_seg: number
   ttl_conteudo_seg: number
@@ -89,6 +151,19 @@ export const CONFIG_PADRAO: Readonly<ConfigValores> = Object.freeze({
   regra2_campo_agrupamento: 'labels',
   regra2_exemplos_ajuste_operacional: [],
   regra2_limite_tickets: 20,
+  canal_notificacao_padrao: null,
+  chat_webhook_url: null,
+  email_endpoint: null,
+  email_remetente: null,
+  base_publica_app: null,
+  sla_fracao_aviso: 0.75,
+  // Vazio = piloto DESLIGADO (ver o comentário do campo — é a exceção deliberada).
+  emails_piloto: [],
+  areas_por_email: {},
+  baseline_assentos: null,
+  retencao_conversas_dias: null,
+  retencao_auditoria_dias: null,
+  retencao_notificacoes_dias: null,
   ttl_metadados_seg: 900,
   ttl_conteudo_seg: 300,
   limite_requisicoes_por_minuto: 30,
