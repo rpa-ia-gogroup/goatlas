@@ -140,6 +140,23 @@ export function TelaAdmin() {
     setErro(null)
   }
 
+  async function recarregarAssentos() {
+    const [inventario, itens] = await Promise.allSettled([
+      api.adminAssentos(),
+      api.adminRecomendacoesAssentos(),
+    ])
+    setAssentos(
+      inventario.status === 'fulfilled'
+        ? { estado: 'pronto', dado: inventario.value }
+        : { estado: 'falhou' },
+    )
+    setRecomendacoes(
+      itens.status === 'fulfilled'
+        ? { estado: 'pronto', dado: itens.value.itens }
+        : { estado: 'falhou' },
+    )
+  }
+
   async function salvar(chave: string, valor: unknown, rotulo: string) {
     setSalvando(chave)
     setErro(null)
@@ -148,6 +165,17 @@ export function TelaAdmin() {
       await api.adminSalvarConfig(chave as keyof ConfigValores, valor)
       setAviso(`${rotulo} salvo. Já vale na próxima ação de quem estiver usando o app.`)
       await carregarConfig()
+      // ⚠️ Painel que CONSOME a chave salva precisa ser refeito, senão a tela mostra
+      // a resposta anterior e a pessoa conclui que o salvamento não funcionou. Foi
+      // exatamente o que aconteceu: preencher o preço de todos os produtos deixava
+      // o servidor com `custoConfigurado: true` e a tela ainda dizendo "sem preço".
+      //
+      // São só estas duas porque só elas entram no CÁLCULO do painel (`calcularCusto`
+      // lê as duas na rota). Métricas e lacunas são agregados históricos — mudar o
+      // threshold não reescreve o passado, então não há o que recarregar.
+      if (chave === 'custo_mensal_por_produto' || chave === 'assentos_ocioso_dias') {
+        await recarregarAssentos()
+      }
     } catch (e) {
       setErro(e instanceof ErroApi ? e.message : 'Não conseguimos salvar.')
     } finally {
