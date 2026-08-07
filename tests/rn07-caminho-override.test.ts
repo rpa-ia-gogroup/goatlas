@@ -20,7 +20,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
-import { CaminhoOverride, Compositor } from '@/app/telas'
+import { CaminhoOverride, Compositor, EntradaConversa } from '@/app/telas'
 
 const nada = () => {}
 
@@ -119,5 +119,43 @@ describe('RN-07 — o compositor fecha enquanto a justificativa está aberta', (
       }),
     )
     expect(saida.match(/disabled/g) ?? []).toHaveLength(1)
+  })
+})
+
+describe('RF-42 — a justificativa aparece na conversa, e não como mensagem', () => {
+  it('vira REGISTRO: sobretítulo próprio, nunca o balão de quem conversou', () => {
+    const saida = html(
+      createElement(EntradaConversa, {
+        fala: { de: 'justificativa', texto: 'a página é da loja física' },
+      }),
+    )
+    expect(saida).toContain('a página é da loja física')
+    expect(saida).toContain('Justificativa registrada')
+    expect(saida).toContain('fala-justificativa')
+    // Balão de usuário diria que ela conversou com o agente — e ela não conversou:
+    // o texto foi para a auditoria e para a fila de documentação.
+    expect(saida).not.toContain('fala-usuario')
+  })
+
+  it('mensagem comum continua sendo balão, e não vira registro', () => {
+    const saida = html(
+      createElement(EntradaConversa, {
+        fala: { de: 'usuario', texto: 'o relatório não atualizou' },
+      }),
+    )
+    expect(saida).toContain('fala-usuario')
+    expect(saida).not.toContain('fala-justificativa')
+    expect(saida).not.toContain('Justificativa registrada')
+  })
+
+  it('o agente continua sem balão, assinando como goatlas', () => {
+    const saida = html(
+      createElement(EntradaConversa, {
+        fala: { de: 'agente', texto: 'Achei documentação sobre isso.' },
+      }),
+    )
+    expect(saida).toContain('goatlas')
+    expect(saida).not.toContain('fala-usuario')
+    expect(saida).not.toContain('fala-justificativa')
   })
 })

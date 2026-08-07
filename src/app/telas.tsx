@@ -33,8 +33,14 @@ import {
 
 /* ======================= conversa com o agente ========================= */
 
+/**
+ * `justificativa` é a frase do override — palavras da pessoa, mas **não** uma
+ * mensagem para o agente. Ela foi para a auditoria e para a fila de melhoria da
+ * documentação (`RF-42`), e some da conversa se não tiver entrada própria: a
+ * pessoa escreve, aperta, e não vê registro nenhum do que disse.
+ */
 interface Fala {
-  readonly de: 'agente' | 'usuario'
+  readonly de: 'agente' | 'usuario' | 'justificativa'
   readonly texto: string
 }
 
@@ -108,6 +114,10 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
       if (r.proposta) setProposta(r.proposta)
       setFalas((f) => [
         ...f,
+        // A frase da pessoa entra na conversa ANTES da resposta: sem ela, some da
+        // tela o que ela acabou de escrever, e a resposta do agente ("registrei que
+        // a documentação não cobre o seu caso") fica sem referente.
+        { de: 'justificativa', texto: motivo },
         {
           de: 'agente',
           texto: r.proposta
@@ -134,18 +144,9 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
       />
 
       <div className="conversa">
-        {falas.map((f, i) =>
-          f.de === 'agente' ? (
-            <div key={i}>
-              <span className="autor">goatlas</span>
-              <TextoDoAgente texto={f.texto} />
-            </div>
-          ) : (
-            <p key={i} className="fala-usuario">
-              {f.texto}
-            </p>
-          ),
-        )}
+        {falas.map((f, i) => (
+          <EntradaConversa key={i} fala={f} />
+        ))}
         {enviando && (
           <p className="carregando" aria-live="polite">
             Verificando antes de responder…
@@ -182,6 +183,37 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
       />
     </div>
   )
+}
+
+/**
+ * Uma entrada da conversa. Três tipos, três formas — e a terceira existe porque
+ * duas não bastavam.
+ *
+ * A justificativa do override são palavras da pessoa, mas não são uma mensagem: ela
+ * não foi para o agente, foi para a auditoria e para a fila de melhoria da
+ * documentação. Mostrá-la como balão de usuário diria que ela conversou; não
+ * mostrar diria que o que ela escreveu se perdeu. Fica como **registro**: espinha
+ * lime e sobretítulo, o mesmo par visual do formulário onde ela acabou de digitar,
+ * para que uma coisa leve à outra.
+ */
+export function EntradaConversa({ fala }: { fala: Fala }) {
+  if (fala.de === 'agente') {
+    return (
+      <div>
+        <span className="autor">goatlas</span>
+        <TextoDoAgente texto={fala.texto} />
+      </div>
+    )
+  }
+  if (fala.de === 'justificativa') {
+    return (
+      <div className="fala-justificativa">
+        <span className="autor">Justificativa registrada</span>
+        <p>{fala.texto}</p>
+      </div>
+    )
+  }
+  return <p className="fala-usuario">{fala.texto}</p>
 }
 
 /**

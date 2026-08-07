@@ -283,6 +283,26 @@
   font-size: var(--fs-body);
 }
 
+/**
+ * A justificativa do override dentro da conversa — RF-13, RN-07, RF-42.
+ *
+ * Nem balão de usuário nem fala do agente: é **registro**. Balão diria que a pessoa
+ * conversou com o agente, e ela não conversou — o texto foi para a auditoria e para
+ * a fila de melhoria da documentação. Repete a espinha lime e o sobretítulo do
+ * formulário onde ela acabou de digitar, para que uma coisa leve à outra; e ocupa a
+ * largura toda, ao contrário do balão, porque é um item do histórico do caso e não
+ * um turno de diálogo.
+ */
+.fala-justificativa {
+  border-left: 4px solid var(--go-lime);
+  padding: var(--space-2) 0 var(--space-2) var(--space-4);
+}
+.fala-justificativa p {
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  color: var(--go-text-primary);
+}
+
 .autor {
   font-size: 0.6875rem;
   font-weight: var(--fw-semibold);
