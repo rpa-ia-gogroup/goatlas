@@ -283,6 +283,26 @@
   font-size: var(--fs-body);
 }
 
+/**
+ * A justificativa do override dentro da conversa — RF-13, RN-07, RF-42.
+ *
+ * Nem balão de usuário nem fala do agente: é **registro**. Balão diria que a pessoa
+ * conversou com o agente, e ela não conversou — o texto foi para a auditoria e para
+ * a fila de melhoria da documentação. Repete a espinha lime e o sobretítulo do
+ * formulário onde ela acabou de digitar, para que uma coisa leve à outra; e ocupa a
+ * largura toda, ao contrário do balão, porque é um item do histórico do caso e não
+ * um turno de diálogo.
+ */
+.fala-justificativa {
+  border-left: 4px solid var(--go-lime);
+  padding: var(--space-2) 0 var(--space-2) var(--space-4);
+}
+.fala-justificativa p {
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  color: var(--go-text-primary);
+}
+
 .autor {
   font-size: 0.6875rem;
   font-weight: var(--fw-semibold);
@@ -334,6 +354,46 @@
   box-shadow: var(--shadow-md);
 }
 
+/* ---------- justificativa do override (RF-13, RN-07) ------------------- */
+
+/**
+ * Este campo tem de NÃO parecer o compositor de mensagem.
+ *
+ * Ele apareceu logo abaixo de uma conversa, com a mesma moldura branca e a mesma
+ * caixa de texto, e foi lido como "outro chat" — a pessoa não tinha como saber
+ * que o texto daqui vai para outro lugar (auditoria e fila de documentação), não
+ * para o agente. Três diferenças deliberadas, nenhuma delas só cor:
+ *
+ * 1. **Espinha lime à esquerda** em vez de moldura fechada — marca de anotação
+ *    presa ao bloqueio, não de bloco novo de conversa;
+ * 2. **Sobretítulo** dizendo o que o campo é, antes de a pessoa escrever;
+ * 3. **Fundo creme** na caixa de texto, contra o branco do compositor.
+ */
+.justificativa {
+  background: var(--go-white);
+  border-left: 4px solid var(--go-lime);
+  border-radius: var(--radius-sm) var(--radius-lg) var(--radius-lg) var(--radius-sm);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  box-shadow: var(--shadow-sm);
+}
+
+.justificativa-titulo {
+  font-size: 0.6875rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--go-text-heading);
+}
+
+/* Creme contra o branco do compositor: a caixa não é a mesma caixa. */
+.justificativa .campo textarea {
+  background: var(--go-cream);
+  min-height: 88px;
+}
+
 /* ---------- recibo de confirmação (RF-18) ------------------------------ */
 
 /**
@@ -350,19 +410,31 @@
   box-shadow: var(--shadow-sm);
 }
 
+/**
+ * UMA coluna, UMA margem esquerda — inclusive no desktop.
+ *
+ * A versão anterior virava grade de duas colunas acima de 520px, com o rótulo
+ * alinhado à direita e centralizado na vertical. Três defeitos de uma vez:
+ *
+ * 1. Rótulo à direita deixa a borda esquerda dos rótulos serrilhada (`DESCRIÇÃO`,
+ *    `ÁREA`, `PRIORIDADE`, `PRAZO` têm larguras diferentes), e o olho precisa
+ *    procurar onde cada um começa;
+ * 2. `align-self: center` fazia o rótulo flutuar no meio de valores altos — o
+ *    `PRAZO` parava na altura da segunda linha da explicação, parecendo solto;
+ * 3. o título e o botão ficavam na margem do cartão enquanto os valores começavam
+ *    depois da coluna de 8rem — **três** margens esquerdas na mesma tela.
+ *
+ * Uma coluna resolve os três, e faz o desktop usar o mesmo desenho do celular, que
+ * é o que mobile-first quer dizer (`RNF-28`). A hierarquia passa a vir do ritmo
+ * vertical e do peso do texto, não de uma coluna de rótulos.
+ */
+/* ⚠️ Espaçamento por MARGEM, não por `gap`. Um `gap` de flex/grid separa rótulo do
+   valor tanto quanto separa um par do próximo — e aí o rótulo fica à mesma distância
+   do valor que ele nomeia e do valor de cima, que não é dele. O par precisa estar
+   colado e os pares, afastados: é a proximidade que agrupa, já que não há mais
+   coluna de rótulos fazendo esse trabalho. */
 .recibo dl {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3);
-}
-@media (min-width: 520px) {
-  .recibo dl {
-    grid-template-columns: 8rem minmax(0, 1fr);
-    column-gap: var(--space-4);
-  }
-  .recibo dt {
-    text-align: right;
-  }
+  display: block;
 }
 .recibo dt {
   font-size: 0.6875rem;
@@ -370,22 +442,39 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
-  align-self: center;
+  margin-bottom: 6px;
 }
 .recibo dd {
   font-size: var(--fs-body);
+  line-height: 1.55;
   color: var(--go-text-primary);
+  margin: 0 0 var(--space-4);
+}
+.recibo dd:last-child {
+  margin-bottom: 0;
+}
+/* Campo de uma palavra não precisa da largura do cartão — esticado até a borda ele
+   promete mais escolha do que os três valores que tem. O teto é generoso o bastante
+   para o alvo de toque e some no celular, onde a largura já é essa. */
+.recibo dd .campo select {
+  max-width: 20rem;
 }
 
+/* O número é o dado; a frase de RN-08 é a ressalva que impede o número de virar
+   promessa de solução. Tamanhos diferentes para que se leiam como duas coisas. */
 .prazo {
-  font-weight: var(--fw-semibold);
+  font-size: 1.5rem;
+  font-weight: var(--fw-extrabold);
+  line-height: 1.1;
   color: var(--go-text-heading);
 }
 /* RN-08 — "primeira resposta" nunca fica implícito. */
 .prazo small {
   display: block;
+  margin-top: 4px;
   font-weight: var(--fw-regular);
   font-size: var(--fs-caption);
+  line-height: 1.5;
   color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
 }
 
@@ -476,6 +565,23 @@
 .campo textarea:focus,
 .campo select:focus {
   border-color: var(--go-blue);
+}
+
+/**
+ * Campo desabilitado precisa PARECER desabilitado.
+ *
+ * Sem isto, o compositor fechado durante a justificativa (`RN-07`) fica idêntico ao
+ * aberto: a pessoa clica, nada acontece, e a conclusão é "travou" em vez de "é ali
+ * em cima". Borda apagada + cursor, nunca só opacidade — e a explicação em texto
+ * continua ao lado, porque estado nunca é comunicado só por aparência.
+ */
+.campo input:disabled,
+.campo textarea:disabled,
+.campo select:disabled {
+  background: color-mix(in srgb, var(--go-blue) 4%, var(--go-cream));
+  border-color: color-mix(in srgb, var(--go-blue) 12%, transparent);
+  color: color-mix(in srgb, var(--go-text-primary) 55%, transparent);
+  cursor: not-allowed;
 }
 .dica {
   font-size: var(--fs-caption);

@@ -186,6 +186,9 @@ async function rotear(
     return json({
       texto: r.texto,
       bloqueado: r.bloqueado,
+      // RF-13 / RN-07 — persiste entre turnos; é dele que a UI tira o caminho de
+      // override. `bloqueado` sozinho fazia o botão sumir na mensagem seguinte.
+      bloqueioPendente: r.bloqueioPendente,
       regraBloqueio: r.regraBloqueio,
       // RNF-12: a UI precisa mostrar progresso das duas verificações.
       verificacoes: {

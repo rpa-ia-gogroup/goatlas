@@ -681,6 +681,88 @@ lugar, não para ser aplicada em silêncio.
 
 ---
 
+### D-21 · O bloqueio dura até o override, e o override só existe pelo botão
+
+**Data:** 07/08/2026 · **Quem:** Kaique, ao testar o app e perguntar se digitar
+"isso não resolve meu caso" no chat equivalia a apertar o botão · **Status:** fechada
+
+**Não equivalia — e essa era a falha.** Havia duas portas para sair de um bloqueio e
+só uma registrava:
+
+| | Botão "Isso não resolve meu caso" | Mandar outra mensagem no chat |
+|---|---|---|
+| Abria o chamado | sim | **sim** |
+| Registrava o override | sim | **não** |
+| Pedia o motivo | sim | não |
+| Contava na taxa de override (`R-04`) | sim | não |
+| Alimentava o mapa de lacunas (`RF-42`) | sim | não |
+
+**Por que acontecia:** `bloqueio` era uma variável **do turno**. Na mensagem seguinte
+nenhuma regra dispara de novo — a busca já rodou, as verificações já estão concluídas —
+então o servidor via "nada bloqueou" e montava a proposta. Reproduzido contra o app
+rodando: auditoria com `bloqueio_disparado` e `chamado_criado`, sem nenhum
+`override_registrado` entre os dois.
+
+**Por que era pior do que um furo de registro:** quem escapava pelo chat não entrava na
+taxa de override. O painel mostrava deflexão alta **exatamente quando a deflexão
+falhou** — a métrica mentia para o lado favorável, que é o oposto do que o projeto faz
+em `custoConfigurado` e em `taxa null vs 0%`. E `RF-42` perdia o terceiro sinal.
+
+**Agravante:** a própria mensagem de bloqueio dizia *"me diga o que ficou de fora"*, o
+que convida a digitar no chat. A copy apontava a porta que não registrava.
+
+**A decisão.** `RN-07` passa a valer nas duas metades — há sempre saída **e** a saída
+fica registrada:
+
+1. **`temBloqueioPendente`** (`agent/estado.ts`) — bloqueio sem override impede a
+   proposta de nascer, por quantas mensagens vierem. Duas camadas, como toda trava
+   crítica: a condição no turno e a recusa em `montarPropostaAgora`.
+2. **`bloqueioPendente` na resposta**, persistindo entre turnos. É dele que a UI tira o
+   caminho de override — com `bloqueado` (do turno) o botão sumiria na mensagem
+   seguinte, e aí sim viraria parede.
+3. **A copy aponta o botão**, nas duas regras.
+4. **Com bloqueio de pé, quem responde é o SERVIDOR** — `MENSAGEM_BLOQUEIO_PENDENTE`
+   substitui o texto do modelo, e o modelo nem chega a ser chamado. A primeira versão
+   *acrescentava* o aviso ao texto dele, e o resultado se contradizia sozinho:
+   "Montei o chamado abaixo — confira e confirme." seguido de "Só não consigo abrir o
+   chamado ainda". O modelo não sabe que o servidor recusou montar a proposta, e
+   nenhum aviso colado embaixo conserta uma frase que já foi dita. É a mesma regra que
+   `montarMensagemBloqueio` já seguia: **a regra em vigor fala, o modelo não** —
+   deixá-lo narrar durante o bloqueio é o que transforma a regra em sugestão que ele
+   contorna com boa retórica. Pular a chamada também é `RNF-16`: o turno do bloqueio
+   descarta a resposta do modelo uma vez; sem o desvio, descartaria a cada mensagem.
+5. **O campo de justificativa deixou de parecer chat** — espinha lime, sobretítulo
+   "Corrigir a recomendação", caixa creme. Foi lido como "outro chat" no primeiro teste,
+   e duas caixas de texto idênticas na mesma tela não têm como comunicar que uma vai
+   para o agente e a outra para a auditoria.
+6. **O compositor FECHA enquanto a justificativa está aberta.** Distinguir as duas
+   caixas não bastava: com as duas disponíveis, a pessoa escreve na de baixo — maior,
+   já usada, onde o dedo espera. O texto viraria mensagem para o agente, o override não
+   aconteceria, e ela repetiria "isso não resolve" para um modelo que não tem como
+   liberar nada. Fechado, **não escondido**: sumir com o campo faz a página saltar; o
+   motivo vai escrito ao lado e o "Voltar" reabre. E campo desabilitado passou a
+   *parecer* desabilitado (`.campo :disabled`) — sem isso o clique não fazia nada e a
+   conclusão seria "travou" em vez de "é ali em cima".
+
+**O que NÃO mudou:** bloqueio continua não sendo parede (`RF-13`). O botão está sempre
+visível, o override nunca é recusado, e o formulário mínimo (`D-04`) segue aberto. A
+mudança é *por onde* se passa, não *se* dá para passar.
+
+**Testes:** três em `tests/orquestrador.test.ts`, sendo dois de burla — insistir pelo
+chat não monta proposta e não registra override; `montarPropostaAgora` recusa com
+bloqueio de pé. Mais seis em `tests/rn07-caminho-override.test.ts`, do lado da tela:
+a justificativa se apresenta como correção e não como mensagem, o compositor fecha com
+o motivo escrito, e volta a abrir depois.
+
+**Nota de ambiente (não é produção):** o roteiro do dublê de IA em `npm run dev` tem
+dois turnos e o índice é do **processo**, não da conversa — uma conversa que terminava
+com número ímpar de mensagens deixava a próxima começando pelo turno 2, respondendo
+"montei o chamado" sem ter verificado nada. Nada nascia daí (`RF-08` continua fechando
+o caminho, e nenhuma proposta era montada), mas quem testava via o agente pular a
+deflexão e concluía que a Regra 1 tinha quebrado. `vite-plugin-api-dev.ts` reinicia o
+roteiro a cada `POST /api/conversas`.
+---
+
 ### D-22 · O 401 era a família da credencial, e o endpoint de usuários estava medido como vazio
 **Data:** 07/08/2026 · **Quem:** João Victor (medição) + Kaique (correção) · **Status:** aceita
 
