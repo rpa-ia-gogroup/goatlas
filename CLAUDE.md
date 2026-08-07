@@ -434,6 +434,27 @@ persistente.
 - ⚠️ **`updateApp` MESCLA assets, não substitui.** Para limpar caminho errado são
   dois deploys: `assets: []` e depois a lista certa. Confira com `getApp` +
   `include: ["manifest"]`.
+- 🚨 **`env.DB` devolve `rows` como array de OBJETOS, não colunas+arrays.** O shim de
+  teste (`sqlite-local.ts`) implementa a forma documentada; a plataforma entrega outra.
+  `linhasComoObjetos` aceita as duas desde 07/08/2026 — antes disso **toda leitura do banco
+  devolvia `{}` em produção**, sem erro nenhum: auditoria com 58 registros vazios, lista de
+  chamados vazia, config caindo nos defaults. Como os defaults vêm do bootstrap por env, o
+  app *parecia* funcionar. **Nunca indexe `rows` direto**; há teste das duas formas.
+- 🚨 **O header do cron é ASSINADO** (`t=<unix>;<rótulo>=<hmac-sha256-hex>`), não é a chave.
+  Comparar por igualdade dava 403 nas sete rotas com a chave certa. A verificação está em
+  `http/cron-auth.ts`, com janela de replay e comparação em tempo constante. ⚠️ **Qual
+  string é assinada continua desconhecido** — 10 construções × 2 leituras da chave, nenhuma
+  casou. A pergunta exata para a plataforma está em `docs/DEPLOY.md`; chutar não converge.
+- ⚠️ **Colisão de `UNIQUE (vinculos.issue_key)` é caso previsto, não erro** — e a
+  classificação importa: por não ser `ErroAtlassian`, ela caía no default **transitório** e
+  o cron reprocessava para sempre contra a mesma constraint. Mesmo solicitante =
+  idempotência; **outro** solicitante = recusa definitiva e auditada, porque aceitar seria
+  dar a alguém o vínculo do chamado de outra pessoa (`RF-30`).
+- **A leitura de chamado DEGRADA, no detalhe também.** A lista já usava o payload do outbox
+  desde a Fase 1; o detalhe subia a falha e virava **500** — a pessoa clicava no próprio
+  chamado durante uma queda do Jira e lia "algo deu errado". E "não há respostas" ≠ "não
+  consegui buscar as respostas": são frases opostas, e a errada faz ela achar que ninguém
+  olhou (`degradado` e `comentariosIndisponiveis` na resposta).
 - 🚨 **O edge fecha TUDO, inclusive o que foi escrito como rota pública.** Com
   `visibility: authenticated`, `/api/webhook/jira` (`RF-48`) e `/api/health` (`RF-59`)
   recebem **302** para o OAuth antes de chegarem ao worker — medido com `curl` em
@@ -557,6 +578,23 @@ está em `ENDPOINTS_NAO_VERIFICADOS` — e a tela de governança mostra a lista.
 | Baseline de assentos (Fase 0) | João | Sem ele a tela diz "sem baseline" em vez de comparar contra zero |
 | **T-235** — distinguir "defletido e resolveu" de "desistiu e foi pro chat" | Produto | Mitigado, não resolvido: o painel devolve `deflexaoResolvidaConhecida: false` e trata o número como **teto** |
 | Destino do alerta de SLA | Produto | Hoje vai ao solicitante, o único destino que o app conhece. Outro destinatário é uma linha na mesma função |
+
+### O que só o app REAL revelou (07/08/2026)
+
+Quatro bugs passaram por **610 testes verdes** e apareceram no primeiro teste de ponta a
+ponta contra `goatlas.devgogroup.com`. Nenhum dava erro no lugar certo:
+
+| Bug | Por que o teste não pegava |
+|---|---|
+| `env.DB` devolve `rows` como objetos | O shim implementa a forma documentada; a plataforma usa outra. Sintoma era `{}`, não exceção |
+| Detalhe do chamado dava 500 numa queda | Nos testes o chamado sempre existia |
+| Demonstração perdia o chamado entre requisições | O Worker é stateless; o teste roda tudo num processo |
+| Colisão de `UNIQUE` virava retry infinito | A colisão só acontece quando o vínculo já existe, cenário que nenhum teste montava |
+
+**A lição que vale para as próximas fases:** o dublê implementa o contrato **documentado**,
+e onde a plataforma diverge da documentação o dublê esconde a divergência em vez de
+revelá-la. Teste de integração contra o app publicado não é luxo de fim de projeto — é a
+única coisa que vê essa classe de bug.
 
 ### Como testar sem credencial
 As duas camadas isoladas têm **fake** (`src/lib/atlassian/fake.ts`,

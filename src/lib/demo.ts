@@ -94,7 +94,13 @@ export async function repovoarChamadosDemo(
       ORDER BY criado_em DESC LIMIT 50`,
     [],
   )
+  let maiorNumero = 0
   for (const linha of linhasComoObjetos<{ issue_key: string; payload_json: string }>(r)) {
+    // O contador do fake reinicia a cada requisição (Worker stateless), então sem isto o
+    // segundo chamado da demonstração nasce com a chave do primeiro e bate no
+    // `UNIQUE (vinculos.issue_key)`.
+    const numero = Number.parseInt(linha.issue_key.split('-').pop() ?? '', 10)
+    if (Number.isInteger(numero) && numero > maiorNumero) maiorNumero = numero
     if (fake.estado.chamados.has(linha.issue_key)) continue
     try {
       const p = JSON.parse(linha.payload_json) as {
@@ -120,6 +126,7 @@ export async function repovoarChamadosDemo(
       // aparecendo como indisponível, que é o comportamento honesto.
     }
   }
+  fake.ajustarContadorIssue(maiorNumero)
 }
 
 export function semearAtlassianDemo(fake: ClienteAtlassianFake): void {

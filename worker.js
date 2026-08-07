@@ -828,6 +828,18 @@ var ClienteAtlassianFake = class {
     };
   }
   /**
+   * Avança o contador de chaves para além do que já existe — só demonstração/teste.
+   *
+   * ⚠️ O Worker é **stateless**: `contadorIssue` volta a zero a cada requisição, então o
+   * segundo chamado aberto na demonstração também nascia `GOATLAS-1` e batia no
+   * `UNIQUE (vinculos.issue_key)`. Pego no app real em 07/08/2026.
+   *
+   * Em produção nada disto existe: a chave é do JSM, que não repete.
+   */
+  ajustarContadorIssue(minimo) {
+    if (minimo > this.contadorIssue) this.contadorIssue = minimo;
+  }
+  /**
    * Muda o chamado como o time de tech mudaria — só para teste e demonstração.
    *
    * Existe porque a Fase 3 precisa encenar o outro lado: status que muda, comentário
@@ -2020,7 +2032,10 @@ async function repovoarChamadosDemo(fake, db) {
       ORDER BY criado_em DESC LIMIT 50`,
     []
   );
+  let maiorNumero = 0;
   for (const linha of linhasComoObjetos(r)) {
+    const numero = Number.parseInt(linha.issue_key.split("-").pop() ?? "", 10);
+    if (Number.isInteger(numero) && numero > maiorNumero) maiorNumero = numero;
     if (fake.estado.chamados.has(linha.issue_key)) continue;
     try {
       const p = JSON.parse(linha.payload_json);
@@ -2037,6 +2052,7 @@ async function repovoarChamadosDemo(fake, db) {
     } catch {
     }
   }
+  fake.ajustarContadorIssue(maiorNumero);
 }
 function semearAtlassianDemo(fake) {
   fake.estado.tiposChamado = [
@@ -3682,14 +3698,42 @@ var ServicoChamados = class {
         ...dados.payload.camposDinamicos ? { camposDinamicos: dados.payload.camposDinamicos } : {}
       });
       await this.outbox.marcarCriado(submissaoId, criado.issueKey);
-      await this.vinculos.criar({
-        issueKey: criado.issueKey,
-        solicitanteEmail: dados.solicitanteEmail,
-        conversaId: dados.conversaId,
-        via: dados.via,
-        verificadoRegras: dados.verificadoRegras,
-        area: dados.area
-      });
+      try {
+        await this.vinculos.criar({
+          issueKey: criado.issueKey,
+          solicitanteEmail: dados.solicitanteEmail,
+          conversaId: dados.conversaId,
+          via: dados.via,
+          verificadoRegras: dados.verificadoRegras,
+          area: dados.area
+        });
+      } catch (erroVinculo) {
+        const existente = await this.vinculos.obterSemIsolamento_apenasReconciliacao(
+          criado.issueKey
+        );
+        if (!existente) throw erroVinculo;
+        if (existente.solicitanteEmail !== dados.solicitanteEmail) {
+          await this.auditoria.registrar({
+            atorEmail: dados.solicitanteEmail,
+            acao: "chamado_criado",
+            recurso: criado.issueKey,
+            resultado: "negado",
+            detalhe: { motivo: "issue_key_ja_vinculada_a_outro_solicitante" }
+          });
+          throw new ErroAtlassian("chave de chamado j\xE1 vinculada a outro solicitante", {
+            // **Definitivo**: reprocessar não muda nada, e insistir esconderia a anomalia.
+            transitorio: false,
+            recurso: criado.issueKey
+          });
+        }
+        await this.auditoria.registrar({
+          atorEmail: dados.solicitanteEmail,
+          acao: "vinculo_reconciliado",
+          recurso: criado.issueKey,
+          resultado: "sucesso",
+          detalhe: { motivo: "vinculo_ja_existia" }
+        });
+      }
       await this.auditoria.registrar({
         atorEmail: dados.solicitanteEmail,
         acao: "chamado_criado",
@@ -6165,19 +6209,30 @@ function mensagensCandidatas(dados) {
     { rotulo: "corpo", mensagem: dados.corpo },
     { rotulo: "t.caminho", mensagem: `${t}.${dados.caminho}` },
     { rotulo: "t.metodo.caminho", mensagem: `${t}.${dados.metodo}.${dados.caminho}` },
-    { rotulo: "t+corpo", mensagem: `${t}${dados.corpo}` }
+    { rotulo: "t+corpo", mensagem: `${t}${dados.corpo}` },
+    { rotulo: "t.metodo caminho", mensagem: `${t}.${dados.metodo} ${dados.caminho}` },
+    { rotulo: "caminho.t", mensagem: `${dados.caminho}.${t}` },
+    { rotulo: "t|caminho|corpo", mensagem: `${t}|${dados.caminho}|${dados.corpo}` }
   ];
 }
-async function hmacHex(chave, mensagem) {
-  const codificador = new TextEncoder();
+function chavesCandidatas(chave) {
+  const comoTexto = { rotulo: "ascii", bytes: new TextEncoder().encode(chave) };
+  if (!/^[0-9a-fA-F]{2,}$/.test(chave) || chave.length % 2 !== 0) return [comoTexto];
+  const bytes = new Uint8Array(chave.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = Number.parseInt(chave.slice(i * 2, i * 2 + 2), 16);
+  }
+  return [{ rotulo: "hex", bytes }, comoTexto];
+}
+async function hmacHex(chaveBytes, mensagem) {
   const material = await crypto.subtle.importKey(
     "raw",
-    codificador.encode(chave),
+    chaveBytes,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
   );
-  const bytes = await crypto.subtle.sign("HMAC", material, codificador.encode(mensagem));
+  const bytes = await crypto.subtle.sign("HMAC", material, new TextEncoder().encode(mensagem));
   return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 function hexConfere(a, b) {
@@ -6196,15 +6251,18 @@ async function verificarCron(dados) {
   if (!assinatura) return { ok: false, motivo: "formato_desconhecido" };
   const idadeSeg = Math.abs(dados.agoraMs / 1e3 - assinatura.carimboSeg);
   if (idadeSeg > JANELA_CRON_SEG) return { ok: false, motivo: "carimbo_fora_da_janela" };
-  for (const candidata of mensagensCandidatas({
+  const mensagens = mensagensCandidatas({
     carimboSeg: assinatura.carimboSeg,
     metodo: dados.metodo,
     caminho: dados.caminho,
     corpo: dados.corpo
-  })) {
-    const esperado = await hmacHex(dados.chave, candidata.mensagem);
-    if (hexConfere(esperado, assinatura.assinaturaHex)) {
-      return { ok: true, candidata: candidata.rotulo };
+  });
+  for (const chave of chavesCandidatas(dados.chave)) {
+    for (const candidata of mensagens) {
+      const esperado = await hmacHex(chave.bytes, candidata.mensagem);
+      if (hexConfere(esperado, assinatura.assinaturaHex)) {
+        return { ok: true, candidata: `${chave.rotulo}/${candidata.rotulo}` };
+      }
     }
   }
   return { ok: false, motivo: "assinatura_invalida" };

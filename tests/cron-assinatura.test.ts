@@ -82,11 +82,42 @@ describe('lerAssinaturaCron — o formato medido na plataforma', () => {
 })
 
 describe('verificarCron — o caminho felizes e os cinco degraus de recusa', () => {
-  it('assinatura válida passa, e diz QUAL construção casou', async () => {
+  it('assinatura válida passa, e diz QUAL combinação casou', async () => {
     const header = `t=${CARIMBO};sig=${await assinar(`${CARIMBO}.`)}`
     const r = await verificarCron({ ...base, headerEnviado: header })
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.candidata).toBe('t.corpo')
+    // O rótulo é composto — `<leitura da chave>/<construção da mensagem>` — porque as duas
+    // dimensões são desconhecidas e é a combinação que precisa ser confirmada em log.
+    if (r.ok) expect(r.candidata).toBe('ascii/t.corpo')
+  })
+
+  it('a chave HEX-DECODIFICADA também é aceita — 64 hex são 32 bytes', async () => {
+    // ⚠️ `HMAC(chave_ascii)` ≠ `HMAC(bytes)`: são segredos diferentes. Quem gera a chave
+    // como 32 bytes e a imprime em hex assina com os bytes; quem a trata como senha assina
+    // com o texto. De fora não há como saber qual, e errar dá 403 idêntico a "sem chave".
+    const bytes = new Uint8Array(32).fill(0xab)
+    const material = await crypto.subtle.importKey(
+      'raw',
+      bytes as unknown as ArrayBuffer,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    )
+    const sig = [
+      ...new Uint8Array(
+        await crypto.subtle.sign('HMAC', material, new TextEncoder().encode(`${CARIMBO}.`)),
+      ),
+    ]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+
+    const r = await verificarCron({
+      ...base,
+      chave: 'ab'.repeat(32),
+      headerEnviado: `t=${CARIMBO};sig=${sig}`,
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.candidata).toBe('hex/t.corpo')
   })
 
   it('cada candidata da lista é aceita — nenhuma exige a lista inteira estar certa', async () => {

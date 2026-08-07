@@ -19,6 +19,7 @@ import { AuditoriaBanco } from '@/lib/audit'
 import { ClienteAtlassianFake } from '@/lib/atlassian/fake'
 import { RepositorioConversas } from '@/lib/agent/estado'
 import { CriacaoRecusada } from '@/lib/agent/gate'
+import { montarContexto } from '@/lib/contexto'
 
 const ANA = 'ana@gocase.com'
 const AGORA = '2026-08-03T12:00:00.000Z'
@@ -31,6 +32,7 @@ const PAYLOAD = {
 }
 
 let db: SqliteLocal
+let contador = 0
 let outbox: Outbox
 let vinculos: RepositorioVinculos
 let servico: ServicoChamados
@@ -279,5 +281,99 @@ describe('RNF-18 / D-04 — degradação sem virar bypass', () => {
     )
     // E nada foi criado na Atlassian.
     expect(atlassian.chamadas.filter((c) => c.operacao === 'criarChamado')).toHaveLength(0)
+  })
+})
+
+/**
+ * A colisão de `UNIQUE (vinculos.issue_key)` — pega no app real em 07/08/2026.
+ *
+ * O sintoma era um chamado eternamente `pendente`: a colisão subia como erro genérico e,
+ * por não ser `ErroAtlassian`, era classificada como **transitória**. O cron reprocessava
+ * para sempre, batendo na mesma constraint a cada rodada.
+ *
+ * ⚠️ Os dois lados importam, e são opostos: mesmo solicitante é **idempotência** (já estava
+ * feito); solicitante diferente é **anomalia** e não pode passar em silêncio, porque
+ * significaria dar a alguém o vínculo de um chamado de outra pessoa (`RF-30`).
+ */
+describe('colisão de vínculo: idempotente para o mesmo, recusa para outro', () => {
+  it('mesma pessoa: a criação COMPLETA em vez de ficar pendente para sempre', async () => {
+    const atlassian = new ClienteAtlassianFake({
+      tiposChamado: [{ id: 'rt-1', serviceDeskId: 'sd-1', nome: 'S', descricao: null }],
+    })
+    const ctx = await montarContexto(
+      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      () => AGORA,
+      () => `id-${++contador}`,
+      { atlassian },
+    )
+    // O vínculo já existe (é o estado depois de um reprocessamento parcial).
+    await ctx.vinculos.criar({
+      issueKey: 'GOATLAS-1',
+      solicitanteEmail: ANA,
+      conversaId: null,
+      via: 'formulario',
+      verificadoRegras: false,
+    })
+
+    const r = await ctx.chamados.abrirPorFormulario({
+      solicitanteEmail: ANA,
+      chaveIdempotencia: 'colisao-mesma-pessoa',
+      payload: {
+        titulo: 'Etiqueta cortada',
+        descricao: 'Sai cortado na impressão.',
+        tipoChamadoId: 'rt-1',
+        serviceDeskId: 'sd-1',
+        prioridade: 'normal',
+      },
+    })
+
+    // ⚠️ `criado`, não `pendente`. Pendente aqui é retentativa infinita.
+    expect(r.estado).toBe('criado')
+    expect(r.issueKey).toBe('GOATLAS-1')
+  })
+
+  it('OUTRA pessoa: recusa DEFINITIVA e auditada — nunca aceita em silêncio', async () => {
+    const atlassian = new ClienteAtlassianFake({
+      tiposChamado: [{ id: 'rt-1', serviceDeskId: 'sd-1', nome: 'S', descricao: null }],
+    })
+    const ctx = await montarContexto(
+      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      () => AGORA,
+      () => `id-${++contador}`,
+      { atlassian },
+    )
+    await ctx.vinculos.criar({
+      issueKey: 'GOATLAS-1',
+      solicitanteEmail: 'outra@gocase.com',
+      conversaId: null,
+      via: 'formulario',
+      verificadoRegras: false,
+    })
+
+    await expect(
+      ctx.chamados.abrirPorFormulario({
+        solicitanteEmail: ANA,
+        chaveIdempotencia: 'colisao-outra-pessoa',
+        payload: {
+          titulo: 'Etiqueta cortada',
+          descricao: 'Sai cortado na impressão.',
+          tipoChamadoId: 'rt-1',
+          serviceDeskId: 'sd-1',
+          prioridade: 'normal',
+        },
+      }),
+    ).rejects.toThrow(/já vinculada a outro solicitante/)
+
+    // O vínculo da outra pessoa continua intacto — nada foi sobrescrito.
+    const dono = await ctx.vinculos.obterSemIsolamento_apenasReconciliacao('GOATLAS-1')
+    expect(dono?.solicitanteEmail).toBe('outra@gocase.com')
+
+    const negado = linhasComoObjetos<{ detalhe_json: string }>(
+      await db.query(
+        `SELECT detalhe_json FROM auditoria WHERE acao = 'chamado_criado' AND resultado = 'negado'`,
+        [],
+      ),
+    )
+    expect(negado[0]?.detalhe_json).toContain('issue_key_ja_vinculada_a_outro_solicitante')
   })
 })

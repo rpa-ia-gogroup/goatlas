@@ -95,20 +95,46 @@ export function mensagensCandidatas(dados: {
     { rotulo: 't.caminho', mensagem: `${t}.${dados.caminho}` },
     { rotulo: 't.metodo.caminho', mensagem: `${t}.${dados.metodo}.${dados.caminho}` },
     { rotulo: 't+corpo', mensagem: `${t}${dados.corpo}` },
+    { rotulo: 't.metodo caminho', mensagem: `${t}.${dados.metodo} ${dados.caminho}` },
+    { rotulo: 'caminho.t', mensagem: `${dados.caminho}.${t}` },
+    { rotulo: 't|caminho|corpo', mensagem: `${t}|${dados.caminho}|${dados.corpo}` },
   ]
 }
 
+/**
+ * As duas leituras possíveis da chave — e por que isso não é paranoia.
+ *
+ * ⚠️ A chave configurada tem **64 caracteres hexadecimais**, o que são **32 bytes**. E
+ * `HMAC(chave_ascii)` ≠ `HMAC(bytes_decodificados)`: são segredos diferentes, e a
+ * assinatura sai completamente diferente. Quem gera a chave como 32 bytes aleatórios e a
+ * imprime em hex normalmente assina com os **bytes**; quem a trata como senha assina com o
+ * texto. Não há como saber de fora qual das duas a plataforma faz.
+ *
+ * Tentar as duas é o que evita outra rodada de cinco minutos por hipótese. E não afrouxa
+ * nada: as duas exigem conhecer a chave.
+ */
+function chavesCandidatas(chave: string): readonly { readonly rotulo: string; readonly bytes: Uint8Array }[] {
+  const comoTexto = { rotulo: 'ascii', bytes: new TextEncoder().encode(chave) }
+  if (!/^[0-9a-fA-F]{2,}$/.test(chave) || chave.length % 2 !== 0) return [comoTexto]
+
+  const bytes = new Uint8Array(chave.length / 2)
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = Number.parseInt(chave.slice(i * 2, i * 2 + 2), 16)
+  }
+  // Bytes primeiro: é a leitura mais provável para uma chave que É hex.
+  return [{ rotulo: 'hex', bytes }, comoTexto]
+}
+
 /** Hex de um HMAC-SHA256. `crypto.subtle` é o que existe no runtime dos Workers. */
-async function hmacHex(chave: string, mensagem: string): Promise<string> {
-  const codificador = new TextEncoder()
+async function hmacHex(chaveBytes: Uint8Array, mensagem: string): Promise<string> {
   const material = await crypto.subtle.importKey(
     'raw',
-    codificador.encode(chave),
+    chaveBytes as unknown as ArrayBuffer,
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
   )
-  const bytes = await crypto.subtle.sign('HMAC', material, codificador.encode(mensagem))
+  const bytes = await crypto.subtle.sign('HMAC', material, new TextEncoder().encode(mensagem))
   return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
@@ -175,15 +201,20 @@ export async function verificarCron(dados: {
   const idadeSeg = Math.abs(dados.agoraMs / 1000 - assinatura.carimboSeg)
   if (idadeSeg > JANELA_CRON_SEG) return { ok: false, motivo: 'carimbo_fora_da_janela' }
 
-  for (const candidata of mensagensCandidatas({
+  const mensagens = mensagensCandidatas({
     carimboSeg: assinatura.carimboSeg,
     metodo: dados.metodo,
     caminho: dados.caminho,
     corpo: dados.corpo,
-  })) {
-    const esperado = await hmacHex(dados.chave, candidata.mensagem)
-    if (hexConfere(esperado, assinatura.assinaturaHex)) {
-      return { ok: true, candidata: candidata.rotulo }
+  })
+  for (const chave of chavesCandidatas(dados.chave)) {
+    for (const candidata of mensagens) {
+      const esperado = await hmacHex(chave.bytes, candidata.mensagem)
+      if (hexConfere(esperado, assinatura.assinaturaHex)) {
+        // O rótulo composto é o que permite reduzir as duas listas a uma combinação só
+        // depois da primeira rodada bem-sucedida.
+        return { ok: true, candidata: `${chave.rotulo}/${candidata.rotulo}` }
+      }
     }
   }
 

@@ -176,6 +176,37 @@ A rota exige o header assinado `X-Godeploy-Cron` conferido contra
 o contrário deixaria a rota aberta justamente na instalação que esqueceu de
 configurar.
 
+🚨 **O header do cron é ASSINADO — não é a chave. Medido em 07/08/2026, no app real.**
+
+Com `GODEPLOY_CRON_KEY` corretamente registrada, as sete rotas continuavam respondendo
+**403**. O que a plataforma estampa em `X-Godeploy-Cron` é:
+
+```
+t=<unix 10 dígitos>;<rótulo 3 letras>=<hmac-sha256 em 64 hex>
+```
+
+Descoberto sem nunca registrar o valor: um diagnóstico logava só a **estrutura** do header
+(separadores, e por segmento o tamanho e o conjunto de caracteres). O código agora verifica
+por HMAC (`http/cron-auth.ts`), com janela de tempo contra replay e comparação em tempo
+constante.
+
+⚠️ **Falta um dado que só o time da plataforma tem: QUAL string é assinada.** Foram
+testadas 10 construções de mensagem × 2 leituras da chave (texto e hex decodificado em 32
+bytes) — **nenhuma casou**. Cada tentativa custa um ciclo de cron, e chutar não converge.
+
+**A pergunta exata para a plataforma:**
+
+> No header `X-Godeploy-Cron` (`t=<unix>;<rótulo>=<hmac-sha256-hex>`), qual é a string
+> exata usada como mensagem do HMAC, e a `GODEPLOY_CRON_KEY` entra como texto ASCII ou
+> hex-decodificada em bytes?
+
+Com a resposta, é editar `mensagensCandidatas` em `http/cron-auth.ts` — e reduzir a lista à
+construção confirmada, que é o estado desejável.
+
+**Até lá os sete crons estão registrados e recusando**, o que significa: notificação só
+chega por quem abre o app, o outbox não reprocessa sozinho, o inventário de assentos não
+coleta e a retenção não roda. Nada se perde — só não acontece sozinho.
+
 ⚠️ **A plataforma NÃO provisiona `GODEPLOY_CRON_KEY`** — conferido no `godaily`, onde ela
 foi criada à mão junto com os outros secrets. E cuidado com a **confusão de credencial**:
 uma chave de prefixo `gdk_` parece ser da **plataforma** (a que deploya e lê secrets de
@@ -183,21 +214,21 @@ todos os seus apps), não do cron deste app. Guardar uma dessas num env de app e
 dentro do app, algo com muito mais poder do que ele precisa — é a mesma família de troca
 já registrada em `D-14`.
 
-**Como saber se casou, sem logar segredo nenhum:** o `detalhe_json` da auditoria de
-`acesso_negado` traz `headerAusente`, `chaveAusente`, `tamanhoRecebido` e
-`tamanhoEsperado` — **comprimentos, nunca valores**. Basta olhar a auditoria depois da
-primeira rodada:
+**Como saber POR QUE recusou, sem logar segredo nenhum:** o `detalhe_json` da auditoria
+de `acesso_negado` traz o motivo, e o log da plataforma traz a estrutura do header —
+**comprimentos e conjuntos de caracteres, nunca valores nem prefixos**.
 
-| O que aparece | O que significa |
+| `detalhe` | O que significa |
 |---|---|
-| `headerAusente: true` | O cron não está chegando à rota (rota errada, ou o edge barrou) |
-| `chaveAusente: true` | Falta o secret `GODEPLOY_CRON_KEY` |
-| tamanhos **diferentes** | O header é de **outro formato** — provavelmente uma assinatura derivada, não a chave crua |
-| tamanhos **iguais** e recusou | É a chave errada, mesmo formato |
-| nada na auditoria e `200` no log | Funcionou |
+| `header_ausente` | O cron não está chegando à rota (rota errada, ou o edge barrou) |
+| `chave_ausente` | Falta o secret `GODEPLOY_CRON_KEY` |
+| `formato_desconhecido` | A plataforma mudou o esquema de assinatura |
+| `carimbo_fora_da_janela` | Relógio torto, ou requisição repetida fora da janela de replay |
+| `assinatura_invalida` | Chave errada — **ou** a mensagem assinada não é nenhuma das candidatas |
+| nada na auditoria e `200` no log | Funcionou; o log diz qual combinação casou |
 
-Essa distinção existe porque o sintoma dos quatro casos é idêntico (403), e adivinhar entre
-eles custa mais que quatro campos de diagnóstico.
+Essa distinção existe porque o sintoma dos cinco casos é idêntico (403), e adivinhar entre
+eles é o que fez este bug custar uma noite.
 
 ### Webhook do Jira (RF-48)
 

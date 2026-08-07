@@ -163,14 +163,57 @@ export class ServicoChamados {
 
       // (4) Vínculo. Se falhar aqui, a submissão fica 'criado' SEM vínculo e a
       // reconciliação recupera — o chamado nunca fica órfão sem rastro (RNF-21).
-      await this.vinculos.criar({
-        issueKey: criado.issueKey,
-        solicitanteEmail: dados.solicitanteEmail,
-        conversaId: dados.conversaId,
-        via: dados.via,
-        verificadoRegras: dados.verificadoRegras,
-        area: dados.area,
-      })
+      //
+      // ⚠️ **A colisão de `UNIQUE (issue_key)` é caso PREVISTO, não erro.** Ela significa
+      // que este `issueKey` já tem vínculo — o que acontece de verdade quando o outbox
+      // reprocessa uma submissão cujo vínculo já havia sido criado, e quando a Atlassian
+      // devolve a mesma chave por idempotência do lado dela.
+      //
+      // O bug que isto corrige: a colisão subia como erro genérico e, por não ser
+      // `ErroAtlassian`, era classificada como **transitória** — a submissão voltava para
+      // `pendente` e o cron tentava **para sempre**, batendo na mesma constraint. Pego no
+      // app real em 07/08/2026.
+      //
+      // A distinção que importa: mesmo solicitante = já estava feito (idempotente). Outro
+      // solicitante = anomalia grave (a Atlassian devolveu uma chave que pertence a outra
+      // pessoa) e **não pode** ser aceita em silêncio — seria entregar o chamado de alguém
+      // para quem abriu este.
+      try {
+        await this.vinculos.criar({
+          issueKey: criado.issueKey,
+          solicitanteEmail: dados.solicitanteEmail,
+          conversaId: dados.conversaId,
+          via: dados.via,
+          verificadoRegras: dados.verificadoRegras,
+          area: dados.area,
+        })
+      } catch (erroVinculo) {
+        const existente = await this.vinculos.obterSemIsolamento_apenasReconciliacao(
+          criado.issueKey,
+        )
+        if (!existente) throw erroVinculo
+        if (existente.solicitanteEmail !== dados.solicitanteEmail) {
+          await this.auditoria.registrar({
+            atorEmail: dados.solicitanteEmail,
+            acao: 'chamado_criado',
+            recurso: criado.issueKey,
+            resultado: 'negado',
+            detalhe: { motivo: 'issue_key_ja_vinculada_a_outro_solicitante' },
+          })
+          throw new ErroAtlassian('chave de chamado já vinculada a outro solicitante', {
+            // **Definitivo**: reprocessar não muda nada, e insistir esconderia a anomalia.
+            transitorio: false,
+            recurso: criado.issueKey,
+          })
+        }
+        await this.auditoria.registrar({
+          atorEmail: dados.solicitanteEmail,
+          acao: 'vinculo_reconciliado',
+          recurso: criado.issueKey,
+          resultado: 'sucesso',
+          detalhe: { motivo: 'vinculo_ja_existia' },
+        })
+      }
 
       await this.auditoria.registrar({
         atorEmail: dados.solicitanteEmail,

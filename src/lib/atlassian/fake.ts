@@ -218,6 +218,19 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
   }
 
   /**
+   * Avança o contador de chaves para além do que já existe — só demonstração/teste.
+   *
+   * ⚠️ O Worker é **stateless**: `contadorIssue` volta a zero a cada requisição, então o
+   * segundo chamado aberto na demonstração também nascia `GOATLAS-1` e batia no
+   * `UNIQUE (vinculos.issue_key)`. Pego no app real em 07/08/2026.
+   *
+   * Em produção nada disto existe: a chave é do JSM, que não repete.
+   */
+  ajustarContadorIssue(minimo: number): void {
+    if (minimo > this.contadorIssue) this.contadorIssue = minimo
+  }
+
+  /**
    * Muda o chamado como o time de tech mudaria — só para teste e demonstração.
    *
    * Existe porque a Fase 3 precisa encenar o outro lado: status que muda, comentário
