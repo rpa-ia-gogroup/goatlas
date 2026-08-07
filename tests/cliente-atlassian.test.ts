@@ -28,6 +28,76 @@ const BASE = {
   ttlConteudoSeg: 300,
 }
 
+/**
+ * **`listarTiposChamado` — o endpoint global é EXPERIMENTAL e devolvia 412.**
+ *
+ * 🚨 Medido contra a Atlassian real em 07/08/2026, com credencial válida:
+ * `GET /rest/servicedeskapi/requesttype` responde **412** com *"This API is experimental…
+ * You must set the header 'X-ExperimentalApi: opt-in'"*. Era o endpoint que este método
+ * usava, então **listar tipos de chamado não funcionava em produção** — e sem isso não há
+ * allowlist de `RF-28` nem formulário sem IA sabendo o que oferecer.
+ *
+ * A correção **não** foi ligar o opt-in: "experimental" é a Atlassian avisando que pode
+ * mudar sem aviso, e a allowlist de tipos é trava de roteamento (`RF-28`). O caminho
+ * estável é por service desk, que responde 200 sem cabeçalho nenhum.
+ *
+ * _Requirements: RF-28, RNF-25, R-02_
+ */
+describe('listarTiposChamado usa o caminho estável, não o experimental', () => {
+  function clienteFalso(
+    responder: (url: string) => { status?: number; corpo?: unknown },
+  ): { cliente: ClienteAtlassianHttp; urls: string[] } {
+    const urls: string[] = []
+    const fetchImpl = (async (url: string | URL | Request) => {
+      const u = String(url)
+      urls.push(u)
+      const r = responder(u)
+      return new Response(r.corpo === undefined ? null : JSON.stringify(r.corpo), {
+        status: r.status ?? 200,
+      })
+    }) as unknown as typeof fetch
+    return {
+      cliente: new ClienteAtlassianHttp({ ...BASE, campoSolicitanteId: null, fetchImpl }),
+      urls,
+    }
+  }
+
+  const RESPOSTAS = (url: string) => {
+    if (url.endsWith('/rest/servicedeskapi/servicedesk')) {
+      return { corpo: { values: [{ id: 4 }, { id: 9 }] } }
+    }
+    if (url.includes('/servicedesk/4/requesttype')) {
+      return { corpo: { values: [{ id: 70, name: 'Relatar um bug', description: 'bug' }] } }
+    }
+    if (url.includes('/servicedesk/9/requesttype')) {
+      return { corpo: { values: [{ id: 12, name: 'Outro' }] } }
+    }
+    // O global existe no dublê e responde como a Atlassian real: 412.
+    return { status: 412, corpo: { message: 'This API is experimental.' } }
+  }
+
+  it('NÃO chama o endpoint global — ele responde 412 na Atlassian real', async () => {
+    const { cliente, urls } = clienteFalso(RESPOSTAS)
+    await cliente.listarTiposChamado()
+    expect(urls).not.toContain(`${BASE.baseUrl}/rest/servicedeskapi/requesttype`)
+  })
+
+  it('lista os desks e depois os tipos DE CADA UM', async () => {
+    const { cliente, urls } = clienteFalso(RESPOSTAS)
+    const tipos = await cliente.listarTiposChamado()
+    expect(urls[0]).toBe(`${BASE.baseUrl}/rest/servicedeskapi/servicedesk`)
+    expect(tipos.map((t) => t.id)).toEqual(['70', '12'])
+  })
+
+  it('o `serviceDeskId` vem do LAÇO — o endpoint por desk não o repete em cada item', async () => {
+    const { cliente } = clienteFalso(RESPOSTAS)
+    const tipos = await cliente.listarTiposChamado()
+    // `String(undefined ?? '')` daria `''`, e tipo sem desk não cria chamado nenhum.
+    expect(tipos.map((t) => t.serviceDeskId)).toEqual(['4', '9'])
+    expect(tipos.every((t) => t.serviceDeskId.length > 0)).toBe(true)
+  })
+})
+
 describe('RN-06 — injeção de CQL não reescreve a allowlist', () => {
   it('aspas no termo são escapadas', () => {
     expect(escaparCql('a"b')).toBe('a\\"b')

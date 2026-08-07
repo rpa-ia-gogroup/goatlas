@@ -10,7 +10,12 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { assentoOcioso, calcularCusto } from '@/lib/governanca/custo'
+import {
+  assentoOcioso,
+  calcularCusto,
+  economiaComCurva,
+  precoNaFaixa,
+} from '@/lib/governanca/custo'
 import { gerarRecomendacoes, PRODUTO_SERVICE_DESK_AGENTE } from '@/lib/governanca/recomendacoes'
 import { recomendacoesParaCsv } from '@/lib/governanca/csv'
 import type { ItemInventario } from '@/lib/governanca/inventario'
@@ -101,6 +106,111 @@ describe('RF-53 — calcularCusto NUNCA inventa número (Q8)', () => {
     expect(r.porProduto).toEqual([])
     expect(r.custoConfigurado).toBe(false)
     expect(r.totalMensalUsd).toBeNull()
+  })
+})
+
+/**
+ * **T-134** — o preço da Atlassian é escalonado, e isso inverte a intuição.
+ *
+ * 🚨 Medido no `HANDOFF` de 31/07 e registrado em `D-23`: um corte de **54 para 38
+ * assentos (−30%)** baixou a fatura em **3,4%**. Porque o preço é por FAIXA: quem fica
+ * pode cair numa faixa de preço unitário **mais alto**.
+ *
+ * `ociosos × preço` é, portanto, um **teto** da economia — e é o número com que alguém
+ * decide rebaixar o acesso de um colega. Mesmo raciocínio de `custoConfigurado` (Q8) e de
+ * `deflexaoResolvidaConhecida` (T-235): número que não se sabe calcular não vira número
+ * que se afirma.
+ *
+ * _Requirements: RF-53, RF-56_
+ */
+describe('T-134 — economia de assento ocioso com preço ESCALONADO', () => {
+  // Faixas medidas na faixa 1–100 (`D-23`): mais assentos, preço unitário menor.
+  const CURVA_JSM = [
+    { ate: 10, precoUnitarioUsd: 9.05 },
+    { ate: 100, precoUnitarioUsd: 6.7 },
+  ]
+
+  it('`precoNaFaixa` acha a faixa, e `ate: null` é "daí para cima"', () => {
+    expect(precoNaFaixa(CURVA_JSM, 5)).toBe(9.05)
+    expect(precoNaFaixa(CURVA_JSM, 10)).toBe(9.05)
+    expect(precoNaFaixa(CURVA_JSM, 11)).toBe(6.7)
+    // Quantidade fora de toda faixa é `null` — não se extrapola preço.
+    expect(precoNaFaixa(CURVA_JSM, 500)).toBeNull()
+    expect(precoNaFaixa([...CURVA_JSM, { ate: null, precoUnitarioUsd: 5 }], 500)).toBe(5)
+  })
+
+  it('🚨 cortar assento pode SUBIR o preço unitário — a economia ingênua mente', () => {
+    // 12 assentos a 6,70 = 80,40. Removendo 3, sobram 9 — que caem na faixa de 9,05:
+    // 9 × 9,05 = 81,45. Ou seja, a fatura **não cai**.
+    const ingenua = 3 * 6.7 // 20,10 — o que `ociosos × preço` afirmaria
+    const real = economiaComCurva(CURVA_JSM, 12, 3)
+    expect(ingenua).toBeCloseTo(20.1, 2)
+    // A economia real é ZERO, não 20,10. E nunca negativa: a tela não mostra "prejuízo
+    // de cortar", que confundiria mais do que informa.
+    expect(real).toBe(0)
+  })
+
+  it('quando a faixa não muda, a economia coincide com a ingênua', () => {
+    // 100 → 90 assentos: os dois lados na mesma faixa de 6,70.
+    expect(economiaComCurva(CURVA_JSM, 100, 10)).toBeCloseTo(10 * 6.7, 2)
+  })
+
+  it('SEM curva configurada, o número sai marcado como TETO', () => {
+    const itens = [
+      item({ accountId: 'a1', produto: 'jira-servicedesk' }),
+      item({ accountId: 'a2', produto: 'jira-servicedesk', ultimoAcessoEm: null }),
+    ]
+    const r = calcularCusto(itens, { 'jira-servicedesk': 20 }, OCIOSO_DIAS, AGORA)
+    expect(r.ocioso.usuarios).toBe(1)
+    expect(r.ocioso.custoMensalUsd).toBe(20)
+    // ⚠️ O valor continua vindo — o que muda é a app deixar de AFIRMAR que é economia.
+    expect(r.ocioso.economiaConfiavel).toBe(false)
+  })
+
+  it('COM curva configurada, o número passa a ser confiável e usa a curva', () => {
+    const itens = Array.from({ length: 12 }, (_, i) =>
+      item({
+        accountId: `a${i}`,
+        produto: 'jira-servicedesk',
+        ...(i < 3 ? { ultimoAcessoEm: null } : {}),
+      }),
+    )
+    const r = calcularCusto(
+      itens,
+      { 'jira-servicedesk': 6.7 },
+      OCIOSO_DIAS,
+      AGORA,
+      { 'jira-servicedesk': CURVA_JSM },
+    )
+    expect(r.ocioso.usuarios).toBe(3)
+    expect(r.ocioso.economiaConfiavel).toBe(true)
+    // Pela curva: 0, e não os 20,10 do cálculo ingênuo.
+    expect(r.ocioso.custoMensalUsd).toBe(0)
+  })
+
+  it('UM produto sem curva contamina a afirmação inteira', () => {
+    const itens = [
+      item({ accountId: 'a1', produto: 'jira-servicedesk', ultimoAcessoEm: null }),
+      item({ accountId: 'a2', produto: 'confluence', ultimoAcessoEm: null }),
+    ]
+    const r = calcularCusto(
+      itens,
+      { 'jira-servicedesk': 6.7, confluence: 5 },
+      OCIOSO_DIAS,
+      AGORA,
+      // Só o JSM tem curva; `confluence` não.
+      { 'jira-servicedesk': CURVA_JSM },
+    )
+    expect(r.ocioso.economiaConfiavel).toBe(false)
+  })
+
+  it('sem assento ocioso não há economia a ressalvar', () => {
+    const itens = [item({ accountId: 'a1', produto: 'confluence' })]
+    const r = calcularCusto(itens, { confluence: 5 }, OCIOSO_DIAS, AGORA)
+    expect(r.ocioso.usuarios).toBe(0)
+    // `false` aqui viraria um aviso na tela sobre um número que é zero por não haver
+    // ocioso nenhum — ruído que faz duvidar do resto.
+    expect(r.ocioso.economiaConfiavel).toBe(true)
   })
 })
 
