@@ -117,15 +117,21 @@
 
 /* ---------- navegação: pílulas, o formato da marca ---------------------- */
 
+/* ⚠️ QUEBRA a linha, não rola. Era `overflow-x: auto` com `scrollbar-width: none`:
+   a quinta aba (a de admin, a última) ficava cortada fora da tela **sem nenhuma
+   pista de que existia algo à direita** — sem barra, sem sombra, sem meia pílula
+   aparecendo. Quem não sabia que ela existia não a encontrava; quem sabia
+   precisava adivinhar shift+roda.
+
+   São no máximo cinco itens, então uma segunda linha custa 40px e resolve. Rolagem
+   horizontal escondida só se justifica quando a lista é longa o bastante para que
+   quebrar seja pior — não é o caso aqui, e a aba escondida era a única porta para
+   toda a administração. */
 .abas {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
-  overflow-x: auto;
   padding-bottom: var(--space-1);
-  scrollbar-width: none;
-}
-.abas::-webkit-scrollbar {
-  display: none;
 }
 
 .aba {
