@@ -427,7 +427,11 @@ export interface ResumoCusto {
   readonly custoConfigurado: boolean
   readonly ocioso: {
     readonly usuarios: number
+    /** ⚠️ **TETO** da economia quando `economiaConfiavel` é `false`, não a economia. */
     readonly custoMensalUsd: number | null
+    /** `false` = preço escalonado sem curva configurada (T-134). A tela mostra a ressalva
+     * ao lado do número, porque é aqui que se decide cortar acesso de alguém. */
+    readonly economiaConfiavel: boolean
   }
 }
 

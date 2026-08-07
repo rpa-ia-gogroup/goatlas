@@ -1126,6 +1126,7 @@ async function rotear(
       ctx.valores.custo_mensal_por_produto,
       ctx.valores.assentos_ocioso_dias,
       Date.parse(ctx.agora()),
+      ctx.valores.curva_preco_por_produto,
     )
     return json({
       coletadoEm: snapshot.coletadoEm,
@@ -1688,9 +1689,9 @@ async function tratarCron(
     }
     const orgId = ctx.valores.org_id
     try {
-      const usuarios = await ctx.organizacao.listarUsuarios(orgId)
+      const varredura = await ctx.organizacao.listarUsuarios(orgId)
       const entradas = []
-      for (const usuario of usuarios) {
+      for (const usuario of varredura.usuarios) {
         try {
           entradas.push({
             usuario,
@@ -1706,10 +1707,26 @@ async function tratarCron(
       await ctx.auditoria.registrar({
         atorEmail: '(cron)',
         acao: 'inventario_coletado',
-        resultado: 'sucesso',
-        detalhe: { usuarios: usuarios.length, registros: r.registros },
+        // ⚠️ Coleta incompleta ou com suspensão desconhecida **não** é `sucesso`. Ela
+        // grava o que deu, mas marcá-la como sucesso apagaria o único registro de que
+        // o inventário daquele dia não é a organização inteira — e é sobre esse
+        // inventário que a tela recomenda revogar assento.
+        resultado: varredura.parcial || !varredura.suspensaoConhecida ? 'falha' : 'sucesso',
+        detalhe: {
+          usuarios: varredura.usuarios.length,
+          registros: r.registros,
+          suspensas: varredura.suspensas,
+          suspensaoConhecida: varredura.suspensaoConhecida,
+          parcial: varredura.parcial,
+        },
       })
-      return json({ ok: true, ...r })
+      return json({
+        ok: true,
+        ...r,
+        suspensas: varredura.suspensas,
+        suspensaoConhecida: varredura.suspensaoConhecida,
+        parcial: varredura.parcial,
+      })
     } catch (e) {
       await ctx.auditoria.registrar({
         atorEmail: '(cron)',

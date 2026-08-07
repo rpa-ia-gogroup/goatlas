@@ -141,7 +141,7 @@ export function apiDev(): Plugin {
       // Uma coleta já rodada, para a tela de governança não nascer vazia — em
       // produção isso é o cron diário (`POST /api/cron/coletar-inventario`).
       if ((await inicial.inventarioAssentos.obterMaisRecente()).coletadoEm === null) {
-        const usuarios = await organizacaoDev.listarUsuarios('org-dev')
+        const { usuarios } = await organizacaoDev.listarUsuarios('org-dev')
         const entradas = []
         for (const usuario of usuarios) {
           entradas.push({
