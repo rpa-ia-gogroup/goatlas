@@ -9,6 +9,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
+import { linhasComoObjetos } from '@/lib/db/tipos'
 import { SqliteLocal } from '@/lib/db/sqlite-local'
 import { migrar } from '@/lib/db/schema'
 import { Outbox } from '@/lib/tickets/outbox'
@@ -91,7 +92,7 @@ describe('RF-24 — idempotência', () => {
     expect(chaves.size).toBe(1)
     expect([a.duplicada, b.duplicada]).toContain(true)
     const r = await db.query(`SELECT COUNT(*) AS n FROM submissoes`, [])
-    expect(r.rows[0]?.[0]).toBe(1)
+    expect(linhasComoObjetos<{ n: number }>(r)[0]?.n).toBe(1)
   })
 })
 

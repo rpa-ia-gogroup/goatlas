@@ -550,17 +550,21 @@ describe('cron recusado registra o DIAGNÓSTICO, não o segredo', () => {
     return JSON.parse(linhas[0]?.detalhe_json ?? '{}') as Record<string, unknown>
   }
 
-  it('sem header: `headerAusente` — o cron não está batendo aqui', async () => {
+  it('sem header: `header_ausente` — o cron não está batendo aqui', async () => {
     expect((await tentarCron({}, 'chave-certa')).status).toBe(403)
-    const d = await ultimoDetalhe()
-    expect(d.headerAusente).toBe(true)
-    expect(d.chaveAusente).toBe(false)
+    expect((await ultimoDetalhe()).detalhe).toBe('header_ausente')
   })
 
-  it('sem secret: `chaveAusente` — falta configurar, não é chave errada', async () => {
+  it('sem secret: `chave_ausente` — falta configurar, não é chave errada', async () => {
     expect((await tentarCron({ 'x-godeploy-cron': 'qualquer' })).status).toBe(403)
-    const d = await ultimoDetalhe()
-    expect(d.chaveAusente).toBe(true)
+    expect((await ultimoDetalhe()).detalhe).toBe('chave_ausente')
+  })
+
+  it('header em formato desconhecido é distinguido de assinatura errada', async () => {
+    // Os dois recusam; a diferença é diagnóstica. "Formato desconhecido" aponta para a
+    // plataforma ter mudado o esquema; "assinatura inválida" aponta para chave errada.
+    expect((await tentarCron({ 'x-godeploy-cron': 'nada-parecido' }, 'chave')).status).toBe(403)
+    expect((await ultimoDetalhe()).detalhe).toBe('formato_desconhecido')
   })
 
   it('tamanhos DIFERENTES apontam formato diferente (assinatura, p.ex.)', async () => {

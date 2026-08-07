@@ -11,6 +11,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
+import { linhasComoObjetos } from '@/lib/db/tipos'
 import { SqliteLocal } from '@/lib/db/sqlite-local'
 import { migrar } from '@/lib/db/schema'
 import { CONFIG_PADRAO, type ConfigValores } from '@/lib/config'
@@ -241,7 +242,7 @@ describe('RF-10 — Regra 2 com classificação e cache', () => {
     expect(iaAntiga.classificacoesRecebidas.length).toBe(chamadasPrimeira)
 
     const cache = await db.query(`SELECT COUNT(*) AS n FROM classificacoes_ticket`, [])
-    expect(cache.rows[0]?.[0]).toBe(2)
+    expect(linhasComoObjetos<{ n: number }>(cache)[0]?.n).toBe(2)
   })
 
   it('comentário diferente no mesmo ticket força reclassificação', () => {

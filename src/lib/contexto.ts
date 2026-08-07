@@ -18,7 +18,7 @@ import { ClienteIAIndisponivel } from './ia/indisponivel'
 import type { ClienteIA } from './ia/tipos'
 import { AuditoriaBanco, type Auditoria } from './audit'
 import { Config, valoresDoBootstrap, type BootstrapEnv, type ConfigValores } from './config'
-import { configDemo, semearAtlassianDemo, semearIaDemo } from './demo'
+import { configDemo, repovoarChamadosDemo, semearAtlassianDemo, semearIaDemo } from './demo'
 import { migrar } from './db/schema'
 import type { Banco } from './db/tipos'
 import { RepositorioConversas } from './agent/estado'
@@ -205,7 +205,12 @@ export async function montarContexto(
     // Os fakes são semeados a cada montagem porque o Worker é stateless: o estado
     // deles não sobrevive entre requisições. O que persiste (conversa, vínculo,
     // chamado) está no banco.
-    if (atlassian instanceof ClienteAtlassianFake) semearAtlassianDemo(atlassian)
+    if (atlassian instanceof ClienteAtlassianFake) {
+      semearAtlassianDemo(atlassian)
+      // O Worker é stateless: sem isto, o chamado aberto na requisição anterior aparece
+      // como indisponível na seguinte. Ver `repovoarChamadosDemo`.
+      await repovoarChamadosDemo(atlassian, env.DB)
+    }
     if (ia instanceof ClienteIAFake) semearIaDemo(ia)
   }
 

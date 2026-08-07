@@ -92,7 +92,15 @@ export interface DetalheChamado {
   }
   readonly via: 'conversa' | 'formulario'
   readonly verificadoRegras: boolean
+  readonly area: string | null
   readonly comentarios: readonly ComentarioPublico[]
+  /**
+   * `true` = a Atlassian não respondeu e o que está na tela veio do que NÓS gravamos
+   * (`RNF-19`). O chamado existe; o estado dele é que não pôde ser lido.
+   */
+  readonly degradado: boolean
+  /** `true` = não deu para buscar as respostas. Diferente de "não há respostas ainda". */
+  readonly comentariosIndisponiveis: boolean
 }
 
 export interface TipoChamado {

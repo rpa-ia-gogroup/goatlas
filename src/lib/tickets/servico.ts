@@ -279,14 +279,55 @@ export class ServicoChamados {
       })
       return null
     }
-    const chamado = await this.atlassian.obterChamado(issueKey)
-    await this.auditoria.registrar({
-      atorEmail: solicitanteEmail,
-      acao: 'chamado_lido',
-      recurso: issueKey,
-      resultado: 'sucesso',
-    })
-    return { chamado, vinculo }
+    // ⚠️ **A leitura DEGRADA, não quebra** (`RNF-19`). Antes, uma falha aqui subia até o
+    // roteador e virava **500**: a pessoa clicava no próprio chamado e lia "algo deu errado
+    // do nosso lado", sem nenhuma informação — numa queda do Jira, o app inteiro parecia
+    // quebrado justo na tela que ela mais precisa.
+    //
+    // A lista já fazia isso certo desde a Fase 1 (usa o payload do outbox e marca o status
+    // como indisponível). O detalhe não fazia, e a incoerência só apareceu testando contra
+    // o app real — nenhum teste local pegava, porque nos testes o chamado sempre existe.
+    //
+    // O que se mostra é o que NÓS gravamos: título, descrição e prioridade vêm do outbox.
+    // Só o status é honestamente marcado como indisponível.
+    try {
+      const chamado = await this.atlassian.obterChamado(issueKey)
+      await this.auditoria.registrar({
+        atorEmail: solicitanteEmail,
+        acao: 'chamado_lido',
+        recurso: issueKey,
+        resultado: 'sucesso',
+      })
+      return { chamado, vinculo, degradado: false as const }
+    } catch (erro) {
+      const submissao = await this.outbox.obterPorIssueKey(issueKey)
+      await this.auditoria.registrar({
+        atorEmail: solicitanteEmail,
+        acao: 'chamado_lido',
+        recurso: issueKey,
+        resultado: 'falha',
+        detalhe: {
+          motivo: 'atlassian_indisponivel',
+          // Sem o corpo da resposta (RNF-01) — `ErroAtlassian` já garante isso.
+          erro: erro instanceof Error ? erro.message : 'falha',
+          recuperadoDoOutbox: submissao !== null,
+        },
+      })
+      return {
+        vinculo,
+        degradado: true as const,
+        chamado: {
+          issueKey,
+          titulo: submissao?.payload.titulo ?? '',
+          descricao: submissao?.payload.descricao ?? '',
+          status: 'indisponivel',
+          prioridade: submissao?.payload.prioridade ?? null,
+          criadoEm: vinculo.criadoEm,
+          atualizadoEm: vinculo.criadoEm,
+          slaPrimeiraResposta: null,
+        },
+      }
+    }
   }
 
   /** Comentários públicos do chamado — isolamento + RF-32 em duas camadas. */

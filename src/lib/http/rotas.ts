@@ -36,6 +36,7 @@ import {
   segredoConfere,
 } from '../notificacoes/webhook'
 import { validarPreferencia } from '../notificacoes/preferencias'
+import { verificarCron } from './cron-auth'
 import { areaDoEmail, areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
@@ -476,15 +477,28 @@ async function rotear(
   if (detalhe && req.method === 'GET') {
     const r = await ctx.chamados.obterChamadoDoSolicitante(detalhe[1]!, eu.email)
     if (!r) return ERROS.chamadoNaoSeu()
-    const comentarios = await ctx.chamados.listarComentariosDoSolicitante(
-      detalhe[1]!,
-      eu.email,
-    )
+    // ⚠️ Os comentários são uma SEGUNDA chamada à Atlassian, e falhavam com 500 pelo mesmo
+    // motivo que o chamado falhava. Aqui a distinção importa mais que na lista: "ainda não
+    // há respostas" e "não consegui buscar as respostas" são frases opostas, e mostrar a
+    // primeira durante uma queda faz a pessoa achar que ninguém olhou o chamado dela.
+    let comentarios: Awaited<ReturnType<typeof ctx.chamados.listarComentariosDoSolicitante>> = []
+    let comentariosIndisponiveis = false
+    try {
+      comentarios = await ctx.chamados.listarComentariosDoSolicitante(detalhe[1]!, eu.email)
+    } catch {
+      comentariosIndisponiveis = true
+    }
     return json({
       chamado: r.chamado,
       via: r.vinculo.via,
       verificadoRegras: r.vinculo.verificadoRegras,
+      area: r.vinculo.area,
       comentarios: comentarios ?? [],
+      // `RNF-19` — a tela precisa distinguir "não há resposta ainda" de "não consegui
+      // buscar as respostas". Sem estes campos, uma queda do Jira apareceria como um
+      // chamado sem histórico, o que é uma informação falsa.
+      degradado: r.degradado,
+      comentariosIndisponiveis,
     })
   }
 
@@ -1283,6 +1297,41 @@ async function avisarCriacao(
   }
 }
 
+/**
+ * Descreve a FORMA de um valor opaco, sem revelar o valor.
+ *
+ * ⚠️ Existe para um problema concreto: a plataforma diz que estampa um header
+ * `X-Godeploy-Cron` **assinado**, e não documenta o formato. Medido em 07/08/2026, o que
+ * chega tem 81 caracteres contra 64 da chave configurada — ou seja, **não é a chave crua**,
+ * e comparar por igualdade nunca vai casar. Para verificar direito é preciso saber se é
+ * `timestamp.hmac`, JWT, base64, ou outra coisa.
+ *
+ * O que sai daqui é **estrutura**: separadores, e por segmento o comprimento e o conjunto
+ * de caracteres. Nada de conteúdo — `abc123` e `def456` produzem exatamente a mesma
+ * descrição. É a diferença entre "sei que é hex de 64" e "sei qual hex".
+ */
+function descreverFormato(valor: string): {
+  separadores: string
+  segmentos: { tamanho: number; conjunto: string }[]
+} {
+  const conjuntoDe = (s: string): string => {
+    if (/^\d+$/.test(s)) return 'digitos'
+    if (/^[0-9a-f]+$/.test(s)) return 'hex-minusculo'
+    if (/^[0-9A-F]+$/.test(s)) return 'hex-maiusculo'
+    if (/^[A-Za-z0-9_-]+$/.test(s)) return 'base64url'
+    if (/^[A-Za-z0-9+/=]+$/.test(s)) return 'base64'
+    return 'misto'
+  }
+  return {
+    // Só os caracteres que NÃO são de conteúdo: `.`, `,`, `=`, `:` etc.
+    separadores: valor.replace(/[A-Za-z0-9_-]/g, ''),
+    segmentos: valor
+      .split(/[^A-Za-z0-9_-]+/)
+      .filter((s) => s.length > 0)
+      .map((s) => ({ tamanho: s.length, conjunto: conjuntoDe(s) })),
+  }
+}
+
 /** Sem acento e em minúsculas — "orçamento" e "orcamento" procuram a mesma coisa. */
 function normalizarBusca(texto: string): string {
   return texto
@@ -1529,9 +1578,25 @@ async function tratarCron(
 
   const enviado = req.headers.get('x-godeploy-cron')
   const esperado = env.GODEPLOY_CRON_KEY
-  // Fail-closed: sem chave configurada, a rota não funciona. O contrário deixaria
-  // a rota aberta justamente na instalação que esqueceu de configurar.
-  if (!esperado || !enviado || enviado !== esperado) {
+
+  // ⚠️ O header é **assinado**, não é a chave crua — medido no app real em 07/08/2026, e
+  // era a razão de as sete rotas de cron devolverem 403 com a chave certa configurada.
+  // Toda a lógica (HMAC, janela de tempo, comparação em tempo constante) está em
+  // `cron-auth.ts`, com teste próprio: é código de autenticação, não detalhe de roteador.
+  //
+  // O corpo é lido antes porque uma das construções candidatas o inclui na assinatura. As
+  // rotas de cron não têm corpo hoje, e ler string vazia é barato.
+  const corpoCron = await req.clone().text().catch(() => '')
+  const veredito = await verificarCron({
+    headerEnviado: enviado,
+    chave: esperado,
+    metodo: req.method,
+    caminho,
+    corpo: corpoCron,
+    agoraMs: Date.parse(ctx.agora()),
+  })
+
+  if (!veredito.ok) {
     await ctx.auditoria.registrar({
       atorEmail: '(cron)',
       acao: 'acesso_negado',
@@ -1552,14 +1617,38 @@ async function tratarCron(
       // de segredo é vazamento desprezível; prefixo não é, e é por isso que ele fica fora.
       detalhe: {
         motivo: 'cron_nao_autenticado',
-        headerAusente: enviado === null,
-        chaveAusente: !esperado,
+        // O motivo específico é o que separa "esqueci de configurar" de "alguém está
+        // tentando" — distinção que precisa existir na auditoria, não só no código.
+        detalhe: veredito.motivo,
         tamanhoRecebido: enviado?.length ?? 0,
         tamanhoEsperado: esperado?.length ?? 0,
       },
     })
+    // O MESMO diagnóstico vai para o log da plataforma, e não é redundância: a auditoria
+    // vive em `env.DB` e só é legível por uma rota de admin atrás do SSO — quem está
+    // depurando o cron normalmente está fora do navegador. `getAppLogs` é a superfície que
+    // se lê de fora.
+    //
+    // ⚠️ Os **nomes** dos cabeçalhos entram; os valores, não. É o que revela se a
+    // plataforma mudou o nome do header (aí `x-godeploy-cron` some da lista) — a hipótese
+    // que nenhum outro campo distingue.
+    console.log(
+      '[cron] recusado',
+      JSON.stringify({
+        caminho,
+        motivo: veredito.motivo,
+        headers: [...req.headers.keys()].sort(),
+        tamanhoRecebido: enviado?.length ?? 0,
+        tamanhoEsperado: esperado?.length ?? 0,
+        formatoRecebido: enviado === null ? null : descreverFormato(enviado),
+      }),
+    )
     return ERROS.semPermissao()
   }
+
+  // Qual construção casou. É o que permite reduzir a lista de candidatas a uma só depois
+  // da primeira rodada — o rótulo não revela assinatura nenhuma.
+  console.log('[cron] autenticado', JSON.stringify({ caminho, candidata: veredito.candidata }))
 
   if (caminho === '/api/cron/reprocessar-submissoes') {
     const r = await ctx.chamados.reprocessarPendentes(25)

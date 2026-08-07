@@ -1799,9 +1799,13 @@ var ClienteIAIndisponivel = class {
 // src/lib/db/tipos.ts
 function linhasComoObjetos(r) {
   return r.rows.map((linha) => {
+    if (linha !== null && typeof linha === "object" && !Array.isArray(linha)) {
+      return linha;
+    }
+    const valores = linha;
     const obj = {};
     r.columns.forEach((coluna, i) => {
-      obj[coluna] = linha[i];
+      obj[coluna] = valores[i];
     });
     return obj;
   });
@@ -2008,6 +2012,31 @@ function configDemo() {
      */
     areas_por_email: { "demonstracao@gocase.com": "CX" }
   };
+}
+async function repovoarChamadosDemo(fake, db) {
+  const r = await db.query(
+    `SELECT issue_key, payload_json FROM submissoes
+      WHERE estado = 'criado' AND issue_key IS NOT NULL
+      ORDER BY criado_em DESC LIMIT 50`,
+    []
+  );
+  for (const linha of linhasComoObjetos(r)) {
+    if (fake.estado.chamados.has(linha.issue_key)) continue;
+    try {
+      const p = JSON.parse(linha.payload_json);
+      fake.estado.chamados.set(linha.issue_key, {
+        issueKey: linha.issue_key,
+        titulo: typeof p.titulo === "string" ? p.titulo : "",
+        descricao: typeof p.descricao === "string" ? p.descricao : "",
+        status: "Aberto",
+        prioridade: p.prioridade === "critica" || p.prioridade === "alta" || p.prioridade === "normal" ? p.prioridade : null,
+        criadoEm: (/* @__PURE__ */ new Date(0)).toISOString(),
+        atualizadoEm: (/* @__PURE__ */ new Date(0)).toISOString(),
+        slaPrimeiraResposta: { prazo: null, cumprido: null }
+      });
+    } catch {
+    }
+  }
 }
 function semearAtlassianDemo(fake) {
   fake.estado.tiposChamado = [
@@ -3761,14 +3790,44 @@ var ServicoChamados = class {
       });
       return null;
     }
-    const chamado = await this.atlassian.obterChamado(issueKey);
-    await this.auditoria.registrar({
-      atorEmail: solicitanteEmail,
-      acao: "chamado_lido",
-      recurso: issueKey,
-      resultado: "sucesso"
-    });
-    return { chamado, vinculo };
+    try {
+      const chamado = await this.atlassian.obterChamado(issueKey);
+      await this.auditoria.registrar({
+        atorEmail: solicitanteEmail,
+        acao: "chamado_lido",
+        recurso: issueKey,
+        resultado: "sucesso"
+      });
+      return { chamado, vinculo, degradado: false };
+    } catch (erro2) {
+      const submissao = await this.outbox.obterPorIssueKey(issueKey);
+      await this.auditoria.registrar({
+        atorEmail: solicitanteEmail,
+        acao: "chamado_lido",
+        recurso: issueKey,
+        resultado: "falha",
+        detalhe: {
+          motivo: "atlassian_indisponivel",
+          // Sem o corpo da resposta (RNF-01) — `ErroAtlassian` já garante isso.
+          erro: erro2 instanceof Error ? erro2.message : "falha",
+          recuperadoDoOutbox: submissao !== null
+        }
+      });
+      return {
+        vinculo,
+        degradado: true,
+        chamado: {
+          issueKey,
+          titulo: submissao?.payload.titulo ?? "",
+          descricao: submissao?.payload.descricao ?? "",
+          status: "indisponivel",
+          prioridade: submissao?.payload.prioridade ?? null,
+          criadoEm: vinculo.criadoEm,
+          atualizadoEm: vinculo.criadoEm,
+          slaPrimeiraResposta: null
+        }
+      };
+    }
   }
   /** Comentários públicos do chamado — isolamento + RF-32 em duas camadas. */
   async listarComentariosDoSolicitante(issueKey, solicitanteEmail) {
@@ -4699,7 +4758,10 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   });
   const organizacao = reaproveitar.organizacao ? reaproveitar.organizacao : usandoFakes ? new ClienteOrganizacaoFake() : env.ATLASSIAN_ORG_API_KEY ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY }) : null;
   if (modoDemo) {
-    if (atlassian instanceof ClienteAtlassianFake) semearAtlassianDemo(atlassian);
+    if (atlassian instanceof ClienteAtlassianFake) {
+      semearAtlassianDemo(atlassian);
+      await repovoarChamadosDemo(atlassian, env.DB);
+    }
     if (ia instanceof ClienteIAFake) semearIaDemo(ia);
   }
   const conversas = new RepositorioConversas(env.DB, agora);
@@ -6075,6 +6137,79 @@ function chaveDoPayload(corpo) {
   return /^[A-Z][A-Z0-9_]{1,19}-\d{1,10}$/.test(bruto) ? bruto : null;
 }
 
+// src/lib/http/cron-auth.ts
+var JANELA_CRON_SEG = 300;
+function lerAssinaturaCron(bruto) {
+  let carimboSeg = null;
+  let assinaturaHex = null;
+  for (const parte of bruto.split(";")) {
+    const [chave, valor] = parte.split("=", 2);
+    if (chave === void 0 || valor === void 0) continue;
+    const nome = chave.trim();
+    const conteudo = valor.trim();
+    if (nome === "t" && /^\d{1,15}$/.test(conteudo)) {
+      carimboSeg = Number(conteudo);
+      continue;
+    }
+    if (/^[0-9a-f]{64}$/.test(conteudo)) assinaturaHex = conteudo;
+  }
+  if (carimboSeg === null || assinaturaHex === null) return null;
+  return { carimboSeg, assinaturaHex };
+}
+function mensagensCandidatas(dados) {
+  const t = String(dados.carimboSeg);
+  return [
+    { rotulo: "t.corpo", mensagem: `${t}.${dados.corpo}` },
+    { rotulo: "t", mensagem: t },
+    { rotulo: "t:corpo", mensagem: `${t}:${dados.corpo}` },
+    { rotulo: "corpo", mensagem: dados.corpo },
+    { rotulo: "t.caminho", mensagem: `${t}.${dados.caminho}` },
+    { rotulo: "t.metodo.caminho", mensagem: `${t}.${dados.metodo}.${dados.caminho}` },
+    { rotulo: "t+corpo", mensagem: `${t}${dados.corpo}` }
+  ];
+}
+async function hmacHex(chave, mensagem) {
+  const codificador = new TextEncoder();
+  const material = await crypto.subtle.importKey(
+    "raw",
+    codificador.encode(chave),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const bytes = await crypto.subtle.sign("HMAC", material, codificador.encode(mensagem));
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function hexConfere(a, b) {
+  let diferenca = a.length ^ b.length;
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i += 1) {
+    diferenca |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return diferenca === 0;
+}
+async function verificarCron(dados) {
+  if (!dados.chave) return { ok: false, motivo: "chave_ausente" };
+  if (dados.headerEnviado === null) return { ok: false, motivo: "header_ausente" };
+  if (hexConfere(dados.headerEnviado, dados.chave)) return { ok: true, candidata: "chave_crua" };
+  const assinatura = lerAssinaturaCron(dados.headerEnviado);
+  if (!assinatura) return { ok: false, motivo: "formato_desconhecido" };
+  const idadeSeg = Math.abs(dados.agoraMs / 1e3 - assinatura.carimboSeg);
+  if (idadeSeg > JANELA_CRON_SEG) return { ok: false, motivo: "carimbo_fora_da_janela" };
+  for (const candidata of mensagensCandidatas({
+    carimboSeg: assinatura.carimboSeg,
+    metodo: dados.metodo,
+    caminho: dados.caminho,
+    corpo: dados.corpo
+  })) {
+    const esperado = await hmacHex(dados.chave, candidata.mensagem);
+    if (hexConfere(esperado, assinatura.assinaturaHex)) {
+      return { ok: true, candidata: candidata.rotulo };
+    }
+  }
+  return { ok: false, motivo: "assinatura_invalida" };
+}
+
 // src/lib/piloto/areas.ts
 var MENSAGEM_FORA_DO_PILOTO = "O goatlas est\xE1 em piloto e ainda n\xE3o abrange a sua \xE1rea. Enquanto isso, siga pedindo pelo canal que voc\xEA j\xE1 usa hoje com o time de tech \u2014 e a gente avisa quando chegar a sua vez. A consulta \xE0 documenta\xE7\xE3o continua liberada para voc\xEA aqui mesmo.";
 function dentroDoPiloto(email, emailsPiloto) {
@@ -6505,15 +6640,24 @@ async function rotear(req, ctx, eu, caminho, url) {
   if (detalhe && req.method === "GET") {
     const r = await ctx.chamados.obterChamadoDoSolicitante(detalhe[1], eu.email);
     if (!r) return ERROS.chamadoNaoSeu();
-    const comentarios = await ctx.chamados.listarComentariosDoSolicitante(
-      detalhe[1],
-      eu.email
-    );
+    let comentarios = [];
+    let comentariosIndisponiveis = false;
+    try {
+      comentarios = await ctx.chamados.listarComentariosDoSolicitante(detalhe[1], eu.email);
+    } catch {
+      comentariosIndisponiveis = true;
+    }
     return json({
       chamado: r.chamado,
       via: r.vinculo.via,
       verificadoRegras: r.vinculo.verificadoRegras,
-      comentarios: comentarios ?? []
+      area: r.vinculo.area,
+      comentarios: comentarios ?? [],
+      // `RNF-19` — a tela precisa distinguir "não há resposta ainda" de "não consegui
+      // buscar as respostas". Sem estes campos, uma queda do Jira apareceria como um
+      // chamado sem histórico, o que é uma informação falsa.
+      degradado: r.degradado,
+      comentariosIndisponiveis
     });
   }
   const comentar = caminho.match(/^\/api\/chamados\/([^/]+)\/comentarios$/);
@@ -7083,6 +7227,21 @@ async function avisarCriacao(ctx, resultado, dados) {
   } catch {
   }
 }
+function descreverFormato(valor) {
+  const conjuntoDe = (s) => {
+    if (/^\d+$/.test(s)) return "digitos";
+    if (/^[0-9a-f]+$/.test(s)) return "hex-minusculo";
+    if (/^[0-9A-F]+$/.test(s)) return "hex-maiusculo";
+    if (/^[A-Za-z0-9_-]+$/.test(s)) return "base64url";
+    if (/^[A-Za-z0-9+/=]+$/.test(s)) return "base64";
+    return "misto";
+  };
+  return {
+    // Só os caracteres que NÃO são de conteúdo: `.`, `,`, `=`, `:` etc.
+    separadores: valor.replace(/[A-Za-z0-9_-]/g, ""),
+    segmentos: valor.split(/[^A-Za-z0-9_-]+/).filter((s) => s.length > 0).map((s) => ({ tamanho: s.length, conjunto: conjuntoDe(s) }))
+  };
+}
 function normalizarBusca(texto2) {
   return texto2.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
 }
@@ -7221,7 +7380,16 @@ async function tratarCron(req, ctx, env, caminho) {
   if (req.method !== "POST") return ERROS.naoEncontrado();
   const enviado = req.headers.get("x-godeploy-cron");
   const esperado = env.GODEPLOY_CRON_KEY;
-  if (!esperado || !enviado || enviado !== esperado) {
+  const corpoCron = await req.clone().text().catch(() => "");
+  const veredito = await verificarCron({
+    headerEnviado: enviado,
+    chave: esperado,
+    metodo: req.method,
+    caminho,
+    corpo: corpoCron,
+    agoraMs: Date.parse(ctx.agora())
+  });
+  if (!veredito.ok) {
     await ctx.auditoria.registrar({
       atorEmail: "(cron)",
       acao: "acesso_negado",
@@ -7242,14 +7410,27 @@ async function tratarCron(req, ctx, env, caminho) {
       // de segredo é vazamento desprezível; prefixo não é, e é por isso que ele fica fora.
       detalhe: {
         motivo: "cron_nao_autenticado",
-        headerAusente: enviado === null,
-        chaveAusente: !esperado,
+        // O motivo específico é o que separa "esqueci de configurar" de "alguém está
+        // tentando" — distinção que precisa existir na auditoria, não só no código.
+        detalhe: veredito.motivo,
         tamanhoRecebido: enviado?.length ?? 0,
         tamanhoEsperado: esperado?.length ?? 0
       }
     });
+    console.log(
+      "[cron] recusado",
+      JSON.stringify({
+        caminho,
+        motivo: veredito.motivo,
+        headers: [...req.headers.keys()].sort(),
+        tamanhoRecebido: enviado?.length ?? 0,
+        tamanhoEsperado: esperado?.length ?? 0,
+        formatoRecebido: enviado === null ? null : descreverFormato(enviado)
+      })
+    );
     return ERROS.semPermissao();
   }
+  console.log("[cron] autenticado", JSON.stringify({ caminho, candidata: veredito.candidata }));
   if (caminho === "/api/cron/reprocessar-submissoes") {
     const r = await ctx.chamados.reprocessarPendentes(25);
     await ctx.auditoria.registrar({

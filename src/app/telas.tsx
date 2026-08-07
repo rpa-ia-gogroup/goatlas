@@ -722,6 +722,16 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
 
       {avisoAcao && <Aviso>{avisoAcao}</Aviso>}
 
+      {/* RNF-19 — o chamado existe; o que faltou foi ler o estado dele. Dizer isso é o
+          oposto de mostrar uma tela vazia e deixar a pessoa concluir que o chamado sumiu. */}
+      {dados.degradado && (
+        <Aviso atencao>
+          Não conseguimos consultar o estado atual deste chamado agora. O que você vê aqui é
+          o que registramos na abertura — <strong>seu chamado está a salvo</strong>. Tente
+          recarregar em instantes.
+        </Aviso>
+      )}
+
       <section className="recibo">
         <span className="eyebrow">Descrição</span>
         <TextoDoAgente texto={dados.chamado.descricao} />
@@ -794,7 +804,14 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
         <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
           Conversa do chamado
         </h2>
-        {dados.comentarios.length === 0 ? (
+        {dados.comentariosIndisponiveis ? (
+          // ⚠️ Nunca "ainda não há respostas" quando o que houve foi falha de leitura:
+          // seriam frases opostas, e a errada faz a pessoa achar que ninguém olhou.
+          <p className="dica">
+            Não conseguimos carregar as respostas agora. Isso não significa que não há
+            nenhuma — tente recarregar em instantes.
+          </p>
+        ) : dados.comentarios.length === 0 ? (
           <p className="dica">
             Ainda não há respostas. Você recebe aviso aqui quando o time responder.
           </p>
