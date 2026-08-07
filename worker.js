@@ -271,7 +271,8 @@ function camposAdicionais(brutos) {
     }));
     const custom = typeof bruto.jiraSchema?.custom === "string" ? bruto.jiraSchema.custom : "";
     const tipoBruto = typeof bruto.jiraSchema?.type === "string" ? bruto.jiraSchema.type : "";
-    const tipo = opcoes.length > 0 || tipoBruto === "option" ? "selecao" : custom.toLowerCase().includes("textarea") ? "texto_longo" : "texto";
+    const itens = typeof bruto.jiraSchema?.items === "string" ? bruto.jiraSchema.items : "";
+    const tipo = sistema === "attachment" || itens === "attachment" ? "anexo" : opcoes.length > 0 || tipoBruto === "option" ? "selecao" : custom.toLowerCase().includes("textarea") ? "texto_longo" : "texto";
     resultado.push({
       fieldId,
       rotulo: String(bruto.name ?? fieldId),
@@ -6464,6 +6465,28 @@ async function validarAnexoEnviado(arquivo) {
   };
 }
 
+// src/lib/http/campos-dinamicos.ts
+function extrairCamposDinamicos(bruto) {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return null;
+  const saida = {};
+  for (const [chave, valor] of Object.entries(bruto)) {
+    if (typeof valor !== "string") continue;
+    const limpo = valor.trim();
+    if (limpo.length === 0) continue;
+    saida[chave] = limpo;
+  }
+  return Object.keys(saida).length > 0 ? saida : null;
+}
+function filtrarPeloSchema(campos, schema) {
+  if (!campos) return null;
+  const permitidas = new Set(schema.filter((c) => c.tipo !== "anexo").map((c) => c.fieldId));
+  const saida = {};
+  for (const [chave, valor] of Object.entries(campos)) {
+    if (permitidas.has(chave)) saida[chave] = valor;
+  }
+  return Object.keys(saida).length > 0 ? saida : null;
+}
+
 // src/lib/http/rotas.ts
 var PRIORIDADES = ["critica", "alta", "normal"];
 var ehPrioridade = (v) => typeof v === "string" && PRIORIDADES.includes(v);
@@ -6665,7 +6688,13 @@ async function rotear(req, ctx, eu, caminho, url) {
     const piloto = await verificarPiloto(ctx, eu, caminho);
     if (piloto) return piloto;
     const chave = typeof corpo?.chaveIdempotencia === "string" && corpo.chaveIdempotencia.length > 0 ? `form:${eu.email}:${corpo.chaveIdempotencia}` : `form:${eu.email}:${ctx.novoId()}`;
-    const camposDinamicos = extrairCamposDinamicos(corpo?.camposDinamicos);
+    const camposDinamicos = await filtrarCamposComSchema(
+      ctx,
+      eu.email,
+      serviceDeskId,
+      validada.proposta.tipoChamadoId,
+      extrairCamposDinamicos(corpo?.camposDinamicos)
+    );
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
@@ -7446,16 +7475,34 @@ function respostaCriacao(r, prioridade) {
     mensagem: r.estado === "criado" ? "Chamado aberto. Voc\xEA acompanha tudo por aqui." : "Recebemos sua solicita\xE7\xE3o e estamos abrindo o chamado. Nada se perdeu \u2014 voc\xEA ver\xE1 a chave aqui em instantes."
   };
 }
-function extrairCamposDinamicos(bruto) {
-  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return null;
-  const saida = {};
-  for (const [chave, valor] of Object.entries(bruto)) {
-    if (typeof valor !== "string") continue;
-    const limpo = valor.trim();
-    if (limpo.length === 0) continue;
-    saida[chave] = limpo;
+async function filtrarCamposComSchema(ctx, atorEmail, serviceDeskId, tipoChamadoId, campos) {
+  if (!campos) return null;
+  try {
+    const schema = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, tipoChamadoId);
+    const filtrados = filtrarPeloSchema(campos, schema);
+    const descartadas = Object.keys(campos).filter((c) => !filtrados || !(c in filtrados));
+    if (descartadas.length > 0) {
+      await ctx.auditoria.registrar({
+        atorEmail,
+        acao: "campos_dinamicos_descartados",
+        recurso: tipoChamadoId,
+        resultado: "negado",
+        // Só os NOMES dos campos: o valor é conteúdo do chamado e não tem por que
+        // ser duplicado na auditoria.
+        detalhe: { motivo: "fora_do_schema", campos: descartadas }
+      });
+    }
+    return filtrados;
+  } catch {
+    await ctx.auditoria.registrar({
+      atorEmail,
+      acao: "campos_dinamicos_descartados",
+      recurso: tipoChamadoId,
+      resultado: "negado",
+      detalhe: { motivo: "schema_indisponivel", campos: Object.keys(campos) }
+    });
+    return null;
   }
-  return Object.keys(saida).length > 0 ? saida : null;
 }
 function validarProposta(corpo, tiposPermitidos) {
   const titulo = typeof corpo?.titulo === "string" ? corpo.titulo.trim() : "";

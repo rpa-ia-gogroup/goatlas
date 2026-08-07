@@ -198,7 +198,7 @@ interface CampoRequestTypeBruto {
   fieldId?: unknown
   name?: unknown
   required?: unknown
-  jiraSchema?: { type?: unknown; system?: unknown; custom?: unknown }
+  jiraSchema?: { type?: unknown; system?: unknown; custom?: unknown; items?: unknown }
   validValues?: { id?: unknown; value?: unknown; label?: unknown }[]
 }
 
@@ -225,12 +225,18 @@ export function camposAdicionais(brutos: readonly CampoRequestTypeBruto[]): Camp
     }))
     const custom = typeof bruto.jiraSchema?.custom === 'string' ? bruto.jiraSchema.custom : ''
     const tipoBruto = typeof bruto.jiraSchema?.type === 'string' ? bruto.jiraSchema.type : ''
+    const itens = typeof bruto.jiraSchema?.items === 'string' ? bruto.jiraSchema.items : ''
+    // ⚠️ Anexo é reconhecido ANTES do resto: o `else` final é `'texto'`, então sem
+    // este ramo o campo de anexo viraria uma caixa de texto na tela (RF-27) e o
+    // servidor não teria como saber que o tipo aceita arquivo (RF-62).
     const tipo: TipoCampoRequestType =
-      opcoes.length > 0 || tipoBruto === 'option'
-        ? 'selecao'
-        : custom.toLowerCase().includes('textarea')
-          ? 'texto_longo'
-          : 'texto'
+      sistema === 'attachment' || itens === 'attachment'
+        ? 'anexo'
+        : opcoes.length > 0 || tipoBruto === 'option'
+          ? 'selecao'
+          : custom.toLowerCase().includes('textarea')
+            ? 'texto_longo'
+            : 'texto'
 
     resultado.push({
       fieldId,

@@ -40,6 +40,7 @@ import { verificarCron } from './cron-auth'
 import { areaDoEmail, areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
+import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
 
 export interface EnvCron {
   readonly GODEPLOY_CRON_KEY?: string
@@ -311,7 +312,19 @@ async function rotear(
     // RF-27 (T-130) — campos adicionais do request type, coletados pelo
     // formulário dinâmico. Ausente/inválido = nenhum, nunca erro: o caminho sem
     // IA não pode regredir por causa de um campo extra malformado.
-    const camposDinamicos = extrairCamposDinamicos(corpo?.camposDinamicos)
+    //
+    // ⚠️ T-401 — e as CHAVES são validadas contra o schema, não aceitas do cliente.
+    // Schema indisponível descarta todos (fail-closed no campo) e ainda assim abre o
+    // chamado (fail-open no chamado, `RNF-18`): validação que se desliga sob pressão
+    // não é validação, mas recusar chamado por causa dela seria a parede que o
+    // caminho sem IA existe para não ser.
+    const camposDinamicos = await filtrarCamposComSchema(
+      ctx,
+      eu.email,
+      serviceDeskId,
+      validada.proposta.tipoChamadoId,
+      extrairCamposDinamicos(corpo?.camposDinamicos),
+    )
 
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
@@ -1430,16 +1443,47 @@ function respostaCriacao(
  * campo adicional", não erro — o formulário fixo (título/descrição/tipo/
  * prioridade) não pode deixar de funcionar por causa de um extra torto.
  */
-function extrairCamposDinamicos(bruto: unknown): Record<string, string> | null {
-  if (!bruto || typeof bruto !== 'object' || Array.isArray(bruto)) return null
-  const saida: Record<string, string> = {}
-  for (const [chave, valor] of Object.entries(bruto as Record<string, unknown>)) {
-    if (typeof valor !== 'string') continue
-    const limpo = valor.trim()
-    if (limpo.length === 0) continue
-    saida[chave] = limpo
+/**
+ * Aplica o schema do request type sobre os campos que o cliente mandou — T-401.
+ *
+ * ⚠️ **Schema indisponível descarta tudo**, e o descarte é auditado. Silêncio aqui
+ * esconderia duas coisas diferentes com a mesma cara: "o tipo não tem esse campo" e
+ * "não deu para saber quais campos o tipo tem".
+ */
+async function filtrarCamposComSchema(
+  ctx: Contexto,
+  atorEmail: string,
+  serviceDeskId: string,
+  tipoChamadoId: string,
+  campos: Record<string, string> | null,
+): Promise<Record<string, string> | null> {
+  if (!campos) return null
+  try {
+    const schema = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, tipoChamadoId)
+    const filtrados = filtrarPeloSchema(campos, schema)
+    const descartadas = Object.keys(campos).filter((c) => !filtrados || !(c in filtrados))
+    if (descartadas.length > 0) {
+      await ctx.auditoria.registrar({
+        atorEmail,
+        acao: 'campos_dinamicos_descartados',
+        recurso: tipoChamadoId,
+        resultado: 'negado',
+        // Só os NOMES dos campos: o valor é conteúdo do chamado e não tem por que
+        // ser duplicado na auditoria.
+        detalhe: { motivo: 'fora_do_schema', campos: descartadas },
+      })
+    }
+    return filtrados
+  } catch {
+    await ctx.auditoria.registrar({
+      atorEmail,
+      acao: 'campos_dinamicos_descartados',
+      recurso: tipoChamadoId,
+      resultado: 'negado',
+      detalhe: { motivo: 'schema_indisponivel', campos: Object.keys(campos) },
+    })
+    return null
   }
-  return Object.keys(saida).length > 0 ? saida : null
 }
 
 type ValidacaoProposta = { proposta: PropostaChamado } | { erro: string }

@@ -43,6 +43,13 @@ export type AcaoAuditada =
   | 'config_alterada'
   | 'tool_recusada'
   | 'limite_excedido'
+  /**
+   * T-401 — campo adicional do formulário recusado por não estar no schema do
+   * request type, ou por não ter sido possível ler o schema. Registrado porque as
+   * duas causas somem com a mesma cara na tela ("o campo não foi"), e só a auditoria
+   * distingue "esse tipo não tem esse campo" de "não deu para saber quais tem".
+   */
+  | 'campos_dinamicos_descartados'
   /** Coleta diária da Organizations API (RF-51, RF-52, T-124) — toca a Atlassian,
    * então é auditada mesmo quando falha. */
   | 'inventario_coletado'

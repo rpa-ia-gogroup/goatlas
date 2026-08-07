@@ -185,7 +185,13 @@ export const MAX_ANEXO_BYTES = 12 * 1024 * 1024
  * prioridade=`priority`). `camposAdicionais()` em `atlassian/cliente.ts` já
  * filtra esses três antes de qualquer campo chegar aqui.
  */
-export type TipoCampoRequestType = 'texto' | 'texto_longo' | 'selecao'
+/**
+ * ⚠️ `'anexo'` existe porque o desconhecido cai em `'texto'` (ver `camposAdicionais`).
+ * Sem este membro, um campo de anexo no schema seria **renderizado como caixa de
+ * texto** no formulário de `RF-27` — e não haveria como o servidor saber que o tipo
+ * de chamado aceita arquivo, que é do que `RF-62` depende para decidir se pergunta.
+ */
+export type TipoCampoRequestType = 'texto' | 'texto_longo' | 'selecao' | 'anexo'
 
 export interface OpcaoCampoRequestType {
   readonly id: string

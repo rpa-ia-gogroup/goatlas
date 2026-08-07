@@ -15,11 +15,11 @@ revised: "2026-08-07 — v2, depois do /analyze"
 > ⚠️ **Vai primeiro, e vale por si só.** Ver `plan.md` §4. Sem isto, o campo de
 > anexo no schema abre o caminho de `SC-12`.
 
-- [ ] **T-400** Teste de burla: `camposDinamicos` com chave que **não pertence** ao
+- [x] **T-400** Teste de burla: `camposDinamicos` com chave que **não pertence** ao
       schema é descartada — e, com o **schema indisponível**, todos são descartados
       (fail-closed, `plan.md` §4). Validação que se desliga sob pressão não é
       validação. _Requirements: RF-27, RF-30, RNF-18_
-- [ ] **T-401** Validar as chaves de `camposDinamicos` contra o schema, e excluir
+- [x] **T-401** Validar as chaves de `camposDinamicos` contra o schema, e excluir
       sempre o `fieldId` de anexo — o anexo entra só pelo caminho do `plan.md` §2.
       _Requirements: RF-27, RF-30, RNF-25_
 
@@ -43,7 +43,7 @@ revised: "2026-08-07 — v2, depois do /analyze"
 - [ ] **T-406** `ClienteAtlassian` ganha `subirAnexoTemporario` — interface, Http,
       Fake e `somente-leitura` (que **recusa**). Hoje `anexarArquivo` é atômica e
       exige `issueKey`. _Requirements: RF-25, RNF-22, RNF-18_
-- [ ] **T-406b** ⚠️ `TipoCampoRequestType` ganha `'anexo'`, e `camposAdicionais`
+- [x] **T-406b** ⚠️ `TipoCampoRequestType` ganha `'anexo'`, e `camposAdicionais`
       passa a reconhecê-lo. **Hoje o desconhecido cai em `'texto'`**, então um campo
       de anexo no schema já seria desenhado como caixa de texto — e sem este tipo o
       gate de `RF-62` não tem como saber se o tipo aceita anexo.

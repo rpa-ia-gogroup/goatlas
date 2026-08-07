@@ -211,7 +211,7 @@ O agente é a porta de entrada. O colaborador descreve a demanda em linguagem na
 | RF-62 | **Antes de confirmar, a pessoa declara se tem material para anexar** — escolha obrigatória, sem opção pré-marcada. "Tenho" abre o envio; "não tenho" libera a criação. A declaração é registrada. | P1 |
 | RF-63 | Falha no envio do anexo **não impede o chamado de nascer** e **nunca** marca a criação como falha definitiva (**RNF-17**, **RNF-18**): o chamado é criado, a tela diz que o anexo não subiu e oferece o caminho de **RF-34**. | P1 |
 | RF-26 | Confirmação final com a chave do chamado, prioridade, prazo de primeira resposta e link para acompanhamento interno. | P0 |
-| RF-27 | Fallback de formulário estruturado para quem preferir não conversar, renderizado dinamicamente a partir do schema de campos do tipo de chamado (`/servicedesk/{serviceDeskId}/requesttype/{requestTypeId}/field`). Campos não podem ser hardcoded. | P1 |
+| RF-27 | Fallback de formulário estruturado para quem preferir não conversar, renderizado dinamicamente a partir do schema de campos do tipo de chamado (`/servicedesk/{serviceDeskId}/requesttype/{requestTypeId}/field`). Campos não podem ser hardcoded — e as **chaves enviadas são validadas contra esse schema** no servidor, nunca aceitas do cliente (T-401). Schema indisponível descarta os campos adicionais e ainda assim abre o chamado (**RNF-18**). | P1 |
 | RF-28 | Exibir apenas tipos de chamado presentes na allowlist do admin (**RF-49**). Nada exposto por padrão. | P0 |
 
 ### M3 — Acompanhamento de chamados

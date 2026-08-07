@@ -176,7 +176,7 @@ describe('POST /api/chamados — camposDinamicos chega até criarChamado', () =>
     expect(r.status).toBe(201)
   })
 
-  it('campo com valor vazio ou não-string é descartado, não vira lixo no Jira', async () => {
+  it('valor vazio, valor não-string e chave FORA DO SCHEMA são descartados', async () => {
     await chamar(
       req('/api/chamados', {
         metodo: 'POST',
@@ -186,12 +186,15 @@ describe('POST /api/chamados — camposDinamicos chega até criarChamado', () =>
           descricao: 'O pipeline diário não gerou os dados de ontem.',
           tipoChamadoId: 'rt-1',
           prioridade: 'alta',
-          camposDinamicos: { customfield_1: '   ', customfield_2: 42, customfield_3: 'ok' },
+          // `customfield_3` NÃO está no schema deste tipo. Ele passava antes de
+          // T-401 — a allowlist era de valor, não de chave. Ver
+          // `tests/rf27-campos-fora-do-schema.test.ts` para o porquê.
+          camposDinamicos: { customfield_1: '   ', customfield_2: 'Produção', customfield_3: 'ok' },
         },
       }),
     )
     const chamada = fake.chamadas.find((c) => c.operacao === 'criarChamado')
     const params = chamada?.params as { camposDinamicos?: Record<string, string> }
-    expect(params?.camposDinamicos).toEqual({ customfield_3: 'ok' })
+    expect(params?.camposDinamicos).toEqual({ customfield_2: 'Produção' })
   })
 })
