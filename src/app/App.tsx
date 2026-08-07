@@ -31,7 +31,7 @@ const ABAS: readonly { nome: Tela['nome']; rotulo: string; soAdmin?: boolean }[]
   { nome: 'formulario', rotulo: 'Abrir direto' },
   // A aba só aparece para admin — mas quem garante o acesso é o gate do SERVIDOR
   // em cada rota `/api/admin/*`. Esconder no cliente é conveniência, não segurança.
-  { nome: 'admin', rotulo: 'Configuração', soAdmin: true },
+  { nome: 'admin', rotulo: 'Administração', soAdmin: true },
 ]
 
 export function App() {
@@ -86,7 +86,9 @@ export function App() {
         </p>
       )}
 
-      <main className="painel">
+      {/* O console de administração é a única tela com trilha lateral: 760px daria
+          540px de conteúdo ao lado dela. As outras seguem na largura de leitura. */}
+      <main className={tela.nome === 'admin' ? 'painel painel-largo' : 'painel'}>
         {erroAuth ? (
           <Aviso atencao>{erroAuth}</Aviso>
         ) : (

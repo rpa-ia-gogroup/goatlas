@@ -179,7 +179,13 @@ export interface PaginaLida {
   readonly truncado: boolean
 }
 
-/** Espelha `ConfigValores` do servidor no que a tela de admin edita. */
+/**
+ * Espelha `ConfigValores` do servidor — **todas** as chaves, não só as editáveis.
+ *
+ * O console edita menos do que isto (`D-15`), mas o espelho precisa ser completo:
+ * é ele que `diagnosticar()` recebe, e uma chave a menos aqui viraria um
+ * diagnóstico que não enxerga metade da configuração.
+ */
 export interface ConfigValores {
   readonly dominios_permitidos: string[]
   readonly admins: string[]
@@ -188,6 +194,9 @@ export interface ConfigValores {
   readonly tipos_chamado_permitidos: string[]
   readonly service_desk_id: string | null
   readonly campo_solicitante_id: string | null
+  readonly org_id: string | null
+  readonly assentos_ocioso_dias: number
+  readonly custo_mensal_por_produto: Record<string, number>
   readonly regra1_threshold_score: number
   readonly regra2_threshold_recorrencia: number
   readonly regra2_janela_dias: number

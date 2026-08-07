@@ -426,6 +426,64 @@ remover `GOATLAS_MODO_DEMO`.
 
 ---
 
+### D-15 · O console de administração mostra o que se decide, não o que se configura
+**Data:** 07/08/2026 · **Quem:** Kaique · **Status:** aceita · **Spec:** `specs/003-console-de-administracao/`
+
+A aba cresceu por acumulação: cada requisito que precisou de superfície empilhou a
+sua no fim da página. O resultado era **um scroll com cinco trabalhos** — 14 campos
+na ordem em que foram implementados, depois métricas, assentos, lacunas e auditoria
+— com rótulos que nomeavam a chave do banco (*"Regra 2 — campo que delimita 'mesmo
+tipo'"*, *"score mínimo para bloquear"*). Funcionava, e ninguém entendia. Como
+`RF-49`/`RF-50` existem para a calibração acontecer **sem deploy**, um console
+indecifrável devolve a calibração ao `curl` — ou ao "deixa como está".
+
+**A decisão:** organizar por **capacidade do app**, com cada ajuste ao lado do dado
+que ele afeta, e reduzir o console ao que uma pessoa da Gocase **decide**.
+
+**O critério de corte foi uma pergunta só: quem decide isto, e quando?** Ficaram 13
+chaves — as mesmas que `RF-49`, `RF-50` e `RF-53` nomeiam. Saíram quatro:
+
+| Chave | Por que sai |
+|---|---|
+| `ttl_metadados_seg`, `ttl_conteudo_seg` | Cache (`RNF-13`). Ninguém decide 900s sem ler o código. |
+| `regra2_limite_tickets` | Teto de leitura por conversa (`R-08`), proteção de custo. |
+| `limite_requisicoes_por_minuto` | Rate limit (`RNF-11`). O teto de custo por conversa já é o controle de orçamento que se decide. |
+
+⚠️ **Sair do console não é sair do sistema.** As quatro continuam em
+`ConfigValores`, continuam com bootstrap por env (`RNF-25`) e continuam mudáveis
+sem deploy por `PUT /api/admin/config` — o que se retirou foi a **tela**. As três
+primeiras nunca tiveram uma; `limite_requisicoes_por_minuto` tinha, e é a única
+perda real de superfície. Restaurar qualquer uma é acrescentar um descritor em
+`src/app/admin/campos.tsx`, e `tests/tela-admin.test.ts` falha se voltarem sem
+passar por aqui.
+
+**O que entrou no lugar:** a primeira seção é um **diagnóstico** — cinco
+capacidades com estado (ligado/parcial/desligado) e a **consequência** de cada uma,
+derivada da configuração (`src/lib/config/diagnostico.ts`, função pura, com teste).
+É o que responde "por que a busca não acha nada?" sem abrir 13 campos. Todo campo
+carrega, abaixo do controle, o efeito do **valor que está lá agora**.
+
+⚠️ **O diagnóstico relata, não decide.** Cada predicado é o mesmo que o servidor já
+aplica (`regra2Disponivel` vem de `rules/`; `buscaConfigurada` é o predicado que a
+rota de busca usa). Condição nova escrita ali é uma segunda regra que diverge em
+silêncio — o lugar dela é o módulo de origem.
+
+**Junto veio uma trava que faltava:** `PUT /api/admin/config` validava só se a
+**chave** existia e gravava o valor como viesse. `Config.carregar` aceita de volta
+qualquer JSON válido, então `regra1_threshold_score = "alto"` sobrevivia ao boot e
+chegava à Regra 1 como string — e o default fail-closed **não** cobre isso, porque
+valor corrompido não é ausência de valor. `src/lib/config/validar.ts` recusa (400) e
+nunca coage: `"0.9"` não vira `0.9`, senão o dia em que for `"alto"` a coerção
+produz `NaN` sem avisar ninguém. Teste de burla em
+`tests/rf49-config-validacao.test.ts`, escrito antes do código.
+
+**Efeito colateral bom:** `custo_mensal_por_produto` (**Q8**) e `org_id` (**Q1**)
+ganharam superfície. O preço é uma linha **por produto encontrado no inventário** —
+o console não inventa a lista de produtos que a organização assina. No dia em que o
+financeiro responder Q8, é preencher e salvar.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
@@ -440,7 +498,7 @@ implementado antes da resposta.
 | Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | RF-37, RF-38 e o `search_confluence` da Regra 1 |
 | Q6 | ~~Qual API de IA?~~ Resta: qual a **política de retenção/treinamento** do provedor atrás do proxy corporativo? | João | **Provedor decidido — ver D-05.** O que resta bloqueia o *rollout* (conformidade **RNF-34**), não a arquitetura |
 | Q7 | Quais domínios de e-mail além de `@gocase.com` são válidos? | João | RF-01, RF-05 (allowlist de domínio no servidor) |
-| Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | RF-53 (custo mensal e assentos ociosos) |
+| Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | **Só o valor** — desde `D-15` há um campo de preço por produto do inventário no console, sem deploy. RF-53 (custo mensal e assentos ociosos) |
 | Q9 | Como comunicar o SLA de 24h às áreas que hoje têm retorno em 2h30 sem soar como piora? | João + Produto | Não bloqueia código; bloqueia **rollout** (R-05) |
 | Q10 | O time de tech está ciente de que o reporter dos chamados vai mudar? | João | Não bloqueia código; bloqueia **rollout** (R-03) |
 | Q11 | Google Chat, e-mail ou ambos na v1 de notificações? | João | RF-45 (Fase 3) |
