@@ -249,6 +249,33 @@ destes reabre um vazamento que já foi fechado.
   procurando por isso — e também prova, plantando um "segredo" no corpo de uma
   resposta de erro simulada, que as três camadas de transporte não o repassam na
   mensagem lançada nem a auditoria o persiste sem redigir.
+- 🚨 **`ATCTT` é chave de ORGANIZAÇÃO; `ATATT` é token de USUÁRIO** (`D-22`). São duas
+  famílias sem relação: `ATATT` (gerado em `id.atlassian.com/manage-profile/security/api-tokens`)
+  é o único que funciona em Basic auth contra `<site>.atlassian.net/rest/api/3/*` —
+  Confluence e JSM; `ATCTT` (gerado em `admin.atlassian.com` → API keys) só serve
+  `api.atlassian.com/admin/*`. ⚠️ **O `docs/DEPLOY.md` afirmou o inverso até 07/08/2026, e
+  foi essa instrução que causou o 401 do app** — a credencial não estava quebrada, estava na
+  gaveta errada. Um `ATCTT` em `ATLASSIAN_API_TOKEN` dá **401 por design**, com e-mail certo
+  e site certo, então os testes óbvios (e-mail · expiração · barra final) voltam todos
+  negativos para sempre. E o `ATLASSIAN_EMAIL` tem de ser o da conta que gerou o `ATATT`.
+- 🚨 **`GET /admin/v1/orgs/{org}/users` lista SÓ conta gerenciada, e sem domínio
+  reivindicado isso é zero** (`D-22`). Devolve `{"data": []}` com HTTP 200 — nenhuma
+  exceção, console mostrando "0 assentos", ninguém desconfiando da chamada. Mesma família
+  do `env.DB` devolvendo `{}`. O endpoint certo é **`POST /admin/v1/orgs/{org}/users/search`**,
+  e nele: **`accountTypes: ["atlassian"]` é obrigatório** (sem ele entram ~83 contas de
+  app/bot) · o **cursor volta em `links.next` e é reenviado no CORPO**, não seguido como URL
+  · **`query`, `groupIds` e `productAccess` respondem 200 SEM filtrar** — filtro que parece
+  filtrar e não filtra é pior que filtro ausente · **`accountStatus` não é status de
+  suspensão** (volta `"active"` para conta suspensa; quem responde é o filtro
+  `isSuspended`, em duas varreduras).
+- **Filtro que pode não filtrar é VERIFICADO, não acreditado** (`organizacao.ts`). Como
+  "responde 200 sem filtrar" é comportamento medido desta API, as duas varreduras de
+  `isSuspended` são comparadas: interseção não vazia prova que o filtro não separou nada, e
+  o resultado sai com `suspensaoConhecida: false` em vez de afirmar "nenhuma suspensa".
+  Contar conta suspensa como assento ativo infla o custo (`RF-53`) e recomenda revogar
+  acesso de quem já não tem acesso. E `parcial` existe porque o teto de páginas era atingido
+  **em silêncio** — apesar de o comentário do próprio código jurar o contrário. Coleta
+  parcial ou cega quanto a suspensão **não** é auditada como `sucesso`.
 - **A Organizations API tem TRANSPORTE PRÓPRIO** (`atlassian/organizacao.ts`,
   `RNF-04`) — não a mesma instância do cliente de Jira/Confluence. A credencial é
   **Org Admin**: "economizar" reaproveitando `atlassian/http.ts` (que já resolve
@@ -563,9 +590,20 @@ workflow do JSM oferece (`RF-36`) e retenção (`RNF-33`).
 assentos (`O2`).
 
 **T-122/T-123/T-131 saíram do bloqueio de Q1** (`D-18`): `ClienteOrganizacaoHttp` existe,
-com paginação, `links.next` de outro host descartado, teto de páginas e normalização de
+com paginação, cursor de outro host descartado, teto de páginas e normalização de
 carimbo (segundos × milissegundos são 55 anos de diferença). O que **não** foi verificado
 está em `ENDPOINTS_NAO_VERIFICADOS` — e a tela de governança mostra a lista.
+
+**O 401 da Atlassian está diagnosticado, e a correção era nossa** (`D-22`, 07/08/2026, a
+partir de medição do João de 31/07): `ATLASSIAN_API_TOKEN` guarda um `ATCTT` (chave de
+org) onde `/rest/api/3/*` exige `ATATT` (token de usuário) — e o nosso próprio
+`docs/DEPLOY.md` mandava fazer exatamente isso. Falta **gerar o `ATATT`**; é a única
+ação humana que destrava Confluence e JSM reais. O `ATCTT` que já existe é a credencial
+certa para `ATLASSIAN_ORG_API_KEY`. No mesmo movimento, `listarUsuarios` trocou
+`GET /users` (que mede vazio sem domínio reivindicado) por `POST /users/search`, e passou
+a devolver `suspensas`/`suspensaoConhecida`/`parcial` em vez de uma lista que escondia
+duas incertezas. **Q5 respondida:** `GO`, `DTE`, `GN`, `datateam`, `Protheus` — e o
+espaço `TECH` que circulava **nunca existiu**.
 
 **O que falta não é código:**
 

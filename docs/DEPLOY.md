@@ -41,26 +41,36 @@ navegador**, para não existir caminho em que a identidade venha do cliente
 
 ### Secrets já configurados em `9c47f42f`
 
-Estado em **05/08/2026** (conferido por `listAppSecrets` — que devolve **nomes**,
+Estado em **07/08/2026** (conferido por `listAppSecrets` — que devolve **nomes**,
 nunca valores):
 
-| Secret | Valor | Por quê |
+| Secret | Estado | Por quê |
 |---|---|---|
-| `GOATLAS_MODO_DEMO` | `1` | Fakes + tarja de aviso. **Remover ao virar produção — por último, ver abaixo.** |
+| `GOATLAS_SOMENTE_LEITURA` | `1` | Lê Confluence/Jira de verdade e **recusa toda escrita**. É a trava que sustenta o app hoje |
 | `GOATLAS_DOMINIOS` | `gocase.com` | Bootstrap — sem ele o app nega todo mundo (`RNF-07`). **[SUPOSIÇÃO: Q7]** |
-| `GOATLAS_ADMINS` | `kaique.breno@gocase.com` | Bootstrap do primeiro admin (`RF-02`) |
-| `ATLASSIAN_API_TOKEN` · `ATLASSIAN_EMAIL` · `ATLASSIAN_BASE_URL` | *(registrados)* | Trio Jira/Confluence — `D-14`. ⚠️ Rotação pendente do token |
-| `GOATLAS_ORG_ID` | *(registrado, **não validado**)* | Bootstrap do `org_id`. Não é secret. ⚠️ Reconferir: UUID só tem `0-9a-f` |
+| `GOATLAS_ADMINS` | *(registrado)* | Bootstrap do primeiro admin (`RF-02`) |
+| `ATLASSIAN_API_TOKEN` · `ATLASSIAN_EMAIL` · `ATLASSIAN_BASE_URL` | *(registrados)* | 🚨 **O token é da família ERRADA** — `ATCTT` onde `/rest/api/3/*` exige `ATATT`. É o 401. Ver `D-22` |
+| `LLM_API_KEY` · `LLM_BASE_URL` · `LLM_MODEL` | *(registrados)* | Proxy de IA (`D-05`). ⚠️ Rotação pendente: a chave transitou por chat |
+| `GODEPLOY_CRON_KEY` | *(registrado)* | Cron assinado. ⚠️ Qual string é assinada segue desconhecido — ver a seção de cron |
+| `GOATLAS_BASE_PUBLICA` · `GOATLAS_CANAL_NOTIFICACAO` | *(registrados)* | Bootstrap dos defaults de `D-20` |
+| `GOATLAS_ORG_ID` | *(registrado, **não validado**)* | Bootstrap do `org_id`. Não é secret. 🚨 Quase certamente errado: o valor no `.env` de origem tem `j`/`k`, e UUID só tem `0-9a-f` (`D-22`) |
 
-Ainda **ausentes**: `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY`, `LLM_BASE_URL` e
-`GODEPLOY_CRON_KEY`.
+Ainda **ausentes**: `ATLASSIAN_ORG_API_KEY` (e o valor certo para ela é o `ATCTT` que
+hoje está em `ATLASSIAN_API_TOKEN`), `GOATLAS_WEBHOOK_SEGREDO`,
+`GOATLAS_SERVICE_DESK_ID`, `GOATLAS_TIPOS_CHAMADO`, `GOATLAS_ESPACOS_CONFLUENCE`
+(**Q5**, valores escolhidos em `D-22`) e `GOATLAS_CAMPO_SOLICITANTE_ID` (**Q4**).
 
-#### ⚠️ A ordem de configurar importa — `GOATLAS_MODO_DEMO` sai por ÚLTIMO
+#### ⚠️ `GOATLAS_MODO_DEMO` já NÃO está configurado — o app não está nos fakes
 
 `usandoFakes` (em `contexto.ts`) é `modoDemo || GOATLAS_USAR_FAKES || !ATLASSIAN_API_TOKEN`.
-O modo demo é o **primeiro** termo: enquanto ele existe, nenhum outro secret muda
-comportamento nenhum. E o terceiro termo era uma rede de proteção que **já caiu** —
-com o token registrado, remover o modo demo passa a valer de verdade na hora.
+Os três termos são falsos hoje: o modo demo saiu, e o token está registrado. **O app
+roda com os clientes reais**, e o que impede efeito colateral é
+`GOATLAS_SOMENTE_LEITURA`, não o modo demo.
+
+⚠️ Isso desloca onde mora a segurança: enquanto o modo demo existia, nenhum secret
+mudava comportamento. Agora **remover `GOATLAS_SOMENTE_LEITURA` vale na hora** — é o
+único passo entre o estado atual e escrita real no JSM. Ver a ordem abaixo antes de
+tocar nele.
 
 Cada ausência silencia uma parte diferente, todas fail-closed. Configure nesta ordem,
 e só então remova o modo demo:
@@ -303,10 +313,20 @@ indisponível (fail-closed, não erro) — ver T-120/T-122/T-123.
 ⚠️ **Três confusões que já aconteceram** ao reunir estas credenciais (`D-14`), todas
 silenciosas — nenhuma dá erro no momento de configurar:
 
-- **API token não é chave de Organizations API.** Prefixo `ATCTT3x…` é *API token*:
-  vai em `ATLASSIAN_API_TOKEN`, com `ATLASSIAN_EMAIL`, Basic auth. A
-  `ATLASSIAN_ORG_API_KEY` nasce em `admin.atlassian.com` → API keys, é `Bearer`, e
-  só ela exige Org Admin. Trocar uma pela outra dá 401 na governança — muito depois.
+- 🚨 **API token não é chave de Organizations API — e o PREFIXO desmente o que este
+  documento dizia até 07/08/2026.** A versão anterior mandava `ATCTT3x…` para
+  `ATLASSIAN_API_TOKEN`. **Está invertido, e foi essa instrução que produziu o 401 do
+  app** (`D-22`). O certo:
+
+  | Família | Prefixo | Onde se gera | Vai em | Auth |
+  |---|---|---|---|---|
+  | Token de **usuário** | `ATATT` | `id.atlassian.com/manage-profile/security/api-tokens` | `ATLASSIAN_API_TOKEN` (+ `ATLASSIAN_EMAIL`) | Basic, contra `<site>.atlassian.net` |
+  | Chave de **organização** | `ATCTT` | `admin.atlassian.com` → Settings → API keys | `ATLASSIAN_ORG_API_KEY` | Bearer, contra `api.atlassian.com/admin` |
+
+  As duas não têm relação; escopo de uma não afeta a outra. Um `ATCTT` em
+  `ATLASSIAN_API_TOKEN` dá **401 por design** em `/rest/api/3/*` — com o e-mail certo,
+  sem barra final e no site correto. ⚠️ **O e-mail tem de ser o da conta que gerou o
+  `ATATT`**, senão o Basic auth falha igual e pela razão errada.
 - **`cloudId` não é `orgId`.** Os dois são UUID e ficam no mesmo console. O que a
   Organizations API quer é o **orgId**, o da URL `admin.atlassian.com/o/<id>/`.
 - **UUID só admite `0-9a-f`.** Id com `j`, `k` ou qualquer não-hexadecimal está

@@ -10,6 +10,7 @@
 import {
   ErroOrganizacao,
   type ClienteOrganizacao,
+  type ResultadoUsuarios,
   type UltimoAcesso,
   type UltimoAcessoProduto,
   type UsuarioOrganizacao,
@@ -28,6 +29,12 @@ export interface EstadoOrganizacaoFake {
   usuarios: UsuarioOrganizacao[]
   /** `accountId` → último acesso por produto. Sem entrada = "nunca coletado". */
   ultimoAcesso: Map<string, UltimoAcessoProduto[]>
+  /** Contas suspensas encontradas na varredura (T-122). */
+  suspensas: number
+  /** `false` encena o filtro `isSuspended` que não filtrou. */
+  suspensaoConhecida: boolean
+  /** `true` encena o teto de páginas atingido — coleta incompleta. */
+  parcial: boolean
   falhas: {
     listarUsuarios: ModoFalhaOrganizacao
     ultimoAcesso: ModoFalhaOrganizacao
@@ -42,6 +49,9 @@ export class ClienteOrganizacaoFake implements ClienteOrganizacao {
     this.estado = {
       usuarios: inicial.usuarios ?? [],
       ultimoAcesso: inicial.ultimoAcesso ?? new Map(),
+      suspensas: inicial.suspensas ?? 0,
+      suspensaoConhecida: inicial.suspensaoConhecida ?? true,
+      parcial: inicial.parcial ?? false,
       falhas: {
         listarUsuarios: 'nenhum',
         ultimoAcesso: 'nenhum',
@@ -57,9 +67,20 @@ export class ClienteOrganizacaoFake implements ClienteOrganizacao {
     throw new ErroOrganizacao(`fake organização: ${modo}`, { status, transitorio, recurso })
   }
 
-  async listarUsuarios(_orgId: string): Promise<readonly UsuarioOrganizacao[]> {
+  /**
+   * ⚠️ O fake expõe `suspensas`/`suspensaoConhecida`/`parcial` como estado
+   * **roteirizável**, e não como constante otimista. Um dublê que respondesse sempre
+   * `suspensaoConhecida: true` esconderia justamente o caso que a tela precisa saber
+   * mostrar — o mesmo raciocínio do fake de busca ignorar o termo por padrão.
+   */
+  async listarUsuarios(_orgId: string): Promise<ResultadoUsuarios> {
     this.checar(this.estado.falhas.listarUsuarios, 'listarUsuarios')
-    return this.estado.usuarios
+    return {
+      usuarios: this.estado.usuarios,
+      suspensas: this.estado.suspensas,
+      suspensaoConhecida: this.estado.suspensaoConhecida,
+      parcial: this.estado.parcial,
+    }
   }
 
   async ultimoAcesso(_orgId: string, accountId: string): Promise<UltimoAcesso> {

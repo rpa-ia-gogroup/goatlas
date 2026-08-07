@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BASE_ORGANIZACAO,
   ClienteOrganizacaoHttp,
+  cursorDaProximaPagina,
   ENDPOINTS_NAO_VERIFICADOS,
   MAX_PAGINAS_USUARIOS,
   normalizarCarimbo,
@@ -55,35 +56,84 @@ const cliente = (impl: typeof fetch) =>
     aleatorio: () => 0.5,
   })
 
-describe('T-122 — listarUsuarios', () => {
+/** O corpo JSON de uma chamada, já desserializado. */
+const corpoDe = (c: Chamada | undefined) =>
+  JSON.parse(c?.corpo ?? '{}') as Record<string, unknown>
+
+describe('T-122 — listarUsuarios usa `POST /users/search`, não `GET /users`', () => {
   it('usa Bearer contra api.atlassian.com — não Basic contra o site (RNF-04)', async () => {
     const { impl, chamadas } = fetchFalso(() => ({ corpo: { data: [] } }))
     await cliente(impl).listarUsuarios('org-1')
-    expect(chamadas[0]?.url).toBe(
-      `${BASE_ORGANIZACAO}/admin/v1/orgs/org-1/users?limit=100`,
-    )
+    expect(chamadas[0]?.url).toBe(`${BASE_ORGANIZACAO}/admin/v1/orgs/org-1/users/search`)
+    expect(chamadas[0]?.metodo).toBe('POST')
     expect(chamadas[0]?.auth).toBe('Bearer chave-org-de-teste')
   })
 
+  /**
+   * ⚠️ O motivo de `GET /users` ter saído: ele lista só conta **gerenciada**, e a org da
+   * Gocase não reivindicou domínio — devolve `{"data": []}` com HTTP 200. Um teste que
+   * afirme o caminho antigo estaria certificando uma chamada que sempre volta vazia.
+   */
+  it('NÃO chama o endpoint de contas gerenciadas, que devolve lista vazia sem domínio', async () => {
+    const { impl, chamadas } = fetchFalso(() => ({ corpo: { data: [] } }))
+    await cliente(impl).listarUsuarios('org-1')
+    for (const c of chamadas) {
+      expect(c.url).not.toMatch(/\/users(\?|$)/)
+    }
+  })
+
+  it('manda `accountTypes: ["atlassian"]` — sem ele entram ~83 contas de app/bot', async () => {
+    const { impl, chamadas } = fetchFalso(() => ({ corpo: { data: [] } }))
+    await cliente(impl).listarUsuarios('org-1')
+    expect(corpoDe(chamadas[0]).accountTypes).toEqual(['atlassian'])
+  })
+
+  /**
+   * `query`, `groupIds` e `productAccess` respondem **200 com a lista inteira**, sem
+   * filtrar. Mandar um deles produz um resultado que parece filtrado e não é — por isso
+   * a ausência deles é uma afirmação do teste, não um detalhe.
+   */
+  it('NÃO manda os filtros que respondem 200 sem filtrar nada', async () => {
+    const { impl, chamadas } = fetchFalso(() => ({ corpo: { data: [] } }))
+    await cliente(impl).listarUsuarios('org-1')
+    for (const c of chamadas) {
+      const corpo = corpoDe(c)
+      expect(corpo).not.toHaveProperty('query')
+      expect(corpo).not.toHaveProperty('groupIds')
+      expect(corpo).not.toHaveProperty('productAccess')
+    }
+  })
+
+  it('faz DUAS varreduras — `isSuspended` é o único jeito de saber quem está suspenso', async () => {
+    const { impl, chamadas } = fetchFalso(() => ({ corpo: { data: [] } }))
+    await cliente(impl).listarUsuarios('org-1')
+    expect(chamadas).toHaveLength(2)
+    expect(chamadas.map((c) => corpoDe(c).isSuspended)).toEqual([false, true])
+  })
+
   it('traduz os campos da Atlassian para o contrato do app', async () => {
-    const { impl } = fetchFalso(() => ({
-      corpo: {
-        data: [
-          {
-            account_id: 'acc-1',
-            email: 'ana@gocase.com',
-            name: 'Ana Souza',
-            account_status: 'active',
-            product_access: [
-              { key: 'confluence', name: 'Confluence' },
-              { key: 'jira-servicedesk', name: 'Jira Service Management' },
-            ],
+    const { impl } = fetchFalso((c) =>
+      corpoDe(c).isSuspended === true
+        ? { corpo: { data: [] } }
+        : {
+            corpo: {
+              data: [
+                {
+                  account_id: 'acc-1',
+                  email: 'ana@gocase.com',
+                  name: 'Ana Souza',
+                  account_status: 'active',
+                  product_access: [
+                    { key: 'confluence', name: 'Confluence' },
+                    { key: 'jira-servicedesk', name: 'Jira Service Management' },
+                  ],
+                },
+              ],
+            },
           },
-        ],
-      },
-    }))
-    const usuarios = await cliente(impl).listarUsuarios('org-1')
-    expect(usuarios).toEqual([
+    )
+    const r = await cliente(impl).listarUsuarios('org-1')
+    expect(r.usuarios).toEqual([
       {
         accountId: 'acc-1',
         email: 'ana@gocase.com',
@@ -94,67 +144,131 @@ describe('T-122 — listarUsuarios', () => {
         ],
       },
     ])
+    expect(r.suspensaoConhecida).toBe(true)
+    expect(r.parcial).toBe(false)
   })
 
   it('conta SEM produto continua na lista — ela não consome licença, mas existe', async () => {
-    const { impl } = fetchFalso(() => ({
-      corpo: { data: [{ account_id: 'acc-9', email: 'x@gocase.com', name: 'X' }] },
-    }))
-    const usuarios = await cliente(impl).listarUsuarios('org-1')
-    expect(usuarios).toHaveLength(1)
-    expect(usuarios[0]?.produtos).toEqual([])
+    const { impl } = fetchFalso((c) =>
+      corpoDe(c).isSuspended === true
+        ? { corpo: { data: [] } }
+        : { corpo: { data: [{ account_id: 'acc-9', email: 'x@gocase.com', name: 'X' }] } },
+    )
+    const r = await cliente(impl).listarUsuarios('org-1')
+    expect(r.usuarios).toHaveLength(1)
+    expect(r.usuarios[0]?.produtos).toEqual([])
   })
 
   it('conta desativada e conta sem `account_id` são descartadas', async () => {
-    const { impl } = fetchFalso(() => ({
+    const { impl } = fetchFalso((c) =>
+      corpoDe(c).isSuspended === true
+        ? { corpo: { data: [] } }
+        : {
+            corpo: {
+              data: [
+                {
+                  account_id: 'acc-1',
+                  email: 'a@gocase.com',
+                  name: 'A',
+                  account_status: 'inactive',
+                },
+                { email: 'sem-id@gocase.com', name: 'Sem id' },
+                { account_id: 'acc-2', email: 'b@gocase.com', name: 'B' },
+              ],
+            },
+          },
+    )
+    const r = await cliente(impl).listarUsuarios('org-1')
+    expect(r.usuarios.map((u) => u.accountId)).toEqual(['acc-2'])
+  })
+
+  it('a conta suspensa NÃO entra na lista de assentos, e é contada à parte', async () => {
+    const { impl } = fetchFalso((c) =>
+      corpoDe(c).isSuspended === true
+        ? { corpo: { data: [{ account_id: 'sus-1', email: 's@gocase.com', name: 'S' }] } }
+        : { corpo: { data: [{ account_id: 'acc-1', email: 'a@gocase.com', name: 'A' }] } },
+    )
+    const r = await cliente(impl).listarUsuarios('org-1')
+    // Conta suspensa não consome licença: incluí-la infla o custo e produz
+    // recomendação de revogar acesso de quem já não tem acesso.
+    expect(r.usuarios.map((u) => u.accountId)).toEqual(['acc-1'])
+    expect(r.suspensas).toBe(1)
+    expect(r.suspensaoConhecida).toBe(true)
+  })
+
+  /**
+   * O caso que o memo de 31/07 torna plausível: `query`/`groupIds`/`productAccess`
+   * respondem 200 **sem filtrar**. Se `isSuspended` for um deles, as duas varreduras
+   * devolvem o mesmo conjunto — e afirmar "nenhuma suspensa" aí seria inventar.
+   */
+  it('filtro de suspensão que NÃO filtra é detectado, não acreditado', async () => {
+    const mesmaLista = {
       corpo: {
         data: [
-          { account_id: 'acc-1', email: 'a@gocase.com', name: 'A', account_status: 'inactive' },
-          { email: 'sem-id@gocase.com', name: 'Sem id' },
+          { account_id: 'acc-1', email: 'a@gocase.com', name: 'A' },
           { account_id: 'acc-2', email: 'b@gocase.com', name: 'B' },
         ],
       },
-    }))
-    const usuarios = await cliente(impl).listarUsuarios('org-1')
-    expect(usuarios.map((u) => u.accountId)).toEqual(['acc-2'])
+    }
+    const { impl } = fetchFalso(() => mesmaLista)
+    const r = await cliente(impl).listarUsuarios('org-1')
+    expect(r.suspensaoConhecida).toBe(false)
+    // E não afirma um número de suspensas que não mediu.
+    expect(r.suspensas).toBe(0)
+    // A lista de assentos continua vindo: cegueira sobre suspensão não é motivo para
+    // deixar o console sem inventário nenhum (RNF-18).
+    expect(r.usuarios).toHaveLength(2)
   })
 
-  it('segue `links.next` e acumula as páginas', async () => {
-    const { impl, chamadas } = fetchFalso((c) =>
-      c.url.includes('cursor=2')
+  it('o cursor volta em `links.next` e é reenviado NO CORPO, não seguido como URL', async () => {
+    const { impl, chamadas } = fetchFalso((c) => {
+      if (corpoDe(c).isSuspended === true) return { corpo: { data: [] } }
+      return corpoDe(c).cursor === 'abc123'
         ? { corpo: { data: [{ account_id: 'acc-2', email: 'b@gocase.com', name: 'B' }] } }
         : {
             corpo: {
               data: [{ account_id: 'acc-1', email: 'a@gocase.com', name: 'A' }],
-              links: { next: `${BASE_ORGANIZACAO}/admin/v1/orgs/org-1/users?cursor=2` },
+              links: {
+                next: `${BASE_ORGANIZACAO}/admin/v1/orgs/org-1/users/search?cursor=abc123`,
+              },
             },
-          },
-    )
-    const usuarios = await cliente(impl).listarUsuarios('org-1')
-    expect(usuarios.map((u) => u.accountId)).toEqual(['acc-1', 'acc-2'])
+          }
+    })
+    const r = await cliente(impl).listarUsuarios('org-1')
+    expect(r.usuarios.map((u) => u.accountId)).toEqual(['acc-1', 'acc-2'])
+    // A URL nunca muda: é sempre o mesmo POST. O que muda é o corpo.
+    expect(chamadas[1]?.url).toBe(`${BASE_ORGANIZACAO}/admin/v1/orgs/org-1/users/search`)
+    expect(corpoDe(chamadas[1]).cursor).toBe('abc123')
+    // A primeira página não manda cursor — mandar `undefined` viraria `"cursor":null`.
+    expect(corpoDe(chamadas[0])).not.toHaveProperty('cursor')
+  })
+
+  it('`links.next` de OUTRO host é ignorado — cursor de fora não é cursor desta paginação', async () => {
+    const { impl, chamadas } = fetchFalso(() => ({
+      corpo: {
+        data: [{ account_id: 'acc-1', email: 'a@gocase.com', name: 'A' }],
+        links: { next: 'https://exfiltra.example.com/admin/v1/orgs/org-1/users/search?cursor=x' },
+      },
+    }))
+    await cliente(impl).listarUsuarios('org-1')
+    // Uma chamada por varredura, nenhuma página extra.
     expect(chamadas).toHaveLength(2)
   })
 
-  it('`links.next` de OUTRO host é ignorado — não se manda Org Admin para onde a resposta pedir', async () => {
+  it('`links.next` que nunca termina para no teto — e a coleta sai marcada como PARCIAL', async () => {
     const { impl, chamadas } = fetchFalso(() => ({
       corpo: {
         data: [{ account_id: 'acc-1', email: 'a@gocase.com', name: 'A' }],
-        links: { next: 'https://exfiltra.example.com/admin/v1/orgs/org-1/users' },
+        links: {
+          next: `${BASE_ORGANIZACAO}/admin/v1/orgs/org-1/users/search?cursor=sempre-o-mesmo`,
+        },
       },
     }))
-    await cliente(impl).listarUsuarios('org-1')
-    expect(chamadas).toHaveLength(1)
-  })
-
-  it('`links.next` apontando para si mesmo para no teto de páginas, não em laço infinito', async () => {
-    const { impl, chamadas } = fetchFalso(() => ({
-      corpo: {
-        data: [{ account_id: 'acc-1', email: 'a@gocase.com', name: 'A' }],
-        links: { next: `${BASE_ORGANIZACAO}/admin/v1/orgs/org-1/users?limit=100` },
-      },
-    }))
-    await cliente(impl).listarUsuarios('org-1')
-    expect(chamadas).toHaveLength(MAX_PAGINAS_USUARIOS)
+    const r = await cliente(impl).listarUsuarios('org-1')
+    expect(chamadas).toHaveLength(MAX_PAGINAS_USUARIOS * 2)
+    // ⚠️ Antes o teto era atingido em SILÊNCIO: a lista voltava truncada e a tela
+    // recomendava rebaixar assento com base num inventário incompleto.
+    expect(r.parcial).toBe(true)
   })
 
   it('RNF-01 — a mensagem de erro NÃO carrega o corpo da resposta da Atlassian', async () => {
@@ -175,7 +289,27 @@ describe('T-122 — listarUsuarios', () => {
       return n === 1 ? { status: 429, headers: { 'Retry-After': '1' } } : { corpo: { data: [] } }
     })
     await cliente(impl).listarUsuarios('org-1')
-    expect(chamadas).toHaveLength(2)
+    // 1 recusada + 1 retentada + 1 da segunda varredura.
+    expect(chamadas).toHaveLength(3)
+  })
+})
+
+describe('cursorDaProximaPagina — extrai o valor, não repassa a URL', () => {
+  it('tira o `cursor` da query string', () => {
+    expect(
+      cursorDaProximaPagina(`${BASE_ORGANIZACAO}/admin/v1/orgs/o/users/search?cursor=abc`),
+    ).toBe('abc')
+  })
+
+  it('sem `cursor` na URL é fim de paginação, não string vazia', () => {
+    expect(cursorDaProximaPagina(`${BASE_ORGANIZACAO}/admin/v1/orgs/o/users/search`)).toBeNull()
+    expect(cursorDaProximaPagina(`${BASE_ORGANIZACAO}/x?cursor=`)).toBeNull()
+  })
+
+  it('outro host e lixo viram `null`', () => {
+    expect(cursorDaProximaPagina('https://exfiltra.example.com/x?cursor=abc')).toBeNull()
+    expect(cursorDaProximaPagina('não é url')).toBeNull()
+    expect(cursorDaProximaPagina(null)).toBeNull()
   })
 })
 

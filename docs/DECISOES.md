@@ -387,11 +387,13 @@ pronto; o app continua nos fakes.
 **Três confusões que apareceram no caminho, e que valem registro porque a próxima
 pessoa vai repetir:**
 
-1. **API token ≠ chave de Organizations API.** `ATCTT3x…` é prefixo de *API token*
-   (Basic auth, e-mail + token, `<site>.atlassian.net`). A `ATLASSIAN_ORG_API_KEY` é
-   gerada em `admin.atlassian.com` → API keys, usada como `Bearer` contra
-   `api.atlassian.com/admin`, e é ela que exige Org Admin. São credenciais de
-   superfícies distintas — daí o transporte próprio de `RNF-04`.
+1. **API token ≠ chave de Organizations API.** São credenciais de superfícies
+   distintas — daí o transporte próprio de `RNF-04`.
+   🚨 **A atribuição de prefixo escrita aqui em 05/08/2026 estava INVERTIDA, e foi ela
+   que causou o 401. Corrigida em `D-22` — leia lá antes de registrar qualquer
+   credencial.** `ATCTT` é a chave de **organização**; o token de **usuário** é
+   `ATATT`. O texto original mandava `ATCTT3x…` para `ATLASSIAN_API_TOKEN`, que é
+   exatamente o erro que ficou registrado no app.
 2. **`cloudId` ≠ `orgId`.** Os dois são UUID e convivem no `admin.atlassian.com`. A
    Organizations API quer o **orgId** (o da URL `admin.atlassian.com/o/<id>/`).
 3. **UUID só tem `0-9a-f`.** Um id com `j`/`k` está transcrito errado — não dá erro
@@ -673,6 +675,105 @@ lugar, não para ser aplicada em silêncio.
 
 ---
 
+### D-22 · O 401 era a família da credencial, e o endpoint de usuários estava medido como vazio
+**Data:** 07/08/2026 · **Quem:** João Victor (medição) + Kaique (correção) · **Status:** aceita
+
+Diagnóstico entregue pelo João a partir de medição de 31/07/2026 no tenant
+`goengenharia`. Ele derruba a hipótese que estávamos perseguindo e corrige duas coisas
+nossas — uma de documentação, uma de código.
+
+> Numeração: `D-21` está tomada por `fix/override-obrigatorio`, ainda não mergeada.
+
+#### 1. São duas famílias de autenticação, e o `D-14` as trocou
+
+| Família | Prefixo | Onde se gera | Onde funciona |
+|---|---|---|---|
+| Chave de **organização** | `ATCTT` | `admin.atlassian.com` → Settings → API keys | **só** `api.atlassian.com/admin/*` |
+| Token de **usuário** | `ATATT` | `id.atlassian.com/manage-profile/security/api-tokens` | `<site>.atlassian.net/rest/api/3/*` |
+
+Não têm relação entre si; escopo de uma não afeta a outra. O que está registrado hoje
+em `ATLASSIAN_API_TOKEN` é um `ATCTT`, e Basic auth contra `/rest/api/3/*` com ele
+**retorna 401 por design** — com o e-mail certo, sem barra final, no site correto.
+
+🚨 **A causa raiz não foi um engano de quem registrou: foi o nosso próprio documento.**
+`docs/DEPLOY.md` e o `D-14` afirmavam que `ATCTT3x…` era o *API token* e devia ir em
+`ATLASSIAN_API_TOKEN`. Quem seguiu a instrução acertou o procedimento e errou o
+resultado. Os três testes que passamos uma tarde considerando (e-mail errado · token
+expirado · base URL com barra) eram todos negativos, e continuariam negativos para
+sempre — **rodar o `curl` de novo não acrescenta informação**, e é por isso que o item
+está fechado em vez de "a verificar".
+
+**Consequência prática:** a credencial que temos não está quebrada, está na gaveta
+errada. O `ATCTT` é exatamente o que `ATLASSIAN_ORG_API_KEY` quer — e o memo mede `200`
+com ele contra `/admin/v1/orgs/{org}/*`. Falta gerar um `ATATT` para o trio de site.
+
+#### 2. `GET /admin/v1/orgs/{orgId}/users` devolve lista vazia neste tenant
+
+Medido: `{"data": []}`, HTTP 200. A causa não é permissão — o João é org admin **e**
+site admin. É que aquele endpoint lista **só contas gerenciadas**, e uma org só tem
+contas gerenciadas depois de reivindicar um domínio. A org não reivindicou nenhum
+(`/orgs/{org}/domains` → `{"data": []}`), então há **zero**. Uma única causa explica
+três sintomas que pareciam independentes: lista vazia, `403 "Caller must be a verified
+org admin of targeted account"` na escrita, e log de auditoria sem eventos de gestão.
+
+**`ClienteOrganizacaoHttp` usava esse endpoint.** Trocado por
+`POST /admin/v1/orgs/{orgId}/users/search`. É a pior classe de erro que existe neste
+projeto: HTTP 200, nenhuma exceção, console mostrando "0 assentos" — e ninguém
+desconfiando da chamada. Mesma família do `env.DB` devolvendo `{}`.
+
+**Três armadilhas medidas do `users/search`, nenhuma das quais dá erro:**
+
+- **`accountTypes: ["atlassian"]` é obrigatório** — sem ele entram ~83 contas de
+  app/bot, que não são pessoas e não consomem assento de gente.
+- **`query`, `groupIds` e `productAccess` NÃO filtram** — respondem 200 com a lista
+  inteira. Um filtro que parece filtrar e não filtra é pior que um filtro ausente.
+- **`accountStatus` não é status de suspensão** — volta `"active"` até para conta
+  suspensa. Quem responde é o **filtro** `isSuspended`, em duas varreduras.
+
+#### 3. O que isso obrigou a mudar no desenho, além do endpoint
+
+A armadilha do "filtro que responde 200 sem filtrar" é um comportamento **medido**
+desta API. Se `isSuspended` for um deles, as duas varreduras devolvem o mesmo conjunto
+— e isso é **detectável**: interseção não vazia significa que o filtro não separou
+nada. Daí `suspensaoConhecida`. Contar conta suspensa como assento ativo infla o custo
+(`RF-53`) e gera recomendação de revogar acesso de quem já não tem acesso.
+
+E `parcial`: o teto de `MAX_PAGINAS_USUARIOS` era atingido **em silêncio**, apesar de o
+comentário do código afirmar que a coleta parcial "nunca é silenciada". Era. Inventário
+truncado vira recomendação de rebaixar quem a página seguinte mostraria ativo — e a
+tela não tinha como saber que estava vendo um pedaço. Coleta parcial ou com suspensão
+desconhecida **não** é auditada como `sucesso`.
+
+Mesmo raciocínio de `deflexaoResolvidaConhecida` (`D-20`/T-235) e de "taxa sem dado é
+`null`, nunca `0%`": o número que não se mediu não vira zero.
+
+#### 4. Q5 — o espaço `TECH` não existe
+
+Era exemplo genérico, e virou premissa por repetição. Levantados por evidência real:
+`GO`, `DTE`, `GN`, `datateam`, `Protheus` (engenharia), além de `PROD`, `GDPC`, `CG`,
+`CG1`, `NC`, `AG`, `IA`, `IO` e outros. **É um piso, não a lista completa** — vem do
+índice do RAG, então espaço sem conteúdo indexado ou restrito não aparece. A lista
+autoritativa sai de `GET /wiki/api/v2/spaces` (que também exige `ATATT`) ou do
+diretório de espaços na UI.
+
+**Escolhidos para a allowlist inicial:** `GO`, `DTE`, `GN`, `datateam`, `Protheus`.
+Continua sendo decisão de exposição (`RN-06`, `D-01`) e revisável sem deploy (`RF-49`).
+
+#### 5. O que segue aberto
+
+- **`ATATT` não existe ainda** — é a ação humana que destrava Confluence e JSM reais.
+- **Escrita de governança é 0%** e não depende de credencial: **nenhuma** chave de API,
+  com escopo nenhum, opera sobre conta não gerenciada. Só reivindicar o domínio
+  `gocase.com` destrava — ou mudar grupo via `ATATT` + `/rest/api/3/group/user`.
+  Suspender continua fora dos dois caminhos.
+- **`GOATLAS_ORG_ID` provavelmente está corrompido** — o valor no `.env` do João tem
+  `j` e `k`, que não são hexadecimais (confusão 3 do `D-14`, agora com evidência). Não
+  é legível por MCP; precisa ser reconferido em `admin.atlassian.com/o/<id>/`.
+- **Os códigos HTTP são de 31/07** e não foram reexecutados em 07/08 (o sandbox do João
+  bloqueou o `curl`). A leitura do `.env` é de 07/08 e está confirmada.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
@@ -680,11 +781,11 @@ implementado antes da resposta.
 
 | # | Pergunta | Quem decide | Bloqueia |
 |---|---|---|---|
-| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | **Parcial — ver D-14.** O trio Jira/Confluence está registrado; faltam `ATLASSIAN_ORG_API_KEY` e `LLM_API_KEY`. **T-122/T-123/T-131 saíram do bloqueio — ver D-18:** estão implementadas e testadas contra `fetch` simulado, com os endpoints não verificados declarados em código e na tela. T-063 depende ainda de um projeto **JSM** |
+| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | **Parcial — ver D-14 e sobretudo `D-22`.** O 401 está **diagnosticado**: `ATLASSIAN_API_TOKEN` guarda um `ATCTT` (chave de org) e `/rest/api/3/*` só aceita `ATATT` (token de usuário). Falta **gerar o `ATATT`** — é a única ação que destrava Confluence e JSM reais. `LLM_API_KEY` e `GODEPLOY_CRON_KEY` **já estão registrados** (o `D-14` está desatualizado nisso); `ATLASSIAN_ORG_API_KEY` não, e o valor certo para ela é o `ATCTT` que hoje está na chave errada. **T-122/T-123/T-131 saíram do bloqueio — ver D-18:** implementadas e testadas contra `fetch` simulado. T-063 depende ainda de um projeto **JSM** |
 | Q2 | Qual campo do Jira delimita "mesmo tipo de ticket" para a Regra 2 — label, componente ou tipo de issue? | João + time de tech | RF-10, RF-11 (o agrupamento do `check_jira_history`) |
 | Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | RF-14 — e sem ele a Regra 2 classifica mal (é pré-requisito, não refinamento) |
 | Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | **Só o valor** — `campo_solicitante_id` já é config (RNF-25), editável sem deploy assim que a resposta chegar. RF-21, RNF-21 (reconciliação) |
-| Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | RF-37, RF-38 e o `search_confluence` da Regra 1 |
+| Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | **Respondida em `D-22`: `GO`, `DTE`, `GN`, `datateam`, `Protheus`.** ⚠️ O espaço `TECH` que circulava **não existe** — era exemplo genérico virado premissa. A lista levantada é um **piso** (vem do índice do RAG); a autoritativa exige `ATATT`. Continua revisável sem deploy (`RF-49`) |
 | Q6 | ~~Qual API de IA?~~ Resta: qual a **política de retenção/treinamento** do provedor atrás do proxy corporativo? | João | **Provedor decidido — ver D-05.** O que resta bloqueia o *rollout* (conformidade **RNF-34**), não a arquitetura |
 | Q7 | Quais domínios de e-mail além de `@gocase.com` são válidos? | João | RF-01, RF-05 (allowlist de domínio no servidor) |
 | Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | RF-53 (custo mensal e assentos ociosos) |
