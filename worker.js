@@ -6661,6 +6661,189 @@ async function validarAnexoEnviado(arquivo) {
   };
 }
 
+// src/lib/config/validar.ts
+var FAMILIA = {
+  dominios_permitidos: "lista_de_texto",
+  admins: "lista_de_texto",
+  espacos_confluence: "lista_de_texto",
+  labels_bloqueadas: "lista_de_texto",
+  tipos_chamado_permitidos: "lista_de_texto",
+  regra2_exemplos_ajuste_operacional: "lista_de_texto",
+  // `null` é uma resposta legítima: "ainda não sabemos" (Q1, Q4). Diferente de
+  // string vazia, que seria um id inventado.
+  service_desk_id: "texto_ou_vazio",
+  campo_solicitante_id: "texto_ou_vazio",
+  org_id: "texto_ou_vazio",
+  regra2_campo_agrupamento: "texto",
+  regra1_threshold_score: "fracao",
+  regra2_threshold_recorrencia: "inteiro_positivo",
+  regra2_janela_dias: "inteiro_positivo",
+  regra2_limite_tickets: "inteiro_positivo",
+  assentos_ocioso_dias: "inteiro_positivo",
+  limite_requisicoes_por_minuto: "inteiro_positivo",
+  // TTL zero é uma escolha válida: significa não cachear.
+  ttl_metadados_seg: "inteiro_ou_zero",
+  ttl_conteudo_seg: "inteiro_ou_zero",
+  teto_custo_conversa_usd: "dinheiro",
+  custo_mensal_por_produto: "preco_por_produto",
+  /**
+   * Chaves das Fases 3 e 4 — entraram pelo PR #20, e o `Record<ChaveConfig, …>` acima
+   * **não compilou** sem elas. Foi o mapa fazendo exatamente o que foi desenhado para
+   * fazer: até aqui elas chegavam a `PUT /api/admin/config` sem validação de tipo,
+   * porque a família não existia. Ver `D-25`.
+   */
+  curva_preco_por_produto: "curva_de_preco",
+  canal_notificacao_padrao: "canal_ou_vazio",
+  chat_webhook_url: "texto_ou_vazio",
+  email_endpoint: "texto_ou_vazio",
+  email_remetente: "texto_ou_vazio",
+  base_publica_app: "texto_ou_vazio",
+  sla_fracao_aviso: "fracao",
+  emails_piloto: "lista_de_texto",
+  areas_por_email: "mapa_de_texto",
+  baseline_assentos: "baseline_ou_vazio",
+  // ⚠️ `null` aqui é a política do MVP (`D-20`): **não apagar nada**. É diferente de `0`,
+  // que significaria "apagar tudo imediatamente" — e apagar dado pessoal é irreversível.
+  retencao_conversas_dias: "inteiro_positivo_ou_vazio",
+  retencao_auditoria_dias: "inteiro_positivo_ou_vazio",
+  retencao_notificacoes_dias: "inteiro_positivo_ou_vazio"
+};
+function numeroReal(valor) {
+  return typeof valor === "number" && Number.isFinite(valor);
+}
+function validarFamilia(familia, valor) {
+  switch (familia) {
+    case "lista_de_texto":
+      if (!Array.isArray(valor) || valor.some((v) => typeof v !== "string")) {
+        return { ok: false, motivo: "Esperado uma lista de textos." };
+      }
+      return { ok: true, valor: valor.map((v) => v.trim()).filter((v) => v.length > 0) };
+    case "texto":
+      if (typeof valor !== "string" || valor.trim().length === 0) {
+        return { ok: false, motivo: "Esperado um texto n\xE3o vazio." };
+      }
+      return { ok: true, valor: valor.trim() };
+    case "texto_ou_vazio": {
+      if (valor === null) return { ok: true, valor: null };
+      if (typeof valor !== "string") {
+        return { ok: false, motivo: "Esperado um texto, ou nada." };
+      }
+      const limpo = valor.trim();
+      return { ok: true, valor: limpo.length > 0 ? limpo : null };
+    }
+    case "fracao":
+      if (!numeroReal(valor) || valor < 0 || valor > 1) {
+        return { ok: false, motivo: "Esperado um n\xFAmero entre 0 e 1." };
+      }
+      return { ok: true, valor };
+    case "inteiro_positivo":
+      if (!numeroReal(valor) || !Number.isInteger(valor) || valor < 1) {
+        return { ok: false, motivo: "Esperado um n\xFAmero inteiro de 1 para cima." };
+      }
+      return { ok: true, valor };
+    case "inteiro_ou_zero":
+      if (!numeroReal(valor) || !Number.isInteger(valor) || valor < 0) {
+        return { ok: false, motivo: "Esperado um n\xFAmero inteiro de 0 para cima." };
+      }
+      return { ok: true, valor };
+    case "dinheiro":
+      if (!numeroReal(valor) || valor < 0) {
+        return { ok: false, motivo: "Esperado um n\xFAmero de 0 para cima." };
+      }
+      return { ok: true, valor };
+    case "preco_por_produto": {
+      if (typeof valor !== "object" || valor === null || Array.isArray(valor)) {
+        return { ok: false, motivo: "Esperado um pre\xE7o para cada produto." };
+      }
+      for (const preco of Object.values(valor)) {
+        if (!numeroReal(preco) || preco < 0) {
+          return { ok: false, motivo: "Esperado um pre\xE7o de 0 para cima em cada produto." };
+        }
+      }
+      return { ok: true, valor };
+    }
+    case "inteiro_positivo_ou_vazio": {
+      if (valor === null) return { ok: true, valor: null };
+      if (!numeroReal(valor) || !Number.isInteger(valor) || valor < 1) {
+        return { ok: false, motivo: "Esperado um n\xFAmero inteiro de 1 para cima, ou nada." };
+      }
+      return { ok: true, valor };
+    }
+    case "canal_ou_vazio": {
+      if (valor === null) return { ok: true, valor: null };
+      if (valor !== "chat" && valor !== "email" && valor !== "nenhum") {
+        return { ok: false, motivo: 'Esperado "chat", "email", "nenhum", ou nada.' };
+      }
+      return { ok: true, valor };
+    }
+    case "mapa_de_texto": {
+      if (typeof valor !== "object" || valor === null || Array.isArray(valor)) {
+        return { ok: false, motivo: "Esperado um texto para cada chave." };
+      }
+      const saida = {};
+      for (const [k, v] of Object.entries(valor)) {
+        if (typeof v !== "string" || v.trim().length === 0) {
+          return { ok: false, motivo: "Esperado um texto n\xE3o vazio em cada chave." };
+        }
+        saida[k.trim().toLowerCase()] = v.trim();
+      }
+      return { ok: true, valor: saida };
+    }
+    case "curva_de_preco": {
+      if (typeof valor !== "object" || valor === null || Array.isArray(valor)) {
+        return { ok: false, motivo: "Esperado uma lista de faixas para cada produto." };
+      }
+      for (const faixas of Object.values(valor)) {
+        if (!Array.isArray(faixas) || faixas.length === 0) {
+          return { ok: false, motivo: "Esperado ao menos uma faixa de pre\xE7o por produto." };
+        }
+        for (const f of faixas) {
+          const ate = f?.ate;
+          if (ate !== null && (!numeroReal(ate) || !Number.isInteger(ate) || ate < 1)) {
+            return { ok: false, motivo: 'Em cada faixa, "ate" deve ser inteiro de 1 para cima, ou nada.' };
+          }
+          if (!numeroReal(f?.precoUnitarioUsd) || f.precoUnitarioUsd < 0) {
+            return { ok: false, motivo: 'Em cada faixa, "precoUnitarioUsd" deve ser de 0 para cima.' };
+          }
+        }
+      }
+      return { ok: true, valor };
+    }
+    case "baseline_ou_vazio": {
+      if (valor === null) return { ok: true, valor: null };
+      if (typeof valor !== "object" || Array.isArray(valor)) {
+        return { ok: false, motivo: "Esperado o baseline de assentos, ou nada." };
+      }
+      const v = valor;
+      if (typeof v.coletadoEm !== "string" || v.coletadoEm.trim().length === 0) {
+        return { ok: false, motivo: "Esperado a data da coleta do baseline." };
+      }
+      if (typeof v.porProduto !== "object" || v.porProduto === null || Array.isArray(v.porProduto)) {
+        return { ok: false, motivo: "Esperado a contagem por produto no baseline." };
+      }
+      for (const n of Object.values(v.porProduto)) {
+        if (!numeroReal(n) || !Number.isInteger(n) || n < 0) {
+          return { ok: false, motivo: "Esperado uma contagem inteira de 0 para cima por produto." };
+        }
+      }
+      return { ok: true, valor };
+    }
+  }
+}
+function validarValorDeConfig(chave, valor) {
+  const familia = FAMILIA[chave];
+  if (!familia) return { ok: false, motivo: "Configura\xE7\xE3o desconhecida." };
+  return validarFamilia(familia, valor);
+}
+function chaveDeConfigConhecida(chave) {
+  return chave in CONFIG_PADRAO;
+}
+
+// src/lib/config/diagnostico.ts
+function buscaConfigurada(espacos) {
+  return espacos.length > 0;
+}
+
 // src/lib/http/rotas.ts
 var PRIORIDADES = ["critica", "alta", "normal"];
 var ehPrioridade = (v) => typeof v === "string" && PRIORIDADES.includes(v);
@@ -7179,7 +7362,7 @@ async function rotear(req, ctx, eu, caminho, url) {
         "Escreva ao menos duas letras do que voc\xEA procura."
       );
     }
-    const configurada = ctx.valores.espacos_confluence.length > 0;
+    const configurada = buscaConfigurada(ctx.valores.espacos_confluence);
     let paginas;
     try {
       paginas = await ctx.atlassian.buscarConfluence({
@@ -7409,13 +7592,12 @@ async function rotear(req, ctx, eu, caminho, url) {
     if (req.method === "PUT") {
       const corpo = await lerJson(req);
       const chave = typeof corpo?.chave === "string" ? corpo.chave : "";
-      if (!(chave in ctx.valores)) return ERROS.dadosInvalidos("Configura\xE7\xE3o desconhecida.");
-      await ctx.config.definir(
-        chave,
-        corpo.valor,
-        eu.email,
-        ctx.agora()
-      );
+      if (!chaveDeConfigConhecida(chave)) {
+        return ERROS.dadosInvalidos("Configura\xE7\xE3o desconhecida.");
+      }
+      const validado = validarValorDeConfig(chave, corpo?.valor);
+      if (!validado.ok) return ERROS.dadosInvalidos(validado.motivo);
+      await ctx.config.definir(chave, validado.valor, eu.email, ctx.agora());
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: "config_alterada",

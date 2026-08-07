@@ -1,0 +1,398 @@
+/**
+ * Console de administração — folha própria porque é uma tela própria.
+ *
+ * Organizado por capacidade, não por tipo de dado. A trilha da esquerda é
+ * navegação **e** diagnóstico: cada seção carrega o próprio estado, então "o que
+ * está desligado" se lê sem abrir nada.
+ *
+ * ⚠️ **O lime marca o que está DESLIGADO, não o que está certo.** É a cor escassa
+ * da identidade (§1.2, "acento pontual, mais poderoso quando escasso"), e o que
+ * precisa da atenção de quem administra é o que **não** está no ar — o que já
+ * funciona não deveria competir por atenção. Estado nunca só por cor: há símbolo e
+ * palavra nos três casos (`MarcaDeEstado`).
+ */
+
+.console {
+  display: grid;
+  gap: var(--space-5);
+}
+
+
+.console-topo .dica {
+  margin-top: var(--space-2);
+}
+
+/* ---------- trilha de seções ------------------------------------------- */
+
+.console-trilha {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.console-trilha ul {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: var(--space-1);
+}
+.console-trilha ul::-webkit-scrollbar {
+  display: none;
+}
+.trilha-grupo-titulo {
+  font-size: 0.6875rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--go-text-primary) 55%, transparent);
+  margin-bottom: var(--space-2);
+}
+.trilha-item {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-blue);
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  padding: 8px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.trilha-item:hover {
+  border-color: var(--go-blue);
+}
+.trilha-item[aria-current='true'] {
+  background: var(--go-blue);
+  color: var(--go-white);
+}
+/* Na seção ativa o chip inverte — lime sobre azul perde o contraste. */
+.trilha-item[aria-current='true'] .estado {
+  background: var(--go-white);
+  color: var(--go-blue);
+  border-color: transparent;
+}
+
+/* ---------- marca de estado -------------------------------------------- */
+
+.estado {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.03em;
+  border-radius: var(--radius-pill);
+  padding: 2px 10px;
+  border: 1.5px solid transparent;
+}
+.estado-marca {
+  font-weight: var(--fw-black);
+}
+.estado[data-estado='desligado'] {
+  background: var(--go-lime);
+  color: var(--go-blue);
+}
+.estado[data-estado='parcial'] {
+  background: var(--go-light-blue);
+  color: var(--go-blue);
+}
+.estado[data-estado='ligado'] {
+  color: color-mix(in srgb, var(--go-text-primary) 65%, transparent);
+  border-color: color-mix(in srgb, var(--go-blue) 20%, transparent);
+}
+
+/* ---------- conteúdo da seção ------------------------------------------ */
+
+.console-conteudo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.secao-cabecalho .titulo-secao {
+  font-size: var(--fs-h3);
+}
+.secao-resumo {
+  font-size: var(--fs-small);
+  color: var(--go-text-primary);
+  margin-top: var(--space-2);
+  max-width: 62ch;
+}
+
+/* ---------- visão geral: o estado do app em cinco frases ---------------- */
+
+.capacidades {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: 1fr;
+}
+/* ⚠️ Sem `gap`: o ritmo vem de margens DIFERENTES entre os três elementos, porque
+   eles não têm o mesmo grau de parentesco. Título e frase são a mesma ideia (8px);
+   a ação é outra coisa (16px). Um `gap` uniforme espaçava os três igual e o cartão
+   virava três linhas soltas sem hierarquia. */
+.capacidade {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: var(--go-white);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  border-left: 4px solid color-mix(in srgb, var(--go-blue) 18%, transparent);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.capacidade:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.capacidade[data-estado='desligado'] {
+  border-left-color: var(--go-lime);
+}
+.capacidade[data-estado='parcial'] {
+  border-left-color: var(--go-light-blue);
+}
+/* `nowrap` de propósito: com `wrap`, o flex quebra a linha ANTES de encolher o
+   título, e um nome de três palavras jogava o selo para baixo — a coluna de
+   estados deixava de se ler de cima a baixo. Aqui o título quebra por dentro e o
+   selo fica ancorado no alto à direita. */
+.capacidade-topo {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: nowrap;
+  width: 100%;
+}
+/* O título ocupa a linha e QUEBRA; o selo fica ancorado à direita. Sem isto, um
+   título de duas palavras a mais empurra o selo para a linha de baixo e a coluna
+   de estados deixa de se ler de cima a baixo. */
+.capacidade h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-h4);
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+}
+.capacidade-topo .estado {
+  flex: 0 0 auto;
+}
+.capacidade p {
+  margin-top: var(--space-2);
+  font-size: var(--fs-small);
+  color: var(--go-text-primary);
+  max-width: 68ch;
+}
+
+/* A ação estica sobre o cartão inteiro pelo `::after` — o alvo de clique é o
+   cartão, e o texto aqui é só a pista visual de que ele leva a algum lugar. */
+.capacidade-acao {
+  margin-top: var(--space-4);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.capacidade-acao::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.capacidade:hover .capacidade-acao {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--go-lime);
+  text-decoration-thickness: 2px;
+}
+/* O anel de foco vai no `::after`, ou seja, no cartão — não numa palavra de 60px
+   perdida no canto de uma área clicável de 600px. */
+.capacidade-acao:focus-visible {
+  outline: none;
+}
+.capacidade-acao:focus-visible::after {
+  outline: 3px solid var(--go-blue);
+  outline-offset: 2px;
+}
+
+/* ---------- campo do console ------------------------------------------- */
+
+/* Rótulo (a decisão) → ajuda (o que preciso saber) → controle → efeito (como está
+   agora). O efeito vem DEPOIS do controle porque responde à pergunta que se faz
+   depois de ver o campo, não antes dele. */
+.campo-console {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--go-white);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+}
+.campo-console > label {
+  font-size: var(--fs-h4);
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+}
+.campo-opcional {
+  font-weight: var(--fw-regular);
+  font-size: var(--fs-caption);
+  color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
+  letter-spacing: 0.02em;
+}
+.campo-ajuda {
+  font-size: var(--fs-small);
+  color: color-mix(in srgb, var(--go-text-primary) 85%, transparent);
+  max-width: 62ch;
+}
+.campo-console input,
+.campo-console textarea,
+.campo-console select {
+  font: inherit;
+  font-size: var(--fs-body);
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 2px solid color-mix(in srgb, var(--go-blue) 25%, transparent);
+  background: var(--go-cream);
+  color: var(--go-text-primary);
+  min-height: 48px;
+}
+.campo-console textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.campo-console input:focus,
+.campo-console textarea:focus,
+.campo-console select:focus {
+  border-color: var(--go-blue);
+}
+
+.campo-com-unidade {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.campo-com-unidade input {
+  max-width: 12ch;
+}
+.campo-unidade {
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
+}
+
+/* O que será salvo, item por item: vírgula é fácil de errar em campo de texto. */
+.campo-pilulas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.campo-efeito {
+  font-size: var(--fs-small);
+  color: var(--go-text-primary);
+  background: var(--go-cream);
+  border-left: 3px solid var(--go-blue);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: var(--space-3) var(--space-4);
+  max-width: 62ch;
+}
+
+/* ---------- preço por produto (RF-53, Q8) ------------------------------ */
+
+.precos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.preco-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.preco-linha label {
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+}
+.preco-linha input {
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 2px solid color-mix(in srgb, var(--go-blue) 25%, transparent);
+  background: var(--go-white);
+  color: var(--go-text-primary);
+  max-width: 14ch;
+  min-height: 44px;
+}
+.preco-linha input:focus {
+  border-color: var(--go-blue);
+}
+
+/* ---------- acompanhamento dentro da seção ----------------------------- */
+
+.bloco-dado {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-5);
+  border-top: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+}
+
+.detalhe {
+  background: var(--go-white);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+}
+.detalhe-botao {
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.detalhe-corpo {
+  padding-top: var(--space-4);
+}
+
+/* ---------- desktop: a trilha vira coluna ------------------------------ */
+
+@media (min-width: 900px) {
+  .console {
+    grid-template-columns: 220px minmax(0, 1fr);
+    column-gap: var(--space-7);
+    align-items: start;
+  }
+  .console-topo {
+    grid-column: 1 / -1;
+  }
+  .console-trilha {
+    position: sticky;
+    top: var(--space-4);
+  }
+  .console-trilha ul {
+    flex-direction: column;
+    overflow-x: visible;
+    gap: 2px;
+  }
+  .trilha-item {
+    width: 100%;
+    justify-content: space-between;
+    border-radius: var(--radius-md);
+  }
+}

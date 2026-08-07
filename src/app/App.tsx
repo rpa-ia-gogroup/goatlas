@@ -37,7 +37,7 @@ const ABAS: readonly { nome: Tela['nome']; rotulo: string; soAdmin?: boolean }[]
   { nome: 'avisos', rotulo: 'Avisos' },
   // A aba só aparece para admin — mas quem garante o acesso é o gate do SERVIDOR
   // em cada rota `/api/admin/*`. Esconder no cliente é conveniência, não segurança.
-  { nome: 'admin', rotulo: 'Configuração', soAdmin: true },
+  { nome: 'admin', rotulo: 'Administração', soAdmin: true },
 ]
 
 export function App() {

@@ -65,9 +65,20 @@
   gap: var(--space-5);
 }
 
+/* ⚠️ UMA largura para todas as telas. Chegou a existir um `.painel-largo` só para
+   o console de administração, e o efeito foi pior que o problema: o painel pulava
+   de 760 para 1060px ao trocar de aba, e a faixa de abas refluía na frente de quem
+   clicava — as cinco pílulas saltavam de duas linhas para uma. Largura que muda
+   conforme a aba faz a moldura do app parecer instável.
+
+   960px cabe as cinco abas numa linha só e ainda deixa 596px de conteúdo ao lado da
+   trilha do console. O comprimento de leitura continua protegido onde importa: os
+   blocos de texto têm `max-width` própria (`.fala-agente`, `.campo-ajuda`,
+   `.secao-resumo`, `.doc`), que é onde a medida de leitura pertence — não na
+   moldura. */
 @media (min-width: 720px) {
   .painel {
-    max-width: 760px;
+    max-width: 960px;
     width: 100%;
     margin: 0 auto;
     border-radius: var(--radius-xl);
@@ -75,7 +86,7 @@
     padding: var(--space-7);
   }
   .cabecalho {
-    max-width: 760px;
+    max-width: 960px;
     width: 100%;
     margin: 0 auto;
     padding-inline: 0;
@@ -117,15 +128,22 @@
 
 /* ---------- navegação: pílulas, o formato da marca ---------------------- */
 
+/* ⚠️ QUEBRA a linha, não rola. Era `overflow-x: auto` com `scrollbar-width: none`:
+   a quinta aba (a de admin, a última) ficava cortada fora da tela **sem nenhuma
+   pista de que existia algo à direita** — sem barra, sem sombra, sem meia pílula
+   aparecendo. Quem não sabia que ela existia não a encontrava; quem sabia
+   precisava adivinhar shift+roda.
+
+   São no máximo cinco itens, então uma segunda linha custa 40px e resolve. Rolagem
+   horizontal escondida só se justifica quando a lista é longa o bastante para que
+   quebrar seja pior — não é o caso aqui, e a aba escondida era a única porta para
+   toda a administração. */
 .abas {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-2);
-  overflow-x: auto;
   padding-bottom: var(--space-1);
-  scrollbar-width: none;
-}
-.abas::-webkit-scrollbar {
-  display: none;
 }
 /**
  * ⚠️ A partir de 720px as abas QUEBRAM em vez de rolar.
@@ -262,10 +280,14 @@
  * agente carrega links de documentação e explicação de bloqueio — precisa ler
  * como texto, não como balão de chat. Quem ganha bolha é o usuário.
  */
+/* A medida de leitura mora AQUI, não na moldura: com o painel a 960px a fala do
+   agente esticava para ~110 caracteres por linha, e o olho perde a linha na volta.
+   Mesma `68ch` de `.doc`. */
 .fala-agente {
   font-size: var(--fs-body);
   line-height: 1.65;
   color: var(--go-text-primary);
+  max-width: 68ch;
 }
 .fala-agente a {
   color: var(--go-text-heading);

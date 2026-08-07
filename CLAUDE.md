@@ -100,6 +100,11 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   (defesa em profundidade — **RF-32**, **RN-05**).
 - **Falha de tool não silencia a regra** (**RNF-18**) — informa e marca o ticket
   como não verificado. Indisponibilidade nunca vira bypass.
+- **O console de admin mostra o que se DECIDE** (`D-25`) — não tudo o que é
+  configurável. TTL de cache, rate limit e teto de tickets da Regra 2 ficam fora da
+  tela **de propósito**: continuam em `ConfigValores` e mudáveis sem deploy, mas
+  ninguém os decide sem ler o código, e cada um deles na tela custava atenção de quem
+  precisa achar o que importa. Devolvê-los é reabrir `D-25`, não "completar a tela".
 - **N8N está descartado.** Não propor voltar a ele.
 - **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
   olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe
@@ -316,6 +321,25 @@ destes reabre um vazamento que já foi fechado.
   credencial de maior privilégio do sistema. `ctx.organizacao` é `null` fora dos
   fakes até T-122/T-123 existirem — rota de governança trata isso como
   "não configurado" (RNF-18), nunca como erro.
+- ⚠️ **`PUT /api/admin/config` valida o TIPO, não só a chave** (`config/validar.ts`,
+  `D-25`). `Config.carregar` faz `JSON.parse` e confia no que está gravado, porque
+  quem grava é `definir()` — mas a rota é HTTP comum, e a tela era a única coisa
+  garantindo o tipo. Um `"alto"` em `regra1_threshold_score` é JSON válido, sobrevive
+  ao boot e chega à Regra 1 como string; o default fail-closed **não** cobre isso,
+  porque valor corrompido não é ausência de valor. E a validação **recusa, nunca
+  coage**: `"0.9"` não vira `0.9` — coerção esconde de quem chamou que ele mandou a
+  coisa errada, e no dia em que a string for `"alto"` produz `NaN` em silêncio. O mapa
+  `FAMILIA` é `Record<ChaveConfig, …>` de propósito: chave nova em `ConfigValores` sem
+  família **não compila**, senão o furo volta sem ninguém ver.
+- **O console de admin RELATA o estado, não o recalcula** (`config/diagnostico.ts`,
+  `D-25`). Cada predicado é o mesmo que o servidor já aplica — `regra2Disponivel` vem
+  de `rules/`, `buscaConfigurada` é o predicado que a rota de busca usa para
+  distinguir "nada documentado" de "nada configurado". Condição escrita **só** ali
+  vira uma segunda regra que diverge em silêncio, e o console passa a mentir com
+  confiança; o lugar dela é o módulo de origem. E o que **não** está em
+  `admin/campos.tsx` é decisão (`D-25`), não esquecimento: TTL, rate limit e teto de
+  tickets da Regra 2 continuam configuráveis, só não têm tela — `tests/tela-admin.test.ts`
+  falha se voltarem sem passar pela decisão.
 - **Pergunta em aberto (Q1/Q4/Q5/Q8...) não é motivo para hardcode.** O padrão do
   projeto é sempre o mesmo: o valor que falta vira campo de `ConfigValores`
   (`RNF-25`), com `null`/vazio como default fail-closed, e o código já fica pronto
@@ -612,6 +636,17 @@ de admin (T-128) — tudo testado contra `ClienteOrganizacaoFake`. O que falta,
 `listarUsuarios`/`ultimoAcesso` reais (T-122/T-123) e revogar produto (T-131,
 P2), depende de **Q1**: a credencial de Org Admin ainda não existe, e não há como
 escrever a chamada real contra um endpoint que ninguém pode testar hoje.
+
+**A aba de admin virou console (spec 003, `D-25`).** Era um scroll único com cinco
+trabalhos empilhados — 14 campos na ordem de implementação, depois métricas,
+assentos, lacunas e auditoria, com rótulos que nomeavam a chave do banco. Agora é
+organizada por **capacidade**, com trilha de seções que carrega o estado de cada uma,
+uma **visão geral** que diz o que está ligado/parcial/desligado e a consequência, e
+cada ajuste ao lado do dado que ele calibra (o threshold da Regra 1 junto da taxa de
+override — `R-04`). O console encolheu de propósito: quatro chaves técnicas saíram da
+tela (`D-25`) e `org_id`/`custo_mensal_por_produto` entraram, destravando **Q1**/**Q8**
+sem deploy. `src/app/admin.tsx` virou `src/app/admin/` (`index` · `campos` · `paineis`)
+com folha própria em `console.css`.
 
 **`campo_solicitante_id` (Q4) já é config, não hardcode** (`RF-21`): o dia que o
 time de tech confirmar o id do campo "Solicitante" no projeto do portal, é só

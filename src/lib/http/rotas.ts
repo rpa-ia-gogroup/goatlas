@@ -40,6 +40,8 @@ import { verificarCron } from './cron-auth'
 import { areaDoEmail, areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
+import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
+import { buscaConfigurada } from '../config/diagnostico'
 
 export interface EnvCron {
   readonly GODEPLOY_CRON_KEY?: string
@@ -736,7 +738,7 @@ async function rotear(
     // Allowlist vazia = nada exposto. A camada isolada é que se recusa a montar
     // query aberta; aqui só distinguimos os dois zeros para a tela poder explicar
     // qual dos dois aconteceu.
-    const configurada = ctx.valores.espacos_confluence.length > 0
+    const configurada = buscaConfigurada(ctx.valores.espacos_confluence)
 
     let paginas
     try {
@@ -1038,13 +1040,16 @@ async function rotear(
     if (req.method === 'PUT') {
       const corpo = await lerJson<{ chave?: unknown; valor?: unknown }>(req)
       const chave = typeof corpo?.chave === 'string' ? corpo.chave : ''
-      if (!(chave in ctx.valores)) return ERROS.dadosInvalidos('Configuração desconhecida.')
-      await ctx.config.definir(
-        chave as keyof typeof ctx.valores,
-        corpo!.valor as never,
-        eu.email,
-        ctx.agora(),
-      )
+      if (!chaveDeConfigConhecida(chave)) {
+        return ERROS.dadosInvalidos('Configuração desconhecida.')
+      }
+      // ⚠️ O tipo é validado AQUI, não só na tela: esta é uma rota HTTP comum, e
+      // `Config.carregar` aceita de volta qualquer JSON válido que estiver gravado.
+      // Um `"alto"` em `regra1_threshold_score` sobrevive ao boot e chega à Regra 1
+      // como string — o default fail-closed não cobre valor corrompido (T-136).
+      const validado = validarValorDeConfig(chave, corpo?.valor)
+      if (!validado.ok) return ERROS.dadosInvalidos(validado.motivo)
+      await ctx.config.definir(chave, validado.valor as never, eu.email, ctx.agora())
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: 'config_alterada',
