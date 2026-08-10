@@ -6011,6 +6011,16 @@ function converterMacro(bruto, coletor) {
       coletor
     );
   }
+  const corpos = bruto.filhos.filter(
+    (f) => f.tipo === "elemento" && f.nome === "ac:rich-text-body"
+  );
+  if (corpos.length > 0) {
+    const dentro = converterLista(corpos, coletor);
+    if (dentro.length > 0) {
+      anotar(coletor, "macro_nao_suportada", nome === "" ? "sem nome" : nome);
+      return dentro;
+    }
+  }
   anotar(coletor, "macro_nao_suportada", nome === "" ? "sem nome" : nome);
   return [{ tipo: "macroNaoSuportada", nome: nome === "" ? "sem nome" : nome }];
 }

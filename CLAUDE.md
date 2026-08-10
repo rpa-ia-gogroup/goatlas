@@ -505,6 +505,23 @@ destes reabre um vazamento que já foi fechado.
   `false` ali e o aviso nunca apareceria no caso real. Fazê-lo aparecer exigiria adivinhar
   que aquele parágrafo é placeholder — heurística sobre conteúdo de terceiro. Espaço com home
   vazia é lacuna de documentação, e quem mede isso é `RF-42`.
+- 🎁 **Macro desconhecida COM corpo tem o corpo renderizado, nunca descartado.** Era
+  desperdício silencioso: `panel`, `deck`/`card`, `excerpt` e qualquer macro interna que
+  envolva texto caíam no placeholder **e o texto ia embora** — a página tinha, a pessoa não
+  via, e a tela ainda dizia "o texto ao redor está completo". Renderizar o corpo é grátis
+  (nenhuma chamada nova) e seguro: ele passa por `converterLista`, a **mesma** allowlist de
+  todo o resto. É a diferença entre "não sei desenhar esta moldura" (a moldura se perde, o
+  texto aparece) e "não posso mostrar este conteúdo". O `anotar` continua acontecendo: a
+  auditoria de `RF-43` é o que diz qual macro vale implementar de verdade um dia.
+- **`children`/`pagetree` apontam para a lista que a leitura JÁ mostra** (T-115) em vez de
+  dizer "não há o que trazer" — o conteúdo está na tela, alguns centímetros abaixo, com a
+  verificação de restrição por item que `RN-06` exige.
+- 🚨 **`jira`/`jirachart` NÃO devem ser implementados** — e o motivo não é custo. A JQL vem
+  de dentro da página, que qualquer pessoa edita (`R-07`), e executá-la seria rodar consulta
+  **escolhida pelo conteúdo** com a conta de serviço, mostrando o resultado a qualquer
+  colaborador. É `RN-06` sem gate equivalente: no Confluence existe allowlist de espaço,
+  label e restrição por página; para Jira não existe nada disso. Fica placeholder de
+  propósito.
 - **O parâmetro da macro continua fora da tela** (`RNF-30`), inclusive nos blocos agora
   nomeados: JQL, `spaceKey` e id de filtro descrevem estrutura interna e podem citar projeto
   que quem lê não deveria conhecer.
@@ -672,7 +689,7 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**810 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**816 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
