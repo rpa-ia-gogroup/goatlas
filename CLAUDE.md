@@ -595,7 +595,13 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 **de verdade** com o `ATATT` validado, e o que impede efeito colateral é
 `GOATLAS_SOMENTE_LEITURA=1`, que recusa toda escrita no decorador do cliente.
 Config apontada para o real: `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"),
-tipos `70,134,108,68`, espaços `GT,DTE,GN`.
+tipos `70,134,108,68`, espaços **`GT,DTE,GN,DE,GI,datateam,Protheus`** (`D-29`, 10/08 —
+7 dos 31 espaços reais, conferidos ao vivo contra `/wiki/api/v2/spaces`).
+⚠️ **`Config` resolve `CONFIG_PADRAO` → env → BANCO, e o banco vence.** Mudar
+`GOATLAS_ESPACOS_CONFLUENCE` só tem efeito se ninguém tiver gravado `espacos_confluence` na
+tabela `config` pelo console — senão é no-op **silencioso**. O valor efetivo não é legível de
+fora (`listAppSecrets` não devolve valor, `/api/admin/config` está atrás do edge): confere-se
+abrindo o console.
 
 🚨 **Desligar `GOATLAS_SOMENTE_LEITURA` é o go-live, e tem pré-requisito:** a staging
 (`3936ca2d`, criada e **incompleta** — falta o `LLM_API_KEY`) passa a ser obrigatória

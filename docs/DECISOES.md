@@ -1024,9 +1024,16 @@ documentação de engenharia. E ficaram de fora os que mais parecem certos:
 service desk — feito para deflexão. `GT`, `IO`, `IA`, `Protheus`, `CG1`, `GLPI` e
 `Goconnect360` são desse tipo.
 
-**A allowlist NÃO foi definida ainda** — `GOATLAS_ESPACOS_CONFLUENCE` segue vazio de
-propósito. Escolher continua sendo decisão de exposição (`RN-06`, `D-01`), e agora ela se
-faz sobre a lista real em vez de sobre suposição de assunto.
+~~**A allowlist NÃO foi definida ainda** — `GOATLAS_ESPACOS_CONFLUENCE` segue vazio de
+propósito.~~ **Desatualizado desde 07/08/2026 17:35**, quando o secret foi criado
+(`listAppSecrets`). O `CLAUDE.md` registra o valor como `GT,DTE,GN` — ⚠️ **registra, não
+mede**: a API do GoDeploy nunca devolve valor de secret, então o conteúdo é documentação, e
+divergir dele não daria erro nenhum (`RN-06` nega por padrão: chave errada = zero resultado
+com HTTP 200).
+
+Escolher continua sendo decisão de exposição (`RN-06`, `D-01`), e agora ela se faz sobre a
+lista real em vez de sobre suposição de assunto. ⚠️ **E as duas fontes autoritativas
+discordam** — ver `D-29`, que registra o conflito em vez de escolher por conta própria.
 
 #### 8. Q8 respondida — e o `custo.ts` está errado por construção
 
@@ -1164,6 +1171,57 @@ ganharam superfície. O preço é uma linha **por produto encontrado no inventá
 o console não inventa a lista de produtos que a organização assina. No dia em que o
 financeiro responder Q8, é preencher e salvar.
 
+### D-29 · Q5 fechada: 7 espaços na allowlist, escolhidos sobre a lista medida
+
+**Data:** 10/08/2026 · **Decisão de:** Kaique · **Contexto:** `Q5`, `RN-06`, `D-01`, `RF-49`
+
+**Verificado ao vivo** (`GET /wiki/api/v2/spaces?limit=250`, `ATATT` clássico do pacote do
+João, HTTP **200**): a API devolve **128 espaços numa página só**, sendo **97 pessoais**
+(`~712020…`) e **31 reais**. Idêntico à medição de 07/08 — a lista não mudou.
+
+**Aplicados (`GOATLAS_ESPACOS_CONFLUENCE`):**
+
+| Key | Nome | Tipo |
+|---|---|---|
+| `GT` | GO Tecnologia | `knowledge_base` |
+| `DTE` | Documentação Técnica Engenharia | `global` |
+| `GN` | Tickets Engenharia | `global` |
+| `DE` | Devops | `global` |
+| `GI` | GO INFRA | `global` |
+| `datateam` | GO Data | `collaboration` |
+| `Protheus` | Protheus | `knowledge_base` |
+
+Os 7 foram **conferidos um por um contra o JSON ao vivo**, não contra recomendação: o custo
+de uma chave errada é zero resultado com HTTP 200 (`RN-06` nega por padrão), que não quebra
+nada e não aparece em log nenhum.
+
+**Os 24 que ficaram fora, e por quê:**
+
+- **`GO` (Go Shopify)** — a sugestão do João o incluía; a `D-23` §7 já havia mostrado que
+  ele não é engenharia. Ficou fora. ⚠️ Este é o registro de que **as duas fontes
+  discordavam** e a divergência foi resolvida pelo dado, não pela autoridade de quem
+  sugeriu.
+- **`GLPI` (helpdesk antigo)** — `knowledge_base`, portanto tentador para deflexão. Fora de
+  propósito: defletir com documentação obsoleta é o **pior** caso do projeto — a pessoa lê,
+  não resolve, insiste, e o override sobe sem que a documentação melhore.
+- **`PROD`, `dicas`** — plausíveis, mas são produto e miscelânea, não documentação técnica.
+  Entram numa segunda rodada, se a taxa de override apontar para lá (`RF-42`/`T-117` é
+  exatamente o instrumento que diz isso).
+- **O resto** (CX, Growth, FrontOffice, Opsgenie migrado, …) — nada a ver com o escopo, e
+  cada espaço liberado é conteúdo que **qualquer colaborador** passa a ler pelo proxy sob
+  proxy total (`D-01`).
+
+**Revisável sem deploy** (`RF-49`): o campo está no console de admin.
+
+🚨 **Ressalva de aplicação, e ela pode invalidar a mudança:** `Config.carregar` resolve na
+ordem `CONFIG_PADRAO` → **bootstrap do env** → **BANCO**, e *"o banco, quando tem valor,
+sempre vence"*. Se `espacos_confluence` já tiver sido gravado na tabela `config` (por alguém
+salvando no console), o `setAppSecret` é **no-op silencioso** — nada dá erro, e a busca
+continua no escopo antigo. Não há como ler o valor efetivo de fora: `listAppSecrets` nunca
+devolve valor e `/api/admin/config` está atrás do OAuth do edge. **Verificação: abrir o
+console de admin e ler o campo de espaços.** Se mostrar 3, gravar os 7 ali — o banco vence,
+então essa gravação é a que fica.
+
 ---
 
 ## Perguntas em aberto
@@ -1177,7 +1235,7 @@ implementado antes da resposta.
 | Q2 | Qual campo do Jira delimita "mesmo tipo de ticket" para a Regra 2 — label, componente ou tipo de issue? | João + time de tech | RF-10, RF-11 (o agrupamento do `check_jira_history`) |
 | Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | RF-14 — e sem ele a Regra 2 classifica mal (é pré-requisito, não refinamento) |
 | Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | **Só o valor** — `campo_solicitante_id` já é config (RNF-25), editável sem deploy assim que a resposta chegar. RF-21, RNF-21 (reconciliação) |
-| Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | **Lista autoritativa em mãos (`D-23`): 32 espaços, com nome e tipo.** ⚠️ O `TECH` que circulava **nunca existiu**, e a recomendação do `D-22` estava furada: **`GO` é "Go Shopify"**, não engenharia. Candidatos reais: `GT` (GO Tecnologia, `knowledge_base`), `DTE`, `GN`, `DE` (Devops), `GI` (GO INFRA), `dicas`, `GLPI`. **A escolha continua pendente** — `GOATLAS_ESPACOS_CONFLUENCE` está vazio de propósito, e agora se decide sobre a lista real |
+| Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | **Lista autoritativa em mãos (`D-23`): 32 espaços, com nome e tipo.** ⚠️ O `TECH` que circulava **nunca existiu**, e a recomendação do `D-22` estava furada: **`GO` é "Go Shopify"**, não engenharia. Candidatos reais: `GT` (GO Tecnologia, `knowledge_base`), `DTE`, `GN`, `DE` (Devops), `GI` (GO INFRA), `dicas`, `GLPI`. **Parcialmente aplicada:** o secret existe desde 07/08 17:35 e o `CLAUDE.md` registra `GT,DTE,GN` (3 de 31 espaços reais). ⚠️ **O que resta é conflito, não ausência** — a sugestão do João inclui `GO`/`PROD` e a `D-23` §7 diz que `GO` não é engenharia. Ver `D-29` |
 | Q6 | ~~Qual API de IA?~~ Resta: qual a **política de retenção/treinamento** do provedor atrás do proxy corporativo? | João | **Provedor decidido — ver D-05.** O que resta bloqueia o *rollout* (conformidade **RNF-34**), não a arquitetura |
 | Q7 | Quais domínios de e-mail além de `@gocase.com` são válidos? | João | RF-01, RF-05 (allowlist de domínio no servidor) |
 | Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | ✅ **Respondida em `D-23`**: 73 assentos (5 JSM · 35 Jira · 33 Confluence), e a curva do JSM é **escalonada** — faixa 1–100 medida em USD 9,05 e 6,70. 🚨 **E isso quebra o `custo.ts`**, que multiplica contagem × custo fixo: o preço por assento **sobe** quando se corta, então a economia projetada está **superestimada** — justo o número que recomenda rebaixar. Vira **T-134**. O **valor** se preenche no console desde `D-25`, sem deploy; a **curva** por faixa entra em `curva_preco_por_produto`, e sem ela a economia sai marcada como teto |
