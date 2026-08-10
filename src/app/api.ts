@@ -667,8 +667,18 @@ export const api = {
 
   tiposChamado: () => chamar<{ itens: TipoChamado[] }>('/api/tipos-chamado'),
 
-  buscarDocumentacao: (termo: string) =>
-    chamar<RespostaBusca>(`/api/confluence/busca?q=${encodeURIComponent(termo)}`),
+  /**
+   * `espaco` ESTREITA a busca dentro da allowlist — nunca amplia (`RF-37`).
+   *
+   * O servidor faz a interseção com `espacos_confluence`, então mandar um espaço que o app
+   * não expõe devolve lista vazia, não o espaço. A regra "a allowlist nunca vem do cliente"
+   * continua intacta: o cliente só consegue pedir MENOS.
+   */
+  buscarDocumentacao: (termo: string, espaco?: string) =>
+    chamar<RespostaBusca>(
+      `/api/confluence/busca?q=${encodeURIComponent(termo)}` +
+        (espaco ? `&espaco=${encodeURIComponent(espaco)}` : ''),
+    ),
 
   lerPagina: (id: string, deBusca?: string | null) =>
     chamar<PaginaLida>(

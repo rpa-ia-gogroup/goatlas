@@ -28,7 +28,7 @@
  * usa para "não foi possível" — vocabulário existente, não invenção nova.
  */
 
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { CelulaTabela, LinhaTabela, No, VariantePainel } from './sanitizar'
 import { urlSegura } from './sanitizar'
 
@@ -40,6 +40,22 @@ export interface OpcoesRender {
   readonly urlDeAnexo: (nomeArquivo: string) => string
   /** URL da leitura de outra página, dentro do próprio app. */
   readonly urlDePagina: (titulo: string, espaco: string | null) => string
+  /**
+   * O bloco `livesearch` do Confluence vira **busca de verdade** quando isto existe.
+   *
+   * ## Por que é opcional, e não sempre
+   *
+   * Este renderizador também desenha **trecho de resultado de busca** e roda em SSR nos
+   * testes. Nesses contextos não há para onde uma busca ir, e uma caixa de texto que não
+   * faz nada é pior que a explicação honesta. Ausente = o bloco continua sendo o
+   * placeholder de `RF-43`; presente = a tela assume a busca.
+   *
+   * ⚠️ **O espaço vem de quem chama, não do parâmetro da macro.** O storage traz
+   * `spaceKey`, mas conteúdo de página é editável por qualquer pessoa (`R-07`) e
+   * parâmetro de macro não vai para a tela (`RNF-30`). Quem sabe em que espaço a pessoa
+   * está é a tela, que leu a página por um caminho já verificado (`RN-06`).
+   */
+  readonly aoBuscarNoEspaco?: (termo: string) => void
 }
 
 const ROTULO_PAINEL: Readonly<Record<VariantePainel, string>> = {
@@ -157,7 +173,15 @@ function Fragmento({ no, opcoes }: { no: No; opcoes: OpcoesRender }): ReactNode 
       )
 
     case 'macroNaoSuportada':
-      return <MacroNaoSuportada nome={no.nome} />
+      // ⚠️ O bloco de busca é resolvido AQUI, no renderizador — a sanitização continua
+      // tratando `livesearch` como macro não suportada, e é de propósito: ela é a camada
+      // de segurança, e "esta macro virou um formulário" é decisão de apresentação. Mexer
+      // no sanitizador para isto misturaria as duas camadas que `RNF-06` mantém separadas.
+      return no.nome === 'livesearch' && opcoes.aoBuscarNoEspaco !== undefined ? (
+        <BuscaDoEspaco aoBuscar={opcoes.aoBuscarNoEspaco} />
+      ) : (
+        <MacroNaoSuportada nome={no.nome} />
+      )
   }
 }
 
@@ -281,18 +305,149 @@ function Celula({ celula, opcoes }: { celula: CelulaTabela; opcoes: OpcoesRender
  * ⚠️ Só o **nome** da macro. Parâmetro (JQL, id de filtro, chave de espaço)
  * descreve estrutura interna e pode citar projeto que quem lê não deveria conhecer.
  */
+/**
+ * O que cada bloco do Confluence é, em português — `RF-43`, `RNF-30`, regra 4.
+ *
+ * ## Por que nomear em vez de imprimir o nome técnico
+ *
+ * A versão anterior mostrava `livesearch`, `listlabels`, `recently-updated` — nome de macro
+ * do Confluence, que não diz nada a quem só quer resolver um problema. Três caixas cinzas
+ * empilhadas com palavras em inglês fazem a página parecer quebrada, e quem acha que o app
+ * está quebrado abre chamado: o oposto do que a tela existe para fazer.
+ *
+ * ## E por que a distinção entre os três tipos é a parte que importa
+ *
+ * ⚠️ A frase antiga dizia **"o resto do conteúdo está completo"** em cada caixa. Numa página
+ * inicial de espaço — que é feita *só* desses blocos — ela afirmava o contrário da verdade e
+ * ainda insinuava que havia texto sendo escondido por nós.
+ *
+ * Não há. Estes blocos são **gerados no momento da exibição**: o formato de armazenamento
+ * guarda "aqui vai uma busca", nunca o resultado dela. É diferente de um bloco cujo texto
+ * existe em outra página (`include`), e diferente de um bloco que simplesmente não
+ * conhecemos. As três situações pedem três frases, porque levam a três ações diferentes de
+ * quem lê.
+ */
+type NaturezaDoBloco = 'dinamico' | 'deOutraPagina' | 'jaNaTela' | 'desconhecido'
+
+const BLOCOS_CONHECIDOS: Readonly<Record<string, { nome: string; natureza: NaturezaDoBloco }>> = {
+  livesearch: { nome: 'Busca dentro deste espaço', natureza: 'dinamico' },
+  listlabels: { nome: 'Etiquetas usadas neste espaço', natureza: 'dinamico' },
+  'recently-updated': { nome: 'Páginas alteradas recentemente', natureza: 'dinamico' },
+  'recently-updated-dashboard': { nome: 'Páginas alteradas recentemente', natureza: 'dinamico' },
+  // ⚠️ Estes dois o app JÁ mostra: a leitura lista as páginas filhas no fim (T-115, `RF-41`),
+  // com a verificação de restrição por item que `RN-06` exige. Dizer "não há o que trazer"
+  // seria falso — o conteúdo está na tela, alguns centímetros abaixo.
+  children: { nome: 'Lista das páginas filhas', natureza: 'jaNaTela' },
+  pagetree: { nome: 'Árvore de páginas', natureza: 'jaNaTela' },
+  contentbylabel: { nome: 'Páginas com uma etiqueta', natureza: 'dinamico' },
+  detailssummary: { nome: 'Tabela montada a partir de outras páginas', natureza: 'dinamico' },
+  'blog-posts': { nome: 'Últimas publicações', natureza: 'dinamico' },
+  attachments: { nome: 'Lista de anexos da página', natureza: 'dinamico' },
+  toc: { nome: 'Índice desta página', natureza: 'dinamico' },
+  jira: { nome: 'Lista de chamados do Jira', natureza: 'dinamico' },
+  jirachart: { nome: 'Gráfico de chamados do Jira', natureza: 'dinamico' },
+  include: { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
+  'excerpt-include': { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
+  // `excerpt` tem o próprio corpo no storage, então o sanitizador já o renderiza. Fica aqui
+  // só para o caso de corpo vazio, e aí "abra a origem" seria conselho errado: a origem é
+  // esta página.
+  excerpt: { nome: 'Trecho reaproveitado em outras páginas', natureza: 'jaNaTela' },
+}
+
+/**
+ * ⚠️ **Tentei e descartei um aviso no topo do tipo "esta página é só um índice".**
+ *
+ * A página inicial padrão de espaço *parece* ser só blocos, mas tem texto: o placeholder do
+ * próprio Confluence ("In a sentence or two, describe the purpose of this space"). Um
+ * predicado honesto — "todos os nós são blocos?" — devolve `false` ali, então o aviso nunca
+ * apareceria no caso real que o motivou. Fazê-lo aparecer exigiria adivinhar que aquele
+ * parágrafo é placeholder: heurística sobre conteúdo de terceiro, que quebra na primeira
+ * mudança de template e na primeira página em outro idioma.
+ *
+ * O que sobrou é o que resolve o problema de verdade: cada bloco dizer **o que é** e **por
+ * que não há texto**. Página inicial vazia é lacuna de documentação, e quem mede isso é
+ * `RF-42` (o mapa de lacunas), não uma frase adivinhada na hora da leitura.
+ */
+/**
+ * O bloco `livesearch`, **funcionando** — `RF-37`, `RF-39`.
+ *
+ * ## Por que este bloco é diferente dos outros
+ *
+ * Os demais blocos dinâmicos são **resultados** que o Confluence calcula (lista de páginas
+ * recentes, gráfico do Jira): para reproduzi-los teríamos de refazer a consulta e verificar
+ * restrição de cada item, uma chamada por página (`R-02`, `RN-06`).
+ *
+ * `livesearch` não é resultado — é uma **caixa de busca**. E busca no espaço é exatamente
+ * o que o goatlas já faz melhor que o Confluence para este público: sem assento, com a
+ * allowlist aplicada no servidor, e registrando lacuna de documentação (`RF-42`). Aqui não
+ * há nada a reproduzir: há um caminho nosso a oferecer.
+ *
+ * Sem `<form>` de verdade de propósito: submit dentro da SPA recarregaria a página e
+ * perderia o estado da leitura. O botão chama a tela, que já sabe buscar.
+ */
+function BuscaDoEspaco({ aoBuscar }: { aoBuscar: (termo: string) => void }): ReactNode {
+  const [termo, setTermo] = useState('')
+  const podeBuscar = termo.trim().length >= 2
+  return (
+    <div className="doc-busca-espaco">
+      <label className="doc-busca-rotulo" htmlFor="busca-neste-espaco">
+        Buscar neste espaço
+      </label>
+      <div className="doc-busca-linha">
+        <input
+          id="busca-neste-espaco"
+          type="search"
+          value={termo}
+          onChange={(e) => setTermo(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && podeBuscar) aoBuscar(termo.trim())
+          }}
+          placeholder="Ex.: reprocessar relatório"
+        />
+        <button
+          type="button"
+          className="botao botao-primario"
+          disabled={!podeBuscar}
+          onClick={() => aoBuscar(termo.trim())}
+        >
+          Buscar
+        </button>
+      </div>
+      <span className="dica">
+        Procura só nas páginas deste espaço que o goatlas pode mostrar.
+      </span>
+    </div>
+  )
+}
+
 function MacroNaoSuportada({ nome }: { nome: string }): ReactNode {
+  const conhecido = BLOCOS_CONHECIDOS[nome]
+  const natureza: NaturezaDoBloco = conhecido?.natureza ?? 'desconhecido'
   return (
     <div className="doc-macro">
       <p className="doc-macro-rotulo">
         <span aria-hidden="true" className="doc-macro-marca">
           ⌗
         </span>
-        Bloco não exibido
+        {conhecido ? conhecido.nome : 'Bloco não exibido'}
       </p>
       <p className="doc-macro-texto">
-        Esta página tem um bloco <code className="doc-codigo-inline">{nome}</code> que o goatlas
-        ainda não sabe mostrar. O resto do conteúdo está completo.
+        {natureza === 'dinamico' ? (
+          <>
+            Este bloco é montado pelo Confluence no momento em que a página abre — uma busca,
+            uma lista ou um gráfico. A página não guarda texto dele, então não há o que trazer
+            para cá.
+          </>
+        ) : natureza === 'deOutraPagina' ? (
+          <>Este bloco mostra texto de outra página. Abra a página de origem para ler.</>
+        ) : natureza === 'jaNaTela' ? (
+          <>As páginas abaixo desta já aparecem listadas no fim da leitura.</>
+        ) : (
+          <>
+            O goatlas ainda não sabe mostrar este bloco (
+            <code className="doc-codigo-inline">{nome}</code>). O texto ao redor está completo.
+          </>
+        )}
       </p>
     </div>
   )

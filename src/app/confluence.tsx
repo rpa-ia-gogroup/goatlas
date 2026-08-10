@@ -60,11 +60,20 @@ import { ConteudoConfluence } from '../lib/confluence/renderizar'
  * cair na busca com o título preenchido é o comportamento honesto: leva a pessoa ao
  * documento em um clique a mais, em vez de fingir um link quebrado.
  */
-export function opcoesDeRender(idPagina: string) {
+export function opcoesDeRender(
+  idPagina: string,
+  /**
+   * Presente só na LEITURA de página: é o que transforma o bloco `livesearch` numa busca
+   * de verdade. Nos trechos de resultado de busca ele não existe — ali não há espaço
+   * corrente nem para onde ir, e o bloco volta a ser a explicação honesta.
+   */
+  aoBuscarNoEspaco?: (termo: string) => void,
+) {
   return {
     urlDeAnexo: (nomeArquivo: string) =>
       `/api/confluence/anexo/${encodeURIComponent(idPagina)}/${encodeURIComponent(nomeArquivo)}`,
     urlDePagina: (titulo: string) => `/?q=${encodeURIComponent(titulo)}`,
+    ...(aoBuscarNoEspaco ? { aoBuscarNoEspaco } : {}),
   }
 }
 
@@ -190,27 +199,70 @@ export function FilhosDaPagina({
  * Porta de entrada da árvore (`RF-41`) — aparece no estado inicial, antes de qualquer
  * busca. Quem não sabe o que procurar navega; quem sabe, busca.
  */
+/**
+ * Os três estados da lista de espaços — e são **três**, não dois.
+ *
+ * ⚠️ `espacos` nascia `[]`, e `[]` significava as duas coisas ao mesmo tempo: "ainda estou
+ * buscando" e "não há espaço configurado". Como o componente devolvia `null` nesse caso, a
+ * tela ficava **em branco durante o carregamento** — sem título, sem sinal, sem nada: ninguém
+ * percebia que havia algo a caminho. É o mesmo erro que `admin/paineis.tsx` já registra
+ * ("'não carregou' é diferente de 'não tem dado'"), aqui na aba que mais gente abre.
+ *
+ * O terceiro estado (`falhou`) existe pelo mesmo motivo de lá: guardar `[]` numa falha de
+ * rede transformaria queda em "não tem documentação", que manda a pessoa abrir chamado por
+ * algo que está escrito.
+ */
+export type CargaEspacos =
+  | { readonly estado: 'carregando' }
+  | { readonly estado: 'pronto'; readonly itens: readonly EspacoNavegavel[] }
+  | { readonly estado: 'falhou' }
+
 export function EspacosNavegaveis({
-  espacos,
+  carga,
   aoAbrir,
 }: {
-  espacos: readonly EspacoNavegavel[]
+  carga: CargaEspacos
   aoAbrir: (id: string) => void
 }) {
-  if (espacos.length === 0) return null
   return (
     <section className="pilha secao-filhos">
+      {/* O título aparece SEMPRE, inclusive carregando: é ele que diz que existe uma lista
+          a caminho. Sem ele, o estado de carregamento é indistinguível de tela vazia. */}
       <h2 className="titulo-filhos">Ou navegue pela documentação</h2>
-      <ul className="resultados">
-        {espacos.map((e) => (
-          <li key={e.chave}>
-            <button type="button" className="resultado" onClick={() => aoAbrir(e.homepageId)}>
-              <span className="resultado-espaco">{e.chave}</span>
-              <span className="resultado-titulo">{e.nome}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
+
+      {carga.estado === 'carregando' && (
+        <p className="carregando" aria-live="polite">
+          Carregando os espaços da documentação…
+        </p>
+      )}
+
+      {carga.estado === 'falhou' && (
+        <p className="dica" role="status">
+          Não conseguimos carregar os espaços agora. A busca continua funcionando — e
+          recarregar a página tenta de novo.
+        </p>
+      )}
+
+      {carga.estado === 'pronto' && carga.itens.length === 0 && (
+        // Zero por CONFIGURAÇÃO, e a frase diz isso em vez de sugerir que a empresa não tem
+        // documentação — mesmo raciocínio de `buscaConfigurada`.
+        <p className="dica">
+          Nenhum espaço foi liberado nesta instalação ainda. Fale com o time de tech.
+        </p>
+      )}
+
+      {carga.estado === 'pronto' && carga.itens.length > 0 && (
+        <ul className="resultados">
+          {carga.itens.map((e) => (
+            <li key={e.chave}>
+              <button type="button" className="resultado" onClick={() => aoAbrir(e.homepageId)}>
+                <span className="resultado-espaco">{e.chave}</span>
+                <span className="resultado-titulo">{e.nome}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   )
 }
@@ -220,17 +272,30 @@ export function LeituraDaPagina({
   filhos,
   aoAbrir,
   aoVoltar,
+  veioDeBusca = false,
+  aoBuscarNoEspaco,
 }: {
   pagina: PaginaLida
   /** Nível abaixo desta página, quando já carregado (`RF-41`). */
   filhos?: NivelDaArvore | null
   aoAbrir: (id: string) => void
   aoVoltar: () => void
+  /**
+   * `true` quando existe uma busca para onde voltar. Quem chegou pela lista de espaços não
+   * veio de busca nenhuma, e "voltar para a busca" mandaria para uma tela que ela nunca viu.
+   */
+  veioDeBusca?: boolean
+  /**
+   * Busca escopada no espaço desta página — é o que faz o bloco `livesearch` do Confluence
+   * funcionar em vez de virar placeholder. O espaço sai de `pagina.espaco`, que veio do
+   * servidor por um caminho já verificado (`RN-06`), nunca do parâmetro da macro.
+   */
+  aoBuscarNoEspaco?: (termo: string, espaco: string) => void
 }) {
   return (
     <div className="pilha">
       <button type="button" className="botao botao-discreto" onClick={aoVoltar}>
-        ← Voltar para a busca
+        {veioDeBusca ? '← Voltar para os resultados' : '← Voltar para a documentação'}
       </button>
 
       <header className="pilha">
@@ -264,7 +329,12 @@ export function LeituraDaPagina({
       <ConteudoConfluence
         nos={pagina.nos}
         truncado={pagina.truncado}
-        opcoes={opcoesDeRender(pagina.id)}
+        opcoes={opcoesDeRender(
+          pagina.id,
+          aoBuscarNoEspaco
+            ? (termo: string) => aoBuscarNoEspaco(termo, pagina.espaco)
+            : undefined,
+        )}
       />
 
       {filhos && <FilhosDaPagina nivel={filhos} aoAbrir={aoAbrir} />}
@@ -299,6 +369,40 @@ export interface EntradaDocumentacao {
   readonly pagina?: string
 }
 
+/**
+ * Qual das três visões a aba mostra — **derivada**, nunca guardada.
+ *
+ * ## O bug que isto conserta, e por que ele era de desenho
+ *
+ * A tela decidia por `busca !== null`, e apagar o campo mexia só em `termo`. Resultado
+ * medido no app real em 10/08/2026: a pessoa buscava, os resultados apareciam, ela **limpava
+ * o campo esperando voltar** — e a lista antiga continuava travada na tela, sem caminho de
+ * volta para as categorias. Ficava presa num resultado ("Arquitetura de Pipelines") sem
+ * conseguir navegar para outro espaço.
+ *
+ * Consertar imperativamente (um `setBusca(null)` no `onChange`) funcionaria hoje e voltaria
+ * a quebrar no próximo lugar que mexer em `termo` sem lembrar de limpar o resto — é o mesmo
+ * raciocínio de `bloqueio` × `temBloqueioPendente` (`D-21`): estado derivado não desincroniza,
+ * estado copiado desincroniza.
+ *
+ * ## A ordem das três regras é o comportamento
+ *
+ * 1. **Página aberta ganha de tudo.** Quem chegou lendo (por link, por categoria ou por
+ *    resultado) continua lendo — a leitura tem o próprio botão de voltar.
+ * 2. **Campo vazio = começar de novo.** É o que a pessoa quer dizer ao apagar o texto, e a
+ *    única leitura que não deixa resultado velho preso.
+ * 3. Com termo e resposta, resultados.
+ */
+export function visaoDaDocumentacao(estado: {
+  readonly termo: string
+  readonly busca: unknown | null
+  readonly pagina: unknown | null
+}): 'leitura' | 'resultados' | 'categorias' {
+  if (estado.pagina !== null) return 'leitura'
+  if (estado.termo.trim() === '') return 'categorias'
+  return estado.busca !== null ? 'resultados' : 'categorias'
+}
+
 export function TelaDocumentacao({
   inicial,
   aoConversar,
@@ -310,11 +414,11 @@ export function TelaDocumentacao({
   const [busca, setBusca] = useState<RespostaBusca | null>(null)
   const [pagina, setPagina] = useState<PaginaLida | null>(null)
   const [filhos, setFilhos] = useState<NivelDaArvore | null>(null)
-  const [espacos, setEspacos] = useState<readonly EspacoNavegavel[]>([])
+  const [espacos, setEspacos] = useState<CargaEspacos>({ estado: 'carregando' })
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
-  async function buscar(alvo: string) {
+  async function buscar(alvo: string, espaco?: string) {
     const limpo = alvo.trim()
     if (limpo.length < 2) {
       setErro('Escreva ao menos duas letras do que você procura.')
@@ -324,7 +428,11 @@ export function TelaDocumentacao({
     setErro(null)
     setPagina(null)
     try {
-      setBusca(await api.buscarDocumentacao(limpo))
+      setBusca(await api.buscarDocumentacao(limpo, espaco))
+      // ⚠️ A URL guarda só o termo, não o espaço: `?q=` é contrato com `entradaDaUrl` e com
+      // o link `ri:page` do Confluence (ver `CLAUDE.md`). Acrescentar `?espaco=` aqui
+      // exigiria os dois lados combinando — e o ganho seria um link que busca em um espaço,
+      // que não é caso de uso de ninguém. O escopo vale para a busca que acabou de rodar.
       lembrarNaUrl({ q: limpo })
     } catch (e) {
       setBusca(null)
@@ -372,8 +480,8 @@ export function TelaDocumentacao({
     // Os espaços navegáveis não bloqueiam nada: se falharem, resta a busca.
     api
       .espacos()
-      .then((r) => setEspacos(r.itens))
-      .catch(() => setEspacos([]))
+      .then((r) => setEspacos({ estado: 'pronto', itens: r.itens }))
+      .catch(() => setEspacos({ estado: 'falhou' }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -382,13 +490,20 @@ export function TelaDocumentacao({
     void buscar(termo)
   }
 
+  const visao = visaoDaDocumentacao({ termo, busca, pagina })
+
   return (
     <div className="pilha">
-      {pagina ? (
+      {visao === 'leitura' && pagina ? (
         <LeituraDaPagina
           pagina={pagina}
           filhos={filhos}
           aoAbrir={abrir}
+          aoBuscarNoEspaco={(t, espaco) => {
+            setTermo(t)
+            void buscar(t, espaco)
+          }}
+          veioDeBusca={busca !== null && termo.trim() !== ''}
           aoVoltar={() => {
             setPagina(null)
             lembrarNaUrl(termo.trim() ? { q: termo.trim() } : {})
@@ -408,7 +523,16 @@ export function TelaDocumentacao({
                 id="busca-termo"
                 type="search"
                 value={termo}
-                onChange={(ev) => setTermo(ev.target.value)}
+                onChange={(ev) => {
+                  setTermo(ev.target.value)
+                  // Apagar o campo é "quero começar de novo": a visão já volta para as
+                  // categorias por derivação, e a URL acompanha — senão recarregar
+                  // ressuscitaria a busca que a pessoa acabou de descartar.
+                  if (ev.target.value.trim() === '') {
+                    setErro(null)
+                    lembrarNaUrl({})
+                  }
+                }}
                 placeholder="reprocessar relatório de vendas"
                 autoComplete="off"
                 enterKeyHint="search"
@@ -422,17 +546,17 @@ export function TelaDocumentacao({
           {erro && <Aviso atencao>{erro}</Aviso>}
           {carregando && <p className="carregando">Procurando na documentação…</p>}
 
-          {!carregando && !erro && busca === null && (
+          {!carregando && !erro && visao === 'categorias' && (
             <>
               <Vazio
                 titulo="Procure antes de abrir chamado"
                 texto="Busque por um processo, uma mensagem de erro ou o nome de um sistema. A resposta pode já estar documentada — e você lê aqui, sem conta da Atlassian."
               />
-              <EspacosNavegaveis espacos={espacos} aoAbrir={abrir} />
+              <EspacosNavegaveis carga={espacos} aoAbrir={abrir} />
             </>
           )}
 
-          {!carregando && busca !== null && (
+          {!carregando && visao === 'resultados' && busca !== null && (
             <ResultadosDaBusca
               resposta={busca}
               // O id da busca viaja com o clique: é o que transforma "ninguém abriu"

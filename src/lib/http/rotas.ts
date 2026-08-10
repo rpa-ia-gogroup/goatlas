@@ -740,11 +740,31 @@ async function rotear(
     // qual dos dois aconteceu.
     const configurada = buscaConfigurada(ctx.valores.espacos_confluence)
 
+    // ⚠️ **`?espaco=` ESTREITA a allowlist; nunca a amplia** — é a única forma segura de
+    // aceitar escopo do cliente. A regra do projeto continua valendo ("a allowlist nunca
+    // vem do cliente"): o que o cliente manda é filtrado **contra** `ctx.valores`, então
+    // `?espaco=RH` num app que não expõe RH resulta em lista vazia, não no espaço do RH.
+    //
+    // Interseção, e não "ignora se não estiver na lista": ignorar transformaria um pedido
+    // de "buscar só aqui" em "buscar em tudo", que é o oposto do que quem clicou pediu.
+    const espacoPedido = (url.searchParams.get('espaco') ?? '').trim()
+    const espacosDaBusca =
+      espacoPedido === ''
+        ? ctx.valores.espacos_confluence
+        : ctx.valores.espacos_confluence.filter((e) => e === espacoPedido)
+
+    // ⚠️ Escopo pedido que sobrou vazio NÃO é lacuna de documentação. Sem isto, um
+    // `?espaco=` fora da allowlist gravaria o termo no mapa de `RF-42` como "procuraram e
+    // não existe" — envenenando o backlog de escrita com algo que nunca foi procurável, e
+    // mandando alguém escrever página para um espaço que o app não expõe. É a mesma
+    // distinção de `buscaConfigurada`: zero por escopo ≠ zero por documentação.
+    const escopoValido = espacoPedido === '' || espacosDaBusca.length > 0
+
     let paginas
     try {
       paginas = await ctx.atlassian.buscarConfluence({
         termo,
-        espacosPermitidos: ctx.valores.espacos_confluence,
+        espacosPermitidos: espacosDaBusca,
         labelsBloqueadas: ctx.valores.labels_bloqueadas,
         limite: limiteDeBusca(url.searchParams.get('limite')),
       })
@@ -772,7 +792,7 @@ async function rotear(
     // forma que a Regra 1 grava, para T-117 ler uma coisa só. Mas só quando havia
     // onde procurar: sem espaço configurado a lacuna é de configuração, e registrar
     // envenenaria o mapa com termos que ninguém deixou de documentar.
-    if (configurada && paginas.length === 0) {
+    if (configurada && escopoValido && paginas.length === 0) {
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: 'busca_confluence',
@@ -784,7 +804,7 @@ async function rotear(
 
     // T-116 — o registro só acontece quando a busca de fato procurou em algum lugar.
     // Sem espaço configurado ela não é lacuna de documentação, é lacuna de config.
-    const buscaId = configurada
+    const buscaId = configurada && escopoValido
       ? await ctx.conhecimento.registrarBusca({
           solicitanteEmail: eu.email,
           termo,
