@@ -322,6 +322,45 @@ export const TABELAS = [
      avaliado_em     TEXT NOT NULL,
      CHECK (estado IN ('respondido', 'ok', 'risco', 'estourado'))
    )`,
+  /**
+   * Anexos que a pessoa subiu **antes** de o chamado existir — `RF-61`, T-408.
+   *
+   * ## Por que uma tabela, e não memória do Worker
+   *
+   * O `temporaryAttachmentId` nasce no upload e é usado na confirmação, que é **outra
+   * requisição**. O Worker é stateless: guardar em memória já foi bug real neste app (a
+   * demonstração perdia o chamado entre requisições). E mandar o id para o navegador
+   * seria `RF-30` aplicado a arquivo — quem tem o id de outra pessoa anexa o arquivo
+   * dela no próprio chamado. O id fica aqui, e sai daqui com o e-mail no `WHERE`.
+   *
+   * ## As duas constraints, e o que cada uma impede
+   *
+   * - `UNIQUE (chave_idempotencia, nome_arquivo)` — T-411: duplo clique no seletor não
+   *   gera dois temporários do mesmo arquivo. Como em todo o resto do projeto, a
+   *   idempotência vem da constraint, não de um `SELECT` antes do `INSERT`.
+   * - `materializado_em` — T-413b: a materialização acontece **uma vez**. Reconfirmar
+   *   devolve `duplicada: true` com o mesmo `issueKey` (`RF-24`); sem esta coluna, o
+   *   segundo clique anexaria o arquivo de novo.
+   *
+   * ⚠️ **`conversa_id` é nulo no formulário**, e não é redundante com a chave: a chave
+   * correlaciona, o `conversa_id` é o que permite expurgar/auditar por conversa sem
+   * parsear string.
+   */
+  `CREATE TABLE IF NOT EXISTS anexos_pendentes (
+     id                      TEXT PRIMARY KEY,
+     solicitante_email       TEXT NOT NULL,
+     conversa_id             TEXT,
+     chave_idempotencia      TEXT NOT NULL,
+     temporary_attachment_id TEXT NOT NULL,
+     nome_arquivo            TEXT NOT NULL,
+     criado_em               TEXT NOT NULL,
+     materializado_em        TEXT,
+     UNIQUE (chave_idempotencia, nome_arquivo)
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_chave
+     ON anexos_pendentes (chave_idempotencia, solicitante_email)`,
+  `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_pessoa
+     ON anexos_pendentes (solicitante_email, criado_em)`,
 ] as const
 
 /**

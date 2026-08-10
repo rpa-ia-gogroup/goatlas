@@ -371,6 +371,37 @@ export interface ClienteAtlassian {
   ): Promise<void>
 
   /**
+   * **Primeiro** passo, sozinho — `RF-61` (T-406).
+   *
+   * ## Por que os dois passos precisam ser separáveis
+   *
+   * `anexarArquivo` exige `issueKey`, e na criação com anexo o `issueKey` **ainda não
+   * existe** quando a pessoa escolhe o arquivo. Juntar os passos deixaria só duas
+   * saídas, e as duas foram recusadas em `plan.md` §2: mandar os ids **dentro** da
+   * criação (um id vencido faria a criação responder 400, que `atlassian/http.ts`
+   * classifica como definitivo, e a submissão nunca mais seria reprocessada — o
+   * chamado da pessoa apagado por um arquivo velho), ou subir 8 MB dentro do clique de
+   * confirmar.
+   *
+   * Devolve o `temporaryAttachmentId`. ⚠️ **Ele nunca vai para o navegador** — mora em
+   * `anexos_pendentes` e é lido de lá com o e-mail no `WHERE` (`RF-30` aplicado a
+   * arquivo).
+   */
+  subirAnexoTemporario(
+    serviceDeskId: string,
+    arquivo: { readonly nome: string; readonly tipo: string; readonly bytes: ArrayBuffer },
+  ): Promise<string>
+
+  /**
+   * **Segundo** passo, sozinho — `RF-61`, `RF-63` (T-406).
+   *
+   * Converte ids temporários em anexos do chamado, depois de ele existir. É o único
+   * ponto que pode falhar por id expirado, e é isso que torna a falha de anexo
+   * **isolada** da criação: aqui o chamado já nasceu.
+   */
+  materializarAnexosTemporarios(issueKey: string, ids: readonly string[]): Promise<void>
+
+  /**
    * Transições que o workflow do JSM oferece **ao cliente** (RF-36, T-242).
    *
    * Lista vazia é resposta normal, não erro: se o projeto não expõe transição ao

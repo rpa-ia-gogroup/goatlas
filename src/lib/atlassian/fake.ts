@@ -138,9 +138,29 @@ export interface EstadoFake {
     buscarAtualizados: ModoFalha
     /** T-240 — anexo falha sem derrubar a criação do chamado (RNF-18). */
     anexarArquivo: ModoFalha
+    /** T-407 — o PRIMEIRO passo falha: o arquivo nem chega a ficar pendente. */
+    subirAnexoTemporario: ModoFalha
+    /**
+     * T-407 — o SEGUNDO passo falha, com o chamado **já criado**.
+     *
+     * É o modo de falha de `RF-63`, e o único que importa de verdade: aqui o chamado
+     * existe e o anexo não subiu, que é exatamente o estado que a tela precisa saber
+     * relatar sem assustar ninguém.
+     */
+    materializarAnexos: ModoFalha
     /** T-242 — projeto sem transição exposta ao cliente é caso normal, não falha. */
     transicionar: ModoFalha
   }
+  /**
+   * T-407 — ids temporários que **já não valem**, imitando a expiração da Atlassian.
+   *
+   * ⚠️ Falha diferente de `materializarAnexos: 'indisponivel'`, e é a diferença que a
+   * v1 do plano não viu: id expirado é **4xx**, que `atlassian/http.ts` classifica como
+   * **definitivo**. Era o caminho pelo qual um arquivo velho apagaria o chamado da
+   * pessoa (`plan.md` §0). Sem poder encenar isto, `RF-63` seria testado só no caso
+   * fácil — o da indisponibilidade transitória.
+   */
+  temporariosInvalidos: Set<string>
   /**
    * Relógio do fake, para `criadoEm`/`atualizadoEm` do chamado criado.
    *
@@ -180,6 +200,12 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
   /** Chamadas registradas — permite asserção sobre a QUERY enviada (RF-32). */
   readonly chamadas: RegistroChamada[] = []
   private contadorIssue = 0
+  private contadorTemporario = 0
+  /** Ids temporários emitidos, para a materialização saber o nome do arquivo. */
+  private readonly temporarios = new Map<
+    string,
+    { nome: string; tipo: string; tamanho: number }
+  >()
   /** `chaveIdempotencia` → chamado, para o teste de RF-24 e a reconciliação. */
   private readonly porChave = new Map<string, ChamadoCriado>()
 
@@ -200,6 +226,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       relogio: inicial.relogio ?? (() => new Date(0).toISOString()),
       transicoes: inicial.transicoes ?? new Map(),
       anexosDeChamado: inicial.anexosDeChamado ?? new Map(),
+      temporariosInvalidos: inicial.temporariosInvalidos ?? new Set(),
       falhas: {
         criarChamado: 'nenhum',
         buscarConfluence: 'nenhum',
@@ -211,6 +238,8 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
         obterAnexo: 'nenhum',
         buscarAtualizados: 'nenhum',
         anexarArquivo: 'nenhum',
+        subirAnexoTemporario: 'nenhum',
+        materializarAnexos: 'nenhum',
         transicionar: 'nenhum',
         ...inicial.falhas,
       },
@@ -552,6 +581,51 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       ...atuais,
       { nome: arquivo.nome, tipo: arquivo.tipo, tamanho: arquivo.bytes.byteLength },
     ])
+  }
+
+  async subirAnexoTemporario(
+    serviceDeskId: string,
+    arquivo: { nome: string; tipo: string; bytes: ArrayBuffer },
+  ): Promise<string> {
+    this.chamadas.push({
+      operacao: 'subirAnexoTemporario',
+      params: { serviceDeskId, nome: arquivo.nome, tipo: arquivo.tipo },
+    })
+    this.checar(this.estado.falhas.subirAnexoTemporario, 'subirAnexoTemporario')
+    this.contadorTemporario += 1
+    const id = `tmp-${this.contadorTemporario}`
+    this.temporarios.set(id, {
+      nome: arquivo.nome,
+      tipo: arquivo.tipo,
+      tamanho: arquivo.bytes.byteLength,
+    })
+    return id
+  }
+
+  async materializarAnexosTemporarios(issueKey: string, ids: readonly string[]): Promise<void> {
+    this.chamadas.push({ operacao: 'materializarAnexosTemporarios', params: { issueKey, ids } })
+    this.checar(this.estado.falhas.materializarAnexos, 'materializarAnexosTemporarios')
+
+    // Id que já não vale é **definitivo** (4xx), como na Atlassian real. É o que faz o
+    // teste de `RF-63` provar que a criação não é arrastada junto.
+    const vencido = ids.find((id) => this.estado.temporariosInvalidos.has(id))
+    if (vencido !== undefined) {
+      throw new ErroAtlassian('fake: id de anexo temporário expirado', {
+        status: 400,
+        transitorio: false,
+        recurso: 'materializarAnexosTemporarios',
+      })
+    }
+
+    const atuais = this.estado.anexosDeChamado.get(issueKey) ?? []
+    const novos = ids.map((id) => {
+      const t = this.temporarios.get(id)
+      // Id que o fake nunca emitiu não é erro aqui: quem testa o caminho de expiração
+      // usa `temporariosInvalidos`, e inventar um erro para id desconhecido faria o
+      // teste de materialização depender da ordem em que o fake foi montado.
+      return { nome: t?.nome ?? id, tipo: t?.tipo ?? 'application/octet-stream', tamanho: t?.tamanho ?? 0 }
+    })
+    this.estado.anexosDeChamado.set(issueKey, [...atuais, ...novos])
   }
 
   async listarTransicoes(issueKey: string): Promise<readonly { id: string; nome: string }[]> {

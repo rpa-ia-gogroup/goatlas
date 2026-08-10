@@ -19,7 +19,7 @@ import type { Contexto } from '../contexto'
 import { ERROS, erro, json, lerJson } from './respostas'
 import { verificarLimite } from './limite'
 import { CriacaoRecusada, MENSAGEM_RECUSA } from '../agent/gate'
-import { SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos'
+import { ErroAtlassian, SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos'
 import type { PropostaChamado } from '../agent/estado'
 import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
 import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
@@ -43,9 +43,19 @@ import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
 import {
   exigeDeclaracaoDeAnexo,
+  tipoAceitaAnexo,
   validarDeclaracao,
   type SchemaDoTipo,
 } from '../tickets/declaracao-anexo'
+import {
+  chaveDoClienteValida,
+  normalizarChaveIdempotencia,
+} from '../tickets/chave-idempotencia'
+import {
+  JANELA_ENVIOS_PENDENTES_MS,
+  MAX_ANEXOS_POR_CHAMADO,
+  MAX_ENVIOS_PENDENTES_POR_JANELA,
+} from '../tickets/anexos-pendentes'
 import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
 import { buscaConfigurada } from '../config/diagnostico'
 
@@ -418,8 +428,17 @@ async function rotear(
       )
     }
     try {
-      const itens = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, requestTypeId)
-      return json({ itens })
+      const campos = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, requestTypeId)
+      return json({
+        // ⚠️ **T-406c — o campo de anexo sai da lista.** Quem desenha o seletor de
+        // arquivo é a tela de `RF-61`; deixá-lo aqui mostraria os dois lado a lado, e
+        // como o desconhecido cai em `'texto'`, o campo "Anexo" apareceria como uma
+        // caixa de texto ao lado do seletor de verdade.
+        itens: campos.filter((c) => c.tipo !== 'anexo'),
+        // ...e a informação de que ele existe continua chegando, porque é ela que faz a
+        // pergunta de `RF-62` aparecer (ou não) na tela.
+        aceitaAnexo: tipoAceitaAnexo(campos),
+      })
     } catch {
       return ERROS.conteudoIndisponivel()
     }
@@ -611,6 +630,125 @@ async function rotear(
     return json({ ok: true }, 201)
   }
 
+  // --- anexo ANTES do chamado existir (RF-61, T-409) -------------------------
+  //
+  // ## O que esta rota é
+  //
+  // O primeiro dos dois passos do JSM, isolado: sobe o arquivo como temporário e guarda
+  // o id **no servidor**. A materialização acontece na confirmação, depois de o chamado
+  // nascer (`plan.md` §2).
+  //
+  // ⚠️ **Devolve `{ ok, nome }` e nada mais.** O `temporaryAttachmentId` não trafega: com
+  // ele no navegador, colar o arquivo de outra pessoa no próprio chamado seria trivial —
+  // `RF-30` aplicado a arquivo (`SC-11`).
+  if (caminho === '/api/anexos-pendentes' && req.method === 'POST') {
+    const serviceDeskId = ctx.valores.service_desk_id
+    if (!serviceDeskId) {
+      return ERROS.dadosInvalidos(
+        'O envio de anexos ainda não foi configurado nesta instalação. Fale com o time de tech.',
+      )
+    }
+    // T-410 — os mesmos gates das rotas de criação. Esta rota gasta a credencial única e
+    // escreve na Atlassian; ficar fora do gate de piloto faria dela o caminho aberto.
+    const piloto = await verificarPiloto(ctx, eu, caminho)
+    if (piloto) return piloto
+
+    let form: FormData
+    try {
+      form = await req.formData()
+    } catch {
+      return ERROS.dadosInvalidos('Não consegui ler o arquivo enviado. Tente novamente.')
+    }
+
+    // ⚠️ A chave é **obrigatória** (T-409b). Gerar uma aqui produziria um arquivo órfão
+    // por construção: a criação procuraria outra chave, nenhuma linha casaria, e a tela
+    // teria dito "enviado".
+    const chaveDoCliente = chaveDoClienteValida(form.get('chaveIdempotencia'))
+    const conversaId = typeof form.get('conversaId') === 'string' ? String(form.get('conversaId')) : null
+    if ((chaveDoCliente === null) === (conversaId === null)) {
+      return ERROS.dadosInvalidos(
+        'Não consegui identificar a que chamado este arquivo pertence. Recarregue a página e tente de novo.',
+      )
+    }
+
+    let chaveIdempotencia: string
+    if (conversaId !== null) {
+      // A chave da conversa não embute e-mail, então a posse é verificada aqui — e um id
+      // de outra pessoa responde 404 como todo o resto (`RF-30`).
+      const conversa = await ctx.conversas.obterDoSolicitante(conversaId, eu.email)
+      if (!conversa) return ERROS.naoEncontrado()
+      chaveIdempotencia = normalizarChaveIdempotencia({ via: 'conversa', conversaId })
+    } else {
+      chaveIdempotencia = normalizarChaveIdempotencia({
+        via: 'formulario',
+        solicitanteEmail: eu.email,
+        chaveDoCliente: chaveDoCliente!,
+      })
+    }
+
+    const validado = await validarAnexoEnviado(form.get('arquivo'))
+    if (!validado.ok) return ERROS.dadosInvalidos(validado.mensagem)
+
+    // T-409c — o teto é por CHAMADO e a recusa é mensagem. `.slice()` faria o arquivo
+    // excedente desaparecer sem nada na tela (`SC-08`).
+    const jaEnviados = await ctx.anexosPendentes.contarDaChave(chaveIdempotencia, eu.email)
+    if (jaEnviados >= MAX_ANEXOS_POR_CHAMADO) {
+      return ERROS.dadosInvalidos(
+        `Você já anexou ${MAX_ANEXOS_POR_CHAMADO} arquivos neste chamado, que é o limite. Abra o chamado e anexe o resto depois, ou junte tudo num arquivo só.`,
+      )
+    }
+
+    // T-410 / R-02 — teto por pessoa na janela, contra envio que nunca vira chamado.
+    const desde = new Date(Date.parse(ctx.agora()) - JANELA_ENVIOS_PENDENTES_MS).toISOString()
+    const naJanela = await ctx.anexosPendentes.contarDaPessoaDesde(eu.email, desde)
+    if (naJanela >= MAX_ENVIOS_PENDENTES_POR_JANELA) return ERROS.limiteRequisicoes()
+
+    let temporaryAttachmentId: string
+    try {
+      temporaryAttachmentId = await ctx.atlassian.subirAnexoTemporario(serviceDeskId, {
+        nome: validado.nome,
+        tipo: validado.tipo,
+        bytes: validado.bytes,
+      })
+    } catch (e) {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'anexo_enviado',
+        recurso: chaveIdempotencia,
+        resultado: 'falha',
+        detalhe: { etapa: 'temporario', nome: validado.nome },
+      })
+      // A mensagem do modo somente leitura chega à pessoa (`SC-10`): recusa honesta,
+      // nunca sucesso simulado. Indisponibilidade comum cai na frase genérica.
+      const mensagem =
+        e instanceof ErroAtlassian && !e.detalhe.transitorio
+          ? e.message
+          : 'Não consegui enviar o arquivo agora. Tente novamente em instantes — você também pode abrir o chamado e anexar depois.'
+      return json({ ok: false, mensagem }, 503)
+    }
+
+    const { duplicado } = await ctx.anexosPendentes.registrar({
+      id: ctx.novoId(),
+      solicitanteEmail: eu.email,
+      conversaId,
+      chaveIdempotencia,
+      temporaryAttachmentId,
+      nomeArquivo: validado.nome,
+    })
+
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'anexo_enviado',
+      recurso: chaveIdempotencia,
+      resultado: 'sucesso',
+      detalhe: { etapa: 'temporario', nome: validado.nome, duplicado },
+    })
+
+    // Duplo clique responde 201 de propósito (`SC-09`): não é erro da pessoa, e a
+    // constraint já garantiu que existe uma linha só.
+    return json({ ok: true, nome: validado.nome, anexados: duplicado ? jaEnviados : jaEnviados + 1 }, 201)
+  }
+
   // --- anexo enviado pelo solicitante (RF-25, RF-34, T-240) ------------------
   //
   // Dois passos no JSM (ver `atlassian/cliente.ts#anexarArquivo`), um vínculo antes:
@@ -636,8 +774,16 @@ async function rotear(
       return ERROS.dadosInvalidos('Não consegui ler o arquivo enviado. Tente novamente.')
     }
 
-    const arquivos = form.getAll('arquivo').slice(0, MAX_ANEXOS_POR_ENVIO)
+    const arquivos = form.getAll('arquivo')
     if (arquivos.length === 0) return ERROS.dadosInvalidos('Anexe um arquivo para enviar.')
+    // ⚠️ **Recusa, nunca `.slice()`** (`plan.md` §11, T-409c). O truncamento silencioso
+    // fazia o quarto arquivo desaparecer sem nada na tela — a pessoa achava que o print
+    // decisivo tinha ido. `SC-08` exige dizer o limite.
+    if (arquivos.length > MAX_ANEXOS_POR_ENVIO) {
+      return ERROS.dadosInvalidos(
+        `Envie no máximo ${MAX_ANEXOS_POR_ENVIO} arquivos por vez. Mande os primeiros e repita o envio para os demais.`,
+      )
+    }
 
     const enviados: string[] = []
     for (const bruto of arquivos) {

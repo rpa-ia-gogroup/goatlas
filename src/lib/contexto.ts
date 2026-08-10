@@ -27,6 +27,7 @@ import { RegistroConhecimento } from './confluence/registro'
 import { ExecutorTools } from './agent/tools'
 import { Orquestrador } from './agent/orquestrador'
 import { Outbox } from './tickets/outbox'
+import { RepositorioAnexosPendentes } from './tickets/anexos-pendentes'
 import { RepositorioVinculos } from './tickets/vinculos'
 import { ServicoChamados } from './tickets/servico'
 import { RepositorioInventario } from './governanca/inventario'
@@ -95,6 +96,8 @@ export interface Contexto {
   readonly conhecimento: RegistroConhecimento
   readonly vinculos: RepositorioVinculos
   readonly outbox: Outbox
+  /** RF-61 (T-408) — anexos subidos antes de o chamado existir. */
+  readonly anexosPendentes: RepositorioAnexosPendentes
   readonly chamados: ServicoChamados
   readonly orquestrador: Orquestrador
   /**
@@ -244,6 +247,7 @@ export async function montarContexto(
   const conhecimento = new RegistroConhecimento(env.DB, agora, novoId)
   const vinculos = new RepositorioVinculos(env.DB, agora)
   const outbox = new Outbox(env.DB, agora)
+  const anexosPendentes = new RepositorioAnexosPendentes(env.DB, agora)
   const chamados = new ServicoChamados(atlassian, outbox, vinculos, auditoria, novoId)
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora)
   const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId)
@@ -322,6 +326,7 @@ export async function montarContexto(
     conhecimento,
     vinculos,
     outbox,
+    anexosPendentes,
     chamados,
     orquestrador,
     organizacao,

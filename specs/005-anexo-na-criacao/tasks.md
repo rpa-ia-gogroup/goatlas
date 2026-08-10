@@ -40,7 +40,7 @@ revised: "2026-08-07 — v2, depois do /analyze"
 
 ## Phase 2 — Os dois passos separados
 
-- [ ] **T-406** `ClienteAtlassian` ganha `subirAnexoTemporario` — interface, Http,
+- [x] **T-406** `ClienteAtlassian` ganha `subirAnexoTemporario` — interface, Http,
       Fake e `somente-leitura` (que **recusa**). Hoje `anexarArquivo` é atômica e
       exige `issueKey`. _Requirements: RF-25, RNF-22, RNF-18_
 - [x] **T-406b** ⚠️ `TipoCampoRequestType` ganha `'anexo'`, e `camposAdicionais`
@@ -48,31 +48,31 @@ revised: "2026-08-07 — v2, depois do /analyze"
       de anexo no schema já seria desenhado como caixa de texto — e sem este tipo o
       gate de `RF-62` não tem como saber se o tipo aceita anexo.
       _Requirements: RF-27, RF-61_
-- [ ] **T-406c** O campo de anexo **sai** da lista que `RF-27` renderiza: quem
+- [x] **T-406c** O campo de anexo **sai** da lista que `RF-27` renderiza: quem
       desenha o seletor de arquivo é `T-417`. Sem isto a tela mostra os dois.
       _Requirements: RF-27, RF-61_
-- [ ] **T-407** [P] Fake: sucesso e falha injetável do envio, incluindo **envio
+- [x] **T-407** [P] Fake: sucesso e falha injetável do envio, incluindo **envio
       anterior que já não vale**. Sem isso `RF-63` não tem como ser testado.
       _Requirements: RF-61, RF-63_
-- [ ] **T-408** Tabela `anexos_pendentes` + isolamento por e-mail **no `WHERE`**
+- [x] **T-408** Tabela `anexos_pendentes` + isolamento por e-mail **no `WHERE`**
       (`plan.md` §3), e teste de que envio de outra pessoa não entra
       (`SC-11`). _Requirements: RF-30, RNF-25_
-- [ ] **T-409** Rota de upload: valida (reaproveita `http/anexo-entrada.ts`), sobe o
+- [x] **T-409** Rota de upload: valida (reaproveita `http/anexo-entrada.ts`), sobe o
       temporário, guarda no servidor e devolve **só** `{ nome, ok }` — nunca um
       identificador. _Requirements: RF-25, RF-30, RF-63_
-- [ ] **T-409b** ⚠️ Chave de correlação **normalizada por uma função só**, chamada no
+- [x] **T-409b** ⚠️ Chave de correlação **normalizada por uma função só**, chamada no
       upload e na criação (`plan.md` §3). A rota hoje reescreve a chave do cliente;
       gravar a crua e procurar a prefixada faria nenhuma linha casar — chamado sem
       anexo, em silêncio. Chave obrigatória quando há anexo, e teste do caso "não
       casou" terminando em falha **visível** de anexo. _Requirements: RF-24, RF-63_
-- [ ] **T-409c** Teto de arquivos **por chamado**, contado nas linhas da mesma chave,
+- [x] **T-409c** Teto de arquivos **por chamado**, contado nas linhas da mesma chave,
       com recusa por mensagem. ⚠️ Hoje é `.slice()` na rota, que trunca em silêncio —
       o quarto arquivo some sem nada na tela (`plan.md` §11).
       _Requirements: RF-63, RNF-30_
-- [ ] **T-410** [P] A rota de upload herda os gates das rotas de criação: escopo de
+- [x] **T-410** [P] A rota de upload herda os gates das rotas de criação: escopo de
       piloto, auditoria (toca a Atlassian, `RN-10`) e teto por pessoa/janela contra
       envio órfão (`R-02`). _Requirements: RN-10, R-02, R-06_
-- [ ] **T-411** [P] Dedupe de envio por `(chave_idempotencia, nome_arquivo)`: duplo
+- [x] **T-411** [P] Dedupe de envio por `(chave_idempotencia, nome_arquivo)`: duplo
       clique no seletor não gera dois temporários. _Requirements: RF-24_
 
 ## Phase 3 — A criação, com o anexo isolado dela
