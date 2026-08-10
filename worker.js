@@ -5618,7 +5618,7 @@ var MAX_NOS = 2e4;
 var MAX_DESCARTES = 64;
 var MAX_SPAN_CELULA = 64;
 var IMAGEM_EXTERNA_PERMITIDA = false;
-var ENTIDADES_NOMEADAS = {
+var ENTIDADES_SIMBOLO = {
   amp: "&",
   lt: "<",
   gt: ">",
@@ -5652,6 +5652,50 @@ var ENTIDADES_NOMEADAS = {
   harr: "\u2194",
   check: "\u2713"
 };
+var LETRAS_MINUSCULAS = {
+  aacute: "\xE1",
+  agrave: "\xE0",
+  acirc: "\xE2",
+  atilde: "\xE3",
+  auml: "\xE4",
+  aring: "\xE5",
+  aelig: "\xE6",
+  ccedil: "\xE7",
+  eacute: "\xE9",
+  egrave: "\xE8",
+  ecirc: "\xEA",
+  euml: "\xEB",
+  iacute: "\xED",
+  igrave: "\xEC",
+  icirc: "\xEE",
+  iuml: "\xEF",
+  ntilde: "\xF1",
+  oacute: "\xF3",
+  ograve: "\xF2",
+  ocirc: "\xF4",
+  otilde: "\xF5",
+  ouml: "\xF6",
+  oslash: "\xF8",
+  uacute: "\xFA",
+  ugrave: "\xF9",
+  ucirc: "\xFB",
+  uuml: "\xFC",
+  yacute: "\xFD",
+  yuml: "\xFF"
+};
+var LETRAS_SEM_MAIUSCULA = { szlig: "\xDF" };
+var ENTIDADES_LETRA = Object.freeze(
+  Object.fromEntries([
+    ...Object.entries(LETRAS_SEM_MAIUSCULA),
+    ...Object.entries(LETRAS_MINUSCULAS).flatMap(([nome, letra]) => [
+      [nome, letra],
+      [nome.charAt(0).toUpperCase() + nome.slice(1), letra.toUpperCase()]
+    ])
+  ])
+);
+function letraOuSimbolo(nome) {
+  return ENTIDADES_LETRA[nome] ?? ENTIDADES_SIMBOLO[nome.toLowerCase()];
+}
 function decodificarEntidades(entrada) {
   if (!entrada.includes("&")) return entrada;
   return entrada.replace(
@@ -5659,7 +5703,7 @@ function decodificarEntidades(entrada) {
     (todo, decimal, hexa, nome) => {
       if (decimal !== void 0) return doPontoDeCodigo(Number.parseInt(decimal, 10)) ?? todo;
       if (hexa !== void 0) return doPontoDeCodigo(Number.parseInt(hexa, 16)) ?? todo;
-      if (nome !== void 0) return ENTIDADES_NOMEADAS[nome.toLowerCase()] ?? todo;
+      if (nome !== void 0) return letraOuSimbolo(nome) ?? todo;
       return todo;
     }
   );
@@ -6284,6 +6328,16 @@ function converterMacro(bruto, coletor) {
       bruto.filhos.filter((f) => f.tipo === "elemento" && f.nome === "ac:rich-text-body"),
       coletor
     );
+  }
+  const corpos = bruto.filhos.filter(
+    (f) => f.tipo === "elemento" && f.nome === "ac:rich-text-body"
+  );
+  if (corpos.length > 0) {
+    const dentro = converterLista(corpos, coletor);
+    if (dentro.length > 0) {
+      anotar(coletor, "macro_nao_suportada", nome === "" ? "sem nome" : nome);
+      return dentro;
+    }
   }
   anotar(coletor, "macro_nao_suportada", nome === "" ? "sem nome" : nome);
   return [{ tipo: "macroNaoSuportada", nome: nome === "" ? "sem nome" : nome }];
@@ -7980,11 +8034,14 @@ async function rotear(req, ctx, eu, caminho, url) {
       );
     }
     const configurada = buscaConfigurada(ctx.valores.espacos_confluence);
+    const espacoPedido = (url.searchParams.get("espaco") ?? "").trim();
+    const espacosDaBusca = espacoPedido === "" ? ctx.valores.espacos_confluence : ctx.valores.espacos_confluence.filter((e) => e === espacoPedido);
+    const escopoValido = espacoPedido === "" || espacosDaBusca.length > 0;
     let paginas;
     try {
       paginas = await ctx.atlassian.buscarConfluence({
         termo,
-        espacosPermitidos: ctx.valores.espacos_confluence,
+        espacosPermitidos: espacosDaBusca,
         labelsBloqueadas: ctx.valores.labels_bloqueadas,
         limite: limiteDeBusca(url.searchParams.get("limite"))
       });
@@ -8005,7 +8062,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       resultado: "sucesso",
       detalhe: { encontradas: paginas.length, via: "superficie" }
     });
-    if (configurada && paginas.length === 0) {
+    if (configurada && escopoValido && paginas.length === 0) {
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: "busca_confluence",
@@ -8014,7 +8071,7 @@ async function rotear(req, ctx, eu, caminho, url) {
         detalhe: { motivo: "sem_resultado_util", lacunaDocumentacao: true, via: "superficie" }
       });
     }
-    const buscaId = configurada ? await ctx.conhecimento.registrarBusca({
+    const buscaId = configurada && escopoValido ? await ctx.conhecimento.registrarBusca({
       solicitanteEmail: eu.email,
       termo,
       resultados: paginas.length

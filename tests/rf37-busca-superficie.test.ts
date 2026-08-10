@@ -5,10 +5,18 @@
  * o **termo** e os **parâmetros** passam a vir do cliente, e é aí que mora a burla.
  *
  * A allowlist de espaços é a trava de `RN-06`. Ela vem da **config**, e nenhum
- * parâmetro de query pode influenciá-la — nem `?espacos=`, nem `?espacosPermitidos=`,
+ * parâmetro de query pode **ampliá-la** — nem `?espacos=`, nem `?espacosPermitidos=`,
  * nem `?labelsBloqueadas=`. É o mesmo raciocínio de `RF-04`/`RNF-05` para a
  * identidade: o cliente não escolhe o próprio escopo. Um `?espacos=RH` respeitado
  * transformaria a busca no caminho mais curto para o espaço do RH.
+ *
+ * ⚠️ **Exceção controlada, registrada em `D-30`: `?espaco=` ESTREITA.** O bloco de busca
+ * do Confluence (`livesearch`) precisa de "só neste espaço", e a única forma segura de
+ * aceitar escopo do cliente é **interseção** com a config: o resultado é sempre um
+ * **subconjunto** dela, e o pior caso é lista vazia. É por isso que a asserção abaixo
+ * mudou de "recebe exatamente a config" para "**nunca recebe nada fora da config**" — a
+ * primeira testava o mecanismo, a segunda testa a propriedade, e é a propriedade que
+ * impede o vazamento. Detalhe em `tests/rf37-busca-no-espaco.test.ts`.
  *
  * E busca sem resultado **não é erro**: é o mapa das lacunas de documentação
  * (`RF-42`). Ela é registrada com a mesma forma que a Regra 1 usa, para que
@@ -112,13 +120,31 @@ describe('RF-37 — a busca devolve trecho, score e o id para ler no app', () =>
 })
 
 describe('RN-06 / RF-38 — BURLA: o cliente não escolhe o próprio escopo', () => {
-  it('BURLA — `?espacos=RH` é ignorado; a allowlist vem da config', async () => {
+  it('BURLA — nenhum parâmetro de query coloca `RH` no escopo', async () => {
     const r = await buscar('?q=salario&espacos=RH&espacosPermitidos=RH&espaco=RH')
     const corpo = await r.json()
     expect(corpo.itens.map((i: { id: string }) => i.id)).not.toContain('salarios')
     expect(JSON.stringify(corpo)).not.toContain('salariais')
-    // E a camada isolada recebeu exatamente a config, não o que veio na URL.
+
+    // ⚠️ A propriedade que importa: o que a camada isolada recebe é sempre **subconjunto
+    // da config**. `D-30` permite estreitar (`?espaco=`), então aqui o resultado é `[]` —
+    // nunca `['RH']`. Testar "igual à config" testaria o mecanismo; testar "subconjunto"
+    // testa o que impede o vazamento, e continua reprovando se alguém trocar a interseção
+    // por substituição.
+    const recebido = paramsDaBusca()[0]?.espacosPermitidos ?? []
+    expect(recebido.every((e) => ['TECH'].includes(e))).toBe(true)
+    expect(recebido).not.toContain('RH')
+  })
+
+  it('BURLA — estreitar não é ampliar: espaço VÁLIDO reduz, inválido zera', async () => {
+    // As duas metades de `D-30` numa asserção só. Se alguém trocar a interseção por
+    // substituição, a segunda linha passa a receber `['RH']` e este teste reprova.
+    await buscar('?q=reprocessar&espaco=TECH')
     expect(paramsDaBusca()[0]?.espacosPermitidos).toEqual(['TECH'])
+
+    await montar(['TECH'])
+    await buscar('?q=salario&espaco=RH')
+    expect(paramsDaBusca()[0]?.espacosPermitidos).toEqual([])
   })
 
   it('BURLA — `?labelsBloqueadas=` vazio não desliga a exclusão por label', async () => {

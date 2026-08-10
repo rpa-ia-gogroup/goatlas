@@ -411,6 +411,20 @@ destes reabre um vazamento que já foi fechado.
   ignorados — é o mesmo raciocínio da identidade: quem consulta não escolhe o próprio
   escopo. Um `?espacos=RH` respeitado seria o caminho mais curto para o espaço do RH.
   `?limite=` é clampado, porque cada resultado custa uma consulta de restrição.
+- ⚠️ **A ÚNICA exceção é `?espaco=`, e ela só sabe ESTREITAR** (`D-30`). É interseção com
+  `ctx.valores.espacos_confluence`, nunca substituição: o conjunto efetivo é sempre
+  subconjunto da config, e espaço fora dela resulta em **lista vazia** — nunca no espaço.
+  E **não** é "ignora o filtro se não casar": ignorar transformaria "buscar só aqui" em
+  "buscar em tudo". O teste de burla afirma a **propriedade** ("nunca recebe nada fora da
+  config"), não o mecanismo, justamente para continuar reprovando se alguém trocar a
+  interseção por substituição. E escopo vazio **não** registra lacuna de `RF-42`: zero por
+  escopo ≠ zero por documentação.
+- **`livesearch` é o único bloco dinâmico que virou funcional** (`D-30`), e a razão é que
+  ele não é um **resultado** — é uma caixa de busca, e o app já busca. `recently-updated`,
+  `listlabels` e `jira` continuam placeholder porque reproduzi-los exige refazer a consulta
+  **e** verificar restrição por item (`RN-06`, `R-02`), com valor baixo para deflexão.
+  ⚠️ A macro é resolvida no **renderizador**, não no sanitizador: ele é a camada de
+  segurança, e "esta macro virou formulário" é decisão de apresentação.
 - **Taxa sem nenhum dado ainda é `null`, nunca `0%`** (`governanca/metricas.ts`,
   T-095) — mesmo raciocínio de `custoConfigurado` em `custo.ts`/Q8. "0% de
   override" pareceria "a Regra 1/2 nunca falha" quando na verdade ninguém foi
@@ -430,6 +444,21 @@ destes reabre um vazamento que já foi fechado.
   editável por qualquer pessoa (`R-07`). Ele abre em **outra aba** de propósito — a
   conversa vive em estado de React, e navegar na mesma aba destruiria o botão de
   override (`RF-13`) de quem aceitou ler primeiro.
+- ⚠️ **A visão da aba Documentação é DERIVADA, não guardada** (`visaoDaDocumentacao`). A
+  tela decidia por `busca !== null`, e apagar o campo mexia só em `termo`: os resultados
+  antigos ficavam **travados na tela**, sem caminho de volta para navegar por espaço (visto
+  no app real em 10/08/2026). O conserto não foi um `setBusca(null)` no `onChange` — isso
+  funciona hoje e quebra no próximo lugar que mexer em `termo` sem lembrar de limpar o resto.
+  A ordem das três regras É o comportamento: **página aberta ganha de tudo** (senão o deep
+  link `?pagina=` cairia nas categorias) · **campo vazio = começar de novo** · com termo e
+  resposta, resultados. Mesmo raciocínio de `bloqueio` × `temBloqueioPendente` (`D-21`).
+- ⚠️ **A lista de espaços tem TRÊS estados, e o título aparece nos três.** `espacos` nascia
+  `[]` e o componente devolvia `null` para lista vazia — então **carregar era indistinguível
+  de tela em branco**: nem título, nem sinal, ninguém percebia que havia algo a caminho. E
+  `falhou` é separado de `pronto: []` pelo motivo que `admin/paineis.tsx` já registra: `[]`
+  numa queda de rede vira "não tem documentação" e manda a pessoa abrir chamado por algo que
+  está escrito. Zero por configuração diz "nenhum espaço foi liberado", nunca "não há
+  documentação".
 - **A tela de documentação lê `?q=` e `?pagina=` no boot — e isso NÃO é um router.**
   `App.tsx` continua navegando por estado (Princípio V); o deep link existe por dois
   motivos concretos: link de página compartilhável entre colegas, e o link `ri:page` do
@@ -497,10 +526,62 @@ destes reabre um vazamento que já foi fechado.
 - **Entidade é decodificada em UMA passagem.** `&amp;lt;` para em `&lt;`. Um laço
   "decodifica até não mudar" transformaria dupla codificação em tag — é o bug
   clássico de sanitizador. E o resultado **nunca** é reparseado.
+- 🚨 **A tabela de entidades é DUAS, e o lookup de letra é case-SENSITIVE**
+  (`confluence/sanitizar.ts`). `&Eacute;` é **É** e `&eacute;` é **é**; `&COPY;` e
+  `&copy;` são o mesmo `©`. Havia uma tabela só, consultada com `nome.toLowerCase()`, e
+  **nenhuma letra do Latin-1 dentro dela** — então a aba Documentação mostrava
+  `Pr&eacute;-requisitos` literal (medido no app real em 07/08/2026, `version 22`, e
+  viola a regra 4 na única superfície feita para ler). ⚠️ O conserto "óbvio" — só
+  acrescentar as entradas em minúscula — faria `&Eacute; preciso` virar `é preciso`:
+  acento certo, **caixa errada, em silêncio**, que é pior que o bug original porque
+  parece consertado. Por isso são duas tabelas e `letraOuSimbolo` busca a letra
+  **exata** antes de cair no caminho tolerante do símbolo. As maiúsculas são
+  **derivadas** (`eacute` → `Eacute`, `é` → `É`), o que é correto porque a entidade
+  maiúscula capitaliza só a primeira letra do nome — `&EACUTE;` não existe e continua
+  saindo cru, como no navegador. E `&szlig;` fica fora da derivação: `&Szlig;` não
+  existe.
+- **Entidade NUMÉRICA nunca esteve quebrada** — `doPontoDeCodigo` resolve qualquer
+  código. Por isso o bug acima dependia de *como o autor da página digitou*, e é o tipo
+  de defeito que atravessa revisão inteira sem ninguém reproduzir.
 - **A sanitização tem DUAS passagens e a bruta não sai do arquivo.** Tokenizar +
   árvore bruta (malformado, profundidade, tamanho) → converter (allowlist).
   Misturar as duas espalha a checagem por cima do tratamento de erro de parse, e um
   caminho de recuperação passa a ser um caminho sem checagem.
+- **Bloco não desenhado tem TRÊS frases, porque pedem três ações** (`renderizar.tsx`,
+  `RF-43`). Dinâmico (`livesearch`, `recently-updated`, `listlabels`, `jira`…): o Confluence
+  monta na hora e **o storage não guarda texto nenhum** — não há o que renderizar, e dizer
+  "ainda não sabemos mostrar" acusa defeito nosso que não existe. De outra página
+  (`include`): o texto existe, manda abrir a origem. Desconhecido: aí sim é limitação nossa,
+  e aí o nome técnico aparece, porque é a única pista.
+  ⚠️ **A frase antiga dizia "o resto do conteúdo está completo" em CADA bloco** — e na
+  página inicial padrão de espaço, que é feita só desses blocos, ela afirmava o oposto da
+  verdade três vezes seguidas, em inglês técnico. Quem conclui que o app quebrou **abre
+  chamado**: o contrário do que a tela existe para fazer.
+  ⚠️ **Tentei e descartei** um aviso no topo do tipo "esta página é só um índice": a home de
+  espaço *tem* texto (o placeholder do próprio Confluence), então o predicado honesto é
+  `false` ali e o aviso nunca apareceria no caso real. Fazê-lo aparecer exigiria adivinhar
+  que aquele parágrafo é placeholder — heurística sobre conteúdo de terceiro. Espaço com home
+  vazia é lacuna de documentação, e quem mede isso é `RF-42`.
+- 🎁 **Macro desconhecida COM corpo tem o corpo renderizado, nunca descartado.** Era
+  desperdício silencioso: `panel`, `deck`/`card`, `excerpt` e qualquer macro interna que
+  envolva texto caíam no placeholder **e o texto ia embora** — a página tinha, a pessoa não
+  via, e a tela ainda dizia "o texto ao redor está completo". Renderizar o corpo é grátis
+  (nenhuma chamada nova) e seguro: ele passa por `converterLista`, a **mesma** allowlist de
+  todo o resto. É a diferença entre "não sei desenhar esta moldura" (a moldura se perde, o
+  texto aparece) e "não posso mostrar este conteúdo". O `anotar` continua acontecendo: a
+  auditoria de `RF-43` é o que diz qual macro vale implementar de verdade um dia.
+- **`children`/`pagetree` apontam para a lista que a leitura JÁ mostra** (T-115) em vez de
+  dizer "não há o que trazer" — o conteúdo está na tela, alguns centímetros abaixo, com a
+  verificação de restrição por item que `RN-06` exige.
+- 🚨 **`jira`/`jirachart` NÃO devem ser implementados** — e o motivo não é custo. A JQL vem
+  de dentro da página, que qualquer pessoa edita (`R-07`), e executá-la seria rodar consulta
+  **escolhida pelo conteúdo** com a conta de serviço, mostrando o resultado a qualquer
+  colaborador. É `RN-06` sem gate equivalente: no Confluence existe allowlist de espaço,
+  label e restrição por página; para Jira não existe nada disso. Fica placeholder de
+  propósito.
+- **O parâmetro da macro continua fora da tela** (`RNF-30`), inclusive nos blocos agora
+  nomeados: JQL, `spaceKey` e id de filtro descrevem estrutura interna e podem citar projeto
+  que quem lê não deveria conhecer.
 - **Descartar o conteúdo de `<script>` é cosmético, não a garantia.** A garantia é a
   allowlist não transformar `script` em nó nenhum. A lista de "tags com conteúdo
   descartado" existe para `alert(1)` não aparecer como texto visível — inerte, mas
@@ -661,14 +742,20 @@ nada quebra.
 **de verdade** com o `ATATT` validado, e o que impede efeito colateral é
 `GOATLAS_SOMENTE_LEITURA=1`, que recusa toda escrita no decorador do cliente.
 Config apontada para o real: `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"),
-tipos `70,134,108,68`, espaços `GT,DTE,GN`.
+tipos `70,134,108,68`, espaços **`GT,DTE,GN,DE,GI,datateam,Protheus`** (`D-29`, 10/08 —
+7 dos 31 espaços reais, conferidos ao vivo contra `/wiki/api/v2/spaces`).
+⚠️ **`Config` resolve `CONFIG_PADRAO` → env → BANCO, e o banco vence.** Mudar
+`GOATLAS_ESPACOS_CONFLUENCE` só tem efeito se ninguém tiver gravado `espacos_confluence` na
+tabela `config` pelo console — senão é no-op **silencioso**. O valor efetivo não é legível de
+fora (`listAppSecrets` não devolve valor, `/api/admin/config` está atrás do edge): confere-se
+abrindo o console.
 
 🚨 **Desligar `GOATLAS_SOMENTE_LEITURA` é o go-live, e tem pré-requisito:** a staging
 (`3936ca2d`, criada e **incompleta** — falta o `LLM_API_KEY`) passa a ser obrigatória
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**843 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**896 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -787,6 +874,7 @@ espaço `TECH` que circulava **nunca existiu**.
 | Baseline de assentos (Fase 0) | João | Sem ele a tela diz "sem baseline" em vez de comparar contra zero |
 | **T-235** — distinguir "defletido e resolveu" de "desistiu e foi pro chat" | Produto | Mitigado, não resolvido: o painel devolve `deflexaoResolvidaConhecida: false` e trata o número como **teto** |
 | Destino do alerta de SLA | Produto | Hoje vai ao solicitante, o único destino que o app conhece. Outro destinatário é uma linha na mesma função |
+| **O request type expõe campo de anexo?** (era `T-425` da spec 005) | time de tech | Verificação de go-live, não código: sem o campo o anexo na criação fica **dormente** e cai em `SC-05` sem quebrar nada; com ele funciona sem uma linha a mudar. Só se confirma observando o envio real, o que exige desligar `GOATLAS_SOMENTE_LEITURA` (`D-24`) |
 
 ### O que só o app REAL revelou (07/08/2026)
 

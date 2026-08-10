@@ -129,22 +129,27 @@ revised: "2026-08-07 — v2, depois do /analyze"
       na spec 002, que é quem o entregou. _Requirements: RF-27_
 - [x] **T-424** Fechar os Success Criteria item por item.
       _Requirements: todos_
-- [ ] **T-425** `[BLOQUEADA: Q1]` Verificar contra a Atlassian real que o request
-      type do portal expõe campo de anexo, e observar o envio de verdade. **É
-      verificação, não implementação** — sem o campo, o código já cai em `SC-05`.
-      _Requirements: RF-61_
+> ⚠️ **T-425 saiu desta spec** (10/08/2026, decisão do Kaique). Ela era "verificar contra a
+> Atlassian real que o request type expõe campo de anexo, e observar o envio de verdade" —
+> **verificação de go-live, não tarefa da feature**: nada aqui muda com a resposta, porque
+> sem o campo o código já cai em `SC-05` e a feature fica dormente sem quebrar nada.
+>
+> **O fato não desapareceu, mudou de lugar:** ninguém confirmou que o request type expõe
+> anexo, e `criarChamado` (`T-063`) nunca executou contra o JSM. Isso está na tabela "o que
+> falta não é código" do `CLAUDE.md`, junto das outras verificações que só acontecem quando
+> `GOATLAS_SOMENTE_LEITURA` for desligado (`D-24`). Fechar a spec sem essa transferência seria
+> declarar completude que ela não tem.
 
 ## Estado
 
-**Completa em código (10/08/2026).** 24 de 25 tarefas fechadas; a única aberta é `T-425`,
-que é **verificação** contra a Atlassian real e depende de `Q1`.
+**Completa (10/08/2026).** As 24 tarefas de implementação estão fechadas.
 
 Spec, plano e tarefas escritos em 07/08/2026; implementação em 10/08/2026, em cinco commits
 que seguem as cinco fases deste arquivo. Decisões registradas em `D-26` (o anexo não viaja
 na criação), `D-27` (`RF-62` é fail-open, e por quê) e `D-28` (o endurecimento de `RF-27`,
 anotado também na spec 002, que o entregou).
 
-**843 testes · typecheck limpo · build limpo.** Verificado também em `npm run dev`, não só
+**896 testes · typecheck limpo · build limpo** (a suíte inteira, já com os consertos da aba Documentação de 10/08 incorporados). Verificado também em `npm run dev`, não só
 na suíte: criar sem declarar responde 400 com a mensagem da pessoa, e com a declaração o
 chamado nasce já com `anexo.estado = "anexado"`.
 

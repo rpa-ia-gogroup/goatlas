@@ -193,9 +193,12 @@ Item por item, com **onde** cada um está travado. Critério fechado sem teste �
 honesto; se a pergunta obrigatória valeu a pena só se sabe **depois do piloto**, com ele
 preenchido. É deliberado: a alternativa era não medir e manter a fricção por convicção.
 
-**O que NÃO está fechado, e não dá para fechar aqui:** `T-425` — ninguém verificou contra a
-Atlassian real que o request type do portal expõe campo de anexo. Sem o campo, o código cai
-em `SC-05` e a feature fica **dormente** sem quebrar nada; é verificação, não implementação.
+**O que continua sem verificação, e por que não bloqueia esta spec:** ninguém confirmou
+contra a Atlassian real que o request type do portal expõe campo de anexo. Isso **saiu da
+spec** (a antiga `T-425`) porque é verificação de go-live: sem o campo o código cai em
+`SC-05` e a feature fica **dormente** sem quebrar nada, e com o campo ela funciona sem uma
+linha a mudar. O item vive na tabela "o que falta não é código" do `CLAUDE.md`, junto das
+outras verificações que dependem de desligar `GOATLAS_SOMENTE_LEITURA` (`D-24`).
 
 ## 5. Dependências e o que fica pendente
 

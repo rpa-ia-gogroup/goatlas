@@ -233,13 +233,13 @@ Serve ao colaborador diretamente **e** ao agente, via `search_confluence`. É a 
 
 | ID | Requisito | Pri |
 |---|---|---|
-| RF-37 | Busca full-text via CQL restrita aos espaços da allowlist, com trecho de contexto e **score de relevância** — o score é insumo da Regra 1 (**RF-09**), não só ordenação visual. | P0 |
+| RF-37 | Busca full-text via CQL restrita aos espaços da allowlist, com trecho de contexto e **score de relevância** — o score é insumo da Regra 1 (**RF-09**), não só ordenação visual. ⚠️ `?espaco=` **estreita** a allowlist (interseção, nunca substituição — `D-30`), para o bloco de busca do Confluence funcionar. | P0 |
 | RF-38 | **Allowlist explícita de espaços** — nada exposto por padrão. Exclusão por label (ex.: `confidencial`) mesmo dentro de espaço liberado. | P0 |
 | RF-39 | Renderizar a página com fidelidade razoável (títulos, listas, tabelas, código, imagens e anexos servidos pelo proxy). | P0 |
 | RF-40 | Respeitar page restrictions: página restrita não aparece na busca nem é acessível por URL direta, ainda que o espaço esteja liberado. | P0 |
 | RF-41 | Navegação pela árvore do espaço, com breadcrumbs. | P1 |
 | RF-42 | Registrar **buscas sem resultado útil** e **overrides de bloqueio** (**RF-13**) como backlog de documentação. Esse é o mapa das lacunas do Confluence. | P1 |
-| RF-43 | Macro não suportada degrada de forma visível (placeholder), nunca some em silêncio. | P1 |
+| RF-43 | Macro não suportada degrada de forma visível (placeholder), nunca some em silêncio. ⚠️ E macro com **corpo** tem o corpo renderizado — a moldura se perde, o texto não (`D-31`). Quais blocos são reproduzidos, quais ficam placeholder por custo, e por que `jira`/`jirachart` fica de fora **por decisão**: `D-31`. | P1 |
 
 ### M5 — Notificações e SLA
 

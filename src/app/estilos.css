@@ -903,6 +903,7 @@
   color: color-mix(in srgb, var(--go-text-primary) 65%, transparent);
 }
 
+
 /* Código: a única exceção a "Poppins e nada mais" (§2 da identidade). Não é
    escolha estética — alinhamento de coluna é o que faz código ser legível. A
    superfície azul é a moldura da identidade (§6.2), não um tema escuro inventado. */
@@ -1482,6 +1483,47 @@
   background: var(--go-cream);
   border-radius: var(--radius-sm);
   padding: 2px 6px;
+}
+
+/* Bloco `livesearch` do Confluence, virado busca de verdade (RF-37/RF-39). Moldura
+   discreta: é um caminho oferecido no meio do texto, não uma seção da página — o
+   protagonista continua sendo o conteúdo que a pessoa veio ler. */
+.doc-busca-espaco {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 16%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--go-white);
+}
+.doc-busca-rotulo {
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+}
+.doc-busca-linha {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+.doc-busca-linha input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--fs-body);
+  padding: 10px var(--space-3);
+  border: 2px solid color-mix(in srgb, var(--go-blue) 25%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--go-white);
+  color: var(--go-text-primary);
+}
+.doc-busca-linha input:focus-visible {
+  outline: none;
+  border-color: var(--go-blue);
+}
+.doc-busca-espaco .dica {
+  margin: 0;
 }
 
 /* ---------- pergunta do anexo na criação (T-417 a T-420) ------------------
