@@ -5300,7 +5300,7 @@ var MAX_NOS = 2e4;
 var MAX_DESCARTES = 64;
 var MAX_SPAN_CELULA = 64;
 var IMAGEM_EXTERNA_PERMITIDA = false;
-var ENTIDADES_NOMEADAS = {
+var ENTIDADES_SIMBOLO = {
   amp: "&",
   lt: "<",
   gt: ">",
@@ -5334,6 +5334,50 @@ var ENTIDADES_NOMEADAS = {
   harr: "\u2194",
   check: "\u2713"
 };
+var LETRAS_MINUSCULAS = {
+  aacute: "\xE1",
+  agrave: "\xE0",
+  acirc: "\xE2",
+  atilde: "\xE3",
+  auml: "\xE4",
+  aring: "\xE5",
+  aelig: "\xE6",
+  ccedil: "\xE7",
+  eacute: "\xE9",
+  egrave: "\xE8",
+  ecirc: "\xEA",
+  euml: "\xEB",
+  iacute: "\xED",
+  igrave: "\xEC",
+  icirc: "\xEE",
+  iuml: "\xEF",
+  ntilde: "\xF1",
+  oacute: "\xF3",
+  ograve: "\xF2",
+  ocirc: "\xF4",
+  otilde: "\xF5",
+  ouml: "\xF6",
+  oslash: "\xF8",
+  uacute: "\xFA",
+  ugrave: "\xF9",
+  ucirc: "\xFB",
+  uuml: "\xFC",
+  yacute: "\xFD",
+  yuml: "\xFF"
+};
+var LETRAS_SEM_MAIUSCULA = { szlig: "\xDF" };
+var ENTIDADES_LETRA = Object.freeze(
+  Object.fromEntries([
+    ...Object.entries(LETRAS_SEM_MAIUSCULA),
+    ...Object.entries(LETRAS_MINUSCULAS).flatMap(([nome, letra]) => [
+      [nome, letra],
+      [nome.charAt(0).toUpperCase() + nome.slice(1), letra.toUpperCase()]
+    ])
+  ])
+);
+function letraOuSimbolo(nome) {
+  return ENTIDADES_LETRA[nome] ?? ENTIDADES_SIMBOLO[nome.toLowerCase()];
+}
 function decodificarEntidades(entrada) {
   if (!entrada.includes("&")) return entrada;
   return entrada.replace(
@@ -5341,7 +5385,7 @@ function decodificarEntidades(entrada) {
     (todo, decimal, hexa, nome) => {
       if (decimal !== void 0) return doPontoDeCodigo(Number.parseInt(decimal, 10)) ?? todo;
       if (hexa !== void 0) return doPontoDeCodigo(Number.parseInt(hexa, 16)) ?? todo;
-      if (nome !== void 0) return ENTIDADES_NOMEADAS[nome.toLowerCase()] ?? todo;
+      if (nome !== void 0) return letraOuSimbolo(nome) ?? todo;
       return todo;
     }
   );
