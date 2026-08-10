@@ -903,6 +903,7 @@
   color: color-mix(in srgb, var(--go-text-primary) 65%, transparent);
 }
 
+
 /* Código: a única exceção a "Poppins e nada mais" (§2 da identidade). Não é
    escolha estética — alinhamento de coluna é o que faz código ser legível. A
    superfície azul é a moldura da identidade (§6.2), não um tema escuro inventado. */

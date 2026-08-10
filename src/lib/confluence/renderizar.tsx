@@ -281,18 +281,89 @@ function Celula({ celula, opcoes }: { celula: CelulaTabela; opcoes: OpcoesRender
  * ⚠️ Só o **nome** da macro. Parâmetro (JQL, id de filtro, chave de espaço)
  * descreve estrutura interna e pode citar projeto que quem lê não deveria conhecer.
  */
+/**
+ * O que cada bloco do Confluence é, em português — `RF-43`, `RNF-30`, regra 4.
+ *
+ * ## Por que nomear em vez de imprimir o nome técnico
+ *
+ * A versão anterior mostrava `livesearch`, `listlabels`, `recently-updated` — nome de macro
+ * do Confluence, que não diz nada a quem só quer resolver um problema. Três caixas cinzas
+ * empilhadas com palavras em inglês fazem a página parecer quebrada, e quem acha que o app
+ * está quebrado abre chamado: o oposto do que a tela existe para fazer.
+ *
+ * ## E por que a distinção entre os três tipos é a parte que importa
+ *
+ * ⚠️ A frase antiga dizia **"o resto do conteúdo está completo"** em cada caixa. Numa página
+ * inicial de espaço — que é feita *só* desses blocos — ela afirmava o contrário da verdade e
+ * ainda insinuava que havia texto sendo escondido por nós.
+ *
+ * Não há. Estes blocos são **gerados no momento da exibição**: o formato de armazenamento
+ * guarda "aqui vai uma busca", nunca o resultado dela. É diferente de um bloco cujo texto
+ * existe em outra página (`include`), e diferente de um bloco que simplesmente não
+ * conhecemos. As três situações pedem três frases, porque levam a três ações diferentes de
+ * quem lê.
+ */
+type NaturezaDoBloco = 'dinamico' | 'deOutraPagina' | 'desconhecido'
+
+const BLOCOS_CONHECIDOS: Readonly<Record<string, { nome: string; natureza: NaturezaDoBloco }>> = {
+  livesearch: { nome: 'Busca dentro deste espaço', natureza: 'dinamico' },
+  listlabels: { nome: 'Etiquetas usadas neste espaço', natureza: 'dinamico' },
+  'recently-updated': { nome: 'Páginas alteradas recentemente', natureza: 'dinamico' },
+  'recently-updated-dashboard': { nome: 'Páginas alteradas recentemente', natureza: 'dinamico' },
+  children: { nome: 'Lista das páginas filhas', natureza: 'dinamico' },
+  pagetree: { nome: 'Árvore de páginas', natureza: 'dinamico' },
+  contentbylabel: { nome: 'Páginas com uma etiqueta', natureza: 'dinamico' },
+  detailssummary: { nome: 'Tabela montada a partir de outras páginas', natureza: 'dinamico' },
+  'blog-posts': { nome: 'Últimas publicações', natureza: 'dinamico' },
+  attachments: { nome: 'Lista de anexos da página', natureza: 'dinamico' },
+  toc: { nome: 'Índice desta página', natureza: 'dinamico' },
+  jira: { nome: 'Lista de chamados do Jira', natureza: 'dinamico' },
+  jirachart: { nome: 'Gráfico de chamados do Jira', natureza: 'dinamico' },
+  include: { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
+  'excerpt-include': { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
+  excerpt: { nome: 'Trecho reaproveitado em outras páginas', natureza: 'deOutraPagina' },
+}
+
+/**
+ * ⚠️ **Tentei e descartei um aviso no topo do tipo "esta página é só um índice".**
+ *
+ * A página inicial padrão de espaço *parece* ser só blocos, mas tem texto: o placeholder do
+ * próprio Confluence ("In a sentence or two, describe the purpose of this space"). Um
+ * predicado honesto — "todos os nós são blocos?" — devolve `false` ali, então o aviso nunca
+ * apareceria no caso real que o motivou. Fazê-lo aparecer exigiria adivinhar que aquele
+ * parágrafo é placeholder: heurística sobre conteúdo de terceiro, que quebra na primeira
+ * mudança de template e na primeira página em outro idioma.
+ *
+ * O que sobrou é o que resolve o problema de verdade: cada bloco dizer **o que é** e **por
+ * que não há texto**. Página inicial vazia é lacuna de documentação, e quem mede isso é
+ * `RF-42` (o mapa de lacunas), não uma frase adivinhada na hora da leitura.
+ */
 function MacroNaoSuportada({ nome }: { nome: string }): ReactNode {
+  const conhecido = BLOCOS_CONHECIDOS[nome]
+  const natureza: NaturezaDoBloco = conhecido?.natureza ?? 'desconhecido'
   return (
     <div className="doc-macro">
       <p className="doc-macro-rotulo">
         <span aria-hidden="true" className="doc-macro-marca">
           ⌗
         </span>
-        Bloco não exibido
+        {conhecido ? conhecido.nome : 'Bloco não exibido'}
       </p>
       <p className="doc-macro-texto">
-        Esta página tem um bloco <code className="doc-codigo-inline">{nome}</code> que o goatlas
-        ainda não sabe mostrar. O resto do conteúdo está completo.
+        {natureza === 'dinamico' ? (
+          <>
+            Este bloco é montado pelo Confluence no momento em que a página abre — uma busca,
+            uma lista ou um gráfico. A página não guarda texto dele, então não há o que trazer
+            para cá.
+          </>
+        ) : natureza === 'deOutraPagina' ? (
+          <>Este bloco mostra texto de outra página. Abra a página de origem para ler.</>
+        ) : (
+          <>
+            O goatlas ainda não sabe mostrar este bloco (
+            <code className="doc-codigo-inline">{nome}</code>). O texto ao redor está completo.
+          </>
+        )}
       </p>
     </div>
   )

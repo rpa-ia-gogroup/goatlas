@@ -461,6 +461,24 @@ destes reabre um vazamento que já foi fechado.
   árvore bruta (malformado, profundidade, tamanho) → converter (allowlist).
   Misturar as duas espalha a checagem por cima do tratamento de erro de parse, e um
   caminho de recuperação passa a ser um caminho sem checagem.
+- **Bloco não desenhado tem TRÊS frases, porque pedem três ações** (`renderizar.tsx`,
+  `RF-43`). Dinâmico (`livesearch`, `recently-updated`, `listlabels`, `jira`…): o Confluence
+  monta na hora e **o storage não guarda texto nenhum** — não há o que renderizar, e dizer
+  "ainda não sabemos mostrar" acusa defeito nosso que não existe. De outra página
+  (`include`): o texto existe, manda abrir a origem. Desconhecido: aí sim é limitação nossa,
+  e aí o nome técnico aparece, porque é a única pista.
+  ⚠️ **A frase antiga dizia "o resto do conteúdo está completo" em CADA bloco** — e na
+  página inicial padrão de espaço, que é feita só desses blocos, ela afirmava o oposto da
+  verdade três vezes seguidas, em inglês técnico. Quem conclui que o app quebrou **abre
+  chamado**: o contrário do que a tela existe para fazer.
+  ⚠️ **Tentei e descartei** um aviso no topo do tipo "esta página é só um índice": a home de
+  espaço *tem* texto (o placeholder do próprio Confluence), então o predicado honesto é
+  `false` ali e o aviso nunca apareceria no caso real. Fazê-lo aparecer exigiria adivinhar
+  que aquele parágrafo é placeholder — heurística sobre conteúdo de terceiro. Espaço com home
+  vazia é lacuna de documentação, e quem mede isso é `RF-42`.
+- **O parâmetro da macro continua fora da tela** (`RNF-30`), inclusive nos blocos agora
+  nomeados: JQL, `spaceKey` e id de filtro descrevem estrutura interna e podem citar projeto
+  que quem lê não deveria conhecer.
 - **Descartar o conteúdo de `<script>` é cosmético, não a garantia.** A garantia é a
   allowlist não transformar `script` em nó nenhum. A lista de "tags com conteúdo
   descartado" existe para `alert(1)` não aparecer como texto visível — inerte, mas
@@ -625,7 +643,7 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**777 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**787 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
