@@ -387,6 +387,21 @@ destes reabre um vazamento que já foi fechado.
   editável por qualquer pessoa (`R-07`). Ele abre em **outra aba** de propósito — a
   conversa vive em estado de React, e navegar na mesma aba destruiria o botão de
   override (`RF-13`) de quem aceitou ler primeiro.
+- ⚠️ **A visão da aba Documentação é DERIVADA, não guardada** (`visaoDaDocumentacao`). A
+  tela decidia por `busca !== null`, e apagar o campo mexia só em `termo`: os resultados
+  antigos ficavam **travados na tela**, sem caminho de volta para navegar por espaço (visto
+  no app real em 10/08/2026). O conserto não foi um `setBusca(null)` no `onChange` — isso
+  funciona hoje e quebra no próximo lugar que mexer em `termo` sem lembrar de limpar o resto.
+  A ordem das três regras É o comportamento: **página aberta ganha de tudo** (senão o deep
+  link `?pagina=` cairia nas categorias) · **campo vazio = começar de novo** · com termo e
+  resposta, resultados. Mesmo raciocínio de `bloqueio` × `temBloqueioPendente` (`D-21`).
+- ⚠️ **A lista de espaços tem TRÊS estados, e o título aparece nos três.** `espacos` nascia
+  `[]` e o componente devolvia `null` para lista vazia — então **carregar era indistinguível
+  de tela em branco**: nem título, nem sinal, ninguém percebia que havia algo a caminho. E
+  `falhou` é separado de `pronto: []` pelo motivo que `admin/paineis.tsx` já registra: `[]`
+  numa queda de rede vira "não tem documentação" e manda a pessoa abrir chamado por algo que
+  está escrito. Zero por configuração diz "nenhum espaço foi liberado", nunca "não há
+  documentação".
 - **A tela de documentação lê `?q=` e `?pagina=` no boot — e isso NÃO é um router.**
   `App.tsx` continua navegando por estado (Princípio V); o deep link existe por dois
   motivos concretos: link de página compartilhável entre colegas, e o link `ri:page` do
@@ -657,7 +672,7 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**800 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**810 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
