@@ -1597,7 +1597,19 @@
   margin: 0;
   min-inline-size: 0;
 }
+/* ⚠️ `legend` NÃO é filho normal do `fieldset`: o navegador o promove a *rendered
+   legend* e o encaixa na borda de cima, ignorando `padding` e `gap` do pai. Aqui isso
+   punha "EVIDÊNCIA" acima da borda e o título colado no topo do cartão, com zero
+   respiro (medido no app em 10/08/2026: `legend.top === fieldset.top`).
+   `float: left` tira o elemento da categoria de rendered legend, e num container
+   flex o float é ignorado — sobra um item de flex comum, que finalmente respeita o
+   padding e o gap. `width: 100%` é o cinto: sem virar item de flex, o float faria
+   shrink-to-fit e a pergunta ficaria estreita com o resto contornando ao lado.
+   O `fieldset`/`legend` continuam sendo os elementos certos (grupo de rádio nomeado
+   para leitor de tela) — o que muda é só onde a caixa é desenhada. */
 .pergunta-anexo > legend {
+  float: left;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
