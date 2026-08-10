@@ -1222,6 +1222,50 @@ devolve valor e `/api/admin/config` está atrás do OAuth do edge. **Verificaç�
 console de admin e ler o campo de espaços.** Se mostrar 3, gravar os 7 ali — o banco vence,
 então essa gravação é a que fica.
 
+### D-30 · `?espaco=` ESTREITA a allowlist da busca — a única forma segura de aceitar escopo do cliente
+
+**Data:** 10/08/2026 · **Contexto:** `RF-37`, `RF-39`, `RN-06`, `RNF-07` · **Decisão de:** Kaique
+
+**O pedido:** o bloco `livesearch` do Confluence é uma caixa de "buscar neste espaço", e
+aparecia como placeholder ("não há o que trazer"). Diferente dos outros blocos dinâmicos, ele
+não é um **resultado** a reproduzir — é um **caminho**, e busca no espaço é o que o goatlas
+já faz melhor que o Confluence para este público: sem assento, com allowlist no servidor e
+registrando lacuna de documentação (`RF-42`).
+
+**A tensão:** o `CLAUDE.md` diz, e continua dizendo, que **a allowlist nunca vem do
+cliente** — `?espacos=` sempre foi ignorado, porque quem consulta não escolhe o próprio
+escopo. Um `?espacos=RH` respeitado seria o caminho mais curto para o espaço do RH.
+
+**A decisão:** `?espaco=` é aceito como **interseção** com `ctx.valores.espacos_confluence`,
+nunca como substituição. Consequências, e são elas que fazem a exceção ser segura:
+
+- o conjunto efetivo é **sempre subconjunto da config** — o cliente só consegue pedir
+  **menos**;
+- espaço fora da allowlist resulta em **lista vazia**, não no espaço;
+- e **não** é "ignora o filtro se não casar": ignorar transformaria "buscar só aqui" em
+  "buscar em tudo", que é o oposto do que quem clicou pediu.
+
+⚠️ **Um teste de burla que já existia reprovou, e isso foi o processo funcionando.**
+`rf37-busca-superficie` afirmava `espacosPermitidos === ['TECH']` — e o cenário dele já
+incluía `&espaco=RH` entre os parâmetros de burla. A asserção testava o **mecanismo** ("recebe
+exatamente a config"); passou a testar a **propriedade** ("nunca recebe nada fora da config"),
+que é o que impede o vazamento e continua reprovando se alguém trocar interseção por
+substituição. As duas asserções sobre o resultado — a página do RH não aparece, "salariais"
+não vaza no corpo — não mudaram.
+
+⚠️ **Efeito colateral fechado no mesmo movimento:** escopo pedido que sobra vazio devolve zero,
+e esse zero **não** é lacuna de documentação. Sem o guarda, um `?espaco=` fora da allowlist
+gravaria o termo no mapa de `RF-42` como "procuraram e não existe" — envenenando o backlog de
+escrita com algo que nunca foi procurável, e mandando alguém escrever página para um espaço
+que o app não expõe. Mesma distinção de `buscaConfigurada`: zero por escopo ≠ zero por
+documentação.
+
+**O que NÃO foi feito:** os outros blocos dinâmicos (`recently-updated`, `listlabels`,
+`jira`) continuam placeholder. Reproduzi-los exige refazer a consulta **e verificar restrição
+de cada item** (`RN-06`), uma chamada por página (`R-02`) — e o valor para deflexão é baixo:
+uma lista de páginas alteradas não responde "por que meu relatório está errado". `livesearch`
+foi feito porque não havia resultado a reproduzir, só um caminho a oferecer.
+
 ---
 
 ## Perguntas em aberto

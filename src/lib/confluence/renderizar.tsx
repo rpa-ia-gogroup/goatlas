@@ -28,7 +28,7 @@
  * usa para "não foi possível" — vocabulário existente, não invenção nova.
  */
 
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { CelulaTabela, LinhaTabela, No, VariantePainel } from './sanitizar'
 import { urlSegura } from './sanitizar'
 
@@ -40,6 +40,22 @@ export interface OpcoesRender {
   readonly urlDeAnexo: (nomeArquivo: string) => string
   /** URL da leitura de outra página, dentro do próprio app. */
   readonly urlDePagina: (titulo: string, espaco: string | null) => string
+  /**
+   * O bloco `livesearch` do Confluence vira **busca de verdade** quando isto existe.
+   *
+   * ## Por que é opcional, e não sempre
+   *
+   * Este renderizador também desenha **trecho de resultado de busca** e roda em SSR nos
+   * testes. Nesses contextos não há para onde uma busca ir, e uma caixa de texto que não
+   * faz nada é pior que a explicação honesta. Ausente = o bloco continua sendo o
+   * placeholder de `RF-43`; presente = a tela assume a busca.
+   *
+   * ⚠️ **O espaço vem de quem chama, não do parâmetro da macro.** O storage traz
+   * `spaceKey`, mas conteúdo de página é editável por qualquer pessoa (`R-07`) e
+   * parâmetro de macro não vai para a tela (`RNF-30`). Quem sabe em que espaço a pessoa
+   * está é a tela, que leu a página por um caminho já verificado (`RN-06`).
+   */
+  readonly aoBuscarNoEspaco?: (termo: string) => void
 }
 
 const ROTULO_PAINEL: Readonly<Record<VariantePainel, string>> = {
@@ -157,7 +173,15 @@ function Fragmento({ no, opcoes }: { no: No; opcoes: OpcoesRender }): ReactNode 
       )
 
     case 'macroNaoSuportada':
-      return <MacroNaoSuportada nome={no.nome} />
+      // ⚠️ O bloco de busca é resolvido AQUI, no renderizador — a sanitização continua
+      // tratando `livesearch` como macro não suportada, e é de propósito: ela é a camada
+      // de segurança, e "esta macro virou um formulário" é decisão de apresentação. Mexer
+      // no sanitizador para isto misturaria as duas camadas que `RNF-06` mantém separadas.
+      return no.nome === 'livesearch' && opcoes.aoBuscarNoEspaco !== undefined ? (
+        <BuscaDoEspaco aoBuscar={opcoes.aoBuscarNoEspaco} />
+      ) : (
+        <MacroNaoSuportada nome={no.nome} />
+      )
   }
 }
 
@@ -338,6 +362,58 @@ const BLOCOS_CONHECIDOS: Readonly<Record<string, { nome: string; natureza: Natur
  * que não há texto**. Página inicial vazia é lacuna de documentação, e quem mede isso é
  * `RF-42` (o mapa de lacunas), não uma frase adivinhada na hora da leitura.
  */
+/**
+ * O bloco `livesearch`, **funcionando** — `RF-37`, `RF-39`.
+ *
+ * ## Por que este bloco é diferente dos outros
+ *
+ * Os demais blocos dinâmicos são **resultados** que o Confluence calcula (lista de páginas
+ * recentes, gráfico do Jira): para reproduzi-los teríamos de refazer a consulta e verificar
+ * restrição de cada item, uma chamada por página (`R-02`, `RN-06`).
+ *
+ * `livesearch` não é resultado — é uma **caixa de busca**. E busca no espaço é exatamente
+ * o que o goatlas já faz melhor que o Confluence para este público: sem assento, com a
+ * allowlist aplicada no servidor, e registrando lacuna de documentação (`RF-42`). Aqui não
+ * há nada a reproduzir: há um caminho nosso a oferecer.
+ *
+ * Sem `<form>` de verdade de propósito: submit dentro da SPA recarregaria a página e
+ * perderia o estado da leitura. O botão chama a tela, que já sabe buscar.
+ */
+function BuscaDoEspaco({ aoBuscar }: { aoBuscar: (termo: string) => void }): ReactNode {
+  const [termo, setTermo] = useState('')
+  const podeBuscar = termo.trim().length >= 2
+  return (
+    <div className="doc-busca-espaco">
+      <label className="doc-busca-rotulo" htmlFor="busca-neste-espaco">
+        Buscar neste espaço
+      </label>
+      <div className="doc-busca-linha">
+        <input
+          id="busca-neste-espaco"
+          type="search"
+          value={termo}
+          onChange={(e) => setTermo(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && podeBuscar) aoBuscar(termo.trim())
+          }}
+          placeholder="Ex.: reprocessar relatório"
+        />
+        <button
+          type="button"
+          className="botao botao-primario"
+          disabled={!podeBuscar}
+          onClick={() => aoBuscar(termo.trim())}
+        >
+          Buscar
+        </button>
+      </div>
+      <span className="dica">
+        Procura só nas páginas deste espaço que o goatlas pode mostrar.
+      </span>
+    </div>
+  )
+}
+
 function MacroNaoSuportada({ nome }: { nome: string }): ReactNode {
   const conhecido = BLOCOS_CONHECIDOS[nome]
   const natureza: NaturezaDoBloco = conhecido?.natureza ?? 'desconhecido'

@@ -230,7 +230,7 @@ Serve ao colaborador diretamente **e** ao agente, via `search_confluence`. É a 
 
 | ID | Requisito | Pri |
 |---|---|---|
-| RF-37 | Busca full-text via CQL restrita aos espaços da allowlist, com trecho de contexto e **score de relevância** — o score é insumo da Regra 1 (**RF-09**), não só ordenação visual. | P0 |
+| RF-37 | Busca full-text via CQL restrita aos espaços da allowlist, com trecho de contexto e **score de relevância** — o score é insumo da Regra 1 (**RF-09**), não só ordenação visual. ⚠️ `?espaco=` **estreita** a allowlist (interseção, nunca substituição — `D-30`), para o bloco de busca do Confluence funcionar. | P0 |
 | RF-38 | **Allowlist explícita de espaços** — nada exposto por padrão. Exclusão por label (ex.: `confidencial`) mesmo dentro de espaço liberado. | P0 |
 | RF-39 | Renderizar a página com fidelidade razoável (títulos, listas, tabelas, código, imagens e anexos servidos pelo proxy). | P0 |
 | RF-40 | Respeitar page restrictions: página restrita não aparece na busca nem é acessível por URL direta, ainda que o espaço esteja liberado. | P0 |

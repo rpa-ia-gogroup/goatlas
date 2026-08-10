@@ -7407,11 +7407,14 @@ async function rotear(req, ctx, eu, caminho, url) {
       );
     }
     const configurada = buscaConfigurada(ctx.valores.espacos_confluence);
+    const espacoPedido = (url.searchParams.get("espaco") ?? "").trim();
+    const espacosDaBusca = espacoPedido === "" ? ctx.valores.espacos_confluence : ctx.valores.espacos_confluence.filter((e) => e === espacoPedido);
+    const escopoValido = espacoPedido === "" || espacosDaBusca.length > 0;
     let paginas;
     try {
       paginas = await ctx.atlassian.buscarConfluence({
         termo,
-        espacosPermitidos: ctx.valores.espacos_confluence,
+        espacosPermitidos: espacosDaBusca,
         labelsBloqueadas: ctx.valores.labels_bloqueadas,
         limite: limiteDeBusca(url.searchParams.get("limite"))
       });
@@ -7432,7 +7435,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       resultado: "sucesso",
       detalhe: { encontradas: paginas.length, via: "superficie" }
     });
-    if (configurada && paginas.length === 0) {
+    if (configurada && escopoValido && paginas.length === 0) {
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: "busca_confluence",
@@ -7441,7 +7444,7 @@ async function rotear(req, ctx, eu, caminho, url) {
         detalhe: { motivo: "sem_resultado_util", lacunaDocumentacao: true, via: "superficie" }
       });
     }
-    const buscaId = configurada ? await ctx.conhecimento.registrarBusca({
+    const buscaId = configurada && escopoValido ? await ctx.conhecimento.registrarBusca({
       solicitanteEmail: eu.email,
       termo,
       resultados: paginas.length

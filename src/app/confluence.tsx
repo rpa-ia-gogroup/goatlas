@@ -60,11 +60,20 @@ import { ConteudoConfluence } from '../lib/confluence/renderizar'
  * cair na busca com o título preenchido é o comportamento honesto: leva a pessoa ao
  * documento em um clique a mais, em vez de fingir um link quebrado.
  */
-export function opcoesDeRender(idPagina: string) {
+export function opcoesDeRender(
+  idPagina: string,
+  /**
+   * Presente só na LEITURA de página: é o que transforma o bloco `livesearch` numa busca
+   * de verdade. Nos trechos de resultado de busca ele não existe — ali não há espaço
+   * corrente nem para onde ir, e o bloco volta a ser a explicação honesta.
+   */
+  aoBuscarNoEspaco?: (termo: string) => void,
+) {
   return {
     urlDeAnexo: (nomeArquivo: string) =>
       `/api/confluence/anexo/${encodeURIComponent(idPagina)}/${encodeURIComponent(nomeArquivo)}`,
     urlDePagina: (titulo: string) => `/?q=${encodeURIComponent(titulo)}`,
+    ...(aoBuscarNoEspaco ? { aoBuscarNoEspaco } : {}),
   }
 }
 
@@ -220,12 +229,19 @@ export function LeituraDaPagina({
   filhos,
   aoAbrir,
   aoVoltar,
+  aoBuscarNoEspaco,
 }: {
   pagina: PaginaLida
   /** Nível abaixo desta página, quando já carregado (`RF-41`). */
   filhos?: NivelDaArvore | null
   aoAbrir: (id: string) => void
   aoVoltar: () => void
+  /**
+   * Busca escopada no espaço desta página — é o que faz o bloco `livesearch` do Confluence
+   * funcionar em vez de virar placeholder. O espaço sai de `pagina.espaco`, que veio do
+   * servidor por um caminho já verificado (`RN-06`), nunca do parâmetro da macro.
+   */
+  aoBuscarNoEspaco?: (termo: string, espaco: string) => void
 }) {
   return (
     <div className="pilha">
@@ -264,7 +280,12 @@ export function LeituraDaPagina({
       <ConteudoConfluence
         nos={pagina.nos}
         truncado={pagina.truncado}
-        opcoes={opcoesDeRender(pagina.id)}
+        opcoes={opcoesDeRender(
+          pagina.id,
+          aoBuscarNoEspaco
+            ? (termo: string) => aoBuscarNoEspaco(termo, pagina.espaco)
+            : undefined,
+        )}
       />
 
       {filhos && <FilhosDaPagina nivel={filhos} aoAbrir={aoAbrir} />}
@@ -314,7 +335,7 @@ export function TelaDocumentacao({
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
-  async function buscar(alvo: string) {
+  async function buscar(alvo: string, espaco?: string) {
     const limpo = alvo.trim()
     if (limpo.length < 2) {
       setErro('Escreva ao menos duas letras do que você procura.')
@@ -324,7 +345,11 @@ export function TelaDocumentacao({
     setErro(null)
     setPagina(null)
     try {
-      setBusca(await api.buscarDocumentacao(limpo))
+      setBusca(await api.buscarDocumentacao(limpo, espaco))
+      // ⚠️ A URL guarda só o termo, não o espaço: `?q=` é contrato com `entradaDaUrl` e com
+      // o link `ri:page` do Confluence (ver `CLAUDE.md`). Acrescentar `?espaco=` aqui
+      // exigiria os dois lados combinando — e o ganho seria um link que busca em um espaço,
+      // que não é caso de uso de ninguém. O escopo vale para a busca que acabou de rodar.
       lembrarNaUrl({ q: limpo })
     } catch (e) {
       setBusca(null)
@@ -389,6 +414,10 @@ export function TelaDocumentacao({
           pagina={pagina}
           filhos={filhos}
           aoAbrir={abrir}
+          aoBuscarNoEspaco={(t, espaco) => {
+            setTermo(t)
+            void buscar(t, espaco)
+          }}
           aoVoltar={() => {
             setPagina(null)
             lembrarNaUrl(termo.trim() ? { q: termo.trim() } : {})

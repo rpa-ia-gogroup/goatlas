@@ -146,3 +146,39 @@ describe('o parâmetro da macro continua fora da tela (RNF-30)', () => {
     expect(saida).not.toContain('jql')
   })
 })
+
+describe('o bloco de busca vira busca DE VERDADE quando a tela oferece o caminho', () => {
+  it('com `aoBuscarNoEspaco`, sai um campo de busca — não o placeholder', () => {
+    const r = sanitizarStorage('<ac:structured-macro ac:name="livesearch"></ac:structured-macro>')
+    const saida = renderToStaticMarkup(
+      createElement(ConteudoConfluence, {
+        nos: r.nos,
+        opcoes: { ...OPCOES, aoBuscarNoEspaco: () => {} },
+      }),
+    )
+    expect(saida).toContain('Buscar neste espaço')
+    expect(saida).toContain('type="search"')
+    // A explicação de "não há o que trazer" sai de cena: agora há o que fazer.
+    expect(saida).not.toContain('não guarda texto dele')
+  })
+
+  it('SEM o callback continua o placeholder honesto — trecho de busca e SSR', () => {
+    // ⚠️ Caixa de busca que não busca é pior que a explicação. É por isso que o campo é
+    // opcional em vez de sempre presente.
+    const saida = render('<ac:structured-macro ac:name="livesearch"></ac:structured-macro>')
+    expect(saida).toContain('Busca dentro deste espaço')
+    expect(saida).not.toContain('type="search"')
+  })
+
+  it('e o botão nasce desabilitado: dois caracteres é o mínimo da rota', () => {
+    const r = sanitizarStorage('<ac:structured-macro ac:name="livesearch"></ac:structured-macro>')
+    const saida = renderToStaticMarkup(
+      createElement(ConteudoConfluence, {
+        nos: r.nos,
+        opcoes: { ...OPCOES, aoBuscarNoEspaco: () => {} },
+      }),
+    )
+    // Sem isto o clique viraria 400 do servidor — erro para quem não errou nada.
+    expect(saida).toContain('disabled')
+  })
+})

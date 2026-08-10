@@ -354,6 +354,20 @@ destes reabre um vazamento que já foi fechado.
   ignorados — é o mesmo raciocínio da identidade: quem consulta não escolhe o próprio
   escopo. Um `?espacos=RH` respeitado seria o caminho mais curto para o espaço do RH.
   `?limite=` é clampado, porque cada resultado custa uma consulta de restrição.
+- ⚠️ **A ÚNICA exceção é `?espaco=`, e ela só sabe ESTREITAR** (`D-30`). É interseção com
+  `ctx.valores.espacos_confluence`, nunca substituição: o conjunto efetivo é sempre
+  subconjunto da config, e espaço fora dela resulta em **lista vazia** — nunca no espaço.
+  E **não** é "ignora o filtro se não casar": ignorar transformaria "buscar só aqui" em
+  "buscar em tudo". O teste de burla afirma a **propriedade** ("nunca recebe nada fora da
+  config"), não o mecanismo, justamente para continuar reprovando se alguém trocar a
+  interseção por substituição. E escopo vazio **não** registra lacuna de `RF-42`: zero por
+  escopo ≠ zero por documentação.
+- **`livesearch` é o único bloco dinâmico que virou funcional** (`D-30`), e a razão é que
+  ele não é um **resultado** — é uma caixa de busca, e o app já busca. `recently-updated`,
+  `listlabels` e `jira` continuam placeholder porque reproduzi-los exige refazer a consulta
+  **e** verificar restrição por item (`RN-06`, `R-02`), com valor baixo para deflexão.
+  ⚠️ A macro é resolvida no **renderizador**, não no sanitizador: ele é a camada de
+  segurança, e "esta macro virou formulário" é decisão de apresentação.
 - **Taxa sem nenhum dado ainda é `null`, nunca `0%`** (`governanca/metricas.ts`,
   T-095) — mesmo raciocínio de `custoConfigurado` em `custo.ts`/Q8. "0% de
   override" pareceria "a Regra 1/2 nunca falha" quando na verdade ninguém foi
@@ -643,7 +657,7 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**787 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**800 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
