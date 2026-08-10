@@ -41,6 +41,11 @@ import { areaDoEmail, areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
+import {
+  exigeDeclaracaoDeAnexo,
+  validarDeclaracao,
+  type SchemaDoTipo,
+} from '../tickets/declaracao-anexo'
 import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
 import { buscaConfigurada } from '../config/diagnostico'
 
@@ -259,15 +264,6 @@ async function rotear(
     if (!conversa.proposta) {
       return ERROS.dadosInvalidos('Ainda não há um chamado montado para confirmar.')
     }
-    await ctx.conversas.registrarConfirmacao(conversa.id)
-    await ctx.auditoria.registrar({
-      atorEmail: eu.email,
-      acao: 'confirmacao_registrada',
-      recurso: conversa.id,
-      resultado: 'sucesso',
-    })
-
-    const atual = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email)
     const serviceDeskId = ctx.valores.service_desk_id
     if (!serviceDeskId) {
       // RNF-25 + Q1: sem service desk configurado não se inventa um.
@@ -278,6 +274,40 @@ async function rotear(
     const piloto = await verificarPiloto(ctx, eu, caminho)
     if (piloto) return piloto
 
+    // ⚠️ **RF-62 (T-402) vem ANTES de `registrarConfirmacao`, e a ordem é a trava.**
+    //
+    // Registrar a confirmação e só então recusar deixaria a conversa marcada como
+    // confirmada **sem** chamado: `confirmacao_registrada` apareceria duas ou três
+    // vezes na auditoria de `RF-17` para uma única abertura, e o carimbo de
+    // `confirmadoEm` passaria a significar "clicou" em vez de "autorizou a criação".
+    // Como a pessoa pode responder e confirmar de novo (`SC-03`), o caminho recusado
+    // não é raro — é o caminho normal de quem ainda não respondeu.
+    const corpoConfirmacao = await lerJson<Record<string, unknown>>(req)
+    const schema = await lerSchemaDoTipo(
+      ctx,
+      eu.email,
+      serviceDeskId,
+      conversa.proposta.tipoChamadoId,
+    )
+    const declaracao = await autorizarDeclaracaoDeAnexo(
+      ctx,
+      eu.email,
+      conversa.proposta.tipoChamadoId,
+      schema,
+      corpoConfirmacao?.declarouAnexo,
+    )
+    if ('recusa' in declaracao) return declaracao.recusa
+
+    await ctx.conversas.registrarConfirmacao(conversa.id)
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'confirmacao_registrada',
+      recurso: conversa.id,
+      resultado: 'sucesso',
+    })
+
+    const atual = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email)
+
     // A chave de idempotência é derivada da CONVERSA, não gerada por requisição:
     // é o que faz duplo clique e reenvio caírem na mesma submissão (RF-24).
     const r = await ctx.chamados.abrirPorConversa(
@@ -285,6 +315,7 @@ async function rotear(
       serviceDeskId,
       `conversa:${conversa.id}`,
       areaDoEmail(eu.email, ctx.valores.areas_por_email),
+      declaracao.declarouAnexo,
     )
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
     await avisarCriacao(ctx, r, {
@@ -323,18 +354,37 @@ async function rotear(
     // chamado (fail-open no chamado, `RNF-18`): validação que se desliga sob pressão
     // não é validação, mas recusar chamado por causa dela seria a parede que o
     // caminho sem IA existe para não ser.
-    const camposDinamicos = await filtrarCamposComSchema(
+    const schema = await lerSchemaDoTipo(
       ctx,
       eu.email,
       serviceDeskId,
       validada.proposta.tipoChamadoId,
+    )
+
+    // RF-62 (T-402/T-404) — a pergunta é pré-condição da criação, e a recusa vem ANTES
+    // de qualquer efeito: nada persistido, nada no JSM.
+    const declaracao = await autorizarDeclaracaoDeAnexo(
+      ctx,
+      eu.email,
+      validada.proposta.tipoChamadoId,
+      schema,
+      corpo?.declarouAnexo,
+    )
+    if ('recusa' in declaracao) return declaracao.recusa
+
+    const camposDinamicos = await filtrarCamposComSchema(
+      ctx,
+      eu.email,
+      validada.proposta.tipoChamadoId,
       extrairCamposDinamicos(corpo?.camposDinamicos),
+      schema,
     )
 
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
       area: areaDoEmail(eu.email, ctx.valores.areas_por_email),
+      declarouAnexo: declaracao.declarouAnexo,
       payload: {
         titulo: validada.proposta.titulo,
         descricao: validada.proposta.descricao,
@@ -1453,7 +1503,41 @@ function respostaCriacao(
  * prioridade) não pode deixar de funcionar por causa de um extra torto.
  */
 /**
- * Aplica o schema do request type sobre os campos que o cliente mandou — T-401.
+ * Lê o schema do request type **uma vez por criação** — T-401 + T-404.
+ *
+ * ⚠️ Uma leitura, duas decisões: quais campos adicionais passam (T-401) e se a
+ * pergunta de `RF-62` existe (T-404). Duas leituras seriam duas chamadas com a
+ * credencial única para responder à mesma pergunta (`R-02`) — e, pior, poderiam
+ * **discordar** no meio de uma criação, com o filtro aceitando um campo que o gate
+ * decidiu não existir.
+ *
+ * Indisponibilidade devolve `{ conhecido: false }` e **audita**. O `null` não serve
+ * aqui: "o tipo não tem campos" e "não deu para saber quais tem" levam a decisões
+ * opostas em `exigeDeclaracaoDeAnexo`.
+ */
+async function lerSchemaDoTipo(
+  ctx: Contexto,
+  atorEmail: string,
+  serviceDeskId: string,
+  tipoChamadoId: string,
+): Promise<SchemaDoTipo> {
+  try {
+    const campos = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, tipoChamadoId)
+    return { conhecido: true, campos }
+  } catch {
+    await ctx.auditoria.registrar({
+      atorEmail,
+      acao: 'schema_tipo_indisponivel',
+      recurso: tipoChamadoId,
+      resultado: 'falha',
+      detalhe: { tipoChamadoId, consequencia: 'declaracao_de_anexo_nao_exigida' },
+    })
+    return { conhecido: false }
+  }
+}
+
+/**
+ * Aplica o schema já lido sobre os campos que o cliente mandou — T-401.
  *
  * ⚠️ **Schema indisponível descarta tudo**, e o descarte é auditado. Silêncio aqui
  * esconderia duas coisas diferentes com a mesma cara: "o tipo não tem esse campo" e
@@ -1462,28 +1546,12 @@ function respostaCriacao(
 async function filtrarCamposComSchema(
   ctx: Contexto,
   atorEmail: string,
-  serviceDeskId: string,
   tipoChamadoId: string,
   campos: Record<string, string> | null,
+  schema: SchemaDoTipo,
 ): Promise<Record<string, string> | null> {
   if (!campos) return null
-  try {
-    const schema = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, tipoChamadoId)
-    const filtrados = filtrarPeloSchema(campos, schema)
-    const descartadas = Object.keys(campos).filter((c) => !filtrados || !(c in filtrados))
-    if (descartadas.length > 0) {
-      await ctx.auditoria.registrar({
-        atorEmail,
-        acao: 'campos_dinamicos_descartados',
-        recurso: tipoChamadoId,
-        resultado: 'negado',
-        // Só os NOMES dos campos: o valor é conteúdo do chamado e não tem por que
-        // ser duplicado na auditoria.
-        detalhe: { motivo: 'fora_do_schema', campos: descartadas },
-      })
-    }
-    return filtrados
-  } catch {
+  if (!schema.conhecido) {
     await ctx.auditoria.registrar({
       atorEmail,
       acao: 'campos_dinamicos_descartados',
@@ -1493,6 +1561,46 @@ async function filtrarCamposComSchema(
     })
     return null
   }
+  const filtrados = filtrarPeloSchema(campos, schema.campos)
+  const descartadas = Object.keys(campos).filter((c) => !filtrados || !(c in filtrados))
+  if (descartadas.length > 0) {
+    await ctx.auditoria.registrar({
+      atorEmail,
+      acao: 'campos_dinamicos_descartados',
+      recurso: tipoChamadoId,
+      resultado: 'negado',
+      // Só os NOMES dos campos: o valor é conteúdo do chamado e não tem por que
+      // ser duplicado na auditoria.
+      detalhe: { motivo: 'fora_do_schema', campos: descartadas },
+    })
+  }
+  return filtrados
+}
+
+/**
+ * O gate de `RF-62`, nas duas rotas de criação — T-402, T-403, T-404.
+ *
+ * Devolve a declaração já decidida, ou a `Response` de recusa. Uma função só para os
+ * dois caminhos porque a trava precisa ser a mesma: um segundo lugar decidindo isto
+ * seria um caminho de criação que não pergunta, e "qual dos dois esqueceu" é o tipo de
+ * divergência que ninguém vê até alguém abrir chamado sem evidência pelo lado errado.
+ */
+async function autorizarDeclaracaoDeAnexo(
+  ctx: Contexto,
+  atorEmail: string,
+  tipoChamadoId: string,
+  schema: SchemaDoTipo,
+  bruto: unknown,
+): Promise<{ readonly declarouAnexo: boolean | null } | { readonly recusa: Response }> {
+  const r = validarDeclaracao(bruto, exigeDeclaracaoDeAnexo(schema))
+  if (r.ok) return { declarouAnexo: r.declarouAnexo }
+  await ctx.auditoria.registrar({
+    atorEmail,
+    acao: 'declaracao_anexo_ausente',
+    recurso: tipoChamadoId,
+    resultado: 'negado',
+  })
+  return { recusa: ERROS.dadosInvalidos(r.mensagem) }
 }
 
 type ValidacaoProposta = { proposta: PropostaChamado } | { erro: string }

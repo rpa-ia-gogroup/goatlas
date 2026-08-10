@@ -348,6 +348,17 @@ const COLUNAS_ADICIONADAS = [
    * porque o agente ajustou o resumo três vezes.
    */
   `ALTER TABLE vinculos ADD COLUMN ultimo_status_notificado TEXT`,
+  /**
+   * T-403 / RF-62 — a declaração de anexo, verificável no servidor.
+   *
+   * ⚠️ **Três estados, e o terceiro é o que dá valor aos outros dois:** `1` tenho ·
+   * `0` não tenho · `NULL` **não respondeu** (ou não havia o que responder, porque o
+   * tipo de chamado não aceita anexo). Um `NOT NULL DEFAULT 0` aqui apagaria a
+   * distinção que a spec §1 existe para criar: chamado de quem declarou não ter
+   * material é informação sobre o caso; chamado de quem nunca foi perguntado é
+   * omissão. Com default, os dois viram "disse que não tinha".
+   */
+  `ALTER TABLE submissoes ADD COLUMN declarou_anexo INTEGER`,
 ] as const
 
 export async function migrar(db: Banco): Promise<void> {

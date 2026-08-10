@@ -25,17 +25,17 @@ revised: "2026-08-07 — v2, depois do /analyze"
 
 ## Phase 1 — A trava da declaração, antes de qualquer UI
 
-- [ ] **T-402** Teste de burla: **dado um tipo cujo schema expõe anexo**, criação
+- [x] **T-402** Teste de burla: **dado um tipo cujo schema expõe anexo**, criação
       sem declaração é recusada pelo servidor, nos dois caminhos. A pré-condição é
       parte do teste — sem ela, ele contradiz T-404.
       _Requirements: RF-62, RN-11_
-- [ ] **T-403** `submissoes.declarou_anexo` + recusa na rota. `null` = não
+- [x] **T-403** `submissoes.declarou_anexo` + recusa na rota. `null` = não
       respondeu, nunca default silencioso. _Requirements: RF-62, RN-11_
-- [ ] **T-404** A regra exata do gate (`plan.md` §6): exige declaração **só** quando
+- [x] **T-404** A regra exata do gate (`plan.md` §6): exige declaração **só** quando
       o schema é conhecido **e** expõe anexo. Testes dos dois lados — schema sem
       anexo abre sem perguntar (`SC-05`), schema indisponível abre sem perguntar e
       **audita** (`SC-05b`). _Requirements: RF-62, RF-27, RNF-18, RN-10_
-- [ ] **T-405** Teste: declarar "tenho" e **não** anexar continua abrindo chamado.
+- [x] **T-405** Teste: declarar "tenho" e **não** anexar continua abrindo chamado.
       A trava é responder, não anexar. _Requirements: RN-11_
 
 ## Phase 2 — Os dois passos separados
