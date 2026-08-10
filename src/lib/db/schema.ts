@@ -1,17 +1,44 @@
 /**
- * Schema do goatlas. Idempotente (`CREATE TABLE IF NOT EXISTS`) — roda a cada
- * boot; `env.DB` é persistente entre deploys.
+ * Schema do goatlas. Idempotente (`CREATE TABLE IF NOT EXISTS`); `env.DB` é
+ * persistente entre deploys.
  *
  * Decisão de desenho: as invariantes críticas vivem no SCHEMA, não na aplicação.
  * Código com bug pode criar chamado duplicado; `UNIQUE` não pode.
  *   - `vinculos.issue_key UNIQUE`         → RN-03 (um chamado, um solicitante)
  *   - `submissoes.chave_idempotencia UNIQUE` → RF-24 (duplo clique não duplica)
  *   - `classificacoes_ticket` PK composta → cache da Regra 2 (R-08)
+ *
+ * ⚠️ **Idempotente não quer dizer grátis.** `migrar` roda dentro de
+ * `montarContexto`, que roda a CADA requisição `/api/*` — e cada `db.exec` do
+ * GoDeploy é uma ida e volta assíncrona. Aplicar os 34 `CREATE` mais os 3 `ALTER`
+ * (que **sempre** lançam "duplicate column" depois da primeira vez) custava ~37
+ * idas ao banco antes de a rota começar a trabalhar: piso medido de **442 ms** no
+ * cron mais barato, e ~7× isso para abrir o console de admin, que dispara seis
+ * requisições em paralelo. Daí `jaAplicado` — ver ali por que a sonda é UMA query
+ * e por que a versão é derivada, não escrita à mão.
  */
 
-import type { Banco } from './tipos'
+import { primeiraLinha, type Banco } from './tipos'
 
 export const TABELAS = [
+  /**
+   * Marca de qual schema já foi aplicado neste banco (T-401).
+   *
+   * Uma linha, chave fixa. Existe só para a sonda de `jaAplicado` poder responder
+   * "já está tudo aplicado" em **uma** query, em vez de o app reaplicar 37
+   * statements por requisição para descobrir a mesma coisa.
+   *
+   * ⚠️ Tabela própria, não uma chave em `config`, de propósito: `config` é a tabela
+   * que o console de admin edita e que `PUT /api/admin/config` valida por tipo
+   * (`D-25`). Uma chave interna morando lá viraria uma linha sem família no mapa
+   * `FAMILIA` — e apareceria numa tela feita para decisões humanas.
+   */
+  `CREATE TABLE IF NOT EXISTS meta_schema (
+     id             INTEGER PRIMARY KEY CHECK (id = 1),
+     versao         TEXT NOT NULL,
+     aplicado_em    TEXT NOT NULL
+   )`,
+
   /**
    * O artefato mais crítico do sistema (RF-22, RNF-17). É o que permite
    * acompanhar chamado sem conta Atlassian, e é a base do isolamento (RF-30):
@@ -350,7 +377,70 @@ const COLUNAS_ADICIONADAS = [
   `ALTER TABLE vinculos ADD COLUMN ultimo_status_notificado TEXT`,
 ] as const
 
-export async function migrar(db: Banco): Promise<void> {
+/**
+ * Identidade do schema atual, DERIVADA do próprio conteúdo.
+ *
+ * ⚠️ Um número de versão escrito à mão é a versão frágil disto: quem acrescenta uma
+ * tabela em `TABELAS` e esquece de subir o número produz um app que **nunca** aplica
+ * a tabela nova — e o sintoma é a mesma família de `{}` silencioso que
+ * `linhasComoObjetos` documenta, porque a leitura falha num lugar longe daqui.
+ * Derivando do texto, mudar o schema muda a marca por construção, e não existe o
+ * passo que se pode esquecer.
+ *
+ * Não é hash criptográfico e não precisa ser: a pergunta é "este texto é o mesmo de
+ * antes?", não "alguém forjou isto?". Quem escreve em `meta_schema` é o próprio app.
+ */
+function versaoDoSchema(): string {
+  const texto = [...TABELAS, ...COLUNAS_ADICIONADAS].join('\n')
+  // djb2 — barato, determinístico e sem dependência. Dois hashes em offsets
+  // diferentes para que reordenar statements não colida por acidente.
+  let h1 = 5381
+  let h2 = 52711
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto.charCodeAt(i)
+    h1 = (h1 * 33 + c) | 0
+    h2 = (h2 * 31 + c) | 0
+  }
+  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, '0')
+  return `${hex(h1)}${hex(h2)}-${texto.length}`
+}
+
+export const VERSAO_SCHEMA = versaoDoSchema()
+
+/**
+ * Bancos cuja migração já foi concluída NESTE isolate.
+ *
+ * Guarda a promessa, não um booleano: duas requisições concorrentes no mesmo
+ * isolate chegam aqui juntas, e um booleano só marcado no fim deixaria as duas
+ * migrarem em paralelo. É o mesmo raciocínio do check-then-insert do outbox, na
+ * versão em memória.
+ *
+ * `WeakMap` chaveado pela instância de `Banco` — não uma flag de módulo — porque
+ * cada teste monta um banco novo (`sqlite-local`) e chama `migrar`. Uma flag global
+ * faria o segundo teste rodar contra um banco sem tabela nenhuma.
+ */
+const migracaoPorBanco = new WeakMap<Banco, Promise<void>>()
+
+/**
+ * A sonda: uma query decide se há trabalho a fazer.
+ *
+ * Devolve `true` só quando a marca gravada é exatamente a do schema que este código
+ * conhece. Qualquer outra situação — tabela ausente (banco novo), marca diferente
+ * (schema mudou), erro ao ler — devolve `false` e o caminho completo roda. É a
+ * direção fail-closed de sempre: o custo de aplicar DDL idempotente à toa é tempo;
+ * o custo de **não** aplicar é tabela faltando em produção.
+ */
+async function jaAplicado(db: Banco): Promise<boolean> {
+  try {
+    const r = await db.query(`SELECT versao FROM meta_schema WHERE id = 1`, [])
+    return primeiraLinha<{ versao: string }>(r)?.versao === VERSAO_SCHEMA
+  } catch {
+    // Banco novo: a própria `meta_schema` ainda não existe.
+    return false
+  }
+}
+
+async function aplicar(db: Banco): Promise<void> {
   for (const sql of TABELAS) {
     await db.exec(sql, [])
   }
@@ -365,5 +455,34 @@ export async function migrar(db: Banco): Promise<void> {
         throw e
       }
     }
+  }
+  // A marca é gravada por ÚLTIMO, e só se tudo acima passou: marca gravada antes de
+  // um `ALTER` estourar seria a sonda mentindo para sempre.
+  await db.exec(
+    `INSERT INTO meta_schema (id, versao, aplicado_em) VALUES (1, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET versao = excluded.versao, aplicado_em = excluded.aplicado_em`,
+    [VERSAO_SCHEMA, new Date().toISOString()],
+  )
+}
+
+export async function migrar(db: Banco): Promise<void> {
+  const emAndamento = migracaoPorBanco.get(db)
+  if (emAndamento) return emAndamento
+
+  const promessa = (async () => {
+    if (await jaAplicado(db)) return
+    await aplicar(db)
+  })()
+
+  // Memoiza a promessa ANTES do primeiro `await` do chamador, para que a segunda
+  // requisição do mesmo isolate espere esta em vez de começar outra.
+  migracaoPorBanco.set(db, promessa)
+  try {
+    await promessa
+  } catch (e) {
+    // Migração que falhou não pode ficar memoizada como concluída: a requisição
+    // seguinte tem de tentar de novo (o banco pode ter estado fora do ar).
+    migracaoPorBanco.delete(db)
+    throw e
   }
 }

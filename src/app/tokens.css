@@ -34,8 +34,18 @@
   --go-accent: var(--go-lime);
   --go-border: var(--go-blue);
 
-  /* Tipografia — Poppins e nada mais (§2) */
-  --font-family: 'Poppins', sans-serif;
+  /*
+   * Tipografia — Poppins e nada mais (§2).
+   *
+   * A pilha depois de Poppins não é uma segunda escolha de design: é o que se vê
+   * enquanto a fonte do Google não chegou. A folha dela saiu do caminho crítico do
+   * primeiro paint (ver `index.html`), então esse instante agora EXISTE e alguém o
+   * enxerga — antes a tela toda esperava por ela. Fontes de sistema com métricas
+   * próximas às da Poppins fazem a troca ser mudança de desenho da letra, não
+   * reflow de parágrafo inteiro.
+   */
+  --font-family: 'Poppins', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue',
+    Arial, sans-serif;
   --fw-regular: 400;
   --fw-semibold: 600;
   --fw-bold: 700;
