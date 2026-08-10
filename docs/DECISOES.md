@@ -1270,7 +1270,7 @@ foi feito porque não havia resultado a reproduzir, só um caminho a oferecer.
 
 ### D-31 · O schema deixa de ser reaplicado por requisição, e a marca de versão é DERIVADA
 
-**Data:** 10/08/2026 · **Contexto:** `RNF-36` (novo), `RNF-15`, `T-401` · **Decisão de:** Kaique
+**Data:** 10/08/2026 · **Contexto:** `RNF-36` (novo), `RNF-15`, `T-135` · **Decisão de:** Kaique
 
 **O relato:** "a página em si é bem lenta, tudo demora pra aparecer — até a tela de admin,
 mesmo minha conta já estando logada". O "mesmo estando logada" é a parte que aponta o
@@ -1278,13 +1278,13 @@ culpado: não era o OAuth do edge.
 
 **A medição.** `montarContexto` — que roda a **cada** requisição `/api/*`, porque é ele que
 resolve `CONFIG_PADRAO → env → banco` e config alterada no console tem de valer na requisição
-seguinte — começa chamando `migrar(env.DB)`. `migrar` aplicava os 34 `CREATE TABLE/INDEX IF
+seguinte — começa chamando `migrar(env.DB)`. `migrar` aplicava os 32 `CREATE TABLE/INDEX IF
 NOT EXISTS` mais os 3 `ALTER TABLE`, **em série**, com um `await` por statement. Contado com
 um espião em volta do `Banco`:
 
 | | Idas ao banco por requisição `/api/*` |
 |---|---|
-| Antes | **36**, em toda requisição, sempre |
+| Antes | **36**, em toda requisição, sempre — 35 na migração (32 DDL + 3 `ALTER`) + 1 do `config.carregar()` |
 | Depois — mesmo isolate | **1** (só `config.carregar()`) |
 | Depois — isolate novo, banco já migrado | **2** (a sonda + config) |
 

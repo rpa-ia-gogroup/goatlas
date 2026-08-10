@@ -267,6 +267,31 @@ created: "2026-08-03"
       envolvido em `try/catch` no orquestrador, então o turno sobe como `500`
       genérico de `ERROS.interno()` — fail-closed e auditado, mas a mensagem não
       diz à pessoa que o agente está sem configuração.
+- [x] **T-135** 🚨 O schema era reaplicado **por requisição**: 36 idas ao banco antes
+      de qualquer rota trabalhar.
+      _Requirements: RNF-36, D-31_
+      → Relato do usuário em 10/08/2026: "tudo demora pra aparecer, até a tela de
+      admin mesmo já estando logada" — e o "já estando logada" é o que descarta o
+      OAuth do edge. `montarContexto` roda a cada requisição `/api/*` (é ele que
+      resolve `CONFIG_PADRAO → env → banco`, para config mudada no console valer na
+      requisição seguinte) e começava por `migrar`, que aplicava os 32 statements de
+      DDL (17 tabelas + 15 índices) mais os 3 `ALTER` **em série**. Medido com um espião
+      em volta do `Banco`: **36 idas → 1** (mesmo isolate) ou **2** (isolate novo,
+      pela sonda). No app publicado era piso de **442 ms** no cron mais barato
+      (`enviar-notificacoes` sem nada a enviar, que praticamente só monta contexto),
+      e o console de admin dispara **seis** requisições paralelas no boot.
+      ⚠️ **Nenhum dos 763 testes podia pegar:** o comportamento estava *correto*, só
+      caro — `IF NOT EXISTS` é idempotente, e no shim em memória cada statement custa
+      microssegundos. O custo é de **rede** e só existe na plataforma; mesma família de
+      `linhasComoObjetos`. Por isso o teste novo conta **idas ao banco**, não
+      milissegundos (`tests/migracao-custo-por-requisicao.test.ts`, 8 testes: caminho
+      frio, quente, isolate reciclado, concorrência no boot, marca divergente, sonda
+      que explode, falha não memoizada). Duas partes na correção porque uma só não
+      cobre — memoização por instância de `Banco` (a *promessa*, não um booleano) e
+      sonda de uma query (`meta_schema`) para o isolate reciclado. Marca de versão
+      **derivada** do texto do schema: não há número a subir ao acrescentar tabela.
+      No mesmo movimento, a folha da Poppins saiu do caminho crítico do primeiro
+      paint. Verificado no app rodando (`npm run dev`).
 - [ ] **T-096** Deploy em **staging**, validação, e só então produção.
       _Requirements: CLAUDE.md regra 10_
 - [ ] **T-097** Fechar a Definição de Pronto da Fase 1 (§13 dos requisitos) item por

@@ -8,24 +8,25 @@
  *   - `submissoes.chave_idempotencia UNIQUE` → RF-24 (duplo clique não duplica)
  *   - `classificacoes_ticket` PK composta → cache da Regra 2 (R-08)
  *
- * ⚠️ **Idempotente não quer dizer grátis.** `migrar` roda dentro de
- * `montarContexto`, que roda a CADA requisição `/api/*` — e cada `db.exec` do
- * GoDeploy é uma ida e volta assíncrona. Aplicar os 34 `CREATE` mais os 3 `ALTER`
- * (que **sempre** lançam "duplicate column" depois da primeira vez) custava ~37
- * idas ao banco antes de a rota começar a trabalhar: piso medido de **442 ms** no
- * cron mais barato, e ~7× isso para abrir o console de admin, que dispara seis
- * requisições em paralelo. Daí `jaAplicado` — ver ali por que a sonda é UMA query
- * e por que a versão é derivada, não escrita à mão.
+ * ⚠️ **Idempotente não quer dizer grátis** (`RNF-36`, `D-31`, T-135). `migrar` roda
+ * dentro de `montarContexto`, que roda a CADA requisição `/api/*` — e cada `db.exec`
+ * do GoDeploy é uma ida e volta assíncrona. Aplicar os 32 statements de DDL (17
+ * tabelas + 15 índices) mais os 3 `ALTER` (que **sempre** lançam "duplicate column"
+ * depois da primeira vez) custava **35 idas ao banco** antes de a rota começar a
+ * trabalhar — 36 com o `config.carregar()` logo em seguida. Piso medido de **442 ms**
+ * no cron mais barato do app, e o console de admin dispara **seis** requisições
+ * paralelas no boot. Daí `jaAplicado`: ver ali por que a sonda é UMA query e por que
+ * a versão é derivada, não escrita à mão.
  */
 
 import { primeiraLinha, type Banco } from './tipos'
 
 export const TABELAS = [
   /**
-   * Marca de qual schema já foi aplicado neste banco (T-401).
+   * Marca de qual schema já foi aplicado neste banco (T-135).
    *
    * Uma linha, chave fixa. Existe só para a sonda de `jaAplicado` poder responder
-   * "já está tudo aplicado" em **uma** query, em vez de o app reaplicar 37
+   * "já está tudo aplicado" em **uma** query, em vez de o app reaplicar 35
    * statements por requisição para descobrir a mesma coisa.
    *
    * ⚠️ Tabela própria, não uma chave em `config`, de propósito: `config` é a tabela

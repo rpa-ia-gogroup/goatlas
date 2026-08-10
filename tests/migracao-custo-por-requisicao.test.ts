@@ -1,11 +1,12 @@
 /**
- * O custo de `migrar` por requisição — RNF-36 (custo fixo orçado), T-401.
+ * O custo de `migrar` por requisição — RNF-36 (custo fixo orçado), T-135.
  *
  * `montarContexto` chama `migrar` a CADA requisição `/api/*`, e cada `db.exec` do
- * GoDeploy é uma ida e volta assíncrona. Aplicar os 34 `CREATE` mais os 3 `ALTER`
- * toda vez custava ~37 idas ao banco antes de a rota começar a trabalhar — piso
- * medido de **442 ms** no cron mais barato do app em produção (07..10/08/2026), e
- * seis vezes isso para abrir o console de admin, que dispara seis requisições.
+ * GoDeploy é uma ida e volta assíncrona. Aplicar os 32 statements de DDL (17 tabelas
+ * + 15 índices) mais os 3 `ALTER` toda vez custava **35 idas ao banco** antes de a
+ * rota começar a trabalhar — 36 com o `config.carregar()` que vem em seguida. Piso
+ * medido de **442 ms** no cron mais barato do app publicado (10/08/2026), e o console
+ * de admin dispara **seis** requisições paralelas no boot.
  *
  * ⚠️ Estes testes contam IDAS AO BANCO, não milissegundos. Tempo de parede num
  * SQLite em memória não mede nada do que dói em produção (lá o custo é de rede), e
@@ -44,7 +45,7 @@ beforeEach(() => {
   db = new BancoContado(new SqliteLocal())
 })
 
-describe('T-401 — migrar não cobra o schema inteiro por requisição', () => {
+describe('T-135 — migrar não cobra o schema inteiro por requisição', () => {
   it('a PRIMEIRA migração aplica tudo', async () => {
     await migrar(db)
     // Banco novo: paga os CREATE, os ALTER e a gravação da marca.
@@ -59,11 +60,11 @@ describe('T-401 — migrar não cobra o schema inteiro por requisição', () => 
 
     await migrar(db)
 
-    // Memoizado por instância de banco: zero idas. Era este número que valia ~37.
+    // Memoizado por instância de banco: zero idas. Era este número que valia 35.
     expect(db.idas - depoisDaPrimeira).toBe(0)
   })
 
-  it('🚨 isolate NOVO sobre banco já migrado custa UMA query, não 37 execs', async () => {
+  it('🚨 isolate NOVO sobre banco já migrado custa UMA query, não 35 execs', async () => {
     // O isolate do Worker recicla: a memória em memória não sobrevive, o banco sim.
     // Simular isso é envolver o MESMO SQLite numa instância nova de `Banco`, que é
     // uma chave nova no `WeakMap`.
@@ -89,7 +90,7 @@ describe('T-401 — migrar não cobra o schema inteiro por requisição', () => 
   })
 })
 
-describe('T-401 — a sonda erra para o lado seguro', () => {
+describe('T-135 — a sonda erra para o lado seguro', () => {
   it('marca de OUTRA versão reaplica o schema', async () => {
     await migrar(db)
     // Simula deploy com schema novo: o código conhece uma versão, o banco tem outra.

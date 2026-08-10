@@ -2366,10 +2366,10 @@ function semearIaDemo(fake) {
 // src/lib/db/schema.ts
 var TABELAS = [
   /**
-   * Marca de qual schema já foi aplicado neste banco (T-401).
+   * Marca de qual schema já foi aplicado neste banco (T-135).
    *
    * Uma linha, chave fixa. Existe só para a sonda de `jaAplicado` poder responder
-   * "já está tudo aplicado" em **uma** query, em vez de o app reaplicar 37
+   * "já está tudo aplicado" em **uma** query, em vez de o app reaplicar 35
    * statements por requisição para descobrir a mesma coisa.
    *
    * ⚠️ Tabela própria, não uma chave em `config`, de propósito: `config` é a tabela

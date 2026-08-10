@@ -594,10 +594,11 @@ persistente.
   chamados vazia, config caindo nos defaults. Como os defaults vêm do bootstrap por env, o
   app *parecia* funcionar. **Nunca indexe `rows` direto**; há teste das duas formas.
 - 🚨 **Cada `await db.exec` é uma ida de REDE, e `montarContexto` roda por requisição**
-  (`RNF-36`, `D-31`). `migrar` reaplicava os 34 `CREATE ... IF NOT EXISTS` mais os 3 `ALTER`
-  em série a **cada** requisição `/api/*`: **36 idas ao banco** antes de a rota começar a
-  trabalhar — piso medido de **442 ms** no cron mais barato, e o console de admin dispara
-  seis requisições no boot. Agora são **1** (mesmo isolate) ou **2** (isolate novo, pela
+  (`RNF-36`, `D-31`). `migrar` reaplicava os 32 statements de DDL (17 tabelas + 15
+  índices) mais os 3 `ALTER` em série a **cada** requisição `/api/*`: **36 idas ao banco**
+  (35 na migração + 1 do `config.carregar()`) antes de a rota começar a trabalhar — piso
+  medido de **442 ms** no cron mais barato, e o console de admin dispara seis requisições
+  no boot. Agora são **1** (mesmo isolate) ou **2** (isolate novo, pela
   sonda `meta_schema`). ⚠️ **Idempotente não é grátis**, e o teste não pega: o comportamento
   estava certo, e no shim em memória cada statement custa microssegundos — o custo é de rede
   e só existe na plataforma. Mesma família de `linhasComoObjetos`. Por isso o teto de
