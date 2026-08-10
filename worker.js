@@ -259,6 +259,7 @@ function montarJqlAtualizados(desde, agoraMs) {
   return `reporter = currentUser() AND updated >= "${paraJql(base)}" ORDER BY updated ASC`;
 }
 var CAMPOS_DE_SISTEMA_JA_COBERTOS = /* @__PURE__ */ new Set(["summary", "description", "priority"]);
+var MAX_SERVICE_DESKS = 20;
 function camposAdicionais(brutos) {
   const resultado = [];
   for (const bruto of brutos) {
@@ -271,8 +272,7 @@ function camposAdicionais(brutos) {
     }));
     const custom = typeof bruto.jiraSchema?.custom === "string" ? bruto.jiraSchema.custom : "";
     const tipoBruto = typeof bruto.jiraSchema?.type === "string" ? bruto.jiraSchema.type : "";
-    const itens = typeof bruto.jiraSchema?.items === "string" ? bruto.jiraSchema.items : "";
-    const tipo = sistema === "attachment" || itens === "attachment" ? "anexo" : opcoes.length > 0 || tipoBruto === "option" ? "selecao" : custom.toLowerCase().includes("textarea") ? "texto_longo" : "texto";
+    const tipo = opcoes.length > 0 || tipoBruto === "option" ? "selecao" : custom.toLowerCase().includes("textarea") ? "texto_longo" : "texto";
     resultado.push({
       fieldId,
       rotulo: String(bruto.name ?? fieldId),
@@ -301,13 +301,27 @@ var ClienteAtlassianHttp = class {
   async listarTiposChamado() {
     const cacheado = this.cacheMetadados.obter("tiposChamado");
     if (cacheado) return cacheado;
-    const dados = await this.transporte.requisitar("/rest/servicedeskapi/requesttype");
-    const tipos = (dados?.values ?? []).map((v) => ({
-      id: String(v.id ?? ""),
-      serviceDeskId: String(v.serviceDeskId ?? ""),
-      nome: String(v.name ?? ""),
-      descricao: typeof v.description === "string" ? v.description : null
-    }));
+    const desks = await this.transporte.requisitar("/rest/servicedeskapi/servicedesk");
+    const idsDesk = (desks?.values ?? []).map((d) => String(d.id ?? "")).filter((id) => id.length > 0).slice(0, MAX_SERVICE_DESKS);
+    const tipos = [];
+    for (const serviceDeskId of idsDesk) {
+      const dados = await this.transporte.requisitar(
+        `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype`
+      );
+      for (const v of dados?.values ?? []) {
+        const id = String(v.id ?? "");
+        if (!id) continue;
+        tipos.push({
+          id,
+          // ⚠️ Vem do laço, não do corpo: o endpoint por desk **não repete**
+          // `serviceDeskId` em cada item, e `String(undefined ?? '')` daria `''` —
+          // um tipo sem desk é um tipo com que não se cria chamado nenhum.
+          serviceDeskId,
+          nome: String(v.name ?? ""),
+          descricao: typeof v.description === "string" ? v.description : null
+        });
+      }
+    }
     this.cacheMetadados.definir("tiposChamado", tipos, this.opcoes.ttlMetadadosSeg);
     return tipos;
   }
@@ -1219,9 +1233,9 @@ var LIMITACOES_ULTIMO_ACESSO = Object.freeze({
 var ErroOrganizacao = ErroAtlassian;
 var ENDPOINTS_NAO_VERIFICADOS = Object.freeze([
   Object.freeze({
-    metodo: "GET",
-    caminho: "/admin/v1/orgs/{orgId}/users",
-    risco: "Nome dos campos e forma da pagina\xE7\xE3o (`links.next`) seguem a documenta\xE7\xE3o, n\xE3o uma resposta observada."
+    metodo: "POST",
+    caminho: "/admin/v1/orgs/{orgId}/users/search",
+    risco: '\u2705 VERIFICADO contra a Atlassian real em 07/08/2026: devolve 54 contas, campos em camelCase, `expand:["NAME","EMAIL"]` obrigat\xF3rio para nome/e-mail. \u{1F6A8} O que FALTA n\xE3o \xE9 verifica\xE7\xE3o, \xE9 caminho: **o produto atribu\xEDdo a cada conta n\xE3o existe neste endpoint** (`expand:["PRODUCT_ACCESS"]` responde 400). Sem ele o invent\xE1rio de assentos grava zero linha, e portanto custo (`RF-53`) e assento ocioso (`RF-52`) n\xE3o t\xEAm insumo. A via prov\xE1vel \xE9 derivar de grupos (`jira-servicedesk`/`jira-software`/`conf`), que \xE9 proxy imperfeito \u2014 ver T-133 e `D-22`.'
   }),
   Object.freeze({
     metodo: "GET",
@@ -1320,25 +1334,101 @@ var ClienteOrganizacaoHttp = class {
       baseUrl: opcoes.baseUrl ?? BASE_ORGANIZACAO
     });
   }
+  /**
+   * Inventário de contas da organização — RF-51, T-122.
+   *
+   * ## Por que `POST /users/search` e não `GET /users`
+   *
+   * `GET /admin/v1/orgs/{orgId}/users` lista **só contas gerenciadas**, e uma org só
+   * tem contas gerenciadas depois de reivindicar um domínio. A org da Gocase não
+   * reivindicou nenhum: aquele endpoint devolve `{"data": []}` — medido em
+   * 31/07/2026. Zero contas, HTTP 200, nenhum erro. É a pior forma de estar errado,
+   * porque o console mostraria "0 assentos" e ninguém desconfiaria da chamada.
+   *
+   * ## Três armadilhas medidas, e nenhuma dá erro
+   *
+   * 1. **`accountTypes: ['atlassian']` é obrigatório.** Sem ele entram ~83 contas de
+   *    app/bot, que não são pessoas e não consomem assento de gente.
+   * 2. **`query`, `groupIds` e `productAccess` NÃO filtram** — respondem 200 com a
+   *    lista inteira. Usar um deles achando que restringe produz um resultado que
+   *    parece filtrado e não é. Só `accountTypes`, `accountIds` e `isSuspended`
+   *    filtram de verdade; por isso nenhum outro é enviado aqui.
+   * 3. **`account_status` não é status de suspensão** — volta `"active"` até para
+   *    conta suspensa. Quem responde é o **filtro** `isSuspended`, e é por isso que
+   *    há duas varreduras.
+   *
+   * ## E se o filtro de suspensão também não filtrar?
+   *
+   * A armadilha 2 mostra que "filtro que não filtra" é um comportamento real desta
+   * API. Se `isSuspended` for um deles, as duas varreduras devolvem o **mesmo
+   * conjunto** — e isso é detectável: interseção não vazia significa que o filtro não
+   * separou nada. Nesse caso o resultado sai com `suspensaoConhecida: false` em vez de
+   * afirmar que ninguém está suspenso. Contar conta suspensa como assento ativo infla
+   * o custo e gera recomendação de revogar acesso de quem já não tem acesso.
+   */
   async listarUsuarios(orgId) {
-    const saida = [];
-    let caminho = `/admin/v1/orgs/${encodeURIComponent(orgId)}/users?limit=${TAMANHO_PAGINA}`;
-    for (let pagina = 0; pagina < MAX_PAGINAS_USUARIOS && caminho !== null; pagina += 1) {
-      const dados = await this.transporte.requisitar(caminho);
+    const ativas = await this.varrer(orgId, false);
+    const suspensas = await this.varrer(orgId, true);
+    const idsAtivas = new Set(ativas.usuarios.map((u) => u.accountId));
+    const sobrepostas = suspensas.usuarios.filter((u) => idsAtivas.has(u.accountId)).length;
+    const suspensaoConhecida = sobrepostas === 0;
+    return {
+      usuarios: ativas.usuarios,
+      // `0` sem `suspensaoConhecida` seria a afirmação errada; quem lê o campo tem de
+      // olhar os dois juntos, e o nome do outro campo existe para forçar isso.
+      suspensas: suspensaoConhecida ? suspensas.usuarios.length : 0,
+      suspensaoConhecida,
+      parcial: ativas.parcial || suspensas.parcial
+    };
+  }
+  /**
+   * Uma varredura paginada, com o recorte de suspensão fixo.
+   *
+   * ⚠️ **O cursor volta em `links.next` e é reenviado no CORPO**, não seguido como
+   * URL: é um `POST`, e a próxima página é o mesmo caminho com `cursor` no JSON.
+   * Seguir `links.next` como caminho faria a segunda página virar um `POST` para uma
+   * URL com query string que o endpoint não lê — 200 com a primeira página de novo, ou
+   * seja, laço até o teto sem nunca avançar.
+   */
+  async varrer(orgId, isSuspended) {
+    const caminho = `/admin/v1/orgs/${encodeURIComponent(orgId)}/users/search`;
+    const usuarios = [];
+    let cursor = null;
+    let pagina = 0;
+    for (; pagina < MAX_PAGINAS_USUARIOS; pagina += 1) {
+      const dados = await this.transporte.requisitar(caminho, {
+        method: "POST",
+        body: JSON.stringify({
+          // Só os três filtros que a medição confirmou. Ver armadilha 2.
+          accountTypes: ["atlassian"],
+          isSuspended,
+          limit: TAMANHO_PAGINA,
+          // ⚠️ Sem este expand a resposta NÃO traz `name` nem `email` — só ids e status.
+          // `PRODUCT_ACCESS` não entra na lista: responde 400 (ver `UsuarioBruto`).
+          expand: ["NAME", "EMAIL"],
+          ...cursor === null ? {} : { cursor }
+        })
+      });
       for (const bruto of Array.isArray(dados?.data) ? dados.data : []) {
-        const accountId = texto(bruto?.account_id);
+        const accountId = texto(bruto?.accountId);
         if (!accountId) continue;
-        if (texto(bruto?.account_status) === "inactive") continue;
-        saida.push({
+        if (texto(bruto?.accountStatus) === "inactive") continue;
+        usuarios.push({
           accountId,
           email: texto(bruto?.email) ?? "",
           nome: texto(bruto?.name) ?? texto(bruto?.email) ?? accountId,
-          produtos: produtosDe(bruto?.product_access)
+          // ⚠️ **Sempre vazio hoje**, e isso é honesto em vez de inventado: o produto
+          // atribuído NÃO vem deste endpoint (ver `UsuarioBruto.productAccess`). Enquanto
+          // for assim, `registrarColeta` grava zero linha por conta — o inventário fica
+          // vazio e a tela diz "sem coleta", que é melhor que um inventário que existe e
+          // está errado. Resolver isto é T-133 (`D-22`).
+          produtos: produtosDe(bruto?.productAccess)
         });
       }
-      caminho = proximaPagina(dados?.links?.next);
+      cursor = cursorDaProximaPagina(dados?.links?.next);
+      if (cursor === null) return { usuarios, parcial: false };
     }
-    return saida;
+    return { usuarios, parcial: true };
   }
   async ultimoAcesso(orgId, accountId) {
     const dados = await this.transporte.requisitar(
@@ -1351,7 +1441,10 @@ var ClienteOrganizacaoHttp = class {
     for (const item of bruto) {
       const produto = texto(item?.key);
       if (!produto) continue;
-      porProduto.push({ produto, ultimoAcessoEm: normalizarCarimbo(item?.last_active) });
+      porProduto.push({
+        produto,
+        ultimoAcessoEm: normalizarCarimbo(item?.last_active_timestamp) ?? normalizarCarimbo(item?.last_active)
+      });
     }
     return { accountId, porProduto, coletadoEm: (/* @__PURE__ */ new Date()).toISOString() };
   }
@@ -1371,13 +1464,14 @@ var ClienteOrganizacaoHttp = class {
     );
   }
 };
-function proximaPagina(bruto) {
+function cursorDaProximaPagina(bruto) {
   const url = texto(bruto);
   if (!url) return null;
   try {
     const alvo = new URL(url, BASE_ORGANIZACAO);
     if (alvo.origin !== new URL(BASE_ORGANIZACAO).origin) return null;
-    return `${alvo.pathname}${alvo.search}`;
+    const cursor = alvo.searchParams.get("cursor");
+    return cursor !== null && cursor.length > 0 ? cursor : null;
   } catch {
     return null;
   }
@@ -1395,6 +1489,9 @@ var ClienteOrganizacaoFake = class {
     this.estado = {
       usuarios: inicial.usuarios ?? [],
       ultimoAcesso: inicial.ultimoAcesso ?? /* @__PURE__ */ new Map(),
+      suspensas: inicial.suspensas ?? 0,
+      suspensaoConhecida: inicial.suspensaoConhecida ?? true,
+      parcial: inicial.parcial ?? false,
       falhas: {
         listarUsuarios: "nenhum",
         ultimoAcesso: "nenhum",
@@ -1408,9 +1505,20 @@ var ClienteOrganizacaoFake = class {
     const { status, transitorio } = FALHAS2[modo];
     throw new ErroOrganizacao(`fake organiza\xE7\xE3o: ${modo}`, { status, transitorio, recurso });
   }
+  /**
+   * ⚠️ O fake expõe `suspensas`/`suspensaoConhecida`/`parcial` como estado
+   * **roteirizável**, e não como constante otimista. Um dublê que respondesse sempre
+   * `suspensaoConhecida: true` esconderia justamente o caso que a tela precisa saber
+   * mostrar — o mesmo raciocínio do fake de busca ignorar o termo por padrão.
+   */
   async listarUsuarios(_orgId) {
     this.checar(this.estado.falhas.listarUsuarios, "listarUsuarios");
-    return this.estado.usuarios;
+    return {
+      usuarios: this.estado.usuarios,
+      suspensas: this.estado.suspensas,
+      suspensaoConhecida: this.estado.suspensaoConhecida,
+      parcial: this.estado.parcial
+    };
   }
   async ultimoAcesso(_orgId, accountId) {
     this.checar(this.estado.falhas.ultimoAcesso, "ultimoAcesso");
@@ -1476,6 +1584,8 @@ Voc\xEA **n\xE3o** cria o chamado. Voc\xEA monta a proposta e a pessoa confirma.
 
 ## Quando a resposta j\xE1 existe
 N\xE3o diga "negado" nem "n\xE3o posso abrir". Mostre o que encontrou, explique em uma frase por que parece resolver o caso, e deixe claro que, se n\xE3o resolver, voc\xEA abre o chamado na sequ\xEAncia. Se a documenta\xE7\xE3o n\xE3o serviu, isso \xE9 problema da documenta\xE7\xE3o \u2014 registre e siga.
+
+Depois de um bloqueio desses, **n\xE3o anuncie que montou o chamado** enquanto a pessoa n\xE3o tiver usado o bot\xE3o "Isso n\xE3o resolve meu caso". Ela precisa dizer o que faltou na documenta\xE7\xE3o, e \xE9 isso que libera a proposta. Dizer "montei o chamado abaixo" antes disso descreve uma tela que ela n\xE3o est\xE1 vendo. Continue conversando normalmente; aponte o bot\xE3o quando ela quiser seguir.
 
 ## Prioridade e prazo
 Sugira a prioridade a partir do impacto que a pessoa descreveu:
@@ -1987,6 +2097,7 @@ var CONFIG_PADRAO = Object.freeze({
   org_id: null,
   assentos_ocioso_dias: 90,
   custo_mensal_por_produto: {},
+  curva_preco_por_produto: {},
   regra1_threshold_score: 0.75,
   regra2_threshold_recorrencia: 3,
   regra2_janela_dias: 90,
@@ -2738,6 +2849,27 @@ var RepositorioConversas = class {
     await this.definirEstado(conversaId, "coletando");
     return r.rowsWritten;
   }
+  /**
+   * Existe bloqueio ainda NÃO sobreposto? — RF-13, RN-07.
+   *
+   * É o que faz o bloqueio durar mais que o turno em que disparou. Sem isto a
+   * regra só valia para a resposta imediata: bastava mandar outra mensagem
+   * qualquer para o servidor montar a proposta, porque nenhuma regra dispara de
+   * novo (a busca já rodou) e `bloqueio` volta `null` no turno seguinte. O
+   * chamado nascia sem `override_registrado` entre o bloqueio e a criação — a
+   * saída existia, mas não ficava registrada, que é metade do que RN-07 pede.
+   *
+   * O efeito colateral era pior que o furo: quem escapava pelo chat não entrava
+   * na taxa de override, então o painel mostrava deflexão alta justamente
+   * quando ela falhou.
+   */
+  async temBloqueioPendente(conversaId) {
+    const r = await this.db.query(
+      `SELECT 1 FROM bloqueios WHERE conversa_id = ? AND houve_override = 0 LIMIT 1`,
+      [conversaId]
+    );
+    return r.rows.length > 0;
+  }
   async listarBloqueios(conversaId) {
     const r = await this.db.query(
       `SELECT regra, motivo, houve_override FROM bloqueios WHERE conversa_id = ? ORDER BY criado_em ASC`,
@@ -2909,6 +3041,7 @@ function avaliarRegra2(classificados, thresholdRecorrencia) {
 function urlDeLeituraNoApp(idPagina) {
   return `/?pagina=${encodeURIComponent(idPagina)}`;
 }
+var MENSAGEM_BLOQUEIO_PENDENTE = 'Ainda n\xE3o consigo abrir o chamado: primeiro preciso registrar o que a documenta\xE7\xE3o n\xE3o resolveu no seu caso. Use o bot\xE3o "Isso n\xE3o resolve meu caso" aqui embaixo e me conte em uma frase \u2014 abro o chamado na sequ\xEAncia.';
 function montarMensagemBloqueio(veredito) {
   if (veredito.regra === "regra1_confluence") {
     const ev2 = veredito.evidencia;
@@ -2918,7 +3051,11 @@ function montarMensagemBloqueio(veredito) {
       "",
       links,
       "",
-      "Se essas p\xE1ginas n\xE3o resolvem o **seu** caso, me diga o que ficou de fora e eu abro o chamado na sequ\xEAncia. Isso tamb\xE9m me ajuda a sinalizar que a documenta\xE7\xE3o precisa melhorar."
+      // ⚠️ A copy aponta o BOTÃO, não a caixa de mensagem. A versão anterior dizia
+      // "me diga o que ficou de fora" e convidava a digitar no chat — o caminho que
+      // não registra o override. Duas portas, uma só registrada, e a copy indicando
+      // justamente a outra: o motivo de a taxa de deflexão parecer melhor do que era.
+      'Se essas p\xE1ginas n\xE3o resolvem o **seu** caso, use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo. Vou pedir uma frase sobre o que faltou \u2014 \xE9 ela que manda a documenta\xE7\xE3o para a fila de melhoria \u2014 e sigo com o chamado na sequ\xEAncia.'
     ].join("\n");
   }
   const ev = veredito.evidencia;
@@ -2930,7 +3067,7 @@ function montarMensagemBloqueio(veredito) {
     "",
     "Abrir de novo provavelmente traria o mesmo ajuste tempor\xE1rio. Faz mais sentido tratar a causa \u2014 posso registrar isso como um chamado de causa raiz, com o hist\xF3rico anexado.",
     "",
-    "Se o seu caso \xE9 diferente dos anteriores, me diga o que muda e eu abro normalmente."
+    'Se o seu caso \xE9 diferente dos anteriores, use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo e me conte o que muda \u2014 abro o chamado na sequ\xEAncia.'
   ].join("\n");
 }
 function regra2Disponivel(exemplos) {
@@ -3222,6 +3359,25 @@ var Orquestrador = class {
       textoUsuario,
       null
     );
+    if (await this.conversas.temBloqueioPendente(conversa.id)) {
+      await this.conversas.adicionarMensagem(
+        this.novoId(),
+        conversa.id,
+        "assistant",
+        MENSAGEM_BLOQUEIO_PENDENTE,
+        null
+      );
+      return {
+        texto: MENSAGEM_BLOQUEIO_PENDENTE,
+        bloqueado: false,
+        bloqueioPendente: true,
+        regraBloqueio: null,
+        toolsExecutadas: [],
+        toolsRecusadas: [],
+        custoUsd: 0,
+        tetoCustoAtingido: false
+      };
+    }
     const historico = await this.montarHistorico(conversa.id);
     const executadas = [];
     const recusadas = [];
@@ -3241,6 +3397,9 @@ var Orquestrador = class {
         return {
           texto: "Esta conversa ficou longa e vou precisar encerr\xE1-la por aqui. Voc\xEA pode abrir o chamado pelo formul\xE1rio, ou come\xE7ar uma conversa nova com o resumo do que ficou pendente.",
           bloqueado: false,
+          // Teto de custo não apaga bloqueio: se havia um pendente, o caminho de
+          // override continua na tela mesmo com a conversa encerrada.
+          bloqueioPendente: await this.conversas.temBloqueioPendente(atual.id),
           regraBloqueio: null,
           toolsExecutadas: executadas,
           toolsRecusadas: recusadas,
@@ -3297,13 +3456,14 @@ var Orquestrador = class {
       }
       if (bloqueio) break;
     }
-    if (!bloqueio && !atual.proposta && this.verificacoesConcluidas(atual)) {
+    const bloqueioPendente = await this.conversas.temBloqueioPendente(atual.id);
+    if (!bloqueio && !bloqueioPendente && !atual.proposta && this.verificacoesConcluidas(atual)) {
       custoTurno += await this.tentarMontarProposta(atual, config);
       const relido = await this.conversas.obter(atual.id);
       if (relido) atual = relido;
     }
     await this.conversas.somarCusto(atual.id, custoTurno);
-    const textoFinal = bloqueio?.texto ?? ultimoTexto;
+    const textoFinal = bloqueio?.texto ?? (bloqueioPendente ? MENSAGEM_BLOQUEIO_PENDENTE : ultimoTexto);
     await this.conversas.adicionarMensagem(
       this.novoId(),
       atual.id,
@@ -3315,6 +3475,11 @@ var Orquestrador = class {
     return {
       texto: textoFinal,
       bloqueado: bloqueio !== null,
+      // Persiste entre turnos, ao contrário de `bloqueado`. É por ele que a UI
+      // decide mostrar o caminho de override: se dependesse de `bloqueado`, o
+      // botão sumiria na mensagem seguinte e o bloqueio viraria parede — o
+      // oposto do que RN-07 pede.
+      bloqueioPendente,
       regraBloqueio: bloqueio?.regra ?? null,
       toolsExecutadas: executadas,
       toolsRecusadas: recusadas,
@@ -3332,6 +3497,7 @@ var Orquestrador = class {
   async montarPropostaAgora(conversa, config) {
     if (conversa.proposta) return true;
     if (!this.verificacoesConcluidas(conversa)) return false;
+    if (await this.conversas.temBloqueioPendente(conversa.id)) return false;
     const custo = await this.tentarMontarProposta(conversa, config);
     if (custo > 0) await this.conversas.somarCusto(conversa.id, custo);
     return Boolean((await this.conversas.obter(conversa.id))?.proposta);
@@ -3989,7 +4155,14 @@ var RepositorioInventario = class {
       const porProduto = new Map(
         (ultimoAcesso?.porProduto ?? []).map((p) => [p.produto, p.ultimoAcessoEm])
       );
-      for (const produto of usuario.produtos) {
+      const chaves = /* @__PURE__ */ new Set([
+        ...usuario.produtos.map((p) => p.chave),
+        ...porProduto.keys()
+      ]);
+      const produtos = [...chaves].map(
+        (chave) => usuario.produtos.find((p) => p.chave === chave) ?? { chave, nome: chave }
+      );
+      for (const produto of produtos) {
         await this.db.exec(
           `INSERT INTO inventario_assentos
              (id, account_id, email, nome, produto, ultimo_acesso_em, coletado_em)
@@ -5968,7 +6141,20 @@ function assentoOcioso(ultimoAcessoEm, ociosoDesdeDias, agoraMs) {
   const diasDesdeUltimoAcesso = (agoraMs - Date.parse(ultimoAcessoEm)) / (1e3 * 60 * 60 * 24);
   return diasDesdeUltimoAcesso >= ociosoDesdeDias;
 }
-function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
+function precoNaFaixa(faixas, quantidade) {
+  for (const f of faixas) {
+    if (f.ate === null || quantidade <= f.ate) return f.precoUnitarioUsd;
+  }
+  return null;
+}
+function economiaComCurva(faixas, atual, remover) {
+  const depois = Math.max(0, atual - remover);
+  const precoAntes = precoNaFaixa(faixas, atual);
+  const precoDepois = precoNaFaixa(faixas, depois);
+  if (precoAntes === null || precoDepois === null) return null;
+  return Math.max(0, atual * precoAntes - depois * precoDepois);
+}
+function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs, curvaPorProduto = {}) {
   const porProdutoMap = /* @__PURE__ */ new Map();
   for (const item of itens) {
     const atual = porProdutoMap.get(item.produto) ?? { usuarios: 0, ociosos: 0 };
@@ -5981,6 +6167,7 @@ function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
   let todosPrecificados = porProdutoMap.size > 0;
   let totalMensalUsd = 0;
   let ociosoCustoMensalUsd = 0;
+  let economiaConfiavel = true;
   for (const [produto, { usuarios, ociosos }] of porProdutoMap) {
     const preco = precoMensalPorProduto[produto];
     const custoMensalUsd = preco === void 0 ? null : usuarios * preco;
@@ -5990,7 +6177,14 @@ function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
       todosPrecificados = false;
     } else {
       totalMensalUsd += usuarios * preco;
-      ociosoCustoMensalUsd += ociosos * preco;
+      const curva = curvaPorProduto[produto];
+      const comCurva = curva ? economiaComCurva(curva, usuarios, ociosos) : null;
+      if (comCurva === null) {
+        if (ociosos > 0) economiaConfiavel = false;
+        ociosoCustoMensalUsd += ociosos * preco;
+      } else {
+        ociosoCustoMensalUsd += comCurva;
+      }
     }
   }
   return {
@@ -5999,7 +6193,9 @@ function calcularCusto(itens, precoMensalPorProduto, ociosoDesdeDias, agoraMs) {
     custoConfigurado: todosPrecificados,
     ocioso: {
       usuarios: ociososUsuarios,
-      custoMensalUsd: todosPrecificados ? ociosoCustoMensalUsd : null
+      custoMensalUsd: todosPrecificados ? ociosoCustoMensalUsd : null,
+      // Sem nenhum assento ocioso não há economia a estimar, então não há o que ressalvar.
+      economiaConfiavel: ociososUsuarios === 0 ? true : economiaConfiavel
     }
   };
 }
@@ -6465,26 +6661,187 @@ async function validarAnexoEnviado(arquivo) {
   };
 }
 
-// src/lib/http/campos-dinamicos.ts
-function extrairCamposDinamicos(bruto) {
-  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return null;
-  const saida = {};
-  for (const [chave, valor] of Object.entries(bruto)) {
-    if (typeof valor !== "string") continue;
-    const limpo = valor.trim();
-    if (limpo.length === 0) continue;
-    saida[chave] = limpo;
-  }
-  return Object.keys(saida).length > 0 ? saida : null;
+// src/lib/config/validar.ts
+var FAMILIA = {
+  dominios_permitidos: "lista_de_texto",
+  admins: "lista_de_texto",
+  espacos_confluence: "lista_de_texto",
+  labels_bloqueadas: "lista_de_texto",
+  tipos_chamado_permitidos: "lista_de_texto",
+  regra2_exemplos_ajuste_operacional: "lista_de_texto",
+  // `null` é uma resposta legítima: "ainda não sabemos" (Q1, Q4). Diferente de
+  // string vazia, que seria um id inventado.
+  service_desk_id: "texto_ou_vazio",
+  campo_solicitante_id: "texto_ou_vazio",
+  org_id: "texto_ou_vazio",
+  regra2_campo_agrupamento: "texto",
+  regra1_threshold_score: "fracao",
+  regra2_threshold_recorrencia: "inteiro_positivo",
+  regra2_janela_dias: "inteiro_positivo",
+  regra2_limite_tickets: "inteiro_positivo",
+  assentos_ocioso_dias: "inteiro_positivo",
+  limite_requisicoes_por_minuto: "inteiro_positivo",
+  // TTL zero é uma escolha válida: significa não cachear.
+  ttl_metadados_seg: "inteiro_ou_zero",
+  ttl_conteudo_seg: "inteiro_ou_zero",
+  teto_custo_conversa_usd: "dinheiro",
+  custo_mensal_por_produto: "preco_por_produto",
+  /**
+   * Chaves das Fases 3 e 4 — entraram pelo PR #20, e o `Record<ChaveConfig, …>` acima
+   * **não compilou** sem elas. Foi o mapa fazendo exatamente o que foi desenhado para
+   * fazer: até aqui elas chegavam a `PUT /api/admin/config` sem validação de tipo,
+   * porque a família não existia. Ver `D-25`.
+   */
+  curva_preco_por_produto: "curva_de_preco",
+  canal_notificacao_padrao: "canal_ou_vazio",
+  chat_webhook_url: "texto_ou_vazio",
+  email_endpoint: "texto_ou_vazio",
+  email_remetente: "texto_ou_vazio",
+  base_publica_app: "texto_ou_vazio",
+  sla_fracao_aviso: "fracao",
+  emails_piloto: "lista_de_texto",
+  areas_por_email: "mapa_de_texto",
+  baseline_assentos: "baseline_ou_vazio",
+  // ⚠️ `null` aqui é a política do MVP (`D-20`): **não apagar nada**. É diferente de `0`,
+  // que significaria "apagar tudo imediatamente" — e apagar dado pessoal é irreversível.
+  retencao_conversas_dias: "inteiro_positivo_ou_vazio",
+  retencao_auditoria_dias: "inteiro_positivo_ou_vazio",
+  retencao_notificacoes_dias: "inteiro_positivo_ou_vazio"
+};
+function numeroReal(valor) {
+  return typeof valor === "number" && Number.isFinite(valor);
 }
-function filtrarPeloSchema(campos, schema) {
-  if (!campos) return null;
-  const permitidas = new Set(schema.filter((c) => c.tipo !== "anexo").map((c) => c.fieldId));
-  const saida = {};
-  for (const [chave, valor] of Object.entries(campos)) {
-    if (permitidas.has(chave)) saida[chave] = valor;
+function validarFamilia(familia, valor) {
+  switch (familia) {
+    case "lista_de_texto":
+      if (!Array.isArray(valor) || valor.some((v) => typeof v !== "string")) {
+        return { ok: false, motivo: "Esperado uma lista de textos." };
+      }
+      return { ok: true, valor: valor.map((v) => v.trim()).filter((v) => v.length > 0) };
+    case "texto":
+      if (typeof valor !== "string" || valor.trim().length === 0) {
+        return { ok: false, motivo: "Esperado um texto n\xE3o vazio." };
+      }
+      return { ok: true, valor: valor.trim() };
+    case "texto_ou_vazio": {
+      if (valor === null) return { ok: true, valor: null };
+      if (typeof valor !== "string") {
+        return { ok: false, motivo: "Esperado um texto, ou nada." };
+      }
+      const limpo = valor.trim();
+      return { ok: true, valor: limpo.length > 0 ? limpo : null };
+    }
+    case "fracao":
+      if (!numeroReal(valor) || valor < 0 || valor > 1) {
+        return { ok: false, motivo: "Esperado um n\xFAmero entre 0 e 1." };
+      }
+      return { ok: true, valor };
+    case "inteiro_positivo":
+      if (!numeroReal(valor) || !Number.isInteger(valor) || valor < 1) {
+        return { ok: false, motivo: "Esperado um n\xFAmero inteiro de 1 para cima." };
+      }
+      return { ok: true, valor };
+    case "inteiro_ou_zero":
+      if (!numeroReal(valor) || !Number.isInteger(valor) || valor < 0) {
+        return { ok: false, motivo: "Esperado um n\xFAmero inteiro de 0 para cima." };
+      }
+      return { ok: true, valor };
+    case "dinheiro":
+      if (!numeroReal(valor) || valor < 0) {
+        return { ok: false, motivo: "Esperado um n\xFAmero de 0 para cima." };
+      }
+      return { ok: true, valor };
+    case "preco_por_produto": {
+      if (typeof valor !== "object" || valor === null || Array.isArray(valor)) {
+        return { ok: false, motivo: "Esperado um pre\xE7o para cada produto." };
+      }
+      for (const preco of Object.values(valor)) {
+        if (!numeroReal(preco) || preco < 0) {
+          return { ok: false, motivo: "Esperado um pre\xE7o de 0 para cima em cada produto." };
+        }
+      }
+      return { ok: true, valor };
+    }
+    case "inteiro_positivo_ou_vazio": {
+      if (valor === null) return { ok: true, valor: null };
+      if (!numeroReal(valor) || !Number.isInteger(valor) || valor < 1) {
+        return { ok: false, motivo: "Esperado um n\xFAmero inteiro de 1 para cima, ou nada." };
+      }
+      return { ok: true, valor };
+    }
+    case "canal_ou_vazio": {
+      if (valor === null) return { ok: true, valor: null };
+      if (valor !== "chat" && valor !== "email" && valor !== "nenhum") {
+        return { ok: false, motivo: 'Esperado "chat", "email", "nenhum", ou nada.' };
+      }
+      return { ok: true, valor };
+    }
+    case "mapa_de_texto": {
+      if (typeof valor !== "object" || valor === null || Array.isArray(valor)) {
+        return { ok: false, motivo: "Esperado um texto para cada chave." };
+      }
+      const saida = {};
+      for (const [k, v] of Object.entries(valor)) {
+        if (typeof v !== "string" || v.trim().length === 0) {
+          return { ok: false, motivo: "Esperado um texto n\xE3o vazio em cada chave." };
+        }
+        saida[k.trim().toLowerCase()] = v.trim();
+      }
+      return { ok: true, valor: saida };
+    }
+    case "curva_de_preco": {
+      if (typeof valor !== "object" || valor === null || Array.isArray(valor)) {
+        return { ok: false, motivo: "Esperado uma lista de faixas para cada produto." };
+      }
+      for (const faixas of Object.values(valor)) {
+        if (!Array.isArray(faixas) || faixas.length === 0) {
+          return { ok: false, motivo: "Esperado ao menos uma faixa de pre\xE7o por produto." };
+        }
+        for (const f of faixas) {
+          const ate = f?.ate;
+          if (ate !== null && (!numeroReal(ate) || !Number.isInteger(ate) || ate < 1)) {
+            return { ok: false, motivo: 'Em cada faixa, "ate" deve ser inteiro de 1 para cima, ou nada.' };
+          }
+          if (!numeroReal(f?.precoUnitarioUsd) || f.precoUnitarioUsd < 0) {
+            return { ok: false, motivo: 'Em cada faixa, "precoUnitarioUsd" deve ser de 0 para cima.' };
+          }
+        }
+      }
+      return { ok: true, valor };
+    }
+    case "baseline_ou_vazio": {
+      if (valor === null) return { ok: true, valor: null };
+      if (typeof valor !== "object" || Array.isArray(valor)) {
+        return { ok: false, motivo: "Esperado o baseline de assentos, ou nada." };
+      }
+      const v = valor;
+      if (typeof v.coletadoEm !== "string" || v.coletadoEm.trim().length === 0) {
+        return { ok: false, motivo: "Esperado a data da coleta do baseline." };
+      }
+      if (typeof v.porProduto !== "object" || v.porProduto === null || Array.isArray(v.porProduto)) {
+        return { ok: false, motivo: "Esperado a contagem por produto no baseline." };
+      }
+      for (const n of Object.values(v.porProduto)) {
+        if (!numeroReal(n) || !Number.isInteger(n) || n < 0) {
+          return { ok: false, motivo: "Esperado uma contagem inteira de 0 para cima por produto." };
+        }
+      }
+      return { ok: true, valor };
+    }
   }
-  return Object.keys(saida).length > 0 ? saida : null;
+}
+function validarValorDeConfig(chave, valor) {
+  const familia = FAMILIA[chave];
+  if (!familia) return { ok: false, motivo: "Configura\xE7\xE3o desconhecida." };
+  return validarFamilia(familia, valor);
+}
+function chaveDeConfigConhecida(chave) {
+  return chave in CONFIG_PADRAO;
+}
+
+// src/lib/config/diagnostico.ts
+function buscaConfigurada(espacos) {
+  return espacos.length > 0;
 }
 
 // src/lib/http/rotas.ts
@@ -6587,6 +6944,9 @@ async function rotear(req, ctx, eu, caminho, url) {
     return json({
       texto: r.texto,
       bloqueado: r.bloqueado,
+      // RF-13 / RN-07 — persiste entre turnos; é dele que a UI tira o caminho de
+      // override. `bloqueado` sozinho fazia o botão sumir na mensagem seguinte.
+      bloqueioPendente: r.bloqueioPendente,
       regraBloqueio: r.regraBloqueio,
       // RNF-12: a UI precisa mostrar progresso das duas verificações.
       verificacoes: {
@@ -6688,13 +7048,7 @@ async function rotear(req, ctx, eu, caminho, url) {
     const piloto = await verificarPiloto(ctx, eu, caminho);
     if (piloto) return piloto;
     const chave = typeof corpo?.chaveIdempotencia === "string" && corpo.chaveIdempotencia.length > 0 ? `form:${eu.email}:${corpo.chaveIdempotencia}` : `form:${eu.email}:${ctx.novoId()}`;
-    const camposDinamicos = await filtrarCamposComSchema(
-      ctx,
-      eu.email,
-      serviceDeskId,
-      validada.proposta.tipoChamadoId,
-      extrairCamposDinamicos(corpo?.camposDinamicos)
-    );
+    const camposDinamicos = extrairCamposDinamicos(corpo?.camposDinamicos);
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
@@ -7008,7 +7362,7 @@ async function rotear(req, ctx, eu, caminho, url) {
         "Escreva ao menos duas letras do que voc\xEA procura."
       );
     }
-    const configurada = ctx.valores.espacos_confluence.length > 0;
+    const configurada = buscaConfigurada(ctx.valores.espacos_confluence);
     let paginas;
     try {
       paginas = await ctx.atlassian.buscarConfluence({
@@ -7238,13 +7592,12 @@ async function rotear(req, ctx, eu, caminho, url) {
     if (req.method === "PUT") {
       const corpo = await lerJson(req);
       const chave = typeof corpo?.chave === "string" ? corpo.chave : "";
-      if (!(chave in ctx.valores)) return ERROS.dadosInvalidos("Configura\xE7\xE3o desconhecida.");
-      await ctx.config.definir(
-        chave,
-        corpo.valor,
-        eu.email,
-        ctx.agora()
-      );
+      if (!chaveDeConfigConhecida(chave)) {
+        return ERROS.dadosInvalidos("Configura\xE7\xE3o desconhecida.");
+      }
+      const validado = validarValorDeConfig(chave, corpo?.valor);
+      if (!validado.ok) return ERROS.dadosInvalidos(validado.motivo);
+      await ctx.config.definir(chave, validado.valor, eu.email, ctx.agora());
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: "config_alterada",
@@ -7300,7 +7653,8 @@ async function rotear(req, ctx, eu, caminho, url) {
       snapshot.itens,
       ctx.valores.custo_mensal_por_produto,
       ctx.valores.assentos_ocioso_dias,
-      Date.parse(ctx.agora())
+      Date.parse(ctx.agora()),
+      ctx.valores.curva_preco_por_produto
     );
     return json({
       coletadoEm: snapshot.coletadoEm,
@@ -7475,34 +7829,16 @@ function respostaCriacao(r, prioridade) {
     mensagem: r.estado === "criado" ? "Chamado aberto. Voc\xEA acompanha tudo por aqui." : "Recebemos sua solicita\xE7\xE3o e estamos abrindo o chamado. Nada se perdeu \u2014 voc\xEA ver\xE1 a chave aqui em instantes."
   };
 }
-async function filtrarCamposComSchema(ctx, atorEmail, serviceDeskId, tipoChamadoId, campos) {
-  if (!campos) return null;
-  try {
-    const schema = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, tipoChamadoId);
-    const filtrados = filtrarPeloSchema(campos, schema);
-    const descartadas = Object.keys(campos).filter((c) => !filtrados || !(c in filtrados));
-    if (descartadas.length > 0) {
-      await ctx.auditoria.registrar({
-        atorEmail,
-        acao: "campos_dinamicos_descartados",
-        recurso: tipoChamadoId,
-        resultado: "negado",
-        // Só os NOMES dos campos: o valor é conteúdo do chamado e não tem por que
-        // ser duplicado na auditoria.
-        detalhe: { motivo: "fora_do_schema", campos: descartadas }
-      });
-    }
-    return filtrados;
-  } catch {
-    await ctx.auditoria.registrar({
-      atorEmail,
-      acao: "campos_dinamicos_descartados",
-      recurso: tipoChamadoId,
-      resultado: "negado",
-      detalhe: { motivo: "schema_indisponivel", campos: Object.keys(campos) }
-    });
-    return null;
+function extrairCamposDinamicos(bruto) {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return null;
+  const saida = {};
+  for (const [chave, valor] of Object.entries(bruto)) {
+    if (typeof valor !== "string") continue;
+    const limpo = valor.trim();
+    if (limpo.length === 0) continue;
+    saida[chave] = limpo;
   }
+  return Object.keys(saida).length > 0 ? saida : null;
 }
 function validarProposta(corpo, tiposPermitidos) {
   const titulo = typeof corpo?.titulo === "string" ? corpo.titulo.trim() : "";
@@ -7667,9 +8003,9 @@ async function tratarCron(req, ctx, env, caminho) {
     }
     const orgId = ctx.valores.org_id;
     try {
-      const usuarios = await ctx.organizacao.listarUsuarios(orgId);
+      const varredura = await ctx.organizacao.listarUsuarios(orgId);
       const entradas = [];
-      for (const usuario of usuarios) {
+      for (const usuario of varredura.usuarios) {
         try {
           entradas.push({
             usuario,
@@ -7683,10 +8019,26 @@ async function tratarCron(req, ctx, env, caminho) {
       await ctx.auditoria.registrar({
         atorEmail: "(cron)",
         acao: "inventario_coletado",
-        resultado: "sucesso",
-        detalhe: { usuarios: usuarios.length, registros: r.registros }
+        // ⚠️ Coleta incompleta ou com suspensão desconhecida **não** é `sucesso`. Ela
+        // grava o que deu, mas marcá-la como sucesso apagaria o único registro de que
+        // o inventário daquele dia não é a organização inteira — e é sobre esse
+        // inventário que a tela recomenda revogar assento.
+        resultado: varredura.parcial || !varredura.suspensaoConhecida ? "falha" : "sucesso",
+        detalhe: {
+          usuarios: varredura.usuarios.length,
+          registros: r.registros,
+          suspensas: varredura.suspensas,
+          suspensaoConhecida: varredura.suspensaoConhecida,
+          parcial: varredura.parcial
+        }
       });
-      return json({ ok: true, ...r });
+      return json({
+        ok: true,
+        ...r,
+        suspensas: varredura.suspensas,
+        suspensaoConhecida: varredura.suspensaoConhecida,
+        parcial: varredura.parcial
+      });
     } catch (e) {
       await ctx.auditoria.registrar({
         atorEmail: "(cron)",

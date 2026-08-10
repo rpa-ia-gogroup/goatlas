@@ -41,6 +41,8 @@ import { areaDoEmail, areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
+import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
+import { buscaConfigurada } from '../config/diagnostico'
 
 export interface EnvCron {
   readonly GODEPLOY_CRON_KEY?: string
@@ -187,6 +189,9 @@ async function rotear(
     return json({
       texto: r.texto,
       bloqueado: r.bloqueado,
+      // RF-13 / RN-07 — persiste entre turnos; é dele que a UI tira o caminho de
+      // override. `bloqueado` sozinho fazia o botão sumir na mensagem seguinte.
+      bloqueioPendente: r.bloqueioPendente,
       regraBloqueio: r.regraBloqueio,
       // RNF-12: a UI precisa mostrar progresso das duas verificações.
       verificacoes: {
@@ -746,7 +751,7 @@ async function rotear(
     // Allowlist vazia = nada exposto. A camada isolada é que se recusa a montar
     // query aberta; aqui só distinguimos os dois zeros para a tela poder explicar
     // qual dos dois aconteceu.
-    const configurada = ctx.valores.espacos_confluence.length > 0
+    const configurada = buscaConfigurada(ctx.valores.espacos_confluence)
 
     let paginas
     try {
@@ -1048,13 +1053,16 @@ async function rotear(
     if (req.method === 'PUT') {
       const corpo = await lerJson<{ chave?: unknown; valor?: unknown }>(req)
       const chave = typeof corpo?.chave === 'string' ? corpo.chave : ''
-      if (!(chave in ctx.valores)) return ERROS.dadosInvalidos('Configuração desconhecida.')
-      await ctx.config.definir(
-        chave as keyof typeof ctx.valores,
-        corpo!.valor as never,
-        eu.email,
-        ctx.agora(),
-      )
+      if (!chaveDeConfigConhecida(chave)) {
+        return ERROS.dadosInvalidos('Configuração desconhecida.')
+      }
+      // ⚠️ O tipo é validado AQUI, não só na tela: esta é uma rota HTTP comum, e
+      // `Config.carregar` aceita de volta qualquer JSON válido que estiver gravado.
+      // Um `"alto"` em `regra1_threshold_score` sobrevive ao boot e chega à Regra 1
+      // como string — o default fail-closed não cobre valor corrompido (T-136).
+      const validado = validarValorDeConfig(chave, corpo?.valor)
+      if (!validado.ok) return ERROS.dadosInvalidos(validado.motivo)
+      await ctx.config.definir(chave, validado.valor as never, eu.email, ctx.agora())
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: 'config_alterada',
@@ -1136,6 +1144,7 @@ async function rotear(
       ctx.valores.custo_mensal_por_produto,
       ctx.valores.assentos_ocioso_dias,
       Date.parse(ctx.agora()),
+      ctx.valores.curva_preco_por_produto,
     )
     return json({
       coletadoEm: snapshot.coletadoEm,
@@ -1729,9 +1738,9 @@ async function tratarCron(
     }
     const orgId = ctx.valores.org_id
     try {
-      const usuarios = await ctx.organizacao.listarUsuarios(orgId)
+      const varredura = await ctx.organizacao.listarUsuarios(orgId)
       const entradas = []
-      for (const usuario of usuarios) {
+      for (const usuario of varredura.usuarios) {
         try {
           entradas.push({
             usuario,
@@ -1747,10 +1756,26 @@ async function tratarCron(
       await ctx.auditoria.registrar({
         atorEmail: '(cron)',
         acao: 'inventario_coletado',
-        resultado: 'sucesso',
-        detalhe: { usuarios: usuarios.length, registros: r.registros },
+        // ⚠️ Coleta incompleta ou com suspensão desconhecida **não** é `sucesso`. Ela
+        // grava o que deu, mas marcá-la como sucesso apagaria o único registro de que
+        // o inventário daquele dia não é a organização inteira — e é sobre esse
+        // inventário que a tela recomenda revogar assento.
+        resultado: varredura.parcial || !varredura.suspensaoConhecida ? 'falha' : 'sucesso',
+        detalhe: {
+          usuarios: varredura.usuarios.length,
+          registros: r.registros,
+          suspensas: varredura.suspensas,
+          suspensaoConhecida: varredura.suspensaoConhecida,
+          parcial: varredura.parcial,
+        },
       })
-      return json({ ok: true, ...r })
+      return json({
+        ok: true,
+        ...r,
+        suspensas: varredura.suspensas,
+        suspensaoConhecida: varredura.suspensaoConhecida,
+        parcial: varredura.parcial,
+      })
     } catch (e) {
       await ctx.auditoria.registrar({
         atorEmail: '(cron)',

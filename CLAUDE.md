@@ -86,7 +86,9 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   real. **RNF-22** mantém a migração viável — não achate o cliente Atlassian.
 - **Bloqueio não é parede** (**RF-13**, **RN-07**) — sempre há override, e o
   override é registrado. Override é sinal de documentação ruim, não de usuário
-  teimoso. Não transformar em recusa.
+  teimoso. Não transformar em recusa. ⚠️ **As duas metades valem** (`D-21`): o
+  botão é o único caminho de saída, e o bloqueio dura até ele ser usado.
+  "Simplificar" deixando a conversa seguir sozinha reabre o bypass.
 - **SLA é de primeira resposta, não de resolução** (**RN-08**), e os 24h são
   **piso garantido**, não novo prazo (**R-05** — áreas com retorno atual de 2h30).
 - **A prioridade sugerida pela IA é editável antes de criar** (**RF-16**).
@@ -98,6 +100,11 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   (defesa em profundidade — **RF-32**, **RN-05**).
 - **Falha de tool não silencia a regra** (**RNF-18**) — informa e marca o ticket
   como não verificado. Indisponibilidade nunca vira bypass.
+- **O console de admin mostra o que se DECIDE** (`D-25`) — não tudo o que é
+  configurável. TTL de cache, rate limit e teto de tickets da Regra 2 ficam fora da
+  tela **de propósito**: continuam em `ConfigValores` e mudáveis sem deploy, mas
+  ninguém os decide sem ler o código, e cada um deles na tela custava atenção de quem
+  precisa achar o que importa. Devolvê-los é reabrir `D-25`, não "completar a tela".
 - **N8N está descartado.** Não propor voltar a ele.
 - **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
   olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe
@@ -249,6 +256,64 @@ destes reabre um vazamento que já foi fechado.
   procurando por isso — e também prova, plantando um "segredo" no corpo de uma
   resposta de erro simulada, que as três camadas de transporte não o repassam na
   mensagem lançada nem a auditoria o persiste sem redigir.
+- 🚨 **`ATCTT` é chave de ORGANIZAÇÃO; `ATATT` é token de USUÁRIO** (`D-22`). São duas
+  famílias sem relação: `ATATT` (gerado em `id.atlassian.com/manage-profile/security/api-tokens`)
+  é o único que funciona em Basic auth contra `<site>.atlassian.net/rest/api/3/*` —
+  Confluence e JSM; `ATCTT` (gerado em `admin.atlassian.com` → API keys) só serve
+  `api.atlassian.com/admin/*`. ⚠️ **O `docs/DEPLOY.md` afirmou o inverso até 07/08/2026, e
+  foi essa instrução que causou o 401 do app** — a credencial não estava quebrada, estava na
+  gaveta errada. Um `ATCTT` em `ATLASSIAN_API_TOKEN` dá **401 por design**, com e-mail certo
+  e site certo, então os testes óbvios (e-mail · expiração · barra final) voltam todos
+  negativos para sempre. E o `ATLASSIAN_EMAIL` tem de ser o da conta que gerou o `ATATT`.
+- 🚨 **`ATATT` SCOPED também dá 401 na URL do site — e a Atlassian oferece scoped por
+  padrão.** Token **clássico** (sem escopos) usa `https://<site>.atlassian.net/rest/api/3/…`;
+  token **scoped** exige o gateway `https://api.atlassian.com/ex/jira/{cloudId}/…` e
+  `…/ex/confluence/{cloudId}/…`. Basic auth de scoped contra a URL do site devolve **401** —
+  **o mesmo sintoma do erro de família**, o que faz o diagnóstico parecer não ter avançado.
+  ⚠️ Consequência para nós: `ATLASSIAN_BASE_URL` é **uma só** e serve Jira **e** Confluence
+  (`/rest/api/3/…`, `/rest/servicedeskapi/…`, `/wiki/api/v2/…` no mesmo host). Sob scoped os
+  dois têm **gateways diferentes**, então adotar scoped **exige partir a base em duas** — é
+  mudança de código, não de config. Por isso o pedido é sempre **token clássico**. Fonte:
+  `support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/`
+  e o KB de 401 em conta de serviço.
+- 🚨 **`GET /admin/v1/orgs/{org}/users` lista SÓ conta gerenciada, e sem domínio
+  reivindicado isso é zero** (`D-22`, **confirmado por teste** em `D-23`). Devolve
+  `{"data": []}` com HTTP 200 — nenhuma exceção, console mostrando "0 assentos", ninguém
+  desconfiando da chamada. Mesma família do `env.DB` devolvendo `{}`. O endpoint certo é
+  **`POST /admin/v1/orgs/{org}/users/search`**, e nele: **`accountTypes: ["atlassian"]` é
+  obrigatório** (sem ele entram ~83 contas de app/bot) · o **cursor volta em `links.next` e
+  é reenviado no CORPO**, não seguido como URL · **`query`, `groupIds` e `productAccess`
+  respondem 200 SEM filtrar** — filtro que parece filtrar e não filtra é pior que filtro
+  ausente · **`accountStatus` não é status de suspensão** (volta `"active"` para conta
+  suspensa — medido nas 54 contas; quem responde é o filtro `isSuspended`, em duas
+  varreduras).
+- 🚨 **A Organizations API usa DUAS convenções de nome, e escolher a errada devolve lista
+  vazia com HTTP 200** (`D-23`). `users/search` responde em **camelCase** (`accountId`,
+  `accountStatus`); `last-active-dates` responde em **snake_case** (`product_access`,
+  `last_active`). O contrato estava em snake_case para os dois, então **as 54 contas eram
+  todas descartadas** por `accountId` ausente. ⚠️ Não unifique "para ficar consistente":
+  os dois formatos são reais e unificar quebra um lado com o mesmo sintoma silencioso.
+- 🚨 **`name`/`email` exigem `expand: ["NAME","EMAIL"]`, e o produto atribuído NÃO está no
+  `users/search`** — `expand: ["PRODUCT_ACCESS"]` responde **400**. Quem entrega produto é
+  `last-active-dates` (`product_access[].key`), que o cron já chama por conta. Por isso
+  `registrarColeta` itera a **união** das duas fontes: iterar só `usuario.produtos` gravava
+  **zero linha** e o inventário rodava vazio. E `last_active` é só a **data**;
+  `last_active_timestamp` é o ISO completo e vem primeiro.
+- 🚨 **O endpoint GLOBAL de tipos de chamado é EXPERIMENTAL e devolve 412.**
+  `GET /rest/servicedeskapi/requesttype` exige `X-ExperimentalApi: opt-in` — era o que
+  `listarTiposChamado` usava, então **listar tipos não funcionava em produção** e a
+  allowlist de `RF-28` não tinha como ser montada. A saída **não** foi ligar o opt-in
+  ("experimental" = pode mudar sem aviso, e isto é trava de roteamento): é o caminho
+  estável **por service desk** (`/servicedesk/{id}/requesttype`, 200 sem cabeçalho). ⚠️ Lá
+  o `serviceDeskId` **não vem em cada item** — tem de vir do laço, senão viraria `''`.
+- **Filtro que pode não filtrar é VERIFICADO, não acreditado** (`organizacao.ts`). Como
+  "responde 200 sem filtrar" é comportamento medido desta API, as duas varreduras de
+  `isSuspended` são comparadas: interseção não vazia prova que o filtro não separou nada, e
+  o resultado sai com `suspensaoConhecida: false` em vez de afirmar "nenhuma suspensa".
+  Contar conta suspensa como assento ativo infla o custo (`RF-53`) e recomenda revogar
+  acesso de quem já não tem acesso. E `parcial` existe porque o teto de páginas era atingido
+  **em silêncio** — apesar de o comentário do próprio código jurar o contrário. Coleta
+  parcial ou cega quanto a suspensão **não** é auditada como `sucesso`.
 - **A Organizations API tem TRANSPORTE PRÓPRIO** (`atlassian/organizacao.ts`,
   `RNF-04`) — não a mesma instância do cliente de Jira/Confluence. A credencial é
   **Org Admin**: "economizar" reaproveitando `atlassian/http.ts` (que já resolve
@@ -256,6 +321,25 @@ destes reabre um vazamento que já foi fechado.
   credencial de maior privilégio do sistema. `ctx.organizacao` é `null` fora dos
   fakes até T-122/T-123 existirem — rota de governança trata isso como
   "não configurado" (RNF-18), nunca como erro.
+- ⚠️ **`PUT /api/admin/config` valida o TIPO, não só a chave** (`config/validar.ts`,
+  `D-25`). `Config.carregar` faz `JSON.parse` e confia no que está gravado, porque
+  quem grava é `definir()` — mas a rota é HTTP comum, e a tela era a única coisa
+  garantindo o tipo. Um `"alto"` em `regra1_threshold_score` é JSON válido, sobrevive
+  ao boot e chega à Regra 1 como string; o default fail-closed **não** cobre isso,
+  porque valor corrompido não é ausência de valor. E a validação **recusa, nunca
+  coage**: `"0.9"` não vira `0.9` — coerção esconde de quem chamou que ele mandou a
+  coisa errada, e no dia em que a string for `"alto"` produz `NaN` em silêncio. O mapa
+  `FAMILIA` é `Record<ChaveConfig, …>` de propósito: chave nova em `ConfigValores` sem
+  família **não compila**, senão o furo volta sem ninguém ver.
+- **O console de admin RELATA o estado, não o recalcula** (`config/diagnostico.ts`,
+  `D-25`). Cada predicado é o mesmo que o servidor já aplica — `regra2Disponivel` vem
+  de `rules/`, `buscaConfigurada` é o predicado que a rota de busca usa para
+  distinguir "nada documentado" de "nada configurado". Condição escrita **só** ali
+  vira uma segunda regra que diverge em silêncio, e o console passa a mentir com
+  confiança; o lugar dela é o módulo de origem. E o que **não** está em
+  `admin/campos.tsx` é decisão (`D-25`), não esquecimento: TTL, rate limit e teto de
+  tickets da Regra 2 continuam configuráveis, só não têm tela — `tests/tela-admin.test.ts`
+  falha se voltarem sem passar pela decisão.
 - **Pergunta em aberto (Q1/Q4/Q5/Q8...) não é motivo para hardcode.** O padrão do
   projeto é sempre o mesmo: o valor que falta vira campo de `ConfigValores`
   (`RNF-25`), com `null`/vazio como default fail-closed, e o código já fica pronto
@@ -329,6 +413,19 @@ destes reabre um vazamento que já foi fechado.
   tentou) mas o chamado nasce `verificadoRegras: false`. Não rodar continua
   recusando. É a diferença entre "indisponibilidade não vira bypass" e
   "indisponibilidade vira parede" — o requisito pede o primeiro.
+- ⚠️ **`bloqueio` é do TURNO; `temBloqueioPendente` é da CONVERSA** (`agent/`,
+  `D-21`). O primeiro só diz se uma regra disparou agora — e na mensagem seguinte
+  nenhuma dispara de novo, porque a busca já rodou. Usar só ele para decidir se
+  monta proposta era um bypass real: bastava mandar outra mensagem para o chamado
+  nascer **sem `override_registrado`**, e quem escapava assim não entrava na taxa
+  de override, então o painel mostrava deflexão alta justamente onde ela falhou. A
+  UI tem o mesmo par: `bloqueado` faria o botão de override sumir no turno
+  seguinte — é `bloqueioPendente` que o mantém, e sem ele a trava viraria a parede
+  que `RF-13` proíbe. E com bloqueio de pé **o modelo nem é chamado**: quem responde
+  é `MENSAGEM_BLOQUEIO_PENDENTE`. Acrescentar o aviso ao texto do modelo, em vez de
+  substituí-lo, produzia resposta que se contradizia sozinha ("Montei o chamado
+  abaixo" + "não consigo abrir ainda") — ele não sabe que o servidor recusou, e
+  aviso colado embaixo não conserta frase já dita.
 - **A sanitização devolve ÁRVORE TIPADA, não string de HTML** (`confluence/`).
   Nenhum nó de `No` carrega saco de atributos, então não existe onde um `onerror`
   viajar: o pior caso é um nó que o renderizador não conhece. É isto que torna
@@ -445,6 +542,18 @@ persistente.
   `http/cron-auth.ts`, com janela de replay e comparação em tempo constante. ⚠️ **Qual
   string é assinada continua desconhecido** — 10 construções × 2 leituras da chave, nenhuma
   casou. A pergunta exata para a plataforma está em `docs/DEPLOY.md`; chutar não converge.
+  ✅ **Resolvido por outro caminho, e a assimetria é de propósito** (medido em 07/08/2026,
+  `version 18`): as seis rotas **idempotentes** aceitam por **presença** do header quando a
+  requisição **não traz identidade de usuário** — é isso que distingue o gateway da
+  plataforma de um funcionário logado forjando o header, e é seguro porque o desenho delas já
+  é idempotente (outbox por constraint, dedupe por chave do Jira, marca-d'água que só avança
+  no que deu certo). A rota **destrutiva** (`/api/cron/retencao`) **mantém HMAC obrigatório**
+  e por isso segue dando **403** — fail-closed deliberado, não defeito. Consequência aceita:
+  a retenção não roda, o que hoje é inócuo porque a política é `null` (`D-20`) e ela não
+  apagaria nada. ⚠️ **Diagnóstico de cron se faz com `listCronJobs`**, que mostra o status do
+  último disparo: foi assim que se descobriu que o `CLAUDE.md` afirmava "403 nas sete" muito
+  depois de seis terem voltado a funcionar. `404` = rota não deployada · `403` = gate ·
+  `500` = handler explodiu (aí é `getAppLogs`).
 - ⚠️ **Colisão de `UNIQUE (vinculos.issue_key)` é caso previsto, não erro** — e a
   classificação importa: por não ser `ErroAtlassian`, ela caía no default **transitório** e
   o cron reprocessava para sempre contra a mesma constraint. Mesmo solicitante =
@@ -480,11 +589,20 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 [003](specs/003-sla-e-notificacoes/tasks.md) ·
 [004](specs/004-piloto-e-rollout/tasks.md).
 
-**No ar em modo demonstração: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
-ver `D-07`). Login Google pelo edge, admin por allowlist, tarja avisando que nada
-chega ao time de tech.
+**No ar em SOMENTE LEITURA: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
+`version 20`, deploy de 07/08/2026). Login Google pelo edge, admin por allowlist.
+⚠️ **Já não é modo demonstração** (`GOATLAS_MODO_DEMO` saiu): o app lê Confluence e Jira
+**de verdade** com o `ATATT` validado, e o que impede efeito colateral é
+`GOATLAS_SOMENTE_LEITURA=1`, que recusa toda escrita no decorador do cliente.
+Config apontada para o real: `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"),
+tipos `70,134,108,68`, espaços `GT,DTE,GN`.
 
-**590 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+🚨 **Desligar `GOATLAS_SOMENTE_LEITURA` é o go-live, e tem pré-requisito:** a staging
+(`3936ca2d`, criada e **incompleta** — falta o `LLM_API_KEY`) passa a ser obrigatória
+antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
+de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
+
+**698 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -519,6 +637,17 @@ de admin (T-128) — tudo testado contra `ClienteOrganizacaoFake`. O que falta,
 P2), depende de **Q1**: a credencial de Org Admin ainda não existe, e não há como
 escrever a chamada real contra um endpoint que ninguém pode testar hoje.
 
+**A aba de admin virou console (spec 003, `D-25`).** Era um scroll único com cinco
+trabalhos empilhados — 14 campos na ordem de implementação, depois métricas,
+assentos, lacunas e auditoria, com rótulos que nomeavam a chave do banco. Agora é
+organizada por **capacidade**, com trilha de seções que carrega o estado de cada uma,
+uma **visão geral** que diz o que está ligado/parcial/desligado e a consequência, e
+cada ajuste ao lado do dado que ele calibra (o threshold da Regra 1 junto da taxa de
+override — `R-04`). O console encolheu de propósito: quatro chaves técnicas saíram da
+tela (`D-25`) e `org_id`/`custo_mensal_por_produto` entraram, destravando **Q1**/**Q8**
+sem deploy. `src/app/admin.tsx` virou `src/app/admin/` (`index` · `campos` · `paineis`)
+com folha própria em `console.css`.
+
 **`campo_solicitante_id` (Q4) já é config, não hardcode** (`RF-21`): o dia que o
 time de tech confirmar o id do campo "Solicitante" no projeto do portal, é só
 preencher no console de admin — nenhum código a mudar, nenhum deploy.
@@ -527,14 +656,17 @@ preencher no console de admin — nenhum código a mudar, nenhum deploy.
 `**Nome** (email) via goatlas:` usando a identidade do login corporativo Google
 — sem depender do console do goatlas, visível já no Jira nativo.
 
-**Q1 andou metade (`D-14`, 05/08/2026):** o trio Jira/Confluence
-(`ATLASSIAN_API_TOKEN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_BASE_URL`) e `GOATLAS_ORG_ID`
-estão registrados em `9c47f42f`; faltam `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY` e
-`GODEPLOY_CRON_KEY`. **Nada disso mudou comportamento** — `GOATLAS_MODO_DEMO=1` é o
-primeiro termo do `||` de `usandoFakes`. A ordem de virar produção, o que cada
-ausência silencia e as três confusões de credencial que já aconteceram (API token ≠
-chave de Organizations API · `cloudId` ≠ `orgId` · UUID só tem `0-9a-f`) estão em
-`docs/DEPLOY.md` e `D-14`.
+**Q1 está RESPONDIDA na parte de credencial (`D-23`, 07/08/2026).** O `ATATT` clássico
+funciona (`/rest/api/3/myself` → **200**), o `ATCTT` está em `ATLASSIAN_ORG_API_KEY`, e
+`GOATLAS_SERVICE_DESK_ID=4` (projeto `GN`, "Tickets Engenharia" — um dos 5 service desks
+do site, com 16 tipos de solicitação). **`T-063` saiu do bloqueio:** o que falta é
+*escolher* quais tipos entram na allowlist de `RF-28`, que é decisão de roteamento.
+
+⚠️ **Das "três confusões de credencial" do `D-14`, duas valem e uma era erro nosso:**
+API token ≠ chave de Organizations API (vale, e o `D-14` a descrevia **invertida** —
+ver `D-22`) · `cloudId` ≠ `orgId` (vale) · ~~UUID só tem `0-9a-f`~~ **falsa: org id da
+Atlassian não é UUID estrito**, o da Gocase tem `j`/`k` e responde 200 (`D-23`). Não
+"conserte" um org id com letras fora de hex — teste-o.
 
 O que falta da Fase 1 depende de resposta ou de deploy: `criarChamado` contra a
 Atlassian real (**Q1**), o **valor** do campo customizado "Solicitante" (**Q4** —
@@ -563,9 +695,20 @@ workflow do JSM oferece (`RF-36`) e retenção (`RNF-33`).
 assentos (`O2`).
 
 **T-122/T-123/T-131 saíram do bloqueio de Q1** (`D-18`): `ClienteOrganizacaoHttp` existe,
-com paginação, `links.next` de outro host descartado, teto de páginas e normalização de
+com paginação, cursor de outro host descartado, teto de páginas e normalização de
 carimbo (segundos × milissegundos são 55 anos de diferença). O que **não** foi verificado
 está em `ENDPOINTS_NAO_VERIFICADOS` — e a tela de governança mostra a lista.
+
+**O 401 da Atlassian está diagnosticado, e a correção era nossa** (`D-22`, 07/08/2026, a
+partir de medição do João de 31/07): `ATLASSIAN_API_TOKEN` guarda um `ATCTT` (chave de
+org) onde `/rest/api/3/*` exige `ATATT` (token de usuário) — e o nosso próprio
+`docs/DEPLOY.md` mandava fazer exatamente isso. Falta **gerar o `ATATT`**; é a única
+ação humana que destrava Confluence e JSM reais. O `ATCTT` que já existe é a credencial
+certa para `ATLASSIAN_ORG_API_KEY`. No mesmo movimento, `listarUsuarios` trocou
+`GET /users` (que mede vazio sem domínio reivindicado) por `POST /users/search`, e passou
+a devolver `suspensas`/`suspensaoConhecida`/`parcial` em vez de uma lista que escondia
+duas incertezas. **Q5 respondida:** `GO`, `DTE`, `GN`, `datateam`, `Protheus` — e o
+espaço `TECH` que circulava **nunca existiu**.
 
 **O que falta não é código:**
 

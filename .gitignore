@@ -5,6 +5,12 @@ dist/
 *.log
 logs/
 
+# Pacote de credenciais e medições recebido do João (07/08/2026). O `.env` já cairia
+# na regra acima, mas os `.md` e o `.json` NÃO — e o `HANDOFF-GODEPLOY.md` traz nome
+# de funcionário, composição de grupo e valor de licença. O que vale do pacote está
+# destilado em `docs/DECISOES.md` (D-22); o original é insumo, não artefato do repo.
+goatlas-kaique/
+
 # Worktrees das sessões do Claude (constituição, Princípio XII)
 .claude/worktrees/
 

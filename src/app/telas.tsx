@@ -33,8 +33,14 @@ import {
 
 /* ======================= conversa com o agente ========================= */
 
+/**
+ * `justificativa` é a frase do override — palavras da pessoa, mas **não** uma
+ * mensagem para o agente. Ela foi para a auditoria e para a fila de melhoria da
+ * documentação (`RF-42`), e some da conversa se não tiver entrada própria: a
+ * pessoa escreve, aperta, e não vê registro nenhum do que disse.
+ */
 interface Fala {
-  readonly de: 'agente' | 'usuario'
+  readonly de: 'agente' | 'usuario' | 'justificativa'
   readonly texto: string
 }
 
@@ -53,6 +59,9 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
   const [confluence, setConfluence] = useState<EstadoVerificacao>('pendente')
   const [historico, setHistorico] = useState<EstadoVerificacao>('pendente')
   const [bloqueado, setBloqueado] = useState(false)
+  // Mora aqui, e não dentro de `CaminhoOverride`, porque quem precisa saber é o
+  // compositor: enquanto a justificativa está aberta, a caixa de mensagem fecha.
+  const [justificando, setJustificando] = useState(false)
   const [proposta, setProposta] = useState<Proposta | null>(null)
   const [criado, setCriado] = useState<ResultadoCriacao | null>(null)
   const fim = useRef<HTMLDivElement>(null)
@@ -80,7 +89,11 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
       const r = await api.enviarMensagem(id, texto)
       setConfluence(r.verificacoes.confluence)
       setHistorico(r.verificacoes.historico)
-      setBloqueado(r.bloqueado)
+      // ⚠️ `bloqueioPendente`, não `bloqueado`: o segundo vale só para o turno que
+      // acabou, e usá-lo aqui fazia o caminho de override sumir assim que a pessoa
+      // mandava outra mensagem — deixando-a sem saída agora que o servidor não
+      // monta proposta enquanto o bloqueio não for sobreposto (RN-07).
+      setBloqueado(r.bloqueioPendente)
       setProposta(r.proposta)
       setFalas((f) => [...f, { de: 'agente', texto: r.texto }])
     } catch (e) {
@@ -95,11 +108,16 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
     try {
       const r = await api.registrarOverride(conversaId, motivo)
       setBloqueado(false)
+      setJustificando(false)
       // A proposta vem na resposta do override: a pessoa insistiu, então o próximo
       // passo aparece na hora, sem ela ter de adivinhar que precisa digitar de novo.
       if (r.proposta) setProposta(r.proposta)
       setFalas((f) => [
         ...f,
+        // A frase da pessoa entra na conversa ANTES da resposta: sem ela, some da
+        // tela o que ela acabou de escrever, e a resposta do agente ("registrei que
+        // a documentação não cobre o seu caso") fica sem referente.
+        { de: 'justificativa', texto: motivo },
         {
           de: 'agente',
           texto: r.proposta
@@ -126,18 +144,9 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
       />
 
       <div className="conversa">
-        {falas.map((f, i) =>
-          f.de === 'agente' ? (
-            <div key={i}>
-              <span className="autor">goatlas</span>
-              <TextoDoAgente texto={f.texto} />
-            </div>
-          ) : (
-            <p key={i} className="fala-usuario">
-              {f.texto}
-            </p>
-          ),
-        )}
+        {falas.map((f, i) => (
+          <EntradaConversa key={i} fala={f} />
+        ))}
         {enviando && (
           <p className="carregando" aria-live="polite">
             Verificando antes de responder…
@@ -146,7 +155,14 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
         <div ref={fim} />
       </div>
 
-      {bloqueado && <CaminhoOverride aoConfirmar={usarOverride} />}
+      {bloqueado && (
+        <CaminhoOverride
+          aberto={justificando}
+          aoAbrir={() => setJustificando(true)}
+          aoFechar={() => setJustificando(false)}
+          aoConfirmar={usarOverride}
+        />
+      )}
 
       {proposta && conversaId && !bloqueado && (
         <ReciboConfirmacao
@@ -158,24 +174,102 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
 
       {erro && <Aviso atencao>{erro}</Aviso>}
 
-      <form className="compositor" onSubmit={enviar}>
-        <div className="campo">
-          <label htmlFor="mensagem">Sua mensagem</label>
-          <textarea
-            id="mensagem"
-            value={rascunho}
-            onChange={(e) => setRascunho(e.target.value)}
-            placeholder="Ex.: o relatório de vendas de ontem não atualizou"
-            disabled={enviando}
-          />
-        </div>
-        <div className="acoes">
-          <button type="submit" className="botao botao-primario" disabled={enviando || !rascunho.trim()}>
-            {enviando ? 'Enviando…' : 'Enviar'}
-          </button>
-        </div>
-      </form>
+      <Compositor
+        valor={rascunho}
+        aoMudar={setRascunho}
+        aoEnviar={enviar}
+        enviando={enviando}
+        justificando={justificando}
+      />
     </div>
+  )
+}
+
+/**
+ * Uma entrada da conversa. Três tipos, três formas — e a terceira existe porque
+ * duas não bastavam.
+ *
+ * A justificativa do override são palavras da pessoa, mas não são uma mensagem: ela
+ * não foi para o agente, foi para a auditoria e para a fila de melhoria da
+ * documentação. Mostrá-la como balão de usuário diria que ela conversou; não
+ * mostrar diria que o que ela escreveu se perdeu. Fica como **registro**: espinha
+ * lime e sobretítulo, o mesmo par visual do formulário onde ela acabou de digitar,
+ * para que uma coisa leve à outra.
+ */
+export function EntradaConversa({ fala }: { fala: Fala }) {
+  if (fala.de === 'agente') {
+    return (
+      <div>
+        <span className="autor">goatlas</span>
+        <TextoDoAgente texto={fala.texto} />
+      </div>
+    )
+  }
+  if (fala.de === 'justificativa') {
+    return (
+      <div className="fala-justificativa">
+        <span className="autor">Justificativa registrada</span>
+        <p>{fala.texto}</p>
+      </div>
+    )
+  }
+  return <p className="fala-usuario">{fala.texto}</p>
+}
+
+/**
+ * A caixa de mensagem para o agente.
+ *
+ * ⚠️ Ela **fecha** enquanto a justificativa do override está aberta. Com as duas
+ * disponíveis ao mesmo tempo, a pessoa escreve na de baixo — que é a maior, a que
+ * ela já usou e a que está onde o dedo espera. Aí o texto vira mensagem para o
+ * agente, o override não acontece, e ela fica repetindo "isso não resolve" para um
+ * modelo que não tem como liberar nada (`RN-07`).
+ *
+ * Fechada, não escondida: sumir com o campo faz a página saltar e deixa a pessoa
+ * sem entender o que aconteceu. O motivo vai escrito, e some assim que ela fecha a
+ * justificativa pelo "Voltar".
+ */
+export function Compositor({
+  valor,
+  aoMudar,
+  aoEnviar,
+  enviando,
+  justificando,
+}: {
+  valor: string
+  aoMudar: (v: string) => void
+  aoEnviar: (e: FormEvent) => void
+  enviando: boolean
+  justificando: boolean
+}) {
+  return (
+    <form className="compositor" onSubmit={aoEnviar}>
+      <div className="campo">
+        <label htmlFor="mensagem">Sua mensagem</label>
+        <textarea
+          id="mensagem"
+          value={valor}
+          onChange={(e) => aoMudar(e.target.value)}
+          placeholder="Ex.: o relatório de vendas de ontem não atualizou"
+          disabled={enviando || justificando}
+          aria-describedby={justificando ? 'mensagem-pausada' : undefined}
+        />
+        {justificando && (
+          <span className="dica" id="mensagem-pausada">
+            Termine a justificativa acima — ou use "Voltar" — para escrever aqui de novo.
+          </span>
+        )}
+      </div>
+      <div className="acoes">
+        <button
+          type="submit"
+          className="botao botao-primario"
+          disabled={enviando || justificando || !valor.trim()}
+        >
+          {enviando ? 'Enviando…' : 'Enviar'}
+        </button>
+      </div>
+    </form>
   )
 }
 
@@ -186,14 +280,23 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
  * melhoria da documentação. Bloqueio é orientação, não parede, e o caminho de saída
  * fica visível ao lado do bloqueio, não escondido.
  */
-function CaminhoOverride({ aoConfirmar }: { aoConfirmar: (motivo: string) => void }) {
-  const [aberto, setAberto] = useState(false)
+export function CaminhoOverride({
+  aberto,
+  aoAbrir,
+  aoFechar,
+  aoConfirmar,
+}: {
+  aberto: boolean
+  aoAbrir: () => void
+  aoFechar: () => void
+  aoConfirmar: (motivo: string) => void
+}) {
   const [motivo, setMotivo] = useState('')
 
   if (!aberto) {
     return (
       <div className="acoes">
-        <button type="button" className="botao botao-contorno" onClick={() => setAberto(true)}>
+        <button type="button" className="botao botao-contorno" onClick={aoAbrir}>
           Isso não resolve meu caso
         </button>
       </div>
@@ -202,14 +305,18 @@ function CaminhoOverride({ aoConfirmar }: { aoConfirmar: (motivo: string) => voi
 
   return (
     <form
-      className="recibo"
+      className="justificativa"
       onSubmit={(e) => {
         e.preventDefault()
         if (motivo.trim()) aoConfirmar(motivo.trim())
       }}
     >
+      {/* O sobretítulo existe para dizer o QUE este campo é antes de a pessoa
+          começar a escrever. Sem ele, uma caixa de texto embaixo de uma conversa
+          lê como mais uma mensagem — foi assim que confundiu na primeira vez. */}
+      <span className="justificativa-titulo">Corrigir a recomendação</span>
       <div className="campo">
-        <label htmlFor="motivo-override">O que ficou de fora?</label>
+        <label htmlFor="motivo-override">Por que essas páginas não resolvem o seu caso?</label>
         <textarea
           id="motivo-override"
           value={motivo}
@@ -217,15 +324,15 @@ function CaminhoOverride({ aoConfirmar }: { aoConfirmar: (motivo: string) => voi
           placeholder="Ex.: a página trata da loja física, e meu caso é o e-commerce"
         />
         <span className="dica">
-          Isso vai para a fila de melhoria da documentação — é assim que a próxima pessoa acha a
-          resposta certa.
+          Isto não é uma mensagem para o agente: vai para a fila de melhoria da documentação, e é
+          assim que a próxima pessoa acha a resposta certa.
         </span>
       </div>
       <div className="acoes">
         <button type="submit" className="botao botao-primario" disabled={!motivo.trim()}>
           Seguir com o chamado
         </button>
-        <button type="button" className="botao botao-discreto" onClick={() => setAberto(false)}>
+        <button type="button" className="botao botao-discreto" onClick={aoFechar}>
           Voltar
         </button>
       </div>
@@ -240,7 +347,7 @@ function CaminhoOverride({ aoConfirmar }: { aoConfirmar: (motivo: string) => voi
  * reconhecer o que sai dali. A prioridade é **editável**: priorização automática sem
  * revisão vira jogo, e as pessoas aprendem as palavras que produzem "Crítica".
  */
-function ReciboConfirmacao({
+export function ReciboConfirmacao({
   conversaId,
   propostaInicial,
   aoCriar,
@@ -300,15 +407,23 @@ function ReciboConfirmacao({
               value={prioridade}
               onChange={(e) => setPrioridade(e.target.value as Prioridade)}
             >
+              {/* ⚠️ Só o rótulo. O critério vinha junto ("Alta — Funcionalidade
+                  comprometida, com solução alternativa temporária") e nenhuma
+                  largura de select comportava isso: truncava no meio da palavra,
+                  escondendo justamente o texto que ajuda a decidir. Ele desceu para
+                  a dica, onde aparece inteiro e acompanha a seleção — e é lá que
+                  importa, na hora de conferir se a sugestão cabe no caso (RF-16). */}
               {PRIORIDADES.map((op) => (
                 <option key={op.valor} value={op.valor}>
-                  {op.rotulo} — {op.criterio}
+                  {op.rotulo}
                 </option>
               ))}
             </select>
             <span className="dica">
-              Sugerimos {prioridadePor(propostaInicial.prioridade).rotulo.toLowerCase()}. Ajuste se
-              não bate com o seu caso.
+              {p.criterio}.{' '}
+              {prioridade === propostaInicial.prioridade
+                ? `Sugerimos ${prioridadePor(propostaInicial.prioridade).rotulo.toLowerCase()} — ajuste se não bate com o seu caso.`
+                : `A sugestão era ${prioridadePor(propostaInicial.prioridade).rotulo.toLowerCase()}.`}
             </span>
           </div>
         </dd>

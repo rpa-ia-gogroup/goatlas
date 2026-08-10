@@ -23,6 +23,31 @@ import { ClienteOrganizacaoFake } from './src/lib/atlassian/organizacao-fake'
 const EMAIL_DEV = process.env.GOATLAS_DEV_EMAIL ?? 'dev@gocase.com'
 const CRON_KEY_DEV = 'dev-cron'
 
+/**
+ * O roteiro do "modelo" em desenvolvimento: verifica e bloqueia no primeiro turno,
+ * conclui no segundo.
+ *
+ * ⚠️ São exatamente DOIS turnos, e é por isso que ele precisa ser reiniciado a cada
+ * conversa nova (ver o middleware). O índice do fake é do processo, não da conversa:
+ * uma conversa que termina com número ÍMPAR de mensagens deixa o roteiro fora de
+ * fase, e a conversa seguinte começa pelo turno 2 — respondendo "montei o chamado"
+ * sem ter verificado nada. Nada nasce daí (a ordem de RF-08 continua fechando o
+ * caminho, e nenhuma proposta é montada), mas quem está testando vê o agente pular a
+ * deflexão e conclui que a Regra 1 quebrou.
+ */
+const ROTEIRO_DEV = [
+  {
+    texto: 'Deixa eu ver se isso já está documentado e se já apareceu antes.',
+    toolsPropostas: [
+      { nome: 'search_confluence', argumentos: { topico: 'relatório de vendas' } },
+      { nome: 'check_jira_history', argumentos: { tipoProblema: 'relatorio-vendas' } },
+    ],
+  },
+  {
+    texto: 'Entendi o caso. Montei o chamado abaixo — confira e confirme.',
+  },
+] as const
+
 export function apiDev(): Plugin {
   return {
     name: 'goatlas-api-dev',
@@ -57,18 +82,7 @@ export function apiDev(): Plugin {
 
       // O fake de IA precisa de ROTEIRO, senão o agente responde "(fim do roteiro)"
       // e o fluxo não anda — dev sem roteiro não exercita nada.
-      const iaDev = new ClienteIAFake([
-        {
-          texto: 'Deixa eu ver se isso já está documentado e se já apareceu antes.',
-          toolsPropostas: [
-            { nome: 'search_confluence', argumentos: { topico: 'relatório de vendas' } },
-            { nome: 'check_jira_history', argumentos: { tipoProblema: 'relatorio-vendas' } },
-          ],
-        },
-        {
-          texto: 'Entendi o caso. Montei o chamado abaixo — confira e confirme.',
-        },
-      ])
+      const iaDev = new ClienteIAFake([...ROTEIRO_DEV])
       iaDev.repetirRoteiro = true
       iaDev.propostaSugerida = {
         titulo: 'Relatório de vendas não atualizou',
@@ -127,7 +141,7 @@ export function apiDev(): Plugin {
       // Uma coleta já rodada, para a tela de governança não nascer vazia — em
       // produção isso é o cron diário (`POST /api/cron/coletar-inventario`).
       if ((await inicial.inventarioAssentos.obterMaisRecente()).coletadoEm === null) {
-        const usuarios = await organizacaoDev.listarUsuarios('org-dev')
+        const { usuarios } = await organizacaoDev.listarUsuarios('org-dev')
         const entradas = []
         for (const usuario of usuarios) {
           entradas.push({
@@ -262,6 +276,12 @@ export function apiDev(): Plugin {
 
       server.middlewares.use(async (req, res, next) => {
         if (!req.url?.startsWith('/api/')) return next()
+
+        // Conversa nova = roteiro do zero. `definirRoteiro` zera o índice; sem isto
+        // a fase escorrega entre conversas (ver o comentário de `ROTEIRO_DEV`).
+        if (req.url === '/api/conversas' && req.method === 'POST') {
+          iaDev.definirRoteiro([...ROTEIRO_DEV])
+        }
 
         const corpo: Buffer[] = []
         for await (const pedaco of req) corpo.push(pedaco as Buffer)

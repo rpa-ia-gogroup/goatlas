@@ -194,6 +194,14 @@ export function montarJqlAtualizados(desde: string | null, agoraMs: number): str
 /** `system` dos campos que o formulário fixo já cobre (RF-27) — nunca duplicar. */
 const CAMPOS_DE_SISTEMA_JA_COBERTOS = new Set(['summary', 'description', 'priority'])
 
+/**
+ * Quantos service desks são varridos ao listar tipos de chamado.
+ *
+ * Cada um custa uma chamada, e a lista de desks vem de fora (`R-02`). O site da Gocase
+ * tem 5; o teto existe para o dia em que alguém criar 80.
+ */
+const MAX_SERVICE_DESKS = 20
+
 interface CampoRequestTypeBruto {
   fieldId?: unknown
   name?: unknown
@@ -280,15 +288,46 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     const cacheado = this.cacheMetadados.obter('tiposChamado')
     if (cacheado) return cacheado as TipoChamado[]
 
-    const dados = (await this.transporte.requisitar('/rest/servicedeskapi/requesttype')) as {
-      values?: { id?: unknown; serviceDeskId?: unknown; name?: unknown; description?: unknown }[]
+    // 🚨 **O endpoint GLOBAL `/rest/servicedeskapi/requesttype` é EXPERIMENTAL e
+    // responde 412** sem o cabeçalho `X-ExperimentalApi: opt-in` — medido contra a
+    // Atlassian real em 07/08/2026, com credencial válida. Era o que este método usava,
+    // então `listarTiposChamado` **não funcionava em produção**: nem a allowlist de
+    // `RF-28` podia ser montada, nem o formulário sem IA sabia que tipos oferecer.
+    //
+    // A saída não é ligar o opt-in: "experimental" é a Atlassian avisando que pode mudar
+    // sem aviso, e uma allowlist que depende disso quebra num dia qualquer. O caminho
+    // **estável** é por service desk (`/servicedesk/{id}/requesttype`, 200 sem cabeçalho
+    // nenhum), e ele custa uma chamada a mais para listar os desks — pago uma vez por TTL
+    // de cache, não por requisição de usuário.
+    const desks = (await this.transporte.requisitar('/rest/servicedeskapi/servicedesk')) as {
+      values?: { id?: unknown }[]
     }
-    const tipos: TipoChamado[] = (dados?.values ?? []).map((v) => ({
-      id: String(v.id ?? ''),
-      serviceDeskId: String(v.serviceDeskId ?? ''),
-      nome: String(v.name ?? ''),
-      descricao: typeof v.description === 'string' ? v.description : null,
-    }))
+    const idsDesk = (desks?.values ?? [])
+      .map((d) => String(d.id ?? ''))
+      .filter((id) => id.length > 0)
+      // Teto: cada desk é uma chamada, e a lista vem de fora (`R-02`).
+      .slice(0, MAX_SERVICE_DESKS)
+
+    const tipos: TipoChamado[] = []
+    for (const serviceDeskId of idsDesk) {
+      const dados = (await this.transporte.requisitar(
+        `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype`,
+      )) as { values?: { id?: unknown; name?: unknown; description?: unknown }[] }
+
+      for (const v of dados?.values ?? []) {
+        const id = String(v.id ?? '')
+        if (!id) continue
+        tipos.push({
+          id,
+          // ⚠️ Vem do laço, não do corpo: o endpoint por desk **não repete**
+          // `serviceDeskId` em cada item, e `String(undefined ?? '')` daria `''` —
+          // um tipo sem desk é um tipo com que não se cria chamado nenhum.
+          serviceDeskId,
+          nome: String(v.name ?? ''),
+          descricao: typeof v.description === 'string' ? v.description : null,
+        })
+      }
+    }
     this.cacheMetadados.definir('tiposChamado', tipos, this.opcoes.ttlMetadadosSeg)
     return tipos
   }

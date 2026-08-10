@@ -160,6 +160,26 @@ export function urlDeLeituraNoApp(idPagina: string): string {
  * soar como **ajuda**, não como recusa. E precisa deixar o caminho de override
  * visível (RF-13, RN-07) — bloqueio não é parede.
  */
+/**
+ * A resposta enquanto o bloqueio continua de pé — RF-13, RN-07.
+ *
+ * ⚠️ Ela **substitui** o texto do modelo, não é acrescentada a ele. A primeira
+ * versão acrescentava, e o resultado foi uma resposta que se contradizia sozinha:
+ * "Montei o chamado abaixo — confira e confirme." seguido de "Só não consigo abrir
+ * o chamado ainda". O modelo não sabe que o servidor recusou montar a proposta, e
+ * nenhum aviso colado embaixo conserta uma frase que já foi dita.
+ *
+ * É a mesma regra que `montarMensagemBloqueio` já seguia no turno do bloqueio: a
+ * regra em vigor fala, o modelo não. Deixar o modelo narrar durante o bloqueio é o
+ * que transforma a regra em sugestão que ele contorna com boa retórica.
+ *
+ * ⚠️ NÃO cita o formulário de "Abrir direto" como alternativa. Ele existe e abre
+ * chamado sem passar pelas regras (`D-04`, `RNF-18`), mas ensiná-lo aqui seria
+ * ensinar a pular a deflexão — que é o produto.
+ */
+export const MENSAGEM_BLOQUEIO_PENDENTE =
+  'Ainda não consigo abrir o chamado: primeiro preciso registrar o que a documentação não resolveu no seu caso. Use o botão "Isso não resolve meu caso" aqui embaixo e me conte em uma frase — abro o chamado na sequência.'
+
 export function montarMensagemBloqueio(veredito: Veredito & { bloquear: true }): string {
   if (veredito.regra === 'regra1_confluence') {
     const ev = veredito.evidencia as EvidenciaRegra1
@@ -175,7 +195,11 @@ export function montarMensagemBloqueio(veredito: Veredito & { bloquear: true }):
       '',
       links,
       '',
-      'Se essas páginas não resolvem o **seu** caso, me diga o que ficou de fora e eu abro o chamado na sequência. Isso também me ajuda a sinalizar que a documentação precisa melhorar.',
+      // ⚠️ A copy aponta o BOTÃO, não a caixa de mensagem. A versão anterior dizia
+      // "me diga o que ficou de fora" e convidava a digitar no chat — o caminho que
+      // não registra o override. Duas portas, uma só registrada, e a copy indicando
+      // justamente a outra: o motivo de a taxa de deflexão parecer melhor do que era.
+      'Se essas páginas não resolvem o **seu** caso, use o botão "Isso não resolve meu caso" logo abaixo. Vou pedir uma frase sobre o que faltou — é ela que manda a documentação para a fila de melhoria — e sigo com o chamado na sequência.',
     ].join('\n')
   }
 
@@ -191,7 +215,7 @@ export function montarMensagemBloqueio(veredito: Veredito & { bloquear: true }):
     '',
     'Abrir de novo provavelmente traria o mesmo ajuste temporário. Faz mais sentido tratar a causa — posso registrar isso como um chamado de causa raiz, com o histórico anexado.',
     '',
-    'Se o seu caso é diferente dos anteriores, me diga o que muda e eu abro normalmente.',
+    'Se o seu caso é diferente dos anteriores, use o botão "Isso não resolve meu caso" logo abaixo e me conte o que muda — abro o chamado na sequência.',
   ].join('\n')
 }
 

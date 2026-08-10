@@ -185,7 +185,7 @@ O agente é a porta de entrada. O colaborador descreve a demanda em linguagem na
 | RF-10 | **Regra 2 — padrão de ajuste operacional.** `check_jira_history` busca tickets anteriores do mesmo tipo, lê os comentários de resolução e classifica cada um via IA em: **"ajuste operacional"** (contorna sem resolver a causa raiz — "atualizei o pipeline manualmente", "reparticionei a tabela", "ajustei o cron") ou **"resolução real"** (causa raiz corrigida). O bloqueio dispara ao encontrar padrão recorrente de ajuste operacional para o mesmo tipo de problema. | P0 |
 | RF-11 | Parâmetros da Regra 2 configuráveis pelo admin: **threshold de recorrência** (sugestão inicial: 3+ tickets em 90 dias) e **critério de agrupamento** — qual campo do Jira delimita "mesmo tipo" (label, componente ou tipo de issue). Ver **Q2**. | P0 |
 | RF-12 | **Formato obrigatório da mensagem de bloqueio**, com três elementos: (1) qual regra disparou, (2) motivo em linguagem natural, para que o solicitante saiba como agir, (3) link da página do Confluence — sempre na Regra 1, e na Regra 2 quando houver documentação relacionada. | P0 |
-| RF-13 | **Bloqueio não é parede.** O colaborador pode registrar que a documentação não resolveu o caso dele e prosseguir. A tentativa de bloqueio e o override ficam registrados — o override é sinal de documentação ruim, não de usuário teimoso. | P0 |
+| RF-13 | **Bloqueio não é parede.** O colaborador pode registrar que a documentação não resolveu o caso dele e prosseguir. A tentativa de bloqueio e o override ficam registrados — o override é sinal de documentação ruim, não de usuário teimoso. O registro passa por um **controle explícito** (o botão), nunca por continuar a conversa: ver `RN-07` e `D-21`. | P0 |
 | RF-14 | O prompt de classificação da Regra 2 deve conter **exemplos reais de ajuste operacional da Gocase**. Sem exemplos do contexto da empresa, a classificação é imprecisa. Levantar esses exemplos é pré-requisito de implementação, não refinamento posterior. | P0 |
 | RF-15 | **Priorização automática** a partir da conversa, em três níveis, substituindo a classificação subjetiva atual: | P0 |
 
@@ -356,7 +356,7 @@ Organizados pelas características de qualidade da ISO/IEC 25010:2023.
 | RN-04 | Visibilidade de chamado é por vínculo local, não por permissão do Jira. Sem vínculo, sem acesso. |
 | RN-05 | Comentário interno do agente nunca chega ao colaborador. |
 | RN-06 | Conteúdo do Confluence só é exposto se: espaço na allowlist **E** página sem restrição **E** sem label de bloqueio. Todas simultaneamente. |
-| RN-07 | Bloqueio é orientação, não parede: sempre há caminho de override, e o override é registrado. |
+| RN-07 | Bloqueio é orientação, não parede: sempre há caminho de override, e o override é registrado. **O override é o ÚNICO caminho de saída** — enquanto houver bloqueio sem override, nenhuma proposta de chamado é montada, por mais mensagens que a conversa receba (ver `D-21`). Sem isso a segunda metade da regra era falsa: dava para sair pelo chat sem registro. |
 | RN-08 | O SLA é de **primeira resposta**, não de resolução. Isso precisa estar explícito em toda comunicação do app. |
 | RN-09 | Perfil admin é concedido por lista explícita, nunca por inferência. |
 | RN-10 | Toda ação que toca Atlassian ou IA gera registro de auditoria, inclusive as que falham. |

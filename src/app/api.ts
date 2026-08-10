@@ -36,6 +36,8 @@ export type Prioridade = 'critica' | 'alta' | 'normal'
 export interface RespostaTurno {
   readonly texto: string
   readonly bloqueado: boolean
+  /** Bloqueio sem override, inclusive de turnos anteriores (RF-13, RN-07). */
+  readonly bloqueioPendente: boolean
   readonly regraBloqueio: string | null
   readonly verificacoes: {
     readonly confluence: EstadoVerificacao
@@ -247,7 +249,13 @@ export interface AvisoRecebido {
   readonly criadoEm: string
 }
 
-/** Espelha `ConfigValores` do servidor no que a tela de admin edita. */
+/**
+ * Espelha `ConfigValores` do servidor — **todas** as chaves, não só as editáveis.
+ *
+ * O console edita menos do que isto (`D-25`), mas o espelho precisa ser completo:
+ * é ele que `diagnosticar()` recebe, e uma chave a menos aqui viraria um
+ * diagnóstico que não enxerga metade da configuração.
+ */
 export interface ConfigValores {
   readonly dominios_permitidos: string[]
   readonly admins: string[]
@@ -256,6 +264,9 @@ export interface ConfigValores {
   readonly tipos_chamado_permitidos: string[]
   readonly service_desk_id: string | null
   readonly campo_solicitante_id: string | null
+  readonly org_id: string | null
+  readonly assentos_ocioso_dias: number
+  readonly custo_mensal_por_produto: Record<string, number>
   readonly regra1_threshold_score: number
   readonly regra2_threshold_recorrencia: number
   readonly regra2_janela_dias: number
@@ -278,9 +289,11 @@ export interface ConfigValores {
   readonly retencao_conversas_dias: number | null
   readonly retencao_auditoria_dias: number | null
   readonly retencao_notificacoes_dias: number | null
-  readonly org_id: string | null
-  readonly assentos_ocioso_dias: number
-  readonly custo_mensal_por_produto: Record<string, number>
+  /** T-134 — faixas de preço por produto. Vazio = economia de ocioso sai como teto. */
+  readonly curva_preco_por_produto: Record<
+    string,
+    { readonly ate: number | null; readonly precoUnitarioUsd: number }[]
+  >
 }
 
 export interface BaselineAssentos {
@@ -425,7 +438,11 @@ export interface ResumoCusto {
   readonly custoConfigurado: boolean
   readonly ocioso: {
     readonly usuarios: number
+    /** ⚠️ **TETO** da economia quando `economiaConfiavel` é `false`, não a economia. */
     readonly custoMensalUsd: number | null
+    /** `false` = preço escalonado sem curva configurada (T-134). A tela mostra a ressalva
+     * ao lado do número, porque é aqui que se decide cortar acesso de alguém. */
+    readonly economiaConfiavel: boolean
   }
 }
 
