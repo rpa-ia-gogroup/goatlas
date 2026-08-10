@@ -6119,7 +6119,14 @@ var TAGS_TRANSPARENTES = /* @__PURE__ */ new Set([
   "ac:rich-text-body",
   "ac:plain-text-body",
   "ac:link-body",
-  "ac:plain-text-link-body"
+  "ac:plain-text-link-body",
+  // Andaime do editor novo (ADF). `ac:adf-extension` e `ac:adf-node` são resolvidos no
+  // `switch` — estes dois estão aqui para o caso de chegarem soltos, e as marcas de
+  // formatação do ADF (negrito, link) que só embrulham conteúdo.
+  "ac:adf-content",
+  "ac:adf-fallback",
+  "ac:adf-mark",
+  "ac:adf-mark-fragment"
 ]);
 var ATRIBUTOS_PERMITIDOS = {
   a: ["href"],
@@ -6128,6 +6135,8 @@ var ATRIBUTOS_PERMITIDOS = {
   th: ["colspan", "rowspan"],
   "ac:structured-macro": ["ac:name"],
   "ac:parameter": ["ac:name"],
+  "ac:adf-node": ["type"],
+  "ac:adf-attribute": ["key"],
   "ac:image": ["ac:alt"],
   "ri:attachment": ["ri:filename"],
   "ri:url": ["ri:value"],
@@ -6138,6 +6147,14 @@ var PAINEL_POR_MACRO = {
   note: "nota",
   panel: "nota",
   warning: "aviso",
+  tip: "dica"
+};
+var PAINEL_POR_TIPO_ADF = {
+  info: "info",
+  note: "nota",
+  warning: "aviso",
+  error: "aviso",
+  success: "dica",
   tip: "dica"
 };
 var ENFASE_POR_TAG = {
@@ -6226,7 +6243,12 @@ function converter(bruto, coletor) {
       return converterAcLink(bruto, coletor);
     case "ac:structured-macro":
       return converterMacro(bruto, coletor);
+    case "ac:adf-extension":
+    case "ac:adf-node":
+      return converterAdf(bruto, coletor);
     case "ac:parameter":
+    case "ac:adf-attribute":
+    case "ac:adf-parameter":
       return [];
     case "ac:emoticon":
     case "ac:placeholder":
@@ -6394,6 +6416,10 @@ function converterMacro(bruto, coletor) {
     const linguagem = nome === "code" ? parametroDaMacro(bruto, "language") : null;
     return conteudo.trim() === "" ? [] : [{ tipo: "codigo", linguagem, conteudo }];
   }
+  if (nome === "status") {
+    const texto2 = parametroDaMacro(bruto, "title");
+    return texto2 === null ? [] : [{ tipo: "etiqueta", texto: texto2 }];
+  }
   const painel = PAINEL_POR_MACRO[nome];
   if (painel !== void 0) {
     const dentro = converterLista(
@@ -6420,6 +6446,38 @@ function converterMacro(bruto, coletor) {
   }
   anotar(coletor, "macro_nao_suportada", nome === "" ? "sem nome" : nome);
   return [{ tipo: "macroNaoSuportada", nome: nome === "" ? "sem nome" : nome }];
+}
+function converterAdf(bruto, coletor) {
+  const no = bruto.nome === "ac:adf-node" ? bruto : primeiroFilho(bruto, "ac:adf-node");
+  if (no !== null) {
+    const dentro = converterLista(
+      no.filhos.filter((f) => f.tipo === "elemento" && f.nome === "ac:adf-content"),
+      coletor
+    );
+    if (dentro.length > 0) {
+      if (atributo(no, "type") !== "panel") return dentro;
+      const tipo2 = atributoAdf(no, "panel-type") ?? "";
+      return [{ tipo: "painel", variante: PAINEL_POR_TIPO_ADF[tipo2] ?? "nota", filhos: dentro }];
+    }
+  }
+  const fallback = converterLista(
+    bruto.filhos.filter((f) => f.tipo === "elemento" && f.nome === "ac:adf-fallback"),
+    coletor
+  );
+  if (fallback.length > 0) return fallback;
+  const tipo = no === null ? "" : atributo(no, "type") ?? "";
+  const nome = tipo === "" ? "adf" : `adf:${tipo}`;
+  anotar(coletor, "macro_nao_suportada", nome);
+  return [{ tipo: "macroNaoSuportada", nome }];
+}
+function atributoAdf(no, chave) {
+  for (const filho of no.filhos) {
+    if (filho.tipo !== "elemento" || filho.nome !== "ac:adf-attribute") continue;
+    if (atributo(filho, "key") !== chave) continue;
+    const valor = textoBrutoDe(filho).trim();
+    return valor === "" ? null : valor;
+  }
+  return null;
 }
 function parametroDaMacro(bruto, nomeParametro) {
   for (const filho of bruto.filhos) {
@@ -6449,6 +6507,11 @@ function textoDe(nos) {
         break;
       case "codigo":
         saida += no.conteudo;
+        break;
+      // A etiqueta entra no texto puro: ela é conteúdo da página, e é justamente o tipo de
+      // palavra ("Concluído", "Bloqueado") que faz um trecho de busca dizer se vale abrir.
+      case "etiqueta":
+        saida += no.texto;
         break;
       case "macroNaoSuportada":
         break;
