@@ -387,6 +387,21 @@ destes reabre um vazamento que já foi fechado.
   editável por qualquer pessoa (`R-07`). Ele abre em **outra aba** de propósito — a
   conversa vive em estado de React, e navegar na mesma aba destruiria o botão de
   override (`RF-13`) de quem aceitou ler primeiro.
+- ⚠️ **A visão da aba Documentação é DERIVADA, não guardada** (`visaoDaDocumentacao`). A
+  tela decidia por `busca !== null`, e apagar o campo mexia só em `termo`: os resultados
+  antigos ficavam **travados na tela**, sem caminho de volta para navegar por espaço (visto
+  no app real em 10/08/2026). O conserto não foi um `setBusca(null)` no `onChange` — isso
+  funciona hoje e quebra no próximo lugar que mexer em `termo` sem lembrar de limpar o resto.
+  A ordem das três regras É o comportamento: **página aberta ganha de tudo** (senão o deep
+  link `?pagina=` cairia nas categorias) · **campo vazio = começar de novo** · com termo e
+  resposta, resultados. Mesmo raciocínio de `bloqueio` × `temBloqueioPendente` (`D-21`).
+- ⚠️ **A lista de espaços tem TRÊS estados, e o título aparece nos três.** `espacos` nascia
+  `[]` e o componente devolvia `null` para lista vazia — então **carregar era indistinguível
+  de tela em branco**: nem título, nem sinal, ninguém percebia que havia algo a caminho. E
+  `falhou` é separado de `pronto: []` pelo motivo que `admin/paineis.tsx` já registra: `[]`
+  numa queda de rede vira "não tem documentação" e manda a pessoa abrir chamado por algo que
+  está escrito. Zero por configuração diz "nenhum espaço foi liberado", nunca "não há
+  documentação".
 - **A tela de documentação lê `?q=` e `?pagina=` no boot — e isso NÃO é um router.**
   `App.tsx` continua navegando por estado (Princípio V); o deep link existe por dois
   motivos concretos: link de página compartilhável entre colegas, e o link `ri:page` do
@@ -490,6 +505,23 @@ destes reabre um vazamento que já foi fechado.
   `false` ali e o aviso nunca apareceria no caso real. Fazê-lo aparecer exigiria adivinhar
   que aquele parágrafo é placeholder — heurística sobre conteúdo de terceiro. Espaço com home
   vazia é lacuna de documentação, e quem mede isso é `RF-42`.
+- 🎁 **Macro desconhecida COM corpo tem o corpo renderizado, nunca descartado.** Era
+  desperdício silencioso: `panel`, `deck`/`card`, `excerpt` e qualquer macro interna que
+  envolva texto caíam no placeholder **e o texto ia embora** — a página tinha, a pessoa não
+  via, e a tela ainda dizia "o texto ao redor está completo". Renderizar o corpo é grátis
+  (nenhuma chamada nova) e seguro: ele passa por `converterLista`, a **mesma** allowlist de
+  todo o resto. É a diferença entre "não sei desenhar esta moldura" (a moldura se perde, o
+  texto aparece) e "não posso mostrar este conteúdo". O `anotar` continua acontecendo: a
+  auditoria de `RF-43` é o que diz qual macro vale implementar de verdade um dia.
+- **`children`/`pagetree` apontam para a lista que a leitura JÁ mostra** (T-115) em vez de
+  dizer "não há o que trazer" — o conteúdo está na tela, alguns centímetros abaixo, com a
+  verificação de restrição por item que `RN-06` exige.
+- 🚨 **`jira`/`jirachart` NÃO devem ser implementados** — e o motivo não é custo. A JQL vem
+  de dentro da página, que qualquer pessoa edita (`R-07`), e executá-la seria rodar consulta
+  **escolhida pelo conteúdo** com a conta de serviço, mostrando o resultado a qualquer
+  colaborador. É `RN-06` sem gate equivalente: no Confluence existe allowlist de espaço,
+  label e restrição por página; para Jira não existe nada disso. Fica placeholder de
+  propósito.
 - **O parâmetro da macro continua fora da tela** (`RNF-30`), inclusive nos blocos agora
   nomeados: JQL, `spaceKey` e id de filtro descrevem estrutura interna e podem citar projeto
   que quem lê não deveria conhecer.
@@ -501,7 +533,7 @@ destes reabre um vazamento que já foi fechado.
   confiável **inclusive no tamanho**: há teto de entrada, de profundidade, de nós e
   de descartes. Conteúdo hostil não precisa de script para derrubar o Worker.
 - 🚨 **A migração roda UMA VEZ POR BANCO, não por requisição** (`db/schema.ts`,
-  `garantirMigracao`, `D-31`). São 35 `CREATE` + 3 `ALTER` sequenciais e `await`ados;
+  `garantirMigracao`, `D-32`). São 35 `CREATE` + 3 `ALTER` sequenciais e `await`ados;
   chamados de `montarContexto` eles eram o **piso de ~400 ms de toda rota** — medido nos
   logs em 10/08/2026: `/api/cron/enviar-notificacoes` com a **fila vazia** levava 376–584 ms.
   A memoização é `WeakMap` por objeto de banco, e é isso que a torna correta nos dois mundos:
@@ -526,7 +558,7 @@ destes reabre um vazamento que já foi fechado.
   separada com teto 30 — teto único obrigaria a escolher entre guardar poucas páginas ou
   arriscar centenas de MB num Worker de 128 MB.
 - 🚨 **Laço de rede é paralelo COM TETO, nunca `Promise.all`** (`src/lib/paralelo.ts`,
-  `CONCORRENCIA_ATLASSIAN = 5`, `CONCORRENCIA_IA = 3`, `D-31`). Havia cinco laços
+  `CONCORRENCIA_ATLASSIAN = 5`, `CONCORRENCIA_IA = 3`, `D-32`). Havia cinco laços
   `for … await` sobre listas de rede — lista de chamados (até **100** `obterChamado` em
   série), restrição por página na busca e na árvore, espaços da allowlist, classificação da
   Regra 2 (uma chamada de IA por ticket) — e o tempo era a **soma**. ⚠️ O teto não é
@@ -547,13 +579,13 @@ destes reabre um vazamento que já foi fechado.
   🚨 Mesmo assim `tentarMontarProposta` **reconfere `temBloqueioPendente` antes de gravar** —
   entre começar a extração e voltar dela passa uma ida ao provedor, e `if` que rodou antes do
   `await` não protege o que vem depois. `RN-07` já foi burlada uma vez (`D-21`).
-- ⚠️ **`max_tokens` NÃO é conserto de latência, e streaming conflita com o desenho** (`D-31`).
+- ⚠️ **`max_tokens` NÃO é conserto de latência, e streaming conflita com o desenho** (`D-32`).
   Num modelo com raciocínio o teto conta tokens de raciocínio: teto baixo devolve resposta
   **vazia** (bug que o fake não pega), e teto generoso não corta nada. Streaming é o que mais
   melhoraria a percepção e **não cabe** enquanto o servidor **descartar** o texto do modelo em
   caso de bloqueio (`D-21`) — não se transmite texto que talvez seja jogado fora.
 - **Teste de latência afirma sobre CONTAGEM DE CHAMADAS e SIMULTANEIDADE**
-  (`tests/latencia.test.ts`), não sobre resultado. Os quatro defeitos de `D-31` conviveram com
+  (`tests/latencia.test.ts`), não sobre resultado. Os quatro defeitos de `D-32` conviveram com
   800 asserções verdes porque o app respondia **certo** em todos eles. E o teste da
   sobreposição das duas chamadas de IA falha por **deadlock**, não por tempo: o `chat` nº 2 só
   termina depois de a extração começar, então serializar de novo trava o teste em vez de
@@ -715,15 +747,16 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**824 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**840 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 
-⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-31`,
+⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`
 que nunca acertava, cinco laços de rede em série e três idas ao provedor de IA quando duas
 bastavam. As correções são medidas por **contagem de chamadas** em `tests/latencia.test.ts`;
 o p95 de `RNF-12` (busca < 2 s, primeira resposta do agente < 5 s) só se fecha medindo no app
 publicado.
+
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,

@@ -1111,6 +1111,34 @@ function converterMacro(bruto: ElementoBruto, coletor: Coletor): No[] {
     )
   }
 
+  /**
+   * ⚠️ **Macro desconhecida que TEM corpo: o corpo é renderizado, não descartado.**
+   *
+   * Este era o desperdício silencioso da leitura. Qualquer macro fora das listas acima virava
+   * uma caixa cinza — **e o texto dentro dela ia embora**. `panel`, `deck`/`card` (abas),
+   * `excerpt`, e qualquer macro que a Gocase use para envolver conteúdo caíam aqui: a página
+   * tinha o texto, a pessoa não via, e a tela ainda dizia "o texto ao redor está completo".
+   *
+   * Renderizar o corpo é **de graça** (nenhuma chamada nova) e **seguro**: o corpo passa por
+   * `converterLista`, exatamente a mesma allowlist de todo o resto — é a diferença entre "não
+   * sei desenhar esta moldura" e "não posso mostrar este conteúdo". A moldura se perde; o
+   * texto aparece.
+   *
+   * O `anotar` continua acontecendo: a auditoria de `RF-43` registra qual macro apareceu, e é
+   * dela que sai a lista do que vale implementar de verdade um dia. Perder a moldura sem
+   * registrar seria perder também o sinal.
+   */
+  const corpos = bruto.filhos.filter(
+    (f) => f.tipo === 'elemento' && f.nome === 'ac:rich-text-body',
+  )
+  if (corpos.length > 0) {
+    const dentro = converterLista(corpos, coletor)
+    if (dentro.length > 0) {
+      anotar(coletor, 'macro_nao_suportada', nome === '' ? 'sem nome' : nome)
+      return dentro
+    }
+  }
+
   anotar(coletor, 'macro_nao_suportada', nome === '' ? 'sem nome' : nome)
   return [{ tipo: 'macroNaoSuportada', nome: nome === '' ? 'sem nome' : nome }]
 }

@@ -1266,9 +1266,45 @@ de cada item** (`RN-06`), uma chamada por página (`R-02`) — e o valor para de
 uma lista de páginas alteradas não responde "por que meu relatório está errado". `livesearch`
 foi feito porque não havia resultado a reproduzir, só um caminho a oferecer.
 
+### D-31 · Quais blocos do Confluence o app reproduz — e por que `jira` fica de fora por decisão
+
+**Data:** 10/08/2026 · **Contexto:** `RF-43`, `RF-39`, `RN-06`, `R-02`, `R-07`
+
+A pergunta que originou isto foi "não dá para puxar?", olhando um bloco na aba Documentação.
+A resposta é **caso a caso**, e a linha que separa os casos não é dificuldade — é **de onde
+o conteúdo viria**.
+
+| Bloco | O que é feito | Por quê |
+|---|---|---|
+| Macro desconhecida **com corpo** (`panel`, `deck`/`card`, `excerpt`, macros internas) | ✅ **Corpo renderizado** | O texto já vem no storage. Grátis, e a caixa cinza estava aparecendo **no lugar do texto** |
+| `livesearch` | ✅ **Busca de verdade**, escopada no espaço (`D-30`) | Não é um resultado a reproduzir — é uma caixa de busca, e o app já busca melhor que o Confluence para quem não tem assento |
+| `children`, `pagetree` | ✅ Aponta para a lista que a leitura **já** mostra (T-115) | O conteúdo está na tela, centímetros abaixo, com restrição verificada por item |
+| `contributors`, `recently-updated`, `listlabels`, `toc` | ⏳ **Placeholder** | Custam chamada por visualização — e os dois do meio, **uma verificação de restrição por item** (`RN-06`, `R-02`). Valor baixo para deflexão: uma lista de páginas alteradas não responde "por que meu relatório está errado" |
+| `jira`, `jirachart` | 🚨 **Decisão de NÃO fazer** | Ver abaixo |
+
+🚨 **`jira`/`jirachart` não é questão de custo.** A JQL vem de **dentro da página**, que
+qualquer pessoa da empresa edita (`R-07`). Executá-la seria rodar uma consulta **escolhida
+pelo conteúdo** com a conta de serviço (`D-01`, proxy total) e mostrar o resultado a qualquer
+colaborador.
+
+No Confluence isso é contido por três condições (`RN-06`): espaço na allowlist, sem label
+bloqueada, página sem restrição. **Para o Jira não existe gate equivalente no app** — não há
+allowlist de projeto para leitura, não há verificação de permissão por issue, e sob proxy
+total a permissão da conta de serviço não pode servir de proxy da permissão da pessoa
+(`RNF-09`). Implementar seria abrir para consulta arbitrária de Jira o caminho que `RN-06`
+fecha para o Confluence.
+
+Fica placeholder **por decisão**, não por pendência. Se um dia virar requisito, o
+pré-requisito é o gate — não o código da macro.
+
+**O que sustenta isso em código:** a auditoria de `RF-43` (`macro_nao_suportada`) continua
+registrando o nome de toda macro que aparece, **inclusive as que passaram a ter o corpo
+renderizado**. É essa lista que diz qual bloco vale implementar de verdade um dia, medida em
+vez de suposta.
+
 ---
 
-### D-31 · A latência era quatro defeitos somados, e nenhum dava erro
+### D-32 · A latência era quatro defeitos somados, e nenhum dava erro
 
 **Data:** 10/08/2026 · **Contexto:** `RNF-12`, `RNF-13`, `RNF-15`, `RNF-16`, `R-02` ·
 **Decisão de:** Kaique
