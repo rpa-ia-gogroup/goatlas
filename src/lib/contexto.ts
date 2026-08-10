@@ -7,7 +7,7 @@
  * garantia de RNF-01 passa a depender de disciplina em vez de estrutura.
  */
 
-import { ClienteAtlassianHttp } from './atlassian/cliente'
+import { ClienteAtlassianHttp, novasCachesAtlassian } from './atlassian/cliente'
 import { ClienteAtlassianFake } from './atlassian/fake'
 import { ClienteAtlassianSomenteLeitura } from './atlassian/somente-leitura'
 import type { ClienteAtlassian } from './atlassian/tipos'
@@ -20,7 +20,7 @@ import type { ClienteIA } from './ia/tipos'
 import { AuditoriaBanco, type Auditoria } from './audit'
 import { Config, valoresDoBootstrap, type BootstrapEnv, type ConfigValores } from './config'
 import { configDemo, repovoarChamadosDemo, semearAtlassianDemo, semearIaDemo } from './demo'
-import { migrar } from './db/schema'
+import { garantirMigracao } from './db/schema'
 import type { Banco } from './db/tipos'
 import { RepositorioConversas } from './agent/estado'
 import { RegistroConhecimento } from './confluence/registro'
@@ -150,13 +150,42 @@ export interface ClientesReaproveitados {
   readonly organizacao?: ClienteOrganizacao
 }
 
+/**
+ * As caches da Atlassian, **vivas pelo tempo do isolate** (RNF-13).
+ *
+ * ⚠️ **Este é o conserto de um cache que nunca acertava.** `ClienteAtlassianHttp` sempre
+ * teve `CacheTtl`, e vários comentários do código contavam com ela para conter o custo das
+ * chamadas por página ("contido pelo cache de conteúdo"). Só que a cache morava na
+ * instância, e a instância é criada **a cada requisição** aqui embaixo — então o TTL nunca
+ * chegava a valer: toda leitura de página rebuscava metadados, labels, restrição e corpo, e
+ * cada nível do breadcrumb rebuscava os três primeiros de novo.
+ *
+ * Módulo é escopo de isolate no runtime dos Workers, que é exatamente a vida que se quer:
+ * sobrevive entre requisições, morre com o isolate, e não precisa de invalidação
+ * distribuída. O teto de entradas de cada cache está em `novasCachesAtlassian` — cache
+ * compartilhada sem teto é vazamento de memória com prazo.
+ *
+ * ⚠️ Compartilhar é seguro **porque a identidade perante a Atlassian é sempre a mesma**
+ * (proxy total, `D-01`): não existe resposta "de um usuário" para vazar para outro. Num
+ * mundo com `raiseOnBehalfOf` por pessoa (`RNF-22`) esta cache teria de ser por identidade,
+ * e é por isso que ela mora aqui, num lugar só, e não escondida dentro do cliente.
+ *
+ * ⚠️ A cache **não** guarda decisão de exposição. `RN-06` continua sendo avaliada por
+ * requisição em `confluence/acesso.ts`, contra a allowlist de `ctx.valores`: mudar a
+ * allowlist no console vale na requisição seguinte, mesmo com metadados em cache. O que a
+ * cache evita é rebuscar o **insumo**, não repetir a **decisão**.
+ */
+const cachesAtlassianDoIsolate = novasCachesAtlassian()
+
 export async function montarContexto(
   env: EnvGoDeploy,
   agora: () => string = () => new Date().toISOString(),
   novoId: () => string = novoIdPadrao,
   reaproveitar: ClientesReaproveitados = {},
 ): Promise<Contexto> {
-  await migrar(env.DB)
+  // Uma vez por banco, não por requisição — ver `garantirMigracao`. Eram ~400 ms de DDL
+  // sequencial cobrados de toda rota, inclusive do turno do agente.
+  await garantirMigracao(env.DB)
 
   const modoDemo = env.GOATLAS_MODO_DEMO === '1'
   // Bootstrap: padrão fail-closed → env → banco. A demo acrescenta o mínimo para o
@@ -179,6 +208,8 @@ export async function montarContexto(
         apiToken: env.ATLASSIAN_API_TOKEN ?? '',
         ttlMetadadosSeg: valores.ttl_metadados_seg,
         ttlConteudoSeg: valores.ttl_conteudo_seg,
+        // O que faz o TTL acima valer de verdade — ver `cachesAtlassianDoIsolate`.
+        caches: cachesAtlassianDoIsolate,
         // RF-21, Q4 — configurável (RNF-25), nunca hardcoded. `null` até o time
         // de tech confirmar o id do campo "Solicitante"; o solicitante real
         // continua indo na descrição enquanto isso (cinto e suspensório).

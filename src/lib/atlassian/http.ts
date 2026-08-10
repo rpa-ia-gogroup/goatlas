@@ -205,11 +205,23 @@ export class TransporteAtlassian {
   }
 }
 
-/** Cache com TTL — RNF-13. Sem cache o app vira amplificador de chamadas. */
+/**
+ * Cache com TTL — RNF-13. Sem cache o app vira amplificador de chamadas.
+ *
+ * ⚠️ **Teto de entradas não é enfeite desde que a cache passou a viver por isolate**
+ * (`contexto.ts`). Enquanto ela morria com a requisição, crescer sem limite era inócuo;
+ * compartilhada, uma cache sem teto é vazamento de memória com prazo — o isolate acumula
+ * até a plataforma matá-lo, e o sintoma aparece como erro em requisição alheia. O
+ * despejo é FIFO por ordem de inserção (`Map` preserva), que é o mais barato e suficiente:
+ * o que importa aqui é o teto existir, não escolher a vítima com sabedoria.
+ */
 export class CacheTtl<T> {
   private readonly mapa = new Map<string, { valor: T; expiraEm: number }>()
 
-  constructor(private readonly agoraMs: () => number) {}
+  constructor(
+    private readonly agoraMs: () => number,
+    private readonly maxEntradas = 500,
+  ) {}
 
   obter(chave: string): T | undefined {
     const entrada = this.mapa.get(chave)
@@ -222,10 +234,24 @@ export class CacheTtl<T> {
   }
 
   definir(chave: string, valor: T, ttlSeg: number): void {
+    // Reinserir move para o fim da ordem FIFO: chave já presente é atualização, e
+    // manter a posição antiga faria o valor recém-buscado ser o próximo despejado.
+    this.mapa.delete(chave)
     this.mapa.set(chave, { valor, expiraEm: this.agoraMs() + ttlSeg * 1000 })
+
+    while (this.mapa.size > this.maxEntradas) {
+      const maisAntiga = this.mapa.keys().next()
+      if (maisAntiga.done) break
+      this.mapa.delete(maisAntiga.value)
+    }
   }
 
   limpar(): void {
     this.mapa.clear()
+  }
+
+  /** Só para teste e diagnóstico: quantas entradas estão guardadas agora. */
+  get tamanho(): number {
+    return this.mapa.size
   }
 }
