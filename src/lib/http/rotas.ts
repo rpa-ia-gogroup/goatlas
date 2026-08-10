@@ -55,7 +55,12 @@ import {
   JANELA_ENVIOS_PENDENTES_MS,
   MAX_ANEXOS_POR_CHAMADO,
   MAX_ENVIOS_PENDENTES_POR_JANELA,
+  TTL_ANEXO_PENDENTE_HORAS,
 } from '../tickets/anexos-pendentes'
+import {
+  materializarAnexosDoChamado,
+  type ResultadoAnexoNaCriacao,
+} from '../tickets/anexo-na-criacao'
 import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
 import { buscaConfigurada } from '../config/diagnostico'
 
@@ -319,21 +324,32 @@ async function rotear(
     const atual = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email)
 
     // A chave de idempotência é derivada da CONVERSA, não gerada por requisição:
-    // é o que faz duplo clique e reenvio caírem na mesma submissão (RF-24).
+    // é o que faz duplo clique e reenvio caírem na mesma submissão (RF-24). E é escrita
+    // pela mesma função que a rota de upload usa (T-409b) — se as duas divergirem, o
+    // anexo não casa com o chamado e ninguém vê erro nenhum.
+    const chaveDaConversa = normalizarChaveIdempotencia({
+      via: 'conversa',
+      conversaId: conversa.id,
+    })
     const r = await ctx.chamados.abrirPorConversa(
       atual!,
       serviceDeskId,
-      `conversa:${conversa.id}`,
+      chaveDaConversa,
       areaDoEmail(eu.email, ctx.valores.areas_por_email),
       declaracao.declarouAnexo,
     )
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
+    const anexo = await materializarAnexosDoChamado(ctx, {
+      chaveIdempotencia: chaveDaConversa,
+      solicitanteEmail: eu.email,
+      issueKey: r.issueKey,
+    })
     await avisarCriacao(ctx, r, {
       solicitanteEmail: eu.email,
       titulo: atual!.proposta!.titulo,
       prioridade: atual!.proposta!.prioridade,
     })
-    return json(respostaCriacao(r, atual!.proposta!.prioridade), 201)
+    return json(respostaCriacao(r, atual!.proposta!.prioridade, anexo), 201)
   }
 
   // --- formulário mínimo, caminho sem IA (D-04) -----------------------------
@@ -350,10 +366,14 @@ async function rotear(
     const piloto = await verificarPiloto(ctx, eu, caminho)
     if (piloto) return piloto
 
-    const chave =
-      typeof corpo?.chaveIdempotencia === 'string' && corpo.chaveIdempotencia.length > 0
-        ? `form:${eu.email}:${corpo.chaveIdempotencia}`
-        : `form:${eu.email}:${ctx.novoId()}`
+    // T-409b — a MESMA função que a rota de upload usa. Chave ausente ainda é tolerada
+    // aqui (o formulário sem anexo não pode regredir), e nesse caso simplesmente não há
+    // anexo para casar.
+    const chave = normalizarChaveIdempotencia({
+      via: 'formulario',
+      solicitanteEmail: eu.email,
+      chaveDoCliente: chaveDoClienteValida(corpo?.chaveIdempotencia) ?? ctx.novoId(),
+    })
 
     // RF-27 (T-130) — campos adicionais do request type, coletados pelo
     // formulário dinâmico. Ausente/inválido = nenhum, nunca erro: o caminho sem
@@ -404,12 +424,17 @@ async function rotear(
         ...(camposDinamicos ? { camposDinamicos } : {}),
       },
     })
+    const anexo = await materializarAnexosDoChamado(ctx, {
+      chaveIdempotencia: chave,
+      solicitanteEmail: eu.email,
+      issueKey: r.issueKey,
+    })
     await avisarCriacao(ctx, r, {
       solicitanteEmail: eu.email,
       titulo: validada.proposta.titulo,
       prioridade: validada.proposta.prioridade,
     })
-    return json(respostaCriacao(r, validada.proposta.prioridade), 201)
+    return json(respostaCriacao(r, validada.proposta.prioridade, anexo), 201)
   }
 
   // RF-27 (T-130) — schema de campos adicionais do request type, para o
@@ -1625,12 +1650,21 @@ function estadoVerificacao(
 function respostaCriacao(
   r: { issueKey: string | null; estado: string; duplicada: boolean; verificadoRegras: boolean },
   prioridade: Prioridade,
+  /**
+   * `RF-63` — o resultado do anexo é um dado **separado** do resultado da criação.
+   *
+   * ⚠️ Separado no tipo, não só no texto: aninhar o anexo dentro do estado da criação
+   * (um `estado: 'criado_sem_anexo'`, por exemplo) faria a tela decidir o que mostrar
+   * sobre o chamado a partir de algo que aconteceu com um arquivo.
+   */
+  anexo: ResultadoAnexoNaCriacao,
 ) {
   return {
     issueKey: r.issueKey,
     estado: r.estado,
     duplicada: r.duplicada,
     verificadoRegras: r.verificadoRegras,
+    anexo,
     prioridade,
     // RN-08 — sempre PRIMEIRA RESPOSTA, e o rótulo deixa isso explícito.
     slaPrimeiraRespostaHoras: SLA_PRIMEIRA_RESPOSTA_HORAS[prioridade],
@@ -1966,13 +2000,35 @@ async function tratarCron(
 
   if (caminho === '/api/cron/reprocessar-submissoes') {
     const r = await ctx.chamados.reprocessarPendentes(25)
+
+    /**
+     * T-415 — o expurgo dos anexos pendentes pega carona AQUI, e não na retenção.
+     *
+     * ⚠️ Duas razões, e as duas valem por si:
+     *
+     * 1. `aplicarRetencao` **não apaga nada** com política `null`, que é o default do
+     *    MVP (`D-20`, e apagar dado pessoal é irreversível). Apoiar-se nela deixaria a
+     *    tabela crescer para sempre.
+     * 2. `/api/cron/retencao` é a rota **destrutiva**, a única que mantém HMAC
+     *    obrigatório — e por isso responde **403** hoje (`CLAUDE.md`). Pendurar o
+     *    expurgo lá seria escrever código que nunca roda.
+     *
+     * Aqui é seguro porque este expurgo não é destrutivo no sentido que importa: a linha
+     * já não vale nada (o id expirou do lado da Atlassian horas antes), não é histórico
+     * de ninguém, e o chamado — que é o dado real — não é tocado.
+     */
+    const limite = new Date(
+      Date.parse(ctx.agora()) - TTL_ANEXO_PENDENTE_HORAS * 3600 * 1000,
+    ).toISOString()
+    const anexosPendentesExpurgados = await ctx.anexosPendentes.expurgarAnterioresA(limite)
+
     await ctx.auditoria.registrar({
       atorEmail: '(cron)',
       acao: 'submissao_reprocessada',
       resultado: 'sucesso',
-      detalhe: r,
+      detalhe: { ...r, anexosPendentesExpurgados },
     })
-    return json(r)
+    return json({ ...r, anexosPendentesExpurgados })
   }
 
   if (caminho === '/api/cron/reconciliar-vinculos') {

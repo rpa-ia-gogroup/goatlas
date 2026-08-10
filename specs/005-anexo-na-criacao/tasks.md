@@ -77,24 +77,24 @@ revised: "2026-08-07 — v2, depois do /analyze"
 
 ## Phase 3 — A criação, com o anexo isolado dela
 
-- [ ] **T-412** ⚠️ **Teste primeiro, e é o mais importante da spec:** falha no envio
+- [x] **T-412** ⚠️ **Teste primeiro, e é o mais importante da spec:** falha no envio
       **não** marca a submissão como falha definitiva e **não** impede o chamado.
       É o modo de falha que `plan.md` §0 descreve. _Requirements: RF-63, RNF-17_
-- [ ] **T-413** Materializar o anexo **depois** da criação, dentro da mesma
+- [x] **T-413** Materializar o anexo **depois** da criação, dentro da mesma
       confirmação, com o resultado do anexo separado do resultado da criação.
       _Requirements: RF-61, RF-63_
-- [ ] **T-413b** Materialização **uma vez só**, garantida por constraint
+- [x] **T-413b** Materialização **uma vez só**, garantida por constraint
       (`materializado_em` + `UNIQUE`). Reconfirmar devolve `duplicada: true` com o
       mesmo `issueKey`; sem isto, o segundo clique anexa o arquivo de novo.
       _Requirements: RF-24_
-- [ ] **T-414** Criação diferida (`plan.md` §7): o anexo não é carregado para o
+- [x] **T-414** Criação diferida (`plan.md` §7): o anexo não é carregado para o
       reprocessamento, e a resposta diz isso. O aviso de `RF-44` repete.
       _Requirements: RF-63, RNF-17, RF-44_
-- [ ] **T-415** [P] Expurgo das órfãs com **TTL próprio e curto**, independente da
+- [x] **T-415** [P] Expurgo das órfãs com **TTL próprio e curto**, independente da
       política de retenção pessoal. ⚠️ `aplicarRetencao` não apaga nada com política
       `null`, que é o default do MVP (`D-20`) — apoiar-se nela deixaria a tabela
       crescer para sempre. _Requirements: RNF-33_
-- [ ] **T-416** [P] Auditoria: declaração e resultado do envio, inclusive quando
+- [x] **T-416** [P] Auditoria: declaração e resultado do envio, inclusive quando
       falha. _Requirements: RN-10, RF-62_
 
 ## Phase 4 — As duas telas
