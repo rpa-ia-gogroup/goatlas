@@ -2523,6 +2523,23 @@ function semearIaDemo(fake) {
 // src/lib/db/schema.ts
 var TABELAS = [
   /**
+   * Marca de qual schema já foi aplicado neste banco (T-135).
+   *
+   * Uma linha, chave fixa. Existe só para a sonda de `jaAplicado` poder responder
+   * "já está tudo aplicado" em **uma** query, em vez de o app reaplicar 35
+   * statements por requisição para descobrir a mesma coisa.
+   *
+   * ⚠️ Tabela própria, não uma chave em `config`, de propósito: `config` é a tabela
+   * que o console de admin edita e que `PUT /api/admin/config` valida por tipo
+   * (`D-25`). Uma chave interna morando lá viraria uma linha sem família no mapa
+   * `FAMILIA` — e apareceria numa tela feita para decisões humanas.
+   */
+  `CREATE TABLE IF NOT EXISTS meta_schema (
+     id             INTEGER PRIMARY KEY CHECK (id = 1),
+     versao         TEXT NOT NULL,
+     aplicado_em    TEXT NOT NULL
+   )`,
+  /**
    * O artefato mais crítico do sistema (RF-22, RNF-17). É o que permite
    * acompanhar chamado sem conta Atlassian, e é a base do isolamento (RF-30):
    * sem vínculo, sem acesso (RN-04).
@@ -2896,18 +2913,28 @@ var COLUNAS_ADICIONADAS = [
    */
   `ALTER TABLE submissoes ADD COLUMN anexos_anexados INTEGER`
 ];
-var migracoes = /* @__PURE__ */ new WeakMap();
-async function garantirMigracao(db) {
-  const emAndamento = migracoes.get(db);
-  if (emAndamento) return emAndamento;
-  const promessa = migrar(db).catch((erro2) => {
-    migracoes.delete(db);
-    throw erro2;
-  });
-  migracoes.set(db, promessa);
-  return promessa;
+function versaoDoSchema() {
+  const texto2 = [...TABELAS, ...COLUNAS_ADICIONADAS].join("\n");
+  let h1 = 5381;
+  let h2 = 52711;
+  for (let i = 0; i < texto2.length; i++) {
+    const c = texto2.charCodeAt(i);
+    h1 = h1 * 33 + c | 0;
+    h2 = h2 * 31 + c | 0;
+  }
+  const hex = (n) => (n >>> 0).toString(16).padStart(8, "0");
+  return `${hex(h1)}${hex(h2)}-${texto2.length}`;
 }
-async function migrar(db) {
+var VERSAO_SCHEMA = versaoDoSchema();
+async function jaAplicado(db) {
+  try {
+    const r = await db.query(`SELECT versao FROM meta_schema WHERE id = 1`, []);
+    return primeiraLinha(r)?.versao === VERSAO_SCHEMA;
+  } catch {
+    return false;
+  }
+}
+async function aplicar(db) {
   for (const sql of TABELAS) {
     await db.exec(sql, []);
   }
@@ -2920,6 +2947,26 @@ async function migrar(db) {
       }
     }
   }
+  await db.exec(
+    `INSERT INTO meta_schema (id, versao, aplicado_em) VALUES (1, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET versao = excluded.versao, aplicado_em = excluded.aplicado_em`,
+    [VERSAO_SCHEMA, (/* @__PURE__ */ new Date()).toISOString()]
+  );
+}
+var migracoes = /* @__PURE__ */ new WeakMap();
+async function garantirMigracao(db) {
+  const emAndamento = migracoes.get(db);
+  if (emAndamento) return emAndamento;
+  const promessa = migrar(db).catch((erro2) => {
+    migracoes.delete(db);
+    throw erro2;
+  });
+  migracoes.set(db, promessa);
+  return promessa;
+}
+async function migrar(db) {
+  if (await jaAplicado(db)) return;
+  await aplicar(db);
 }
 
 // src/lib/agent/estado.ts

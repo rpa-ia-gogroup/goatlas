@@ -157,6 +157,13 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   é caso de uso, e quem tem duas limpa os cookies. ⚠️ Isso **contraria `RF-03`** (P0,
   pede logout explícito) e está registrado como divergência consciente, aguardando o
   aval do João — não reintroduzir o botão sem passar por `D-08`.
+- **A fonte do Google NÃO bloqueia o primeiro paint** (`D-35`). O `<link>` da Poppins usa
+  `media="print"` + `onload`, e existe um instante com fonte de sistema (FOUT) que antes não
+  existia — porque antes a tela **inteira** esperava por dois domínios de terceiro. ⚠️
+  `&display=swap` não substitui isto: ele governa quando o *texto* troca de fonte, não quando
+  a *página* pinta. A identidade visual (§2) continua Poppins; a pilha de fallback em
+  `tokens.css` é escolhida para a troca não empurrar o layout, e não é "segunda opção de
+  design". "Consertar o piscar" com `<link>` comum devolve a espera ao caminho crítico.
 
 ## Padrões de código que sustentam as travas
 
@@ -765,6 +772,18 @@ persistente.
   devolvia `{}` em produção**, sem erro nenhum: auditoria com 58 registros vazios, lista de
   chamados vazia, config caindo nos defaults. Como os defaults vêm do bootstrap por env, o
   app *parecia* funcionar. **Nunca indexe `rows` direto**; há teste das duas formas.
+- 🚨 **Cada `await db.exec` é uma ida de REDE, e `montarContexto` roda por requisição**
+  (`RNF-36`, `D-35`). `migrar` reaplicava os 32 statements de DDL (17 tabelas + 15
+  índices) mais os 3 `ALTER` em série a **cada** requisição `/api/*`: **36 idas ao banco**
+  (35 na migração + 1 do `config.carregar()`) antes de a rota começar a trabalhar — piso
+  medido de **442 ms** no cron mais barato, e o console de admin dispara seis requisições
+  no boot. Agora são **1** (mesmo isolate) ou **2** (isolate novo, pela
+  sonda `meta_schema`). ⚠️ **Idempotente não é grátis**, e o teste não pega: o comportamento
+  estava certo, e no shim em memória cada statement custa microssegundos — o custo é de rede
+  e só existe na plataforma. Mesma família de `linhasComoObjetos`. Por isso o teto de
+  `RNF-36` é em **idas ao banco**, nunca em milissegundos. Ao acrescentar tabela em
+  `TABELAS`, **não** há número de versão a subir: a marca é derivada do texto do schema, de
+  propósito.
 - 🚨 **O header do cron é ASSINADO** (`t=<unix>;<rótulo>=<hmac-sha256-hex>`), não é a chave.
   Comparar por igualdade dava 403 nas sete rotas com a chave certa. A verificação está em
   `http/cron-auth.ts`, com janela de replay e comparação em tempo constante. ⚠️ **Qual
@@ -845,7 +864,7 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**943 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**952 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`
@@ -853,6 +872,7 @@ que nunca acertava, cinco laços de rede em série e três idas ao provedor de I
 bastavam. As correções são medidas por **contagem de chamadas** em `tests/latencia.test.ts`;
 o p95 de `RNF-12` (busca < 2 s, primeira resposta do agente < 5 s) só se fecha medindo no app
 publicado.
+
 
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a

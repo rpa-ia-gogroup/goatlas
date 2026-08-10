@@ -1614,6 +1614,109 @@ formato e continuou servindo o antigo ao lado do novo.
 
 ---
 
+### D-35 · O schema deixa de ser reaplicado por requisição, e a marca de versão é DERIVADA
+
+**Data:** 10/08/2026 · **Contexto:** `RNF-36` (novo), `RNF-15`, `T-135` · **Decisão de:** Kaique
+
+**O relato:** "a página em si é bem lenta, tudo demora pra aparecer — até a tela de admin,
+mesmo minha conta já estando logada". O "mesmo estando logada" é a parte que aponta o
+culpado: não era o OAuth do edge.
+
+**A medição.** `montarContexto` — que roda a **cada** requisição `/api/*`, porque é ele que
+resolve `CONFIG_PADRAO → env → banco` e config alterada no console tem de valer na requisição
+seguinte — começa chamando `migrar(env.DB)`. `migrar` aplicava os 32 `CREATE TABLE/INDEX IF
+NOT EXISTS` mais os 3 `ALTER TABLE`, **em série**, com um `await` por statement. Contado com
+um espião em volta do `Banco`:
+
+| | Idas ao banco por requisição `/api/*` |
+|---|---|
+| Antes | **36**, em toda requisição, sempre — 35 na migração (32 DDL + 3 `ALTER`) + 1 do `config.carregar()` |
+| Depois — mesmo isolate | **1** (só `config.carregar()`) |
+| Depois — isolate novo, banco já migrado | **2** (a sonda + config) |
+
+No app publicado (`getAppLogs`, 10/08/2026) isso aparecia como piso de **442 ms** no cron
+mais barato do sistema — `enviar-notificacoes` sem nada a enviar, que praticamente só monta
+contexto — e a aba de admin dispara **seis** requisições paralelas no boot, mais o
+`/api/auth/me` da casca.
+
+**Por que passou por 763 testes.** Todos passam, e continuariam passando: o comportamento
+estava **correto**, só caro. `CREATE TABLE IF NOT EXISTS` é idempotente por definição, então
+nenhuma asserção sobre dado tinha motivo para falhar. E no shim de teste (`sqlite-local`,
+`node:sqlite` em memória) cada statement custa microssegundos — o custo que dói é **de rede**,
+e só existe na plataforma. É a mesma família de `linhasComoObjetos` e do `env.DB` devolvendo
+`{}`: o dublê implementa o contrato e esconde a propriedade da plataforma que importa.
+⚠️ Daí o teste novo contar **idas ao banco**, nunca milissegundos: teto em tempo de parede
+não é verificável sem rede e seria instável na máquina de qualquer pessoa.
+
+**A decisão, em duas partes:**
+
+1. **Memoizar a migração por instância de `Banco`** (`WeakMap`, guardando a *promessa* e não
+   um booleano — duas requisições concorrentes no boot do isolate senão migram as duas, o
+   mesmo check-then-insert que o outbox evita com constraint). `WeakMap` e não flag de
+   módulo porque cada teste monta um banco novo: uma flag global faria o segundo teste rodar
+   contra um banco sem tabela nenhuma.
+2. **Uma sonda de UMA query** (`meta_schema`) para o caso que a memoização não cobre: isolate
+   reciclado sobre banco já migrado. Sem ela o ganho dependeria de o `env.DB` ser a mesma
+   instância entre requisições — o que a plataforma não promete.
+
+⚠️ **A parte 1 chegou por outro caminho, e as duas convivem — não são a mesma coisa** (merge
+com `D-32`, 10/08/2026). O mesmo defeito foi corrigido em duas frentes ao mesmo tempo: `D-32`
+trouxe a memoização como `garantirMigracao`, esta trouxe a sonda. Elas **não se substituem** —
+a sonda corta os 35 statements para 2 idas num isolate **novo**, e a memoização corta as 2
+para **zero** em toda requisição seguinte do **mesmo** isolate. Ficar só com uma delas deixa
+metade do custo de pé, e o sintoma é o mesmo de sempre: comportamento certo, tempo errado.
+
+⚠️ **E a divisão dos nomes é contrato:** `garantirMigracao` memoiza e é o que
+`montarContexto` chama; `migrar` continua exportada **sem** memoização, porque os testes de
+schema querem justamente forçar a reaplicação. Memoizar `migrar` "para simplificar" faz esses
+testes deixarem de reaplicar nada **em silêncio** — há um caso em
+`tests/migracao-custo-por-requisicao.test.ts` cobrando exatamente essa distinção.
+
+**A marca de versão é derivada do texto do schema, não escrita à mão.** Um número manual
+tem um passo esquecível: quem acrescenta tabela em `TABELAS` e não sobe o número produz um app
+que **nunca** aplica a tabela nova, e o sintoma aparece longe daqui — leitura falhando num
+módulo qualquer, na mesma família de `{}` silencioso. Derivando de `[...TABELAS,
+...COLUNAS_ADICIONADAS]`, mudar o schema muda a marca por construção. Não é hash
+criptográfico e não precisa ser: a pergunta é "este texto é o mesmo?", não "alguém forjou
+isto?" — quem escreve em `meta_schema` é o próprio app.
+
+**Fail-closed, como o resto.** A sonda devolve "já aplicado" **só** com a marca exatamente
+igual. Tabela ausente, marca diferente, erro na leitura → aplica tudo. O custo de aplicar DDL
+idempotente à toa é tempo; o custo de não aplicar é tabela faltando em produção. E migração
+que falha **não** fica memoizada como concluída: a requisição seguinte tenta de novo, senão
+uma queda momentânea do banco deixaria o isolate sem schema até ser reciclado.
+
+**Tabela própria, não uma chave em `config`.** `config` é a tabela que o console edita e que
+`PUT /api/admin/config` valida por tipo (`D-25`); uma chave interna morando lá seria linha sem
+família no mapa `FAMILIA`, numa tela feita para decisões humanas.
+
+**No mesmo movimento, o primeiro paint.** A folha da Poppins era um `<link rel="stylesheet">`
+render-blocking para **dois** domínios de terceiro: o navegador não pintava nada — nem o
+cabeçalho, nem "carregando" — antes de resolver DNS, abrir TLS e baixar CSS do Google. Passou
+a carregar sem bloquear (`media="print"` + `onload`). ⚠️ `&display=swap` **não** resolvia
+isso: ele governa quando o *texto* troca de fonte, não quando a *página* pinta.
+
+**Consequência aceita:** existe agora um instante com fonte de sistema (FOUT) — antes não
+existia porque a tela toda esperava. A pilha de fallback em `tokens.css` deixou de ser
+`sans-serif` cru e passou a nomear fontes com métricas próximas às da Poppins, para a troca
+ser mudança de desenho da letra e não reflow de parágrafo. A identidade visual (§2) continua
+sendo Poppins; o que mudou é o que se vê antes dela chegar. Voltar a um `<link>` bloqueante
+"para não piscar" devolve a espera ao caminho crítico.
+
+**O que NÃO foi feito, e por quê:**
+
+- **Partir o bundle** (269 kB, `React.lazy` na aba de admin e na de documentação). Os assets
+  levaram 595–624 ms nos logs, mas boa parte disso é latência da plataforma servindo arquivo,
+  que dividir não muda. E code-splitting **piora** justamente a aba de admin — a tela que o
+  relato citou — porque acrescenta uma ida de rede depois do clique. Fica como medição futura,
+  não como conserto às cegas.
+- **Cachear `config.carregar()` entre requisições.** É 1 ida ao banco e é a ida que faz o
+  console de admin ter efeito **sem deploy** (`RF-49`). Guardá-la em memória do isolate
+  reintroduziria o no-op silencioso que o `CLAUDE.md` já descreve para
+  `GOATLAS_ESPACOS_CONFLUENCE`, agora do outro lado.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
