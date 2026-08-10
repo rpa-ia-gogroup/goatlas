@@ -146,10 +146,10 @@ export function TelaAvisos() {
       {salvo && <Aviso>Preferência salva.</Aviso>}
       {erro && <Aviso atencao>{erro}</Aviso>}
 
-      <fieldset className="opcoes-canal" style={{ border: 0, padding: 0, margin: 0 }}>
+      <fieldset className="opcoes-cartao" style={{ border: 0, padding: 0, margin: 0 }}>
         <legend className="sr-apenas">Canal de aviso</legend>
         {OPCOES.map((o) => (
-          <label className="opcao-canal" key={o.valor}>
+          <label className="opcao-cartao" key={o.valor}>
             <input
               type="radio"
               name="canal"
@@ -157,9 +157,9 @@ export function TelaAvisos() {
               checked={canal === o.valor}
               onChange={() => setCanal(o.valor)}
             />
-            <span className="opcao-canal-texto">
-              <span className="opcao-canal-titulo">{o.titulo}</span>
-              <span className="opcao-canal-nota">{o.nota}</span>
+            <span className="opcao-cartao-texto">
+              <span className="opcao-cartao-titulo">{o.titulo}</span>
+              <span className="opcao-cartao-nota">{o.nota}</span>
             </span>
           </label>
         ))}

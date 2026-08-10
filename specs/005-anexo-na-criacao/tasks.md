@@ -101,16 +101,16 @@ revised: "2026-08-07 — v2, depois do /analyze"
 
 > Skill `frontend-design` antes de codar, e `identidade_visual_gogroup.md`.
 
-- [ ] **T-417** Formulário direto (`D-04`) primeiro — o schema já é renderizado ali
+- [x] **T-417** Formulário direto (`D-04`) primeiro — o schema já é renderizado ali
       (`plan.md` §8). Pergunta obrigatória + envio.
       _Requirements: RF-61, RF-62, RF-27_
-- [ ] **T-418** Recibo de confirmação da conversa: a mesma pergunta, sem opção
+- [x] **T-418** Recibo de confirmação da conversa: a mesma pergunta, sem opção
       pré-marcada, botão de abrir indisponível até a resposta. Copy da opção
       negativa é "não tenho material para anexar" — nunca "pular", que sugere que
       anexar era o dever. _Requirements: RF-62, RN-11, RF-17_
-- [ ] **T-419** [P] Estado do envio na tela: enviando, enviado (com o nome), falhou
+- [x] **T-419** [P] Estado do envio na tela: enviando, enviado (com o nome), falhou
       com o caminho de `RF-34`. Teste por SSR. _Requirements: RF-63, RNF-30_
-- [ ] **T-420** [P] Piso de a11y verificável: foco visível no seletor e nas duas
+- [x] **T-420** [P] Piso de a11y verificável: foco visível no seletor e nas duas
       opções, estado do envio nunca só por cor, alvo de toque no celular.
       _Requirements: RNF-28_
 
