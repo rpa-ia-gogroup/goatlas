@@ -305,6 +305,16 @@ destes reabre um vazamento que já foi fechado.
   (T-415) — por duas razões que valem sozinhas: `aplicarRetencao` não apaga nada com
   política `null` (`D-20`), e `/api/cron/retencao` mantém HMAC obrigatório e responde 403
   hoje. Código pendurado lá nunca rodaria.
+- ⚠️ **O system prompt do agente é FUNÇÃO da instalação** (`montarPromptAgente`, `D-33`). Sem
+  `espacos_confluence` a busca devolve zero **por configuração** e sem os exemplos de `Q3` a
+  Regra 2 se declara indisponível — o prompt constante prometia as duas verificações sempre, e
+  o modelo, recebendo lista vazia, escrevia a conclusão natural: *"não encontrei nada sobre
+  isso"*. É a frase oposta à verdade (ninguém procurou) e manda a pessoa abrir chamado por algo
+  que pode estar escrito. Os dois predicados são **reaproveitados** (`buscaConfigurada`,
+  `regra2Disponivel`), nunca reescritos ali. E as horas do SLA vêm de
+  `SLA_PRIMEIRA_RESPOSTA_HORAS`: repetidas à mão, o agente promete um prazo e o cron cobra
+  outro, sem quebrar teste nenhum. ⚠️ Continua sendo **instrução, não trava** — `RF-08`/`RF-17`
+  seguem em `agent/gate.ts`, e nenhum valor de config entra no texto (`RNF-30`).
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -574,7 +584,7 @@ destes reabre um vazamento que já foi fechado.
   dizer "não há o que trazer" — o conteúdo está na tela, alguns centímetros abaixo, com a
   verificação de restrição por item que `RN-06` exige.
 - 🚨 **O editor novo grava o conteúdo DUAS vezes, e renderizar os dois duplicava a página**
-  (`converterAdf`, `D-33`). `ac:adf-extension` traz o nó (`ac:adf-node` → `ac:adf-content`)
+  (`converterAdf`, `D-34`). `ac:adf-extension` traz o nó (`ac:adf-node` → `ac:adf-content`)
   **e** uma cópia em HTML (`ac:adf-fallback`) para editores antigos. As três tags eram
   desconhecidas, e tag desconhecida é **desembrulhada** — então o painel de boas-vindas
   aparecia com o título em português e, logo abaixo, em inglês (o fallback vem em inglês),
@@ -587,7 +597,7 @@ destes reabre um vazamento que já foi fechado.
   `panel-type` é a única exceção lida, porque é apresentação e é o que faz aviso escrito no
   editor novo continuar sendo aviso.
 - 🚨 **`status` tem texto e NÃO tem corpo — o critério "tem `ac:rich-text-body`?" a jogava
-  no placeholder** (`D-33`). O texto mora num **parâmetro** (`title`), como a linguagem do
+  no placeholder** (`D-34`). O texto mora num **parâmetro** (`title`), como a linguagem do
   bloco de código, então a macro que marca "Concluído"/"Em andamento" dizia *"o goatlas ainda
   não sabe mostrar este bloco"* — acusando limitação nossa sobre texto que estava no storage.
   ⚠️ **A cor não vai para a tela** e isso é decisão: `Green`/`Red` seria inventar paleta (a
@@ -835,7 +845,7 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**933 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**943 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`

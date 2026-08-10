@@ -1368,8 +1368,8 @@ o conteúdo viria**.
 | Bloco | O que é feito | Por quê |
 |---|---|---|
 | Macro desconhecida **com corpo** (`panel`, `deck`/`card`, `excerpt`, macros internas) | ✅ **Corpo renderizado** | O texto já vem no storage. Grátis, e a caixa cinza estava aparecendo **no lugar do texto** |
-| `status` (o "lozenge") | ✅ **Etiqueta**, sem a cor (`D-33`) | O texto está no storage — num **parâmetro**, não num corpo, e era só isso que o fazia cair no placeholder |
-| Bloco do **editor novo** (`ac:adf-extension`) | ✅ **Um dos dois lados**, nunca os dois (`D-33`) | O storage traz o nó **e** um fallback em HTML com a mesma coisa. Renderizar os dois duplicava a página |
+| `status` (o "lozenge") | ✅ **Etiqueta**, sem a cor (`D-34`) | O texto está no storage — num **parâmetro**, não num corpo, e era só isso que o fazia cair no placeholder |
+| Bloco do **editor novo** (`ac:adf-extension`) | ✅ **Um dos dois lados**, nunca os dois (`D-34`) | O storage traz o nó **e** um fallback em HTML com a mesma coisa. Renderizar os dois duplicava a página |
 | `livesearch` | ✅ **Busca de verdade**, escopada no espaço (`D-30`) | Não é um resultado a reproduzir — é uma caixa de busca, e o app já busca melhor que o Confluence para quem não tem assento |
 | `children`, `pagetree` | ✅ Aponta para a lista que a leitura **já** mostra (T-115) | O conteúdo está na tela, centímetros abaixo, com restrição verificada por item |
 | `contributors`, `recently-updated`, `listlabels`, `toc` | ⏳ **Placeholder** | Custam chamada por visualização — e os dois do meio, **uma verificação de restrição por item** (`RN-06`, `R-02`). Valor baixo para deflexão: uma lista de páginas alteradas não responde "por que meu relatório está errado" |
@@ -1488,7 +1488,64 @@ de "teste de integração contra o app publicado não é luxo de fim de projeto"
 
 ---
 
-### D-33 · O editor novo grava o conteúdo DUAS vezes, e a etiqueta de status não tem corpo
+### D-33 · O system prompt do agente é função da instalação, não constante
+
+**Data:** 10/08/2026 · **Contexto:** `RNF-24`, `RNF-18`, `RNF-25`, `RNF-30`, `RN-08`,
+`R-04` · **Decisão de:** Kaique
+
+**O sintoma, medido no app real:** a "olá", o agente respondia **"Olá! Como posso te ajudar
+hoje?"** — indistinguível de um assistente genérico. A tela já abre com uma saudação própria
+(`telas.tsx`), mas ela não entra no histórico do modelo, então o único texto que ele tinha
+era o system prompt, e ele não dizia o que fazer num cumprimento.
+
+**Por que isso não é cosmético.** A primeira mensagem é a única chance de dizer o que este
+app faz: que ele procura na documentação interna antes de abrir chamado, que o chamado é
+acompanhado **aqui dentro** sem conta na Atlassian, que existe formulário para quem não quer
+conversar. Quem não descobre isso volta para o Google Chat — o número que `R-04` e `T-235`
+existem para mover. "Como posso ajudar?" gasta a mensagem afirmando o que a pessoa já sabia.
+
+**O que mudou:**
+
+1. **`PROMPT_AGENTE` virou `montarPromptAgente(ctx)`.** O texto ganhou identidade
+   ("assistente do goatlas", "não é um assistente de uso geral"), a lista do que o app
+   **consegue fazer** (documentação, histórico, proposta editável, acompanhamento, resposta,
+   anexo, aviso, formulário), instrução explícita para cumprimento e para "o que você faz?",
+   a regra de evidência de `RN-11` ("não tenho material para anexar" não se insiste), o
+   encaminhamento honesto quando o pedido não é do time de tech, e um teto de tamanho de
+   resposta.
+2. **Os prazos vêm de `SLA_PRIMEIRA_RESPOSTA_HORAS`**, a mesma constante que
+   `notificacoes/sla.ts` usa. Escritas à mão, o agente prometeria um prazo e o alerta
+   cobraria outro — divergência que nenhum teste de comportamento pega, porque os dois lados
+   continuam "funcionando".
+3. **O prompt sabe o que esta instalação NÃO tem** (`ContextoAgente`). Sem
+   `espacos_confluence` a busca devolve zero **por configuração**; sem os exemplos de `Q3` a
+   Regra 2 se declara indisponível. O prompt antigo prometia as duas verificações sempre — e
+   o modelo, recebendo lista vazia, escrevia a conclusão natural: *"não encontrei nada sobre
+   isso"*. É a frase oposta à verdade (ninguém procurou) e manda a pessoa abrir chamado por
+   algo que pode estar escrito. É o mesmo raciocínio de `buscaConfigurada: false` na rota de
+   busca: **zero por falta de config ≠ zero por falta de documentação**.
+
+⚠️ **Os dois predicados são reaproveitados, não reescritos** — `buscaConfigurada`
+(`config/diagnostico.ts`) e `regra2Disponivel` (`rules/`), os mesmos que o servidor aplica.
+Condição escrita só no orquestrador viraria uma segunda regra divergindo em silêncio, e o
+sintoma seria o agente prometendo uma verificação que o servidor já não faz.
+
+⚠️ **Nada disso é trava** (Princípio X). O prompt continua sendo instrução; `RF-08` e `RF-17`
+seguem validados em `agent/gate.ts`, e os testes de bypass continuam sendo o que garante a
+ordem. `tests/prompt-agente.test.ts` não afirma sobre resposta de modelo — afirma sobre o
+texto entregue: identidade presente, capacidades citadas, prazos iguais aos do SLA, avisos
+de indisponibilidade aparecendo só quando devem, e **nenhum valor de configuração dentro do
+prompt** (`RNF-30`).
+
+**O que ficou de fora, e por quê:** injetar o nome dos tipos de chamado permitidos. Hoje
+`tipos_chamado_permitidos` guarda **ids**, e a extração já os recebe; citá-los no chat seria
+mostrar detalhe interno a quem conversa (`RNF-30`). No dia em que a lista tiver nome legível
+(`listarTiposChamado` por service desk já devolve), isso passa a ser contexto útil e entra
+por `ContextoAgente`, sem mudar o resto.
+
+---
+
+### D-34 · O editor novo grava o conteúdo DUAS vezes, e a etiqueta de status não tem corpo
 
 **Data:** 10/08/2026 · **Contexto:** `RF-43`, `RF-39`, `RNF-30`, regra 4, piso de a11y
 
