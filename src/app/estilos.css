@@ -71,14 +71,20 @@
    clicava — as cinco pílulas saltavam de duas linhas para uma. Largura que muda
    conforme a aba faz a moldura do app parecer instável.
 
-   960px cabe as cinco abas numa linha só e ainda deixa 596px de conteúdo ao lado da
-   trilha do console. O comprimento de leitura continua protegido onde importa: os
-   blocos de texto têm `max-width` própria (`.fala-agente`, `.campo-ajuda`,
-   `.secao-resumo`, `.doc`), que é onde a medida de leitura pertence — não na
-   moldura. */
+   ⚠️ A largura é DERIVADA da faixa de abas, não escolhida por estética. 960px cabia
+   **cinco** pílulas; com a de admin visível são seis, e as seis somam ~895px de
+   conteúdo — mais do que os 864px que sobravam dentro do padding de 48px. O efeito
+   era "Administração" sozinha numa segunda linha, exatamente para quem mais usa o
+   console. 1100px devolve ~1004px de conteúdo: as seis cabem com folga, e a folga é
+   proposital porque o rótulo mais longo ("Falar com o agente") é o que mais cresce se
+   a Poppins não carregar e o fallback for mais largo.
+
+   O comprimento de leitura continua protegido onde importa: os blocos de texto têm
+   `max-width` própria (`.fala-agente`, `.campo-ajuda`, `.secao-resumo`, `.doc`), que
+   é onde a medida de leitura pertence — não na moldura. */
 @media (min-width: 720px) {
   .painel {
-    max-width: 960px;
+    max-width: 1100px;
     width: 100%;
     margin: 0 auto;
     border-radius: var(--radius-xl);
@@ -86,7 +92,7 @@
     padding: var(--space-7);
   }
   .cabecalho {
-    max-width: 960px;
+    max-width: 1100px;
     width: 100%;
     margin: 0 auto;
     padding-inline: 0;
@@ -153,6 +159,11 @@
  * seis, e no desktop — onde ninguém arrasta uma faixa de navegação — a última aba
  * simplesmente **desaparecia sem nenhum sinal**. Quem era admin deixava de achar o
  * console. Quebrar em duas linhas é feio por dois segundos; navegação invisível é bug.
+ *
+ * ⚠️ Hoje a quebra é só a REDE DE SEGURANÇA, não o normal: o painel foi a 1100px e o
+ * respiro das pílulas aperta abaixo disso justamente para as seis caberem numa linha.
+ * A quebra continua aqui porque a alternativa (rolagem ou corte) já escondeu a aba de
+ * administração uma vez.
  */
 @media (min-width: 720px) {
   .abas {
@@ -167,6 +178,10 @@
   font-weight: var(--fw-semibold);
   font-size: var(--fs-small);
   padding: 10px 20px;
+  /* O rótulo nunca quebra DENTRO da pílula: "Falar com o agente" em duas linhas muda
+     a altura da faixa inteira e se lê como defeito. Faltando espaço, quem quebra é a
+     faixa — nunca o texto. */
+  white-space: nowrap;
   border-radius: var(--radius-pill);
   border: 2px solid transparent;
   background: transparent;
@@ -180,6 +195,24 @@
 .aba[aria-current='page'] {
   background: var(--go-blue);
   color: var(--go-white);
+}
+
+/* ⚠️ Entre 720px e o teto do painel (1100px) a moldura é o próprio viewport, então as
+   seis pílulas com o respiro cheio ainda estouram — é a mesma quebra de antes, só que
+   num notebook estreito ou numa janela dividida ao meio. Apertar o padding lateral de
+   20 para 14px e o gap para 4px devolve ~90px, que é o que falta. Vem DEPOIS da regra
+   base de propósito: `padding-inline` e o shorthand `padding` têm a mesma
+   especificidade, então quem estiver embaixo vence — invertido, esta regra não fazia
+   nada e o defeito voltava sem ninguém entender por quê. O `flex-wrap` continua de pé:
+   mais estreito que isso, quebrar é melhor que sumir — a lição do `overflow-x: auto`
+   que existia aqui. */
+@media (min-width: 720px) and (max-width: 1099px) {
+  .abas {
+    gap: var(--space-1);
+  }
+  .aba {
+    padding-inline: 14px;
+  }
 }
 
 /* ---------- ASSINATURA: trilha de verificação -------------------------- */
