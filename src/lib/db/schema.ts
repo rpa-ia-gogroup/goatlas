@@ -398,6 +398,18 @@ const COLUNAS_ADICIONADAS = [
    * omissão. Com default, os dois viram "disse que não tinha".
    */
   `ALTER TABLE submissoes ADD COLUMN declarou_anexo INTEGER`,
+  /**
+   * T-422 / ScC-7 — quantos anexos efetivamente subiram para este chamado.
+   *
+   * ⚠️ **Por que não contar de `anexos_pendentes`:** aquela tabela é expurgada em
+   * `TTL_ANEXO_PENDENTE_HORAS` (T-415). Um indicador que lê dela mostraria a evidência
+   * chegando hoje e **caindo para zero** amanhã, sem nada ter mudado — o gráfico mediria
+   * o expurgo, não a feature. Aqui o número é durável porque mora onde o chamado mora.
+   *
+   * Três estados, de novo: `NULL` = nunca houve materialização (não havia arquivo, ou a
+   * criação foi diferida) · `0` = tentou e nenhum subiu · `N` = subiram N.
+   */
+  `ALTER TABLE submissoes ADD COLUMN anexos_anexados INTEGER`,
 ] as const
 
 export async function migrar(db: Banco): Promise<void> {

@@ -410,6 +410,22 @@ export interface ResumoPainel {
     readonly conversasNoTeto: number
   }
   readonly sla: ResumoSla
+  /**
+   * T-422 / `ScC-7` — a evidência que chega junto com o chamado.
+   *
+   * `declarouTerEFalhou` é o número que exige ação nossa, e o único que uma taxa
+   * sozinha esconderia: ele derruba a evidência sem ninguém ter deixado de colaborar.
+   */
+  readonly evidencia: {
+    readonly chamadosCriados: number
+    readonly perguntados: number
+    readonly comEvidencia: number
+    readonly declarouTerEFalhou: number
+    readonly declarouNaoTer: number
+    readonly semPergunta: number
+    /** `null` enquanto ninguém foi perguntado. Nunca `0%`. */
+    readonly taxaPct: number | null
+  }
   /** T-235: o número é PROXY, não medição (`D-20`). O painel diz isso na tela. */
   readonly deflexaoResolvidaConhecida: false
   readonly avisoDeflexao: string

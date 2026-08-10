@@ -116,18 +116,18 @@ revised: "2026-08-07 — v2, depois do /analyze"
 
 ## Phase 5 — Fechamento
 
-- [ ] **T-421** [P] Teste **estrutural** varrendo `src/` — nenhum `fieldId` de anexo
+- [x] **T-421** [P] Teste **estrutural** varrendo `src/` — nenhum `fieldId` de anexo
       literal no código (`ScC-4`). É o padrão do projeto para "isto não pode
       aparecer", como em `rnf01-vazamento-credenciais`. _Requirements: RNF-25_
-- [ ] **T-422** [P] Indicador de chamados com evidência no painel (`ScC-7`), para
+- [x] **T-422** [P] Indicador de chamados com evidência no painel (`ScC-7`), para
       que o efeito da pergunta seja medido e não presumido.
       _Requirements: RF-55_
-- [ ] **T-423** `[PROCESSO]` Documentação no mesmo PR: a decisão do `plan.md` §2
+- [x] **T-423** `[PROCESSO]` Documentação no mesmo PR: a decisão do `plan.md` §2
       (com as duas alternativas recusadas) vira decisão em `docs/DECISOES.md`; os
       gotchas de `plan.md` §0 e §5 vão para `CLAUDE.md`; e o **endurecimento de
       `RF-27`** (campo extra fora do schema deixa de passar) é anotado no requisito e
       na spec 002, que é quem o entregou. _Requirements: RF-27_
-- [ ] **T-424** Fechar os Success Criteria item por item.
+- [x] **T-424** Fechar os Success Criteria item por item.
       _Requirements: todos_
 - [ ] **T-425** `[BLOQUEADA: Q1]` Verificar contra a Atlassian real que o request
       type do portal expõe campo de anexo, e observar o envio de verdade. **É
@@ -136,7 +136,17 @@ revised: "2026-08-07 — v2, depois do /analyze"
 
 ## Estado
 
-**Nada implementado.** Spec, plano e tarefas escritos em 07/08/2026.
+**Completa em código (10/08/2026).** 24 de 25 tarefas fechadas; a única aberta é `T-425`,
+que é **verificação** contra a Atlassian real e depende de `Q1`.
+
+Spec, plano e tarefas escritos em 07/08/2026; implementação em 10/08/2026, em cinco commits
+que seguem as cinco fases deste arquivo. Decisões registradas em `D-26` (o anexo não viaja
+na criação), `D-27` (`RF-62` é fail-open, e por quê) e `D-28` (o endurecimento de `RF-27`,
+anotado também na spec 002, que o entregou).
+
+**843 testes · typecheck limpo · build limpo.** Verificado também em `npm run dev`, não só
+na suíte: criar sem declarar responde 400 com a mensagem da pessoa, e com a declaração o
+chamado nasce já com `anexo.estado = "anexado"`.
 
 **A v1 do plano estava errada e foi reaberta pelo `/analyze`:** ela punha o anexo
 dentro da chamada de criação, o que faria um arquivo vencido **apagar o chamado da

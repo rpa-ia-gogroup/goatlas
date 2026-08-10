@@ -175,6 +175,28 @@ indisponibilidade degrada, não vira parede.
   observável no painel (`RF-55`). Sem esse número, "a evidência não chegava" continua
   sendo intuição, e não dá para saber se a pergunta obrigatória valeu a pena.
 
+### 4.1 Fechamento (T-424, 10/08/2026)
+
+Item por item, com **onde** cada um está travado. Critério fechado sem teste é intenção.
+
+| | Critério | Estado | Onde |
+|---|---|---|---|
+| **ScC-1** | Abrir com anexo é **uma** confirmação | ✅ | `SC-04` em `rf63-falha-de-anexo`: uma requisição de criação, e o arquivo já está no chamado. A ordem (criar → materializar) tem teste próprio |
+| **ScC-2** | Ninguém cria sem responder; ninguém precisa de arquivo para criar | ✅ | `rf62-declaracao-anexo`: burla nos dois caminhos (400, nada criado) · `T-405`/`SC-03`: "tenho" sem arquivo abre igual |
+| **ScC-3** | Anexo que falha não impede o chamado, e a pessoa sabe como resolver | ✅ | `T-412`: submissão fica `criado`, resposta traz `anexo.estado` e a mensagem manda anexar por `RF-34` |
+| **ScC-4** | Nenhum id de campo de anexo no código | ✅ | `scc4-nenhum-fieldid-de-anexo`: varredura de `src/` + prova de que id arbitrário funciona e campo de texto chamado "attachment" **não** conta |
+| **ScC-5** | Suíte sem credencial e sem rede, com fake exercitando sucesso e falha | ✅ | `falhas.subirAnexoTemporario`, `falhas.materializarAnexos` e `temporariosInvalidos` (id vencido = 4xx definitivo, o caso que importa) |
+| **ScC-6** | **Nenhum chamado perdido por causa de anexo** | ✅ | Estrutural, não só testado: a materialização mora fora de `ServicoChamados.processar` e **não lança** (`D-26`) |
+| **ScC-7** | Proporção de chamados com evidência observável no painel | ✅ | `scc7-evidencia-no-painel` + `PainelEvidencia`. Sinal **durável** (`submissoes.anexos_anexados`), denominador = **perguntados**, taxa `null` sem dado |
+
+⚠️ **`ScC-7` está entregue como instrumento, não como resultado.** O número existe e é
+honesto; se a pergunta obrigatória valeu a pena só se sabe **depois do piloto**, com ele
+preenchido. É deliberado: a alternativa era não medir e manter a fricção por convicção.
+
+**O que NÃO está fechado, e não dá para fechar aqui:** `T-425` — ninguém verificou contra a
+Atlassian real que o request type do portal expõe campo de anexo. Sem o campo, o código cai
+em `SC-05` e a feature fica **dormente** sem quebrar nada; é verificação, não implementação.
+
 ## 5. Dependências e o que fica pendente
 
 - **`Q1`** — sem a credencial funcionando (a Atlassian responde **401** hoje) não é

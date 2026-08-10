@@ -51,7 +51,7 @@ let fake: ClienteAtlassianFake
 let n = 0
 
 const CAMPO_ANEXO = {
-  fieldId: 'attachment',
+  fieldId: 'customfield_20031',
   rotulo: 'Anexo',
   obrigatorio: false,
   tipo: 'anexo' as const,

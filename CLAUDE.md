@@ -105,6 +105,24 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   tela **de propósito**: continuam em `ConfigValores` e mudáveis sem deploy, mas
   ninguém os decide sem ler o código, e cada um deles na tela custava atenção de quem
   precisa achar o que importa. Devolvê-los é reabrir `D-25`, não "completar a tela".
+- **O anexo NÃO viaja dentro da chamada de criação** (`D-26`). Parece a simplificação
+  óbvia — é o que o portal nativo do JSM faz — e é a que perde chamado: id temporário
+  vencido faz a **criação** responder 400, que `atlassian/http.ts` classifica como
+  **definitivo**, e submissão definitiva **nunca** é reprocessada. Um arquivo velho
+  apagaria o chamado da pessoa. São dois passos dentro da mesma confirmação: upload ao
+  escolher o arquivo, materialização **depois** da criação. Custo aceito: existe uma
+  janela curta em que o chamado existe sem o anexo.
+- **`RF-62` é fail-OPEN, e isso é desvio consciente** (`D-27`) — schema de request type
+  que não pôde ser lido **não pergunta** e abre o chamado. A distinção que sustenta:
+  `RF-62` é qualidade de produto, não trava de segurança; quem burla só abre o **próprio**
+  chamado sem responder uma pergunta, e o que perde é a evidência dele mesmo. Fail-closed
+  aqui seria não abrir chamado durante uma queda de leitura de schema — a parede que
+  `RNF-18` proíbe. O evento vai para a auditoria (`schema_tipo_indisponivel`) para ninguém
+  confundir "o tipo não aceita anexo" com "não deu para saber".
+- **A declaração de anexo trava RESPONDER, nunca ANEXAR** (`RN-11`). Quem diz "tenho",
+  desiste e volta para "não tenho" abre o chamado. E a copy da opção negativa é "não tenho
+  material para anexar" — **nunca "pular"**, que diria que anexar era o dever e faria a
+  resposta honesta virar a que ninguém escolhe.
 - **N8N está descartado.** Não propor voltar a ele.
 - **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
   olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe
@@ -248,6 +266,45 @@ destes reabre um vazamento que já foi fechado.
   teto de envio (8 MB) é **menor** que o de leitura (12 MB), e não há allowlist de tipo: o
   arquivo vai para o Jira, que aplica a própria política, e recusar `.zip` de log seria o
   app achando que é antivírus.
+- ⚠️ **A materialização do anexo mora FORA de `ServicoChamados.processar`, e a separação é
+  a trava** (`tickets/anexo-na-criacao.ts`). Dentro daquele `try/catch`, um id de anexo
+  vencido (4xx = definitivo) marcaria a submissão como `falha` e o chamado se perderia.
+  Nada em `materializarAnexosDoChamado` lança: o pior caso é `estado: 'falhou'` com os
+  nomes dos arquivos. Mover aquela chamada "para o lugar certo" reabre `D-26`.
+- ⚠️ **A reivindicação vem ANTES da chamada à Atlassian** (`anexos_pendentes.reivindicar`).
+  `UPDATE ... WHERE materializado_em IS NULL` é o lock: dois cliques disputam, um escreve.
+  Inverter (chamar e marcar depois) faria o arquivo aparecer **duas vezes** no chamado, e
+  anexo em dobro não tem caminho de volta. O custo — falha depois da reivindicação deixa o
+  arquivo fora daquela tentativa — é exatamente o estado que `RF-63` prevê e relata.
+- **A chave de idempotência tem UM produtor** (`tickets/chave-idempotencia.ts`). O upload
+  grava a linha em `anexos_pendentes` e a criação a procura: se um escrevesse a chave crua
+  e o outro a prefixada (`form:<email>:<chave>`), **nenhuma linha casaria** — chamado sem
+  anexo, sem erro nenhum, os dois lados "funcionando". Mesma classe de bug de
+  `urlDeLeituraNoApp`/`entradaDaUrl`. Por isso a chave é **obrigatória** na rota de upload:
+  inventar uma ali produz arquivo órfão por construção.
+- **O `temporaryAttachmentId` nunca trafega pelo navegador** (`RF-30` aplicado a arquivo).
+  O cliente manda o arquivo e recebe `{ ok, nome }`. Com o id no navegador, colar o anexo
+  de outra pessoa no próprio chamado seria trivial.
+- **O teto de anexo é por CHAMADO e a recusa é MENSAGEM, nunca `.slice()`.** O truncamento
+  silencioso fazia o quarto arquivo desaparecer sem nada na tela — a pessoa achava que o
+  print decisivo tinha ido (`SC-08`). Saiu também da rota de `RF-34`.
+- **O upload temporário é ESCRITA, mesmo sem `issueKey`** — o decorador de somente leitura
+  o recusa. Deixá-lo passar produziria o pior resultado do modo: tela dizendo "arquivo
+  enviado", pessoa confirmando, criação recusada depois, arquivo já na Atlassian.
+- ⚠️ **Nada decide "é anexo?" por `fieldId`** (`ScC-4`, teste estrutural em
+  `scc4-nenhum-fieldid-de-anexo.test.ts`). Quem responde é o **tipo** do campo, traduzido
+  de `jiraSchema.system` no cliente. Um `fieldId === 'attachment'` funcionaria no site da
+  Gocase e pararia de funcionar em outro **sem quebrar nada**: a pergunta simplesmente
+  deixaria de aparecer, e os chamados voltariam a chegar sem evidência.
+- **O indicador de evidência lê `submissoes`, não `anexos_pendentes`** (T-422). A tabela de
+  pendentes é expurgada em 12h: um painel que lesse dela mostraria a evidência caindo para
+  zero sem nada ter mudado — mediria o expurgo. E o denominador são os **perguntados**, não
+  os chamados: incluir quem nunca viu a pergunta faria a taxa cair quando alguém criasse um
+  request type sem anexo.
+- **O expurgo dos anexos pendentes pega carona no cron do OUTBOX**, não no da retenção
+  (T-415) — por duas razões que valem sozinhas: `aplicarRetencao` não apaga nada com
+  política `null` (`D-20`), e `/api/cron/retencao` mantém HMAC obrigatório e responde 403
+  hoje. Código pendurado lá nunca rodaria.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -587,7 +644,16 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 [001](specs/001-mvp-chamados-e-agente/tasks.md) ·
 [002](specs/002-confluence-e-governanca/tasks.md) ·
 [003](specs/003-sla-e-notificacoes/tasks.md) ·
-[004](specs/004-piloto-e-rollout/tasks.md).
+[004](specs/004-piloto-e-rollout/tasks.md) ·
+[005](specs/005-anexo-na-criacao/tasks.md).
+
+**A spec 005 (anexo na criação) está completa em código.** `RF-61`/`RF-62`/`RF-63`/`RN-11`:
+a declaração obrigatória travada no servidor nas duas rotas de criação, o upload em dois
+passos com o id vivendo só no servidor, a materialização depois da criação (e fora do
+`catch` que classifica falha), as duas telas e o indicador de evidência no console. A única
+tarefa aberta é **T-425**, que é **verificação** contra a Atlassian real (o request type do
+portal expõe campo de anexo?) e depende de `Q1` — sem o campo, o código já cai em `SC-05` e
+nada quebra.
 
 **No ar em SOMENTE LEITURA: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
 `version 20`, deploy de 07/08/2026). Login Google pelo edge, admin por allowlist.
@@ -602,7 +668,7 @@ tipos `70,134,108,68`, espaços `GT,DTE,GN`.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**698 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**843 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,

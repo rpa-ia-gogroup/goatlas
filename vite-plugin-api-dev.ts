@@ -199,7 +199,7 @@ export function apiDev(): Plugin {
         //
         // ⚠️ Ele **não** é renderizado como campo: a rota o filtra (T-406c) e devolve
         // `aceitaAnexo: true`. Quem desenha o seletor é `PerguntaDeAnexo`.
-        { fieldId: 'attachment', rotulo: 'Anexo', obrigatorio: false, tipo: 'anexo', opcoes: [] },
+        { fieldId: 'customfield_20031', rotulo: 'Anexo', obrigatorio: false, tipo: 'anexo', opcoes: [] },
       ])
       fake.estado.paginas = [
         {

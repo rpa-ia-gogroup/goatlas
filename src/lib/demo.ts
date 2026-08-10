@@ -147,7 +147,7 @@ export function semearAtlassianDemo(fake: ClienteAtlassianFake): void {
    */
   fake.estado.camposPorTipo.set(TIPO_CHAMADO_DEMO, [
     {
-      fieldId: 'attachment',
+      fieldId: 'customfield_20031',
       rotulo: 'Anexo',
       obrigatorio: false,
       tipo: 'anexo',

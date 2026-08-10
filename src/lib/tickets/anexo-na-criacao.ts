@@ -25,6 +25,7 @@
 import type { ClienteAtlassian } from '../atlassian/tipos'
 import type { Auditoria } from '../audit'
 import type { RepositorioAnexosPendentes } from './anexos-pendentes'
+import type { Outbox } from './outbox'
 
 export type EstadoAnexoNaCriacao =
   /** Não havia arquivo esperando — inclui a reconfirmação, cujo anexo já subiu. */
@@ -75,6 +76,8 @@ export interface DependenciasAnexo {
   readonly anexosPendentes: RepositorioAnexosPendentes
   readonly atlassian: ClienteAtlassian
   readonly auditoria: Auditoria
+  /** T-422 — onde o número durável de anexos fica. */
+  readonly outbox: Pick<Outbox, 'registrarAnexosAnexados'>
 }
 
 export async function materializarAnexosDoChamado(
@@ -144,6 +147,10 @@ export async function materializarAnexosDoChamado(
 
   const estado: EstadoAnexoNaCriacao =
     falharam.length === 0 ? 'anexado' : anexados.length === 0 ? 'falhou' : 'parcial'
+
+  // T-422 — o número durável, gravado junto do chamado. Vai **antes** da auditoria de
+  // propósito: é dado de produto (o painel de `ScC-7` lê daqui), não registro de acesso.
+  await deps.outbox.registrarAnexosAnexados(dados.chaveIdempotencia, anexados.length)
 
   await deps.auditoria.registrar({
     atorEmail: dados.solicitanteEmail,

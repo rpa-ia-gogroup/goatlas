@@ -208,6 +208,23 @@ export class Outbox {
     )
   }
 
+  /**
+   * Registra quantos anexos subiram para este chamado — T-422, `ScC-7`.
+   *
+   * ⚠️ Grava **por chave**, não por id de submissão: quem chama é a materialização, que
+   * conhece a chave (é o que correlaciona o arquivo ao chamado) e não a submissão. E o
+   * número precisa ser durável: `anexos_pendentes` é expurgada em horas.
+   *
+   * `0` é um valor legítimo e diferente de `NULL`: significa "havia arquivo e nenhum
+   * subiu", que é justamente o caso que o painel precisa distinguir de "não havia".
+   */
+  async registrarAnexosAnexados(chaveIdempotencia: string, quantidade: number): Promise<void> {
+    await this.db.exec(
+      `UPDATE submissoes SET anexos_anexados = ?, atualizado_em = ? WHERE chave_idempotencia = ?`,
+      [quantidade, this.agora(), chaveIdempotencia],
+    )
+  }
+
   async listarPendentes(limite: number): Promise<readonly Submissao[]> {
     const r = await this.db.query(
       `SELECT ${COLUNAS} FROM submissoes WHERE estado = 'pendente' ORDER BY criado_em ASC LIMIT ?`,
