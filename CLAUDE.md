@@ -500,6 +500,64 @@ destes reabre um vazamento que já foi fechado.
 - **Limite é parte da trava.** Página editável por qualquer pessoa é entrada não
   confiável **inclusive no tamanho**: há teto de entrada, de profundidade, de nós e
   de descartes. Conteúdo hostil não precisa de script para derrubar o Worker.
+- 🚨 **A migração roda UMA VEZ POR BANCO, não por requisição** (`db/schema.ts`,
+  `garantirMigracao`, `D-31`). São 35 `CREATE` + 3 `ALTER` sequenciais e `await`ados;
+  chamados de `montarContexto` eles eram o **piso de ~400 ms de toda rota** — medido nos
+  logs em 10/08/2026: `/api/cron/enviar-notificacoes` com a **fila vazia** levava 376–584 ms.
+  A memoização é `WeakMap` por objeto de banco, e é isso que a torna correta nos dois mundos:
+  em produção `env.DB` é a mesma referência por isolate; nos testes cada caso tem banco
+  próprio. ⚠️ Um `let migrado` global daria o mesmo ganho e faria o **segundo teste da suíte**
+  rodar contra um banco sem tabela nenhuma. E a falha **não** fica memoizada — senão um erro
+  transitório no primeiro boot condenaria o isolate a nunca ter schema.
+- 🚨 **O cache de `RNF-13` vive no MÓDULO, não na instância do cliente** (`contexto.ts`,
+  `cachesAtlassianDoIsolate`). Ele existia desde a Fase 1 e **nunca acertou em produção**:
+  morava na instância, e `montarContexto` cria uma por requisição. Vários comentários do
+  código já contavam com ele ("contido pelo cache de conteúdo") — logo, cada leitura de página
+  rebuscava metadados, labels, restrição e corpo, e cada nível do breadcrumb rebuscava os três
+  primeiros de novo. ⚠️ Compartilhar é seguro **porque a identidade é sempre a conta de
+  serviço** (`D-01`): não há resposta "de um usuário" para vazar para outro. Sob
+  `raiseOnBehalfOf` (`RNF-22`) a cache teria de ser por identidade — é por isso que ela mora
+  em `contexto.ts`, à vista. ⚠️ E ela guarda o **insumo**, nunca a **decisão**: `RN-06`
+  continua avaliada por requisição contra `ctx.valores`, então allowlist mudada no console
+  vale na requisição seguinte.
+- **Cache compartilhada tem TETO de entradas, e o corpo da página tem cache própria.**
+  Enquanto morria com a requisição, crescer sem limite era inócuo; por isolate é vazamento de
+  memória com prazo. O corpo vai a 400 KB (o teto da sanitização), então ele tem cache
+  separada com teto 30 — teto único obrigaria a escolher entre guardar poucas páginas ou
+  arriscar centenas de MB num Worker de 128 MB.
+- 🚨 **Laço de rede é paralelo COM TETO, nunca `Promise.all`** (`src/lib/paralelo.ts`,
+  `CONCORRENCIA_ATLASSIAN = 5`, `CONCORRENCIA_IA = 3`, `D-31`). Havia cinco laços
+  `for … await` sobre listas de rede — lista de chamados (até **100** `obterChamado` em
+  série), restrição por página na busca e na árvore, espaços da allowlist, classificação da
+  Regra 2 (uma chamada de IA por ticket) — e o tempo era a **soma**. ⚠️ O teto não é
+  timidez: o burst limit da Atlassian por API token **não é publicado** e os headers
+  `X-RateLimit-*` só aparecem no 429 (`RNF-15`, `R-02`); disparar a lista inteira é como se
+  descobre o limite do jeito ruim, e um turno que toma 429 e espera 2 s ficou **mais lento**
+  que o laço em série. O teto vale **por laço**, não global — dois usuários simultâneos somam.
+- **Todo laço paralelizado PRESERVA A ORDEM** (`mapearComLimite`). A busca ordena por
+  relevância, a árvore por título e a lista de chamados pelo banco; devolver na ordem de quem
+  respondeu primeiro faz a mesma tela aparecer diferente entre duas cargas, o que se lê como
+  defeito.
+- ⚠️ **A extração da proposta corre JUNTO com a última ida ao modelo** (`orquestrador.ts`,
+  `propostaEmVoo`). Um turno fazia **três** chamadas em série ao provedor, e a 2ª (texto para
+  a pessoa) e a 3ª (`extrairProposta`) partem do mesmo histórico — a resposta do modelo só é
+  persistida depois da extração, então a 3ª nunca viu a 2ª. É seguro por razão **estrutural**:
+  só arranca com as duas verificações concluídas, e nesse estado `toolsPermitidas` é lista
+  **vazia**, logo o ciclo seguinte não executa tool e não pode nascer bloqueio concorrente.
+  🚨 Mesmo assim `tentarMontarProposta` **reconfere `temBloqueioPendente` antes de gravar** —
+  entre começar a extração e voltar dela passa uma ida ao provedor, e `if` que rodou antes do
+  `await` não protege o que vem depois. `RN-07` já foi burlada uma vez (`D-21`).
+- ⚠️ **`max_tokens` NÃO é conserto de latência, e streaming conflita com o desenho** (`D-31`).
+  Num modelo com raciocínio o teto conta tokens de raciocínio: teto baixo devolve resposta
+  **vazia** (bug que o fake não pega), e teto generoso não corta nada. Streaming é o que mais
+  melhoraria a percepção e **não cabe** enquanto o servidor **descartar** o texto do modelo em
+  caso de bloqueio (`D-21`) — não se transmite texto que talvez seja jogado fora.
+- **Teste de latência afirma sobre CONTAGEM DE CHAMADAS e SIMULTANEIDADE**
+  (`tests/latencia.test.ts`), não sobre resultado. Os quatro defeitos de `D-31` conviveram com
+  800 asserções verdes porque o app respondia **certo** em todos eles. E o teste da
+  sobreposição das duas chamadas de IA falha por **deadlock**, não por tempo: o `chat` nº 2 só
+  termina depois de a extração começar, então serializar de novo trava o teste em vez de
+  produzir um número frágil.
 
 ## Automação do processo (hooks)
 
@@ -657,7 +715,15 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**800 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**824 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+
+⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-31`,
+10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
+porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`
+que nunca acertava, cinco laços de rede em série e três idas ao provedor de IA quando duas
+bastavam. As correções são medidas por **contagem de chamadas** em `tests/latencia.test.ts`;
+o p95 de `RNF-12` (busca < 2 s, primeira resposta do agente < 5 s) só se fecha medindo no app
+publicado.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,

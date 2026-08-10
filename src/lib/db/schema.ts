@@ -350,6 +350,48 @@ const COLUNAS_ADICIONADAS = [
   `ALTER TABLE vinculos ADD COLUMN ultimo_status_notificado TEXT`,
 ] as const
 
+/**
+ * Migração já feita, por objeto de banco.
+ *
+ * ⚠️ **`migrar` era chamada em TODA requisição** (`montarContexto`), e são 35 `CREATE`
+ * mais 3 `ALTER` **sequenciais e `await`ados** — cada um uma ida ao serviço de banco da
+ * plataforma. Medido em 10/08/2026 nos logs do app: `POST /api/cron/enviar-notificacoes`
+ * **com a fila vazia** levava 376–584 ms. Aquela rota não faz mais nada além de montar o
+ * contexto e ler uma tabela: os ~400 ms eram o piso que **toda** rota pagava antes de
+ * começar a trabalhar, incluindo o turno do agente e a leitura de página do Confluence.
+ *
+ * A memoização é por **objeto de banco**, não global, e isso é o que a torna correta nos
+ * dois mundos: em produção `env` é criado uma vez por isolate, então `env.DB` é a mesma
+ * referência em todas as requisições e a migração roda **uma vez por isolate**; nos testes
+ * cada caso monta um banco novo, que é uma referência nova, e migra o seu. Um `let migrado`
+ * global daria o mesmo ganho em produção e faria o segundo teste da suíte rodar contra um
+ * banco sem tabela nenhuma.
+ *
+ * `WeakMap` para não segurar o banco vivo, e guarda a **promessa** (não um booleano):
+ * duas requisições concorrentes no mesmo isolate esperam a mesma migração em vez de
+ * disputarem o DDL. Falha não fica memoizada — a entrada é removida, senão um erro
+ * transitório de banco no primeiro boot condenaria o isolate inteiro a nunca ter schema.
+ *
+ * Deploy novo cria isolate novo, então tabela acrescentada num deploy não fica de fora.
+ */
+const migracoes = new WeakMap<Banco, Promise<void>>()
+
+/**
+ * Garante o schema **uma vez por banco**. É por aqui que o app passa; `migrar` continua
+ * exportada porque os testes de schema querem justamente rodar a migração de novo.
+ */
+export async function garantirMigracao(db: Banco): Promise<void> {
+  const emAndamento = migracoes.get(db)
+  if (emAndamento) return emAndamento
+
+  const promessa = migrar(db).catch((erro: unknown) => {
+    migracoes.delete(db)
+    throw erro
+  })
+  migracoes.set(db, promessa)
+  return promessa
+}
+
 export async function migrar(db: Banco): Promise<void> {
   for (const sql of TABELAS) {
     await db.exec(sql, [])

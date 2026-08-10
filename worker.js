@@ -174,8 +174,9 @@ var TransporteAtlassian = class {
   }
 };
 var CacheTtl = class {
-  constructor(agoraMs) {
+  constructor(agoraMs, maxEntradas = 500) {
     this.agoraMs = agoraMs;
+    this.maxEntradas = maxEntradas;
   }
   mapa = /* @__PURE__ */ new Map();
   obter(chave) {
@@ -188,14 +189,57 @@ var CacheTtl = class {
     return entrada.valor;
   }
   definir(chave, valor, ttlSeg) {
+    this.mapa.delete(chave);
     this.mapa.set(chave, { valor, expiraEm: this.agoraMs() + ttlSeg * 1e3 });
+    while (this.mapa.size > this.maxEntradas) {
+      const maisAntiga = this.mapa.keys().next();
+      if (maisAntiga.done) break;
+      this.mapa.delete(maisAntiga.value);
+    }
   }
   limpar() {
     this.mapa.clear();
   }
+  /** Só para teste e diagnóstico: quantas entradas estão guardadas agora. */
+  get tamanho() {
+    return this.mapa.size;
+  }
 };
 
+// src/lib/paralelo.ts
+var CONCORRENCIA_ATLASSIAN = 5;
+var CONCORRENCIA_IA = 3;
+async function mapearComLimite(itens, limite2, fn) {
+  if (itens.length === 0) return [];
+  const resultados = new Array(itens.length);
+  const trabalhadores = Math.max(1, Math.min(Math.floor(limite2), itens.length));
+  let proximo = 0;
+  const conclusoes = await Promise.allSettled(
+    Array.from({ length: trabalhadores }, async () => {
+      for (; ; ) {
+        const indice = proximo;
+        proximo += 1;
+        if (indice >= itens.length) return;
+        resultados[indice] = await fn(itens[indice], indice);
+      }
+    })
+  );
+  const falha = conclusoes.find((c) => c.status === "rejected");
+  if (falha && falha.status === "rejected") throw falha.reason;
+  return resultados;
+}
+
 // src/lib/atlassian/cliente.ts
+function novasCachesAtlassian(agoraMs = () => Date.now()) {
+  return {
+    metadados: new CacheTtl(agoraMs, 500),
+    conteudo: new CacheTtl(agoraMs, 400),
+    // 30 × 400 KB de pior caso ≈ 12 MB. Trinta páginas cobre a navegação de uma sessão
+    // inteira, e o corpo é o valor mais barato de rebuscar: uma requisição, sem as três
+    // de metadados/labels/restrição que decidem a exposição.
+    corpo: new CacheTtl(agoraMs, 30)
+  };
+}
 var ROTULO_PRIORIDADE = Object.freeze({
   critica: "Highest",
   alta: "High",
@@ -287,13 +331,15 @@ var ClienteAtlassianHttp = class {
   constructor(opcoes) {
     this.opcoes = opcoes;
     this.transporte = new TransporteAtlassian(opcoes);
-    const agoraMs = opcoes.agoraMs ?? (() => Date.now());
-    this.cacheMetadados = new CacheTtl(agoraMs);
-    this.cacheConteudo = new CacheTtl(agoraMs);
+    const caches = opcoes.caches ?? novasCachesAtlassian(opcoes.agoraMs ?? (() => Date.now()));
+    this.cacheMetadados = caches.metadados;
+    this.cacheConteudo = caches.conteudo;
+    this.cacheCorpo = caches.corpo;
   }
   transporte;
   cacheMetadados;
   cacheConteudo;
+  cacheCorpo;
   /** RF-60 — a única telemetria de orçamento que existe com API token (RNF-15). */
   get contadores() {
     return this.transporte.contadores;
@@ -461,11 +507,12 @@ var ClienteAtlassianHttp = class {
       trecho: String(r.excerpt ?? "").replace(/<[^>]*>/g, ""),
       labels: []
     }));
-    const paginas = [];
-    for (const p of candidatas) {
-      if (await this.paginaRestrita(p.id)) continue;
-      paginas.push(p);
-    }
+    const restricoes = await mapearComLimite(
+      candidatas,
+      CONCORRENCIA_ATLASSIAN,
+      (p) => this.paginaRestrita(p.id)
+    );
+    const paginas = candidatas.filter((_, i) => !restricoes[i]);
     this.cacheConteudo.definir(chave, paginas, this.opcoes.ttlConteudoSeg);
     return paginas;
   }
@@ -532,12 +579,18 @@ var ClienteAtlassianHttp = class {
     const dados = await this.transporte.requisitar(
       `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}`
     );
+    const [resEspaco, resLabels] = await Promise.allSettled([
+      this.chaveDoEspaco(String(dados?.spaceId ?? "")),
+      this.labelsDaPagina(idPagina)
+    ]);
+    if (resEspaco.status === "rejected") throw resEspaco.reason;
+    if (resLabels.status === "rejected") throw resLabels.reason;
     const metadados = {
       id: String(dados?.id ?? idPagina),
       idPai: dados?.parentId === void 0 || dados?.parentId === null ? null : String(dados.parentId),
       titulo: String(dados?.title ?? ""),
-      espaco: await this.chaveDoEspaco(String(dados?.spaceId ?? "")),
-      labels: await this.labelsDaPagina(idPagina),
+      espaco: resEspaco.value,
+      labels: resLabels.value,
       atual: String(dados?.status ?? "") === "current",
       versao: Number(dados?.version?.number ?? 0),
       atualizadoEm: String(dados?.version?.createdAt ?? ""),
@@ -599,11 +652,12 @@ var ClienteAtlassianHttp = class {
       trecho: "",
       labels: []
     }));
-    const filhos = [];
-    for (const p of candidatas) {
-      if (await this.paginaRestrita(p.id)) continue;
-      filhos.push(p);
-    }
+    const restricoes = await mapearComLimite(
+      candidatas,
+      CONCORRENCIA_ATLASSIAN,
+      (p) => this.paginaRestrita(p.id)
+    );
+    const filhos = candidatas.filter((_, i) => !restricoes[i]);
     this.cacheConteudo.definir(chave, filhos, this.opcoes.ttlConteudoSeg);
     return filhos;
   }
@@ -645,13 +699,13 @@ var ClienteAtlassianHttp = class {
    */
   async obterCorpoStorage(idPagina) {
     const chave = `storage:${idPagina}`;
-    const cacheado = this.cacheConteudo.obter(chave);
+    const cacheado = this.cacheCorpo.obter(chave);
     if (typeof cacheado === "string") return cacheado;
     const dados = await this.transporte.requisitar(
       `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}?body-format=storage`
     );
     const storage = typeof dados?.body?.storage?.value === "string" ? dados.body.storage.value : "";
-    this.cacheConteudo.definir(chave, storage, this.opcoes.ttlConteudoSeg);
+    this.cacheCorpo.definir(chave, storage, this.opcoes.ttlConteudoSeg);
     return storage;
   }
   /**
@@ -2677,6 +2731,17 @@ var COLUNAS_ADICIONADAS = [
    */
   `ALTER TABLE vinculos ADD COLUMN ultimo_status_notificado TEXT`
 ];
+var migracoes = /* @__PURE__ */ new WeakMap();
+async function garantirMigracao(db) {
+  const emAndamento = migracoes.get(db);
+  if (emAndamento) return emAndamento;
+  const promessa = migrar(db).catch((erro2) => {
+    migracoes.delete(db);
+    throw erro2;
+  });
+  migracoes.set(db, promessa);
+  return promessa;
+}
 async function migrar(db) {
   for (const sql of TABELAS) {
     await db.exec(sql, []);
@@ -3163,16 +3228,16 @@ var ExecutorTools = class {
         janelaDias: config.regra2_janela_dias,
         limite: config.regra2_limite_tickets
       });
-      let custoTotal = 0;
-      const classificados = [];
-      for (const ticket of tickets) {
-        const { classe, custoUsd } = await this.classificarComCache(
-          ticket,
-          config.regra2_exemplos_ajuste_operacional
-        );
-        custoTotal += custoUsd;
-        classificados.push({ ticket, classe });
-      }
+      const resultados = await mapearComLimite(
+        tickets,
+        CONCORRENCIA_IA,
+        (ticket) => this.classificarComCache(ticket, config.regra2_exemplos_ajuste_operacional)
+      );
+      const custoTotal = resultados.reduce((soma, r) => soma + r.custoUsd, 0);
+      const classificados = tickets.map((ticket, i) => ({
+        ticket,
+        classe: resultados[i].classe
+      }));
       const veredito = avaliarRegra2(classificados, config.regra2_threshold_recorrencia);
       await this.auditoria.registrar({
         atorEmail,
@@ -3385,6 +3450,7 @@ var Orquestrador = class {
     let bloqueio = null;
     let atual = conversa;
     let ultimoTexto = "";
+    let propostaEmVoo = null;
     for (let ciclo = 0; ciclo < MAX_CICLOS_TOOL; ciclo += 1) {
       if (atual.custoUsd + custoTurno >= config.teto_custo_conversa_usd) {
         await this.auditoria.registrar({
@@ -3455,9 +3521,16 @@ var Orquestrador = class {
         if (relido) atual = relido;
       }
       if (bloqueio) break;
+      if (!propostaEmVoo && !atual.proposta && this.verificacoesConcluidas(atual) && atual.custoUsd + custoTurno < config.teto_custo_conversa_usd) {
+        propostaEmVoo = this.tentarMontarProposta(atual, config);
+      }
     }
     const bloqueioPendente = await this.conversas.temBloqueioPendente(atual.id);
-    if (!bloqueio && !bloqueioPendente && !atual.proposta && this.verificacoesConcluidas(atual)) {
+    if (propostaEmVoo) {
+      custoTurno += await propostaEmVoo;
+      const relido = await this.conversas.obter(atual.id);
+      if (relido) atual = relido;
+    } else if (!bloqueio && !bloqueioPendente && !atual.proposta && this.verificacoesConcluidas(atual)) {
       custoTurno += await this.tentarMontarProposta(atual, config);
       const relido = await this.conversas.obter(atual.id);
       if (relido) atual = relido;
@@ -3518,6 +3591,9 @@ var Orquestrador = class {
         mensagens: await this.conversas.listarMensagens(conversa.id),
         tiposPermitidos: config.tipos_chamado_permitidos.map((id) => ({ id, nome: id }))
       });
+      if (r.proposta && await this.conversas.temBloqueioPendente(conversa.id)) {
+        return r.custoEstimadoUsd;
+      }
       if (r.proposta) {
         await this.conversas.definirProposta(conversa.id, {
           titulo: r.proposta.titulo,
@@ -5042,8 +5118,9 @@ var CanalIndisponivel = class {
 function novoIdPadrao() {
   return crypto.randomUUID();
 }
+var cachesAtlassianDoIsolate = novasCachesAtlassian();
 async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).toISOString(), novoId = novoIdPadrao, reaproveitar = {}) {
-  await migrar(env.DB);
+  await garantirMigracao(env.DB);
   const modoDemo = env.GOATLAS_MODO_DEMO === "1";
   const bootstrap = { ...modoDemo ? configDemo() : {}, ...valoresDoBootstrap(env) };
   const config = new Config(env.DB, bootstrap);
@@ -5057,6 +5134,8 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     apiToken: env.ATLASSIAN_API_TOKEN ?? "",
     ttlMetadadosSeg: valores.ttl_metadados_seg,
     ttlConteudoSeg: valores.ttl_conteudo_seg,
+    // O que faz o TTL acima valer de verdade — ver `cachesAtlassianDoIsolate`.
+    caches: cachesAtlassianDoIsolate,
     // RF-21, Q4 — configurável (RNF-25), nunca hardcoded. `null` até o time
     // de tech confirmar o id do campo "Solicitante"; o solicitante real
     // continua indo na descrição enquanto isso (cinto e suspensório).
@@ -7185,11 +7264,10 @@ async function rotear(req, ctx, eu, caminho, url) {
       resultado: "sucesso",
       detalhe: { quantidade: vinculos.length }
     });
-    const itens = [];
-    for (const v of vinculos) {
+    const itens = await mapearComLimite(vinculos, CONCORRENCIA_ATLASSIAN, async (v) => {
       try {
         const chamado = await ctx.atlassian.obterChamado(v.issueKey);
-        itens.push({
+        return {
           issueKey: chamado.issueKey,
           titulo: chamado.titulo,
           status: chamado.status,
@@ -7197,10 +7275,10 @@ async function rotear(req, ctx, eu, caminho, url) {
           atualizadoEm: chamado.atualizadoEm,
           via: v.via,
           verificadoRegras: v.verificadoRegras
-        });
+        };
       } catch {
         const submissao = await ctx.outbox.obterPorIssueKey(v.issueKey);
-        itens.push({
+        return {
           issueKey: v.issueKey,
           titulo: submissao?.payload.titulo ?? null,
           status: "indisponivel",
@@ -7209,9 +7287,9 @@ async function rotear(req, ctx, eu, caminho, url) {
           via: v.via,
           verificadoRegras: v.verificadoRegras,
           area: v.area
-        });
+        };
       }
-    }
+    });
     const filtroStatus = (url.searchParams.get("status") ?? "").trim().toLowerCase();
     const termo = normalizarBusca(url.searchParams.get("q") ?? "");
     const filtrados = itens.filter((i) => {
@@ -7478,6 +7556,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       });
       return r.motivo === "indisponivel" ? ERROS.conteudoIndisponivel() : ERROS.naoEncontrado();
     }
+    const ancestrais = ancestraisExpostos(ctx.atlassian, ctx.valores, r.metadados);
     const veioDaBusca = await ctx.conhecimento.marcarClique(
       decodificar(url.searchParams.get("de") ?? "") ?? "",
       eu.email
@@ -7505,22 +7584,25 @@ async function rotear(req, ctx, eu, caminho, url) {
       atualizadoEm: r.metadados.atualizadoEm,
       urlOriginal: r.metadados.url,
       // RF-41 — o caminho até aqui, já filtrado por RN-06 (ver `ancestraisExpostos`).
-      ancestrais: await ancestraisExpostos(ctx.atlassian, ctx.valores, r.metadados),
+      // Iniciado acima, esperado agora.
+      ancestrais: await ancestrais,
       nos: r.conteudo.nos,
       truncado: r.conteudo.truncado
     });
   }
   if (caminho === "/api/confluence/espacos" && req.method === "GET") {
-    const itens = [];
-    for (const chave of ctx.valores.espacos_confluence) {
-      try {
-        const espaco = await ctx.atlassian.obterEspaco(chave);
-        if (espaco.homepageId) {
-          itens.push({ chave: espaco.chave, nome: espaco.nome, homepageId: espaco.homepageId });
+    const resolvidos = await mapearComLimite(
+      ctx.valores.espacos_confluence,
+      CONCORRENCIA_ATLASSIAN,
+      async (chave) => {
+        try {
+          return await ctx.atlassian.obterEspaco(chave);
+        } catch {
+          return null;
         }
-      } catch {
       }
-    }
+    );
+    const itens = resolvidos.filter((e) => Boolean(e?.homepageId)).map((e) => ({ chave: e.chave, nome: e.nome, homepageId: e.homepageId }));
     return json({ itens });
   }
   if (caminho === "/api/confluence/arvore" && req.method === "GET") {
@@ -7551,12 +7633,15 @@ async function rotear(req, ctx, eu, caminho, url) {
         });
         return exposicaoPai.motivo === "indisponivel" ? ERROS.conteudoIndisponivel() : ERROS.naoEncontrado();
       }
-      const filhos = await ctx.atlassian.listarFilhosDaPagina({
-        idPai,
-        espacosPermitidos: ctx.valores.espacos_confluence,
-        labelsBloqueadas: ctx.valores.labels_bloqueadas,
-        limite: LIMITE_NIVEL_ARVORE
-      });
+      const [filhos, ancestrais] = await Promise.all([
+        ctx.atlassian.listarFilhosDaPagina({
+          idPai,
+          espacosPermitidos: ctx.valores.espacos_confluence,
+          labelsBloqueadas: ctx.valores.labels_bloqueadas,
+          limite: LIMITE_NIVEL_ARVORE
+        }),
+        ancestraisExpostos(ctx.atlassian, ctx.valores, exposicaoPai.metadados)
+      ]);
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: "arvore_navegada",
@@ -7567,7 +7652,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       return json({
         espaco: { chave: espaco.chave, nome: espaco.nome },
         pai: { id: exposicaoPai.metadados.id, titulo: exposicaoPai.metadados.titulo },
-        ancestrais: await ancestraisExpostos(ctx.atlassian, ctx.valores, exposicaoPai.metadados),
+        ancestrais,
         itens: filhos.map((f) => ({ id: f.id, titulo: f.titulo }))
       });
     } catch {

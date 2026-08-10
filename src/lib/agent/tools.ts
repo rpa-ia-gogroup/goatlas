@@ -20,6 +20,7 @@ import {
 } from '../ia/prompts'
 import type { Auditoria } from '../audit'
 import type { ConfigValores } from '../config'
+import { CONCORRENCIA_IA, mapearComLimite } from '../paralelo'
 import {
   avaliarRegra1,
   avaliarRegra2,
@@ -159,16 +160,27 @@ export class ExecutorTools {
         limite: config.regra2_limite_tickets,
       })
 
-      let custoTotal = 0
-      const classificados: TicketClassificado[] = []
-      for (const ticket of tickets) {
-        const { classe, custoUsd } = await this.classificarComCache(
-          ticket,
-          config.regra2_exemplos_ajuste_operacional,
-        )
-        custoTotal += custoUsd
-        classificados.push({ ticket, classe })
-      }
+      /**
+       * Uma classificação de IA por ticket, **em paralelo com teto** (`paralelo.ts`).
+       *
+       * ⚠️ Era o maior pedaço dos ~12 s que o turno do agente levava: em série, o tempo
+       * desta tool é `regra2_limite_tickets` × latência do provedor, e nada disso aparece
+       * como erro em lugar nenhum — só como espera. O teto é menor que o da Atlassian
+       * porque cada chamada custa dinheiro (`RNF-16`) e o provedor também responde 429.
+       *
+       * A ordem é preservada porque `avaliarRegra2` conta e o texto que vai ao modelo lista
+       * os chamados: reordenar por quem respondeu primeiro faria a mesma conversa produzir
+       * mensagens diferentes a cada execução, e o teste de determinismo é o que sustenta a
+       * calibragem de `R-04`.
+       */
+      const resultados = await mapearComLimite(tickets, CONCORRENCIA_IA, (ticket) =>
+        this.classificarComCache(ticket, config.regra2_exemplos_ajuste_operacional),
+      )
+      const custoTotal = resultados.reduce((soma, r) => soma + r.custoUsd, 0)
+      const classificados: TicketClassificado[] = tickets.map((ticket, i) => ({
+        ticket,
+        classe: resultados[i]!.classe,
+      }))
 
       const veredito = avaliarRegra2(classificados, config.regra2_threshold_recorrencia)
       await this.auditoria.registrar({
