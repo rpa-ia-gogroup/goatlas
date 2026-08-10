@@ -43,6 +43,32 @@ export type AcaoAuditada =
   | 'config_alterada'
   | 'tool_recusada'
   | 'limite_excedido'
+  /**
+   * T-401 — campo adicional do formulário recusado por não estar no schema do
+   * request type, ou por não ter sido possível ler o schema. Registrado porque as
+   * duas causas somem com a mesma cara na tela ("o campo não foi"), e só a auditoria
+   * distingue "esse tipo não tem esse campo" de "não deu para saber quais tem".
+   */
+  | 'campos_dinamicos_descartados'
+  /**
+   * T-402 / RF-62 — criação recusada por falta da declaração de anexo.
+   *
+   * Auditada porque o **volume** dela é o sinal que importa, e não é sobre segurança:
+   * muita recusa significa tela confusa (a pergunta não está onde a pessoa olha, ou a
+   * opção negativa parece uma punição), não gente teimosa. Sem o registro, a única
+   * evidência de uma pergunta mal desenhada seria alguém reclamando.
+   */
+  | 'declaracao_anexo_ausente'
+  /**
+   * T-404 / SC-05b — o schema do request type não pôde ser lido, então a pergunta de
+   * `RF-62` não foi feita e o chamado abriu (fail-open declarado em `plan.md` §9).
+   *
+   * ⚠️ Existe **exatamente** para separar duas coisas que na tela são idênticas: "este
+   * tipo de chamado não aceita anexo" e "não deu para saber se aceita". Sem esta linha,
+   * uma indisponibilidade prolongada de leitura de schema apareceria como uma feature
+   * que ninguém usa.
+   */
+  | 'schema_tipo_indisponivel'
   /** Coleta diária da Organizations API (RF-51, RF-52, T-124) — toca a Atlassian,
    * então é auditada mesmo quando falha. */
   | 'inventario_coletado'

@@ -88,6 +88,16 @@ export type No =
   | { readonly tipo: 'painel'; readonly variante: VariantePainel; readonly filhos: readonly No[] }
   | { readonly tipo: 'quebra' }
   | { readonly tipo: 'separador' }
+  /**
+   * Etiqueta inline da macro `status` — o "lozenge" do Confluence.
+   *
+   * ⚠️ **Não carrega a cor**, e isso é decisão, não simplificação. A identidade GoGroup
+   * não tem vermelho nem verde (§1.3), e o piso de a11y do projeto proíbe estado
+   * comunicado só por cor: pintar `Green`/`Red` seria inventar paleta **e** apostar que
+   * quem lê distingue as duas. O que a pessoa escreveu no `title` é o estado — é ele que
+   * vai para a tela, e é ele que um leitor de tela lê.
+   */
+  | { readonly tipo: 'etiqueta'; readonly texto: string }
   /** RF-43 — degradação VISÍVEL. Macro que some em silêncio é o pior dos dois erros. */
   | { readonly tipo: 'macroNaoSuportada'; readonly nome: string }
 
@@ -760,6 +770,13 @@ const TAGS_TRANSPARENTES = new Set([
   'ac:plain-text-body',
   'ac:link-body',
   'ac:plain-text-link-body',
+  // Andaime do editor novo (ADF). `ac:adf-extension` e `ac:adf-node` são resolvidos no
+  // `switch` — estes dois estão aqui para o caso de chegarem soltos, e as marcas de
+  // formatação do ADF (negrito, link) que só embrulham conteúdo.
+  'ac:adf-content',
+  'ac:adf-fallback',
+  'ac:adf-mark',
+  'ac:adf-mark-fragment',
 ])
 
 /** Atributos lidos, por tag. Tudo que não estiver aqui é anotado e jogado fora. */
@@ -770,6 +787,8 @@ const ATRIBUTOS_PERMITIDOS: Readonly<Record<string, readonly string[]>> = {
   th: ['colspan', 'rowspan'],
   'ac:structured-macro': ['ac:name'],
   'ac:parameter': ['ac:name'],
+  'ac:adf-node': ['type'],
+  'ac:adf-attribute': ['key'],
   'ac:image': ['ac:alt'],
   'ri:attachment': ['ri:filename'],
   'ri:url': ['ri:value'],
@@ -781,6 +800,24 @@ const PAINEL_POR_MACRO: Readonly<Record<string, VariantePainel>> = {
   note: 'nota',
   panel: 'nota',
   warning: 'aviso',
+  tip: 'dica',
+}
+
+/**
+ * `panel-type` do painel do editor novo → a mesma `VariantePainel` da macro antiga.
+ *
+ * Os dois editores produzem o mesmo painel com nomes diferentes (`warning` na macro,
+ * `error`/`warning` no ADF), e mapear para a união existente é o que faz um painel de
+ * aviso escrito no editor novo continuar sendo **aviso** na leitura. Tipo fora da lista
+ * (`custom`, ou algo que a Atlassian acrescente depois) cai em `nota`: moldura neutra,
+ * nunca sumir com o texto.
+ */
+const PAINEL_POR_TIPO_ADF: Readonly<Record<string, VariantePainel>> = {
+  info: 'info',
+  note: 'nota',
+  warning: 'aviso',
+  error: 'aviso',
+  success: 'dica',
   tip: 'dica',
 }
 
@@ -889,9 +926,18 @@ function converter(bruto: NoBruto, coletor: Coletor): No[] {
       return converterAcLink(bruto, coletor)
     case 'ac:structured-macro':
       return converterMacro(bruto, coletor)
+    case 'ac:adf-extension':
+    case 'ac:adf-node':
+      return converterAdf(bruto, coletor)
     case 'ac:parameter':
+    case 'ac:adf-attribute':
+    case 'ac:adf-parameter':
       // Parâmetro é configuração da macro, não conteúdo. Chegando aqui solto, some:
       // JQL e chave de espaço podem revelar estrutura interna (ver `converterMacro`).
+      //
+      // ⚠️ Os dois do ADF **precisam** estar aqui, não só serem ignorados por
+      // `converterAdf`: desembrulhados como tag desconhecida, o VALOR deles viraria texto
+      // visível — a página mostraria `1f5d1 custom #c9372c` antes do painel.
       return []
     case 'ac:emoticon':
     case 'ac:placeholder':
@@ -1094,6 +1140,28 @@ function converterMacro(bruto: ElementoBruto, coletor: Coletor): No[] {
     return conteudo.trim() === '' ? [] : [{ tipo: 'codigo', linguagem, conteudo }]
   }
 
+  /**
+   * 🚨 **`status` tem texto, mas não tem CORPO — e era isso que a fazia virar caixa cinza.**
+   *
+   * O critério deste arquivo para "dá para renderizar?" era ter `ac:rich-text-body`. O
+   * `status` não tem: o texto dele mora num **parâmetro** (`title`), como a linguagem do
+   * bloco de código. Então a macro mais usada para marcar "CONCLUÍDO"/"EM ANDAMENTO" caía
+   * no placeholder de `RF-43` dizendo *"o goatlas ainda não sabe mostrar este bloco"* —
+   * acusando limitação nossa sobre um texto que estava ali, a um `parametroDaMacro` de
+   * distância. Visto no app real em 10/08/2026, duas vezes na mesma página.
+   *
+   * A cor (`colour`) é descartada de propósito — ver `etiqueta` em `No`.
+   *
+   * ⚠️ **`title` vazio devolve nada, e não o placeholder.** Uma etiqueta sem texto é uma
+   * pílula vazia: o Confluence desenha assim, e não há informação nenhuma a preservar.
+   * Mandar o placeholder ali seria o erro oposto — anunciar conteúdo escondido que não
+   * existe, que é exatamente o que a frase antiga de `RF-43` fazia.
+   */
+  if (nome === 'status') {
+    const texto = parametroDaMacro(bruto, 'title')
+    return texto === null ? [] : [{ tipo: 'etiqueta', texto }]
+  }
+
   const painel = PAINEL_POR_MACRO[nome]
   if (painel !== undefined) {
     const dentro = converterLista(
@@ -1111,8 +1179,119 @@ function converterMacro(bruto: ElementoBruto, coletor: Coletor): No[] {
     )
   }
 
+  /**
+   * ⚠️ **Macro desconhecida que TEM corpo: o corpo é renderizado, não descartado.**
+   *
+   * Este era o desperdício silencioso da leitura. Qualquer macro fora das listas acima virava
+   * uma caixa cinza — **e o texto dentro dela ia embora**. `panel`, `deck`/`card` (abas),
+   * `excerpt`, e qualquer macro que a Gocase use para envolver conteúdo caíam aqui: a página
+   * tinha o texto, a pessoa não via, e a tela ainda dizia "o texto ao redor está completo".
+   *
+   * Renderizar o corpo é **de graça** (nenhuma chamada nova) e **seguro**: o corpo passa por
+   * `converterLista`, exatamente a mesma allowlist de todo o resto — é a diferença entre "não
+   * sei desenhar esta moldura" e "não posso mostrar este conteúdo". A moldura se perde; o
+   * texto aparece.
+   *
+   * O `anotar` continua acontecendo: a auditoria de `RF-43` registra qual macro apareceu, e é
+   * dela que sai a lista do que vale implementar de verdade um dia. Perder a moldura sem
+   * registrar seria perder também o sinal.
+   */
+  const corpos = bruto.filhos.filter(
+    (f) => f.tipo === 'elemento' && f.nome === 'ac:rich-text-body',
+  )
+  if (corpos.length > 0) {
+    const dentro = converterLista(corpos, coletor)
+    if (dentro.length > 0) {
+      anotar(coletor, 'macro_nao_suportada', nome === '' ? 'sem nome' : nome)
+      return dentro
+    }
+  }
+
   anotar(coletor, 'macro_nao_suportada', nome === '' ? 'sem nome' : nome)
   return [{ tipo: 'macroNaoSuportada', nome: nome === '' ? 'sem nome' : nome }]
+}
+
+/**
+ * 🚨 **Bloco do editor novo (ADF): renderiza UM dos dois lados, nunca os dois.**
+ *
+ * ## O bug que isto conserta
+ *
+ * Painel escrito no editor novo é guardado assim:
+ *
+ * ```xml
+ * <ac:adf-extension>
+ *   <ac:adf-node type="panel">
+ *     <ac:adf-attribute key="panel-type">info</ac:adf-attribute>
+ *     <ac:adf-content><p>Bem-vindo…</p></ac:adf-content>
+ *   </ac:adf-node>
+ *   <ac:adf-fallback><div class="panel"><p>Welcome…</p></div></ac:adf-fallback>
+ * </ac:adf-extension>
+ * ```
+ *
+ * As três tags eram desconhecidas, então cada uma era **desembrulhada** e o conteúdo saía
+ * **duas vezes**: uma do nó, outra do fallback. Na página inicial de espaço da Gocase isso
+ * aparecia como o mesmo painel repetido com o título em português e depois em inglês —
+ * medido no app real em 10/08/2026. Ninguém lê duas vezes para descobrir que é o mesmo
+ * texto; quem vê conteúdo repetido conclui que o app está quebrado, e quem conclui isso
+ * abre chamado, que é o oposto do que a aba existe para fazer.
+ *
+ * ## Por que o nó ganha do fallback, e não o contrário
+ *
+ * O nó é o conteúdo **de verdade** — o fallback é uma cópia em HTML que a Atlassian grava
+ * para editores antigos, e é ela que estava em inglês. Preferir o fallback funcionaria
+ * hoje e entregaria a tradução errada.
+ *
+ * ⚠️ **Mas o fallback não é decoração: ele é o caminho dos nós INLINE.** `status`, `date` e
+ * afins vêm como `ac:adf-node` **sem** `ac:adf-content` — o texto deles mora nos atributos
+ * — e o fallback traz a `ac:structured-macro` equivalente, que o resto deste arquivo já
+ * sabe converter. É por isso que a regra é "conteúdo do nó, **senão** fallback" em vez de
+ * "só o nó": trocar por "só o nó" faria toda etiqueta do editor novo desaparecer.
+ */
+function converterAdf(bruto: ElementoBruto, coletor: Coletor): No[] {
+  const no = bruto.nome === 'ac:adf-node' ? bruto : primeiroFilho(bruto, 'ac:adf-node')
+
+  if (no !== null) {
+    const dentro = converterLista(
+      no.filhos.filter((f) => f.tipo === 'elemento' && f.nome === 'ac:adf-content'),
+      coletor,
+    )
+    if (dentro.length > 0) {
+      if (atributo(no, 'type') !== 'panel') return dentro
+      const tipo = atributoAdf(no, 'panel-type') ?? ''
+      return [{ tipo: 'painel', variante: PAINEL_POR_TIPO_ADF[tipo] ?? 'nota', filhos: dentro }]
+    }
+  }
+
+  const fallback = converterLista(
+    bruto.filhos.filter((f) => f.tipo === 'elemento' && f.nome === 'ac:adf-fallback'),
+    coletor,
+  )
+  if (fallback.length > 0) return fallback
+
+  // Nem conteúdo nem fallback: aí é o placeholder de `RF-43`, com o tipo do nó como pista.
+  // `adf:` no nome deixa claro na auditoria que veio do editor novo, e não de uma macro.
+  const tipo = no === null ? '' : (atributo(no, 'type') ?? '')
+  const nome = tipo === '' ? 'adf' : `adf:${tipo}`
+  anotar(coletor, 'macro_nao_suportada', nome)
+  return [{ tipo: 'macroNaoSuportada', nome }]
+}
+
+/**
+ * Atributo do nó ADF — o equivalente de `parametroDaMacro` no editor novo.
+ *
+ * Só `panel-type` é lido, e ele é **apresentação** ("este painel é um aviso"), não
+ * estrutura: `RNF-30` guarda JQL, chave de espaço e id de filtro, que descrevem o interior
+ * da Atlassian. `panel-icon-id` e `panel-color` continuam fora — cor não decide nada aqui
+ * (ver `etiqueta` em `No`).
+ */
+function atributoAdf(no: ElementoBruto, chave: string): string | null {
+  for (const filho of no.filhos) {
+    if (filho.tipo !== 'elemento' || filho.nome !== 'ac:adf-attribute') continue
+    if (atributo(filho, 'key') !== chave) continue
+    const valor = textoBrutoDe(filho).trim()
+    return valor === '' ? null : valor
+  }
+  return null
 }
 
 function parametroDaMacro(bruto: ElementoBruto, nomeParametro: string): string | null {
@@ -1151,6 +1330,11 @@ export function textoDe(nos: readonly No[]): string {
         break
       case 'codigo':
         saida += no.conteudo
+        break
+      // A etiqueta entra no texto puro: ela é conteúdo da página, e é justamente o tipo de
+      // palavra ("Concluído", "Bloqueado") que faz um trecho de busca dizer se vale abrir.
+      case 'etiqueta':
+        saida += no.texto
         break
       case 'macroNaoSuportada':
         break

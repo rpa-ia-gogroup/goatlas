@@ -682,6 +682,7 @@ describe('T-310 — a calibragem mostra os MOTIVOS, não só o threshold', () =>
       chamadosPorArea: [],
       prioridades: [],
       vias: [],
+      anexosPorChamado: [],
       bloqueios: [
         {
           regra: 'regra1_confluence',
@@ -724,6 +725,7 @@ describe('T-310 — a calibragem mostra os MOTIVOS, não só o threshold', () =>
       chamadosPorArea: [],
       prioridades: [],
       vias: [],
+      anexosPorChamado: [],
       bloqueios: [],
       thresholds: {},
       notificacoes: { pendente: 0, enviada: 0, falha: 0, suprimida: 0 },
@@ -749,6 +751,7 @@ describe('T-310 — a calibragem mostra os MOTIVOS, não só o threshold', () =>
         chamadosPorArea: [],
         prioridades: [],
         vias: [],
+        anexosPorChamado: [],
         bloqueios: [],
         thresholds: {},
         notificacoes: { pendente: 0, enviada: 0, falha: 0, suprimida: 0 },

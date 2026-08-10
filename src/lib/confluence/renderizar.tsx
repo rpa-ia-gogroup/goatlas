@@ -172,6 +172,12 @@ function Fragmento({ no, opcoes }: { no: No; opcoes: OpcoesRender }): ReactNode 
         </aside>
       )
 
+    case 'etiqueta':
+      // Pílula com contorno, sem cor de estado: a identidade não tem vermelho nem verde
+      // (§1.3) e estado nunca é comunicado só por cor. Quem diz o estado é a palavra que a
+      // pessoa escreveu — e ela é lida por leitor de tela como texto comum, de propósito.
+      return <span className="doc-etiqueta">{no.texto}</span>
+
     case 'macroNaoSuportada':
       // ⚠️ O bloco de busca é resolvido AQUI, no renderizador — a sanitização continua
       // tratando `livesearch` como macro não suportada, e é de propósito: ela é a camada
@@ -327,15 +333,18 @@ function Celula({ celula, opcoes }: { celula: CelulaTabela; opcoes: OpcoesRender
  * conhecemos. As três situações pedem três frases, porque levam a três ações diferentes de
  * quem lê.
  */
-type NaturezaDoBloco = 'dinamico' | 'deOutraPagina' | 'desconhecido'
+type NaturezaDoBloco = 'dinamico' | 'deOutraPagina' | 'jaNaTela' | 'desconhecido'
 
 const BLOCOS_CONHECIDOS: Readonly<Record<string, { nome: string; natureza: NaturezaDoBloco }>> = {
   livesearch: { nome: 'Busca dentro deste espaço', natureza: 'dinamico' },
   listlabels: { nome: 'Etiquetas usadas neste espaço', natureza: 'dinamico' },
   'recently-updated': { nome: 'Páginas alteradas recentemente', natureza: 'dinamico' },
   'recently-updated-dashboard': { nome: 'Páginas alteradas recentemente', natureza: 'dinamico' },
-  children: { nome: 'Lista das páginas filhas', natureza: 'dinamico' },
-  pagetree: { nome: 'Árvore de páginas', natureza: 'dinamico' },
+  // ⚠️ Estes dois o app JÁ mostra: a leitura lista as páginas filhas no fim (T-115, `RF-41`),
+  // com a verificação de restrição por item que `RN-06` exige. Dizer "não há o que trazer"
+  // seria falso — o conteúdo está na tela, alguns centímetros abaixo.
+  children: { nome: 'Lista das páginas filhas', natureza: 'jaNaTela' },
+  pagetree: { nome: 'Árvore de páginas', natureza: 'jaNaTela' },
   contentbylabel: { nome: 'Páginas com uma etiqueta', natureza: 'dinamico' },
   detailssummary: { nome: 'Tabela montada a partir de outras páginas', natureza: 'dinamico' },
   'blog-posts': { nome: 'Últimas publicações', natureza: 'dinamico' },
@@ -345,7 +354,10 @@ const BLOCOS_CONHECIDOS: Readonly<Record<string, { nome: string; natureza: Natur
   jirachart: { nome: 'Gráfico de chamados do Jira', natureza: 'dinamico' },
   include: { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
   'excerpt-include': { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
-  excerpt: { nome: 'Trecho reaproveitado em outras páginas', natureza: 'deOutraPagina' },
+  // `excerpt` tem o próprio corpo no storage, então o sanitizador já o renderiza. Fica aqui
+  // só para o caso de corpo vazio, e aí "abra a origem" seria conselho errado: a origem é
+  // esta página.
+  excerpt: { nome: 'Trecho reaproveitado em outras páginas', natureza: 'jaNaTela' },
 }
 
 /**
@@ -434,6 +446,8 @@ function MacroNaoSuportada({ nome }: { nome: string }): ReactNode {
           </>
         ) : natureza === 'deOutraPagina' ? (
           <>Este bloco mostra texto de outra página. Abra a página de origem para ler.</>
+        ) : natureza === 'jaNaTela' ? (
+          <>As páginas abaixo desta já aparecem listadas no fim da leitura.</>
         ) : (
           <>
             O goatlas ainda não sabe mostrar este bloco (

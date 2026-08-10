@@ -8,7 +8,7 @@
  *   - `submissoes.chave_idempotencia UNIQUE` → RF-24 (duplo clique não duplica)
  *   - `classificacoes_ticket` PK composta → cache da Regra 2 (R-08)
  *
- * ⚠️ **Idempotente não quer dizer grátis** (`RNF-36`, `D-31`, T-135). `migrar` roda
+ * ⚠️ **Idempotente não quer dizer grátis** (`RNF-36`, `D-35`, T-135). `migrar` roda
  * dentro de `montarContexto`, que roda a CADA requisição `/api/*` — e cada `db.exec`
  * do GoDeploy é uma ida e volta assíncrona. Aplicar os 32 statements de DDL (17
  * tabelas + 15 índices) mais os 3 `ALTER` (que **sempre** lançam "duplicate column"
@@ -350,6 +350,45 @@ export const TABELAS = [
      avaliado_em     TEXT NOT NULL,
      CHECK (estado IN ('respondido', 'ok', 'risco', 'estourado'))
    )`,
+  /**
+   * Anexos que a pessoa subiu **antes** de o chamado existir — `RF-61`, T-408.
+   *
+   * ## Por que uma tabela, e não memória do Worker
+   *
+   * O `temporaryAttachmentId` nasce no upload e é usado na confirmação, que é **outra
+   * requisição**. O Worker é stateless: guardar em memória já foi bug real neste app (a
+   * demonstração perdia o chamado entre requisições). E mandar o id para o navegador
+   * seria `RF-30` aplicado a arquivo — quem tem o id de outra pessoa anexa o arquivo
+   * dela no próprio chamado. O id fica aqui, e sai daqui com o e-mail no `WHERE`.
+   *
+   * ## As duas constraints, e o que cada uma impede
+   *
+   * - `UNIQUE (chave_idempotencia, nome_arquivo)` — T-411: duplo clique no seletor não
+   *   gera dois temporários do mesmo arquivo. Como em todo o resto do projeto, a
+   *   idempotência vem da constraint, não de um `SELECT` antes do `INSERT`.
+   * - `materializado_em` — T-413b: a materialização acontece **uma vez**. Reconfirmar
+   *   devolve `duplicada: true` com o mesmo `issueKey` (`RF-24`); sem esta coluna, o
+   *   segundo clique anexaria o arquivo de novo.
+   *
+   * ⚠️ **`conversa_id` é nulo no formulário**, e não é redundante com a chave: a chave
+   * correlaciona, o `conversa_id` é o que permite expurgar/auditar por conversa sem
+   * parsear string.
+   */
+  `CREATE TABLE IF NOT EXISTS anexos_pendentes (
+     id                      TEXT PRIMARY KEY,
+     solicitante_email       TEXT NOT NULL,
+     conversa_id             TEXT,
+     chave_idempotencia      TEXT NOT NULL,
+     temporary_attachment_id TEXT NOT NULL,
+     nome_arquivo            TEXT NOT NULL,
+     criado_em               TEXT NOT NULL,
+     materializado_em        TEXT,
+     UNIQUE (chave_idempotencia, nome_arquivo)
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_chave
+     ON anexos_pendentes (chave_idempotencia, solicitante_email)`,
+  `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_pessoa
+     ON anexos_pendentes (solicitante_email, criado_em)`,
 ] as const
 
 /**
@@ -360,7 +399,7 @@ export const TABELAS = [
  * `ALTER` roda uma vez e falha nas seguintes com "duplicate column" — engolir **só**
  * esse erro é o que torna a migração idempotente sem tabela de versão.
  */
-const COLUNAS_ADICIONADAS = [
+export const COLUNAS_ADICIONADAS = [
   // T-304 / RF-19 — a área **no momento da criação** é o dado histórico correto,
   // mesmo que a pessoa mude de área depois.
   `ALTER TABLE vinculos ADD COLUMN area TEXT`,
@@ -376,6 +415,29 @@ const COLUNAS_ADICIONADAS = [
    * porque o agente ajustou o resumo três vezes.
    */
   `ALTER TABLE vinculos ADD COLUMN ultimo_status_notificado TEXT`,
+  /**
+   * T-403 / RF-62 — a declaração de anexo, verificável no servidor.
+   *
+   * ⚠️ **Três estados, e o terceiro é o que dá valor aos outros dois:** `1` tenho ·
+   * `0` não tenho · `NULL` **não respondeu** (ou não havia o que responder, porque o
+   * tipo de chamado não aceita anexo). Um `NOT NULL DEFAULT 0` aqui apagaria a
+   * distinção que a spec §1 existe para criar: chamado de quem declarou não ter
+   * material é informação sobre o caso; chamado de quem nunca foi perguntado é
+   * omissão. Com default, os dois viram "disse que não tinha".
+   */
+  `ALTER TABLE submissoes ADD COLUMN declarou_anexo INTEGER`,
+  /**
+   * T-422 / ScC-7 — quantos anexos efetivamente subiram para este chamado.
+   *
+   * ⚠️ **Por que não contar de `anexos_pendentes`:** aquela tabela é expurgada em
+   * `TTL_ANEXO_PENDENTE_HORAS` (T-415). Um indicador que lê dela mostraria a evidência
+   * chegando hoje e **caindo para zero** amanhã, sem nada ter mudado — o gráfico mediria
+   * o expurgo, não a feature. Aqui o número é durável porque mora onde o chamado mora.
+   *
+   * Três estados, de novo: `NULL` = nunca houve materialização (não havia arquivo, ou a
+   * criação foi diferida) · `0` = tentou e nenhum subiu · `N` = subiram N.
+   */
+  `ALTER TABLE submissoes ADD COLUMN anexos_anexados INTEGER`,
 ] as const
 
 /**
@@ -409,20 +471,6 @@ function versaoDoSchema(): string {
 export const VERSAO_SCHEMA = versaoDoSchema()
 
 /**
- * Bancos cuja migração já foi concluída NESTE isolate.
- *
- * Guarda a promessa, não um booleano: duas requisições concorrentes no mesmo
- * isolate chegam aqui juntas, e um booleano só marcado no fim deixaria as duas
- * migrarem em paralelo. É o mesmo raciocínio do check-then-insert do outbox, na
- * versão em memória.
- *
- * `WeakMap` chaveado pela instância de `Banco` — não uma flag de módulo — porque
- * cada teste monta um banco novo (`sqlite-local`) e chama `migrar`. Uma flag global
- * faria o segundo teste rodar contra um banco sem tabela nenhuma.
- */
-const migracaoPorBanco = new WeakMap<Banco, Promise<void>>()
-
-/**
  * A sonda: uma query decide se há trabalho a fazer.
  *
  * Devolve `true` só quando a marca gravada é exatamente a do schema que este código
@@ -441,8 +489,7 @@ async function jaAplicado(db: Banco): Promise<boolean> {
   }
 }
 
-async function aplicar(db: Banco): Promise<void> {
-  for (const sql of TABELAS) {
+async function aplicar(db: Banco): Promise<void> {  for (const sql of TABELAS) {
     await db.exec(sql, [])
   }
   for (const sql of COLUNAS_ADICIONADAS) {
@@ -466,24 +513,43 @@ async function aplicar(db: Banco): Promise<void> {
   )
 }
 
-export async function migrar(db: Banco): Promise<void> {
-  const emAndamento = migracaoPorBanco.get(db)
+/**
+ * Migrações já concluídas NESTE isolate, por objeto de banco.
+ *
+ * ⚠️ **As duas metades são necessárias, e resolvem custos diferentes** (`RNF-36`, `D-32`,
+ * `D-35`). A sonda `meta_schema` acima corta os 35 statements de DDL para **2 idas** num
+ * isolate **novo**; esta memoização corta as 2 para **zero** em toda requisição seguinte do
+ * **mesmo** isolate. Ficar só com a sonda faria toda rota pagar duas idas de rede antes de
+ * começar; ficar só com a memoização faria o primeiro request de cada isolate pagar os 35.
+ *
+ * `WeakMap` por instância de `Banco` — não flag de módulo — porque em produção `env.DB` é a
+ * mesma referência por isolate, e nos testes cada caso monta um banco novo. Um `let migrado`
+ * global daria o mesmo ganho em produção e faria o **segundo teste da suíte** rodar contra um
+ * banco sem tabela nenhuma.
+ *
+ * Guarda a **promessa**, não um booleano: duas requisições concorrentes esperam a mesma
+ * migração em vez de disputarem o DDL. E a falha **não** fica memoizada — senão um erro
+ * transitório de banco no primeiro boot condenaria o isolate a nunca ter schema.
+ */
+const migracoes = new WeakMap<Banco, Promise<void>>()
+
+/**
+ * Garante o schema **uma vez por banco**. É por aqui que o app passa; `migrar` continua
+ * exportada porque os testes de schema querem justamente rodar a migração de novo.
+ */
+export async function garantirMigracao(db: Banco): Promise<void> {
+  const emAndamento = migracoes.get(db)
   if (emAndamento) return emAndamento
 
-  const promessa = (async () => {
-    if (await jaAplicado(db)) return
-    await aplicar(db)
-  })()
+  const promessa = migrar(db).catch((erro: unknown) => {
+    migracoes.delete(db)
+    throw erro
+  })
+  migracoes.set(db, promessa)
+  return promessa
+}
 
-  // Memoiza a promessa ANTES do primeiro `await` do chamador, para que a segunda
-  // requisição do mesmo isolate espere esta em vez de começar outra.
-  migracaoPorBanco.set(db, promessa)
-  try {
-    await promessa
-  } catch (e) {
-    // Migração que falhou não pode ficar memoizada como concluída: a requisição
-    // seguinte tem de tentar de novo (o banco pode ter estado fora do ar).
-    migracaoPorBanco.delete(db)
-    throw e
-  }
+export async function migrar(db: Banco): Promise<void> {
+  if (await jaAplicado(db)) return
+  await aplicar(db)
 }

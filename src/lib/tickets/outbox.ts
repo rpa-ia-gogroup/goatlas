@@ -45,6 +45,15 @@ export interface Submissao {
   readonly tentativas: number
   readonly ultimoErro: string | null
   readonly issueKey: string | null
+  /**
+   * RF-62 (T-403) — `true` tenho · `false` não tenho · `null` **não respondeu**.
+   *
+   * ⚠️ `null` também é o valor de quem nunca foi perguntado (tipo de chamado que não
+   * aceita anexo, ou schema que não pôde ser lido). É de propósito: o que a spec quer
+   * distinguir é "declarou não ter" de "não declarou", e as duas variedades de "não
+   * declarou" não mudam nada para quem lê o chamado.
+   */
+  readonly declarouAnexo: boolean | null
 }
 
 interface LinhaSubmissao {
@@ -59,6 +68,7 @@ interface LinhaSubmissao {
   tentativas: number
   ultimo_erro: string | null
   issue_key: string | null
+  declarou_anexo: number | null
 }
 
 function daLinha(l: LinhaSubmissao): Submissao {
@@ -74,11 +84,15 @@ function daLinha(l: LinhaSubmissao): Submissao {
     tentativas: l.tentativas,
     ultimoErro: l.ultimo_erro,
     issueKey: l.issue_key,
+    // `== null` cobre `null` e `undefined` de propósito: a coluna é recém-adicionada
+    // (`ALTER TABLE`), então linha gravada antes dela existir vem sem a chave.
+    declarouAnexo: l.declarou_anexo == null ? null : l.declarou_anexo === 1,
   }
 }
 
 const COLUNAS = `id, chave_idempotencia, solicitante_email, conversa_id, via,
-                 verificado_regras, payload_json, estado, tentativas, ultimo_erro, issue_key`
+                 verificado_regras, payload_json, estado, tentativas, ultimo_erro, issue_key,
+                 declarou_anexo`
 
 export interface ResultadoRegistro {
   readonly submissao: Submissao
@@ -109,14 +123,17 @@ export class Outbox {
     via: ViaAbertura
     verificadoRegras: boolean
     payload: PayloadSubmissao
+    /** RF-62 — `null` quando a pergunta não existia nesta criação. */
+    declarouAnexo?: boolean | null
   }): Promise<ResultadoRegistro> {
     const t = this.agora()
+    const declarou = dados.declarouAnexo ?? null
     try {
       await this.db.exec(
         `INSERT INTO submissoes
            (id, chave_idempotencia, solicitante_email, conversa_id, via, verificado_regras,
-            payload_json, estado, tentativas, criado_em, atualizado_em)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pendente', 0, ?, ?)`,
+            payload_json, estado, tentativas, criado_em, atualizado_em, declarou_anexo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pendente', 0, ?, ?, ?)`,
         [
           dados.id,
           dados.chaveIdempotencia,
@@ -127,6 +144,7 @@ export class Outbox {
           JSON.stringify(dados.payload),
           t,
           t,
+          declarou === null ? null : declarou ? 1 : 0,
         ],
       )
     } catch (erro) {
@@ -187,6 +205,23 @@ export class Outbox {
               atualizado_em = ?
         WHERE id = ?`,
       [erro, transitorio ? 'pendente' : 'falha', this.agora(), id],
+    )
+  }
+
+  /**
+   * Registra quantos anexos subiram para este chamado — T-422, `ScC-7`.
+   *
+   * ⚠️ Grava **por chave**, não por id de submissão: quem chama é a materialização, que
+   * conhece a chave (é o que correlaciona o arquivo ao chamado) e não a submissão. E o
+   * número precisa ser durável: `anexos_pendentes` é expurgada em horas.
+   *
+   * `0` é um valor legítimo e diferente de `NULL`: significa "havia arquivo e nenhum
+   * subiu", que é justamente o caso que o painel precisa distinguir de "não havia".
+   */
+  async registrarAnexosAnexados(chaveIdempotencia: string, quantidade: number): Promise<void> {
+    await this.db.exec(
+      `UPDATE submissoes SET anexos_anexados = ?, atualizado_em = ? WHERE chave_idempotencia = ?`,
+      [quantidade, this.agora(), chaveIdempotencia],
     )
   }
 

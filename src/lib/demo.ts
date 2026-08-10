@@ -138,6 +138,22 @@ export function semearAtlassianDemo(fake: ClienteAtlassianFake): void {
       descricao: 'Problemas em sistemas, relatórios e integrações',
     },
   ]
+  /**
+   * O schema do tipo, com **campo de anexo** — sem ele a pergunta de `RF-62` não aparece
+   * em `npm run dev` e a feature só existiria nos testes.
+   *
+   * ⚠️ O `fieldId` é o do dublê e não vale nada fora dele: quem decide se o tipo aceita
+   * anexo é o **tipo** do campo, nunca o id (`ScC-4`, e há teste estrutural cobrando).
+   */
+  fake.estado.camposPorTipo.set(TIPO_CHAMADO_DEMO, [
+    {
+      fieldId: 'customfield_20031',
+      rotulo: 'Anexo',
+      obrigatorio: false,
+      tipo: 'anexo',
+      opcoes: [],
+    },
+  ])
   fake.estado.paginas = [
     {
       id: 'demo-1',

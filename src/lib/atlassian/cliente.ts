@@ -20,6 +20,7 @@
 
 import { prefixarAutoria, filtrarPublicos, montarQueryComentarios } from './comentarios'
 import { CacheTtl, TransporteAtlassian, type OpcoesHttp } from './http'
+import { CONCORRENCIA_ATLASSIAN, mapearComLimite } from '../paralelo'
 import {
   ErroAtlassian,
   MAX_ANEXO_BYTES,
@@ -43,11 +44,49 @@ import {
   type TipoCampoRequestType,
 } from './tipos'
 
+/**
+ * As três caches do cliente, separadas por **tamanho do valor**, não por assunto.
+ *
+ * `metadados` e `conteudo` guardam coisas pequenas (chave de espaço, lista de tipos,
+ * booleano de restrição, resultado de busca). `corpo` guarda storage de página, que vai
+ * até 400 KB — o teto que a sanitização aplica. Uma cache só, com teto único, obrigaria a
+ * escolher entre guardar poucas páginas ou arriscar centenas de megabytes num Worker de
+ * 128 MB; separadas, cada teto é dimensionado pelo que cabe dentro dele.
+ */
+export interface CachesAtlassian {
+  readonly metadados: CacheTtl<unknown>
+  readonly conteudo: CacheTtl<unknown>
+  readonly corpo: CacheTtl<unknown>
+}
+
+/**
+ * Caches novas e vazias.
+ *
+ * ⚠️ Quem chama decide **quanto elas vivem**, e é essa decisão que faz `RNF-13` existir ou
+ * não: instância nova por requisição (o que acontecia antes) é cache que nunca acerta. Ver
+ * `contexto.ts`.
+ */
+export function novasCachesAtlassian(agoraMs: () => number = () => Date.now()): CachesAtlassian {
+  return {
+    metadados: new CacheTtl(agoraMs, 500),
+    conteudo: new CacheTtl(agoraMs, 400),
+    // 30 × 400 KB de pior caso ≈ 12 MB. Trinta páginas cobre a navegação de uma sessão
+    // inteira, e o corpo é o valor mais barato de rebuscar: uma requisição, sem as três
+    // de metadados/labels/restrição que decidem a exposição.
+    corpo: new CacheTtl(agoraMs, 30),
+  }
+}
+
 export interface OpcoesCliente extends OpcoesHttp {
   /** TTLs de cache (RNF-13). */
   readonly ttlMetadadosSeg: number
   readonly ttlConteudoSeg: number
   readonly agoraMs?: () => number
+  /**
+   * Caches a reaproveitar. Omitir cria caches próprias e vazias — é o que os testes
+   * querem (isolamento entre casos) e é o que **não** se quer em produção.
+   */
+  readonly caches?: CachesAtlassian
   /**
    * Id do campo customizado "Solicitante" no Jira (RF-21), ex.: `customfield_10050`.
    * `null` = ainda não sabemos (Q4) — ver `montarCamposSolicitante`.
@@ -206,7 +245,7 @@ interface CampoRequestTypeBruto {
   fieldId?: unknown
   name?: unknown
   required?: unknown
-  jiraSchema?: { type?: unknown; system?: unknown; custom?: unknown }
+  jiraSchema?: { type?: unknown; system?: unknown; custom?: unknown; items?: unknown }
   validValues?: { id?: unknown; value?: unknown; label?: unknown }[]
 }
 
@@ -233,12 +272,18 @@ export function camposAdicionais(brutos: readonly CampoRequestTypeBruto[]): Camp
     }))
     const custom = typeof bruto.jiraSchema?.custom === 'string' ? bruto.jiraSchema.custom : ''
     const tipoBruto = typeof bruto.jiraSchema?.type === 'string' ? bruto.jiraSchema.type : ''
+    const itens = typeof bruto.jiraSchema?.items === 'string' ? bruto.jiraSchema.items : ''
+    // ⚠️ Anexo é reconhecido ANTES do resto: o `else` final é `'texto'`, então sem
+    // este ramo o campo de anexo viraria uma caixa de texto na tela (RF-27) e o
+    // servidor não teria como saber que o tipo aceita arquivo (RF-62).
     const tipo: TipoCampoRequestType =
-      opcoes.length > 0 || tipoBruto === 'option'
-        ? 'selecao'
-        : custom.toLowerCase().includes('textarea')
-          ? 'texto_longo'
-          : 'texto'
+      sistema === 'attachment' || itens === 'attachment'
+        ? 'anexo'
+        : opcoes.length > 0 || tipoBruto === 'option'
+          ? 'selecao'
+          : custom.toLowerCase().includes('textarea')
+            ? 'texto_longo'
+            : 'texto'
 
     resultado.push({
       fieldId,
@@ -265,12 +310,14 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
   private readonly transporte: TransporteAtlassian
   private readonly cacheMetadados: CacheTtl<unknown>
   private readonly cacheConteudo: CacheTtl<unknown>
+  private readonly cacheCorpo: CacheTtl<unknown>
 
   constructor(private readonly opcoes: OpcoesCliente) {
     this.transporte = new TransporteAtlassian(opcoes)
-    const agoraMs = opcoes.agoraMs ?? (() => Date.now())
-    this.cacheMetadados = new CacheTtl(agoraMs)
-    this.cacheConteudo = new CacheTtl(agoraMs)
+    const caches = opcoes.caches ?? novasCachesAtlassian(opcoes.agoraMs ?? (() => Date.now()))
+    this.cacheMetadados = caches.metadados
+    this.cacheConteudo = caches.conteudo
+    this.cacheCorpo = caches.corpo
   }
 
   /** RF-60 — a única telemetria de orçamento que existe com API token (RNF-15). */
@@ -490,11 +537,15 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     // RF-40 / RN-06 — a terceira condição: página SEM RESTRIÇÃO. O CQL exclui por
     // espaço e por label, mas não por restrição de página, e espaço liberado não
     // implica página liberada.
-    const paginas: PaginaConfluence[] = []
-    for (const p of candidatas) {
-      if (await this.paginaRestrita(p.id)) continue
-      paginas.push(p)
-    }
+    //
+    // Em paralelo COM TETO (ver `paralelo.ts`): eram N idas em série antes de a primeira
+    // linha de resultado aparecer na tela, com N = `limite` da busca. O teto está aqui e
+    // não em `Promise.all` porque a credencial é única e o burst limit da Atlassian não é
+    // publicado (`R-02`). A ordem por relevância é preservada pelo `mapearComLimite`.
+    const restricoes = await mapearComLimite(candidatas, CONCORRENCIA_ATLASSIAN, (p) =>
+      this.paginaRestrita(p.id),
+    )
+    const paginas: PaginaConfluence[] = candidatas.filter((_, i) => !restricoes[i])
 
     this.cacheConteudo.definir(chave, paginas, this.opcoes.ttlConteudoSeg)
     return paginas
@@ -582,14 +633,33 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
       _links?: { webui?: unknown }
     }
 
+    /**
+     * Chave do espaço e labels são **duas requisições independentes** — a v2 não embute
+     * nenhuma das duas — e eram feitas em série. Juntas, em paralelo: economiza uma ida
+     * inteira por página, e uma leitura com breadcrumb toca até seis páginas (`RF-41`).
+     *
+     * ⚠️ `allSettled` + relançar, não `Promise.all`: com `all`, a rejeição da que perdeu a
+     * corrida fica sem tratamento e o runtime a reporta como erro não capturado, quando na
+     * verdade ela foi tratada. E as duas continuam **obrigatórias** — ausência de
+     * informação é negar (`RN-06`): sem chave de espaço não há como avaliar a allowlist,
+     * sem labels não há como avaliar o bloqueio por label. O erro do espaço tem precedência
+     * porque era ele que subia primeiro na versão em série.
+     */
+    const [resEspaco, resLabels] = await Promise.allSettled([
+      this.chaveDoEspaco(String(dados?.spaceId ?? '')),
+      this.labelsDaPagina(idPagina),
+    ])
+    if (resEspaco.status === 'rejected') throw resEspaco.reason
+    if (resLabels.status === 'rejected') throw resLabels.reason
+
     const metadados: MetadadosPagina = {
       id: String(dados?.id ?? idPagina),
       idPai: dados?.parentId === undefined || dados?.parentId === null
         ? null
         : String(dados.parentId),
       titulo: String(dados?.title ?? ''),
-      espaco: await this.chaveDoEspaco(String(dados?.spaceId ?? '')),
-      labels: await this.labelsDaPagina(idPagina),
+      espaco: resEspaco.value,
+      labels: resLabels.value,
       atual: String(dados?.status ?? '') === 'current',
       versao: Number(dados?.version?.number ?? 0),
       atualizadoEm: String(dados?.version?.createdAt ?? ''),
@@ -663,11 +733,12 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
       labels: [],
     }))
 
-    const filhos: PaginaConfluence[] = []
-    for (const p of candidatas) {
-      if (await this.paginaRestrita(p.id)) continue
-      filhos.push(p)
-    }
+    // Mesmo desenho da busca: paralelo com teto, ordem preservada. Aqui o ganho é o mais
+    // visível da tela — um clique na árvore custava até 50 idas em série (`RF-41`).
+    const restricoes = await mapearComLimite(candidatas, CONCORRENCIA_ATLASSIAN, (p) =>
+      this.paginaRestrita(p.id),
+    )
+    const filhos: PaginaConfluence[] = candidatas.filter((_, i) => !restricoes[i])
     this.cacheConteudo.definir(chave, filhos, this.opcoes.ttlConteudoSeg)
     return filhos
   }
@@ -714,14 +785,16 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
    */
   async obterCorpoStorage(idPagina: string): Promise<string> {
     const chave = `storage:${idPagina}`
-    const cacheado = this.cacheConteudo.obter(chave)
+    // Cache própria (`cacheCorpo`), com teto pequeno: é o único valor grande que o cliente
+    // guarda. Ver `novasCachesAtlassian`.
+    const cacheado = this.cacheCorpo.obter(chave)
     if (typeof cacheado === 'string') return cacheado
 
     const dados = (await this.transporte.requisitar(
       `/wiki/api/v2/pages/${encodeURIComponent(idPagina)}?body-format=storage`,
     )) as { body?: { storage?: { value?: unknown } } }
     const storage = typeof dados?.body?.storage?.value === 'string' ? dados.body.storage.value : ''
-    this.cacheConteudo.definir(chave, storage, this.opcoes.ttlConteudoSeg)
+    this.cacheCorpo.definir(chave, storage, this.opcoes.ttlConteudoSeg)
     return storage
   }
 
@@ -843,18 +916,29 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
       .filter((i) => i.issueKey.length > 0)
   }
 
-  /**
-   * Anexo em dois passos (RF-25, RF-34).
-   *
-   * ⚠️ O primeiro passo é **multipart com `X-Atlassian-Token: no-check`** — sem esse
-   * cabeçalho a Atlassian recusa o upload como possível CSRF, e o erro que ela devolve
-   * (403 genérico) não diz isso. É o tipo de detalhe que custa uma tarde.
-   */
+  /** Anexo em dois passos, os dois de uma vez — `RF-25`, `RF-34`. */
   async anexarArquivo(
     serviceDeskId: string,
     issueKey: string,
     arquivo: { nome: string; tipo: string; bytes: ArrayBuffer },
   ): Promise<void> {
+    // ⚠️ **Composição, não um terceiro caminho.** `RF-34` (anexar depois) e `RF-61`
+    // (anexar na criação) são os mesmos dois passos do JSM, em momentos diferentes.
+    // Reimplementar o multipart aqui faria o cabeçalho de CSRF viver em dois lugares —
+    // e o dia em que um deles mudasse, só metade dos anexos pararia de funcionar.
+    const id = await this.subirAnexoTemporario(serviceDeskId, arquivo)
+    await this.materializarAnexosTemporarios(issueKey, [id])
+  }
+
+  /**
+   * ⚠️ O primeiro passo é **multipart com `X-Atlassian-Token: no-check`** — sem esse
+   * cabeçalho a Atlassian recusa o upload como possível CSRF, e o erro que ela devolve
+   * (403 genérico) não diz isso. É o tipo de detalhe que custa uma tarde.
+   */
+  async subirAnexoTemporario(
+    serviceDeskId: string,
+    arquivo: { nome: string; tipo: string; bytes: ArrayBuffer },
+  ): Promise<string> {
     const form = new FormData()
     form.append('file', new Blob([arquivo.bytes], { type: arquivo.tipo }), arquivo.nome)
 
@@ -867,20 +951,25 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
       .map((t) => (typeof t.temporaryAttachmentId === 'string' ? t.temporaryAttachmentId : null))
       .filter((id): id is string => id !== null)
 
-    if (ids.length === 0) {
+    const primeiro = ids[0]
+    if (primeiro === undefined) {
       throw new ErroAtlassian('upload temporário não devolveu id de anexo', {
         transitorio: true,
         recurso: 'attachTemporaryFile',
       })
     }
+    return primeiro
+  }
 
+  async materializarAnexosTemporarios(issueKey: string, ids: readonly string[]): Promise<void> {
+    if (ids.length === 0) return
     await this.transporte.requisitar(
       `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/attachment`,
       {
         method: 'POST',
         // `public: true` de propósito: é o anexo DO SOLICITANTE no próprio chamado, e
         // anexo interno seria invisível para quem o mandou (`RF-34`).
-        body: JSON.stringify({ temporaryAttachmentIds: ids, public: true }),
+        body: JSON.stringify({ temporaryAttachmentIds: [...ids], public: true }),
       },
     )
   }

@@ -1171,6 +1171,97 @@ ganharam superfície. O preço é uma linha **por produto encontrado no inventá
 o console não inventa a lista de produtos que a organização assina. No dia em que o
 financeiro responder Q8, é preencher e salvar.
 
+### D-26 · O anexo não viaja na criação — e a v1 do plano perdia o chamado da pessoa
+
+**Data:** 10/08/2026 · **Contexto:** spec `005-anexo-na-criacao`, `plan.md` §0 e §2
+
+`RF-61` pede que abrir chamado com anexo seja **uma** ação. O caminho óbvio é o do
+portal nativo do JSM: mandar os `temporaryAttachmentIds` dentro do corpo da criação. A
+primeira versão do plano fazia isso, e o `/analyze` mostrou que aquela linha reta passa
+exatamente por cima da trava mais importante do projeto:
+
+1. id temporário expirado faz a **criação** responder **400**;
+2. `atlassian/http.ts` classifica 4xx como **definitivo**;
+3. `tickets/servico.ts` marca a submissão como `falha`;
+4. submissão `falha` **nunca** é reprocessada.
+
+Um arquivo velho apagaria o chamado de alguém. É a mesma família do bug que
+`rf24-outbox-degradacao` já pegou uma vez, na versão com arquivo — e teria passado por
+uma suíte verde, porque nenhum teste montava "id vencido".
+
+**Decisão:** o servidor faz **dois passos dentro da mesma confirmação**. O upload
+acontece quando a pessoa escolhe o arquivo (feedback imediato, criação intocada); a
+materialização acontece **depois** da criação, com o resultado do anexo separado do
+resultado da criação.
+
+| Alternativa | Por que não |
+|---|---|
+| Ids dentro do `requestFieldValues` da criação | A cadeia acima: falha de anexo vira falha definitiva de criação, e o chamado é perdido |
+| Upload só no clique de confirmar | 8 MB subindo dentro da confirmação: a pessoa espera sem retorno, e queda de rede derruba a criação junto |
+
+**Custo aceito e explícito:** existe uma janela curta em que o chamado existe sem o
+anexo. Para o solicitante é invisível (uma tela só); para quem observa a fila, um chamado
+pode aparecer segundos antes do arquivo. É barato perto de perder chamado.
+
+**Consequências que moram em código:** `subirAnexoTemporario` e
+`materializarAnexosTemporarios` existem separados na interface do cliente (e
+`anexarArquivo` de `RF-34` passou a ser a composição dos dois) · o
+`temporaryAttachmentId` vive em `anexos_pendentes` e **nunca** trafega pelo navegador ·
+`materializarAnexosDoChamado` **não lança**, nunca, e mora fora de
+`ServicoChamados.processar` justamente para não alcançar o `catch` que classifica erro.
+
+---
+
+### D-27 · `RF-62` é fail-OPEN, contra o padrão do projeto — e a distinção é o que resolve
+
+**Data:** 10/08/2026 · **Contexto:** spec `005`, `plan.md` §6 e §9
+
+Em todo o resto do goatlas, ausência de informação **nega**. Aqui, schema de request type
+que **não pôde ser lido** faz a pergunta de `RF-62` não existir e o chamado abrir.
+
+**Por que o desvio é legítimo:** `RF-62` é **qualidade de produto, não trava de
+segurança**. Quem "burla" só consegue abrir o **próprio** chamado sem responder uma
+pergunta — não há dado de terceiro, não há exposição, não há escrita indevida. O que se
+perde é a evidência dele mesmo. Uma trava de segurança fail-open convida à burla (derrubar
+a chamada de schema viraria o caminho); esta não tem prêmio.
+
+**Por que fail-closed seria pior:** significaria **não abrir chamado** durante uma
+indisponibilidade de leitura de schema — a parede que `RNF-18` proíbe. Trocar "chamado sem
+print" por "chamado nenhum" é péssimo negócio.
+
+**Mitigação que já existe:** o schema vem do cache de metadados (`ttlMetadadosSeg`), então
+uma indisponibilidade curta não faz a pergunta sumir para quem acabou de vê-la.
+
+**O que impede a confusão:** o evento vai para a auditoria como
+`schema_tipo_indisponivel`. "O tipo não aceita anexo" e "não deu para saber se aceita" têm
+a mesma cara na tela; na auditoria não podem ter, senão uma indisponibilidade prolongada
+apareceria como uma feature que ninguém usa.
+
+---
+
+### D-28 · `RF-27` endureceu: campo extra fora do schema deixou de passar
+
+**Data:** 10/08/2026 · **Contexto:** spec `005`, `plan.md` §4 (pré-requisito de segurança
+independente da feature) · **Afeta:** `T-130` da spec 002, que entregou `RF-27`
+
+`camposDinamicos` chegava do corpo da requisição e era mesclado em `requestFieldValues`
+**sem allowlist de chave** — só `summary` e `description` eram removidos. O dano era
+contido porque *o Jira* recusa campo que não pertence ao request type: a contenção era do
+outro lado, não nossa.
+
+Com um campo de **anexo** no schema, aquela folga passaria a ser o caminho para colar o
+id do anexo de outra pessoa no próprio chamado — `RF-30` aplicado a arquivo.
+
+**Decisão:** as chaves de `camposDinamicos` são validadas contra o schema do request type,
+e o campo de anexo é **sempre** excluído — o arquivo entra só pelo caminho de `D-26`.
+
+⚠️ **É mudança de comportamento em `RF-27`:** campo extra que passava deixou de passar. E
+**schema indisponível descarta os campos adicionais** (fail-closed no campo) mas **abre o
+chamado** (fail-open no chamado): validação que se desliga sob pressão não é validação, e
+perder campo extra numa indisponibilidade é aceitável — perder o chamado não seria.
+
+---
+
 ### D-29 · Q5 fechada: 7 espaços na allowlist, escolhidos sobre a lista medida
 
 **Data:** 10/08/2026 · **Decisão de:** Kaique · **Contexto:** `Q5`, `RN-06`, `D-01`, `RF-49`
@@ -1266,9 +1357,264 @@ de cada item** (`RN-06`), uma chamada por página (`R-02`) — e o valor para de
 uma lista de páginas alteradas não responde "por que meu relatório está errado". `livesearch`
 foi feito porque não havia resultado a reproduzir, só um caminho a oferecer.
 
+### D-31 · Quais blocos do Confluence o app reproduz — e por que `jira` fica de fora por decisão
+
+**Data:** 10/08/2026 · **Contexto:** `RF-43`, `RF-39`, `RN-06`, `R-02`, `R-07`
+
+A pergunta que originou isto foi "não dá para puxar?", olhando um bloco na aba Documentação.
+A resposta é **caso a caso**, e a linha que separa os casos não é dificuldade — é **de onde
+o conteúdo viria**.
+
+| Bloco | O que é feito | Por quê |
+|---|---|---|
+| Macro desconhecida **com corpo** (`panel`, `deck`/`card`, `excerpt`, macros internas) | ✅ **Corpo renderizado** | O texto já vem no storage. Grátis, e a caixa cinza estava aparecendo **no lugar do texto** |
+| `status` (o "lozenge") | ✅ **Etiqueta**, sem a cor (`D-34`) | O texto está no storage — num **parâmetro**, não num corpo, e era só isso que o fazia cair no placeholder |
+| Bloco do **editor novo** (`ac:adf-extension`) | ✅ **Um dos dois lados**, nunca os dois (`D-34`) | O storage traz o nó **e** um fallback em HTML com a mesma coisa. Renderizar os dois duplicava a página |
+| `livesearch` | ✅ **Busca de verdade**, escopada no espaço (`D-30`) | Não é um resultado a reproduzir — é uma caixa de busca, e o app já busca melhor que o Confluence para quem não tem assento |
+| `children`, `pagetree` | ✅ Aponta para a lista que a leitura **já** mostra (T-115) | O conteúdo está na tela, centímetros abaixo, com restrição verificada por item |
+| `contributors`, `recently-updated`, `listlabels`, `toc` | ⏳ **Placeholder** | Custam chamada por visualização — e os dois do meio, **uma verificação de restrição por item** (`RN-06`, `R-02`). Valor baixo para deflexão: uma lista de páginas alteradas não responde "por que meu relatório está errado" |
+| `jira`, `jirachart` | 🚨 **Decisão de NÃO fazer** | Ver abaixo |
+
+🚨 **`jira`/`jirachart` não é questão de custo.** A JQL vem de **dentro da página**, que
+qualquer pessoa da empresa edita (`R-07`). Executá-la seria rodar uma consulta **escolhida
+pelo conteúdo** com a conta de serviço (`D-01`, proxy total) e mostrar o resultado a qualquer
+colaborador.
+
+No Confluence isso é contido por três condições (`RN-06`): espaço na allowlist, sem label
+bloqueada, página sem restrição. **Para o Jira não existe gate equivalente no app** — não há
+allowlist de projeto para leitura, não há verificação de permissão por issue, e sob proxy
+total a permissão da conta de serviço não pode servir de proxy da permissão da pessoa
+(`RNF-09`). Implementar seria abrir para consulta arbitrária de Jira o caminho que `RN-06`
+fecha para o Confluence.
+
+Fica placeholder **por decisão**, não por pendência. Se um dia virar requisito, o
+pré-requisito é o gate — não o código da macro.
+
+**O que sustenta isso em código:** a auditoria de `RF-43` (`macro_nao_suportada`) continua
+registrando o nome de toda macro que aparece, **inclusive as que passaram a ter o corpo
+renderizado**. É essa lista que diz qual bloco vale implementar de verdade um dia, medida em
+vez de suposta.
+
 ---
 
-### D-31 · O schema deixa de ser reaplicado por requisição, e a marca de versão é DERIVADA
+### D-32 · A latência era quatro defeitos somados, e nenhum dava erro
+
+**Data:** 10/08/2026 · **Contexto:** `RNF-12`, `RNF-13`, `RNF-15`, `RNF-16`, `R-02` ·
+**Decisão de:** Kaique
+
+**O sintoma relatado:** o agente levava ~12 s para responder, a página parecia lenta em
+tudo, e a aba Documentação e o console de admin demoravam demais para aparecer. **`RNF-12`
+pede busca < 2 s e primeira resposta do agente < 5 s no p95** — os três eram violação de
+requisito, não impressão.
+
+**A medição, antes de mexer em qualquer coisa** (`getAppLogs`, `appId 9c47f42f`):
+`POST /api/cron/enviar-notificacoes` **com a fila vazia** levava **376–584 ms**. Aquela
+rota monta o contexto e lê uma tabela; não havia trabalho nenhum ali para justificar meio
+segundo. Foi o fio que revelou os quatro defeitos:
+
+1. **`migrar` rodava a cada requisição.** 35 `CREATE TABLE IF NOT EXISTS` + 3 `ALTER`,
+   sequenciais e `await`ados, cada um uma ida ao serviço de banco. Era o piso de ~400 ms que
+   **toda** rota pagava antes de começar — inclusive o turno do agente e a leitura de página.
+   Agora `garantirMigracao` memoiza **por objeto de banco** (`WeakMap`): uma vez por isolate
+   em produção, uma vez por banco nos testes.
+2. **O cache de `RNF-13` nunca acertava.** `CacheTtl` existia desde a Fase 1 e vários
+   comentários do código contavam com ele ("contido pelo cache de conteúdo") — mas ele morava
+   na **instância** do cliente, e `montarContexto` cria uma instância **por requisição**. O TTL
+   era decorativo: cada leitura de página rebuscava metadados, labels, restrição e corpo, e
+   cada nível do breadcrumb rebuscava os três primeiros de novo. Agora as caches vivem no
+   **módulo** (escopo de isolate), com teto de entradas.
+3. **Cinco laços `for … await` sobre listas de rede.** Lista de chamados (até **100**
+   `obterChamado` em série), restrição por página na busca e na árvore (`RN-06`), espaços da
+   allowlist, e a classificação da Regra 2 (uma chamada de IA por ticket, até 20). O tempo era
+   a **soma**.
+4. **Três idas ao provedor de IA em série por turno**, sendo que a segunda (resposta ao
+   usuário) e a terceira (`extrairProposta`) partem do **mesmo** histórico e não dependem uma
+   da outra.
+
+**As decisões, e o que cada uma recusa:**
+
+- **Paralelismo tem teto, sempre** (`src/lib/paralelo.ts`, `CONCORRENCIA_ATLASSIAN = 5`,
+  `CONCORRENCIA_IA = 3`). ⚠️ `Promise.all` na lista inteira é o conserto **errado**: o burst
+  limit da Atlassian por API token não é publicado e os headers `X-RateLimit-*` só aparecem
+  no 429 (`RNF-15`, `R-02`) — 100 requisições simultâneas com a credencial única é como se
+  descobre o limite do jeito ruim, e o custo cai sobre o app inteiro, não sobre quem clicou.
+  Um turno que toma 429 e espera 2 s ficou **mais lento** que o laço em série.
+- **A ordem do resultado é preservada** em todo laço paralelizado. Ordenar por "quem
+  respondeu primeiro" faria a mesma tela mostrar a lista em ordens diferentes entre duas
+  cargas — parece defeito, e é.
+- **Cache compartilhada exige teto de entradas.** Enquanto morria com a requisição, crescer
+  sem limite era inócuo; por isolate, é vazamento de memória com prazo. E o corpo da página
+  ganhou cache **própria** com teto pequeno (30), porque é o único valor grande (até 400 KB) —
+  teto único obrigaria a escolher entre guardar poucas páginas ou arriscar centenas de MB num
+  Worker de 128 MB.
+- ⚠️ **Compartilhar a cache é seguro por causa do proxy total** (`D-01`): a identidade perante
+  a Atlassian é sempre a mesma conta de serviço, então não existe resposta "de um usuário"
+  para vazar para outro. Num mundo com `raiseOnBehalfOf` por pessoa (`RNF-22`) a cache teria
+  de ser por identidade — e é por isso que ela mora em `contexto.ts`, visível, e não escondida
+  dentro do cliente.
+- ⚠️ **A cache guarda o insumo, nunca a decisão.** `RN-06` continua avaliada por requisição
+  contra a allowlist de `ctx.valores`: mudar a allowlist no console vale na requisição
+  seguinte, mesmo com metadados em cache.
+- **A extração da proposta arranca junto com a última ida ao modelo** (`orquestrador.ts`), e é
+  seguro por razão **estrutural**, não por otimismo: só arranca quando as duas verificações
+  estão concluídas, e nesse estado `toolsPermitidas` devolve lista **vazia** — o ciclo seguinte
+  não pode executar tool, logo não pode nascer bloqueio concorrente. ⚠️ Ainda assim
+  `tentarMontarProposta` **reconfere `temBloqueioPendente` antes de gravar**: entre começar a
+  extração e voltar dela passa uma ida ao provedor, e um `if` que rodou antes do `await` não
+  protege o que acontece depois dele. `RN-07` já foi burlada uma vez (`D-21`).
+
+**O que foi TENTADO e DESCARTADO:**
+
+- **`max_tokens` no turno do chat.** Parecia o conserto óbvio (o corpo saía sem limite de
+  geração). Não é: num modelo com raciocínio o teto conta **tokens de raciocínio**, e um teto
+  baixo devolve resposta **vazia** — regressão de comportamento que o fake não pegaria, exatamente
+  a classe de bug do `env.DB`. E um teto generoso não corta latência nenhuma, porque uma resposta
+  de agente de suporte não chega perto dele. Fica como guarda de custo a considerar, não como
+  conserto de latência.
+- **Streaming da resposta do agente.** É o que mais melhoraria a percepção, e **conflita com o
+  desenho**: quando uma regra bloqueia, o servidor **descarta** o texto do modelo e fala no lugar
+  dele (`D-21`). Não se transmite texto que talvez seja jogado fora. Streaming exigiria reabrir
+  aquela decisão primeiro.
+- **Paralelizar a subida do breadcrumb** (`ancestraisExpostos`). A subida é dependente por
+  construção (cada nível dá o `parentId` do seguinte), e buscar os níveis "adiantado" para
+  descartar depois significaria ler metadados de páginas **acima de um ancestral fechado** —
+  funciona hoje e vaza no dia em que alguém devolver o que leu. O que ficou: a subida começa
+  **antes** das três escritas de banco da rota e é esperada no fim, então ela acontece durante
+  elas; e na árvore ela roda em paralelo com a listagem dos filhos, que é independente.
+
+**O que ficou por medir:** os números acima são de contagem de chamadas, não de p95 em
+produção. `RNF-12` só se fecha medindo no app publicado depois do deploy — o mesmo raciocínio
+de "teste de integração contra o app publicado não é luxo de fim de projeto".
+
+---
+
+### D-33 · O system prompt do agente é função da instalação, não constante
+
+**Data:** 10/08/2026 · **Contexto:** `RNF-24`, `RNF-18`, `RNF-25`, `RNF-30`, `RN-08`,
+`R-04` · **Decisão de:** Kaique
+
+**O sintoma, medido no app real:** a "olá", o agente respondia **"Olá! Como posso te ajudar
+hoje?"** — indistinguível de um assistente genérico. A tela já abre com uma saudação própria
+(`telas.tsx`), mas ela não entra no histórico do modelo, então o único texto que ele tinha
+era o system prompt, e ele não dizia o que fazer num cumprimento.
+
+**Por que isso não é cosmético.** A primeira mensagem é a única chance de dizer o que este
+app faz: que ele procura na documentação interna antes de abrir chamado, que o chamado é
+acompanhado **aqui dentro** sem conta na Atlassian, que existe formulário para quem não quer
+conversar. Quem não descobre isso volta para o Google Chat — o número que `R-04` e `T-235`
+existem para mover. "Como posso ajudar?" gasta a mensagem afirmando o que a pessoa já sabia.
+
+**O que mudou:**
+
+1. **`PROMPT_AGENTE` virou `montarPromptAgente(ctx)`.** O texto ganhou identidade
+   ("assistente do goatlas", "não é um assistente de uso geral"), a lista do que o app
+   **consegue fazer** (documentação, histórico, proposta editável, acompanhamento, resposta,
+   anexo, aviso, formulário), instrução explícita para cumprimento e para "o que você faz?",
+   a regra de evidência de `RN-11` ("não tenho material para anexar" não se insiste), o
+   encaminhamento honesto quando o pedido não é do time de tech, e um teto de tamanho de
+   resposta.
+2. **Os prazos vêm de `SLA_PRIMEIRA_RESPOSTA_HORAS`**, a mesma constante que
+   `notificacoes/sla.ts` usa. Escritas à mão, o agente prometeria um prazo e o alerta
+   cobraria outro — divergência que nenhum teste de comportamento pega, porque os dois lados
+   continuam "funcionando".
+3. **O prompt sabe o que esta instalação NÃO tem** (`ContextoAgente`). Sem
+   `espacos_confluence` a busca devolve zero **por configuração**; sem os exemplos de `Q3` a
+   Regra 2 se declara indisponível. O prompt antigo prometia as duas verificações sempre — e
+   o modelo, recebendo lista vazia, escrevia a conclusão natural: *"não encontrei nada sobre
+   isso"*. É a frase oposta à verdade (ninguém procurou) e manda a pessoa abrir chamado por
+   algo que pode estar escrito. É o mesmo raciocínio de `buscaConfigurada: false` na rota de
+   busca: **zero por falta de config ≠ zero por falta de documentação**.
+
+⚠️ **Os dois predicados são reaproveitados, não reescritos** — `buscaConfigurada`
+(`config/diagnostico.ts`) e `regra2Disponivel` (`rules/`), os mesmos que o servidor aplica.
+Condição escrita só no orquestrador viraria uma segunda regra divergindo em silêncio, e o
+sintoma seria o agente prometendo uma verificação que o servidor já não faz.
+
+⚠️ **Nada disso é trava** (Princípio X). O prompt continua sendo instrução; `RF-08` e `RF-17`
+seguem validados em `agent/gate.ts`, e os testes de bypass continuam sendo o que garante a
+ordem. `tests/prompt-agente.test.ts` não afirma sobre resposta de modelo — afirma sobre o
+texto entregue: identidade presente, capacidades citadas, prazos iguais aos do SLA, avisos
+de indisponibilidade aparecendo só quando devem, e **nenhum valor de configuração dentro do
+prompt** (`RNF-30`).
+
+**O que ficou de fora, e por quê:** injetar o nome dos tipos de chamado permitidos. Hoje
+`tipos_chamado_permitidos` guarda **ids**, e a extração já os recebe; citá-los no chat seria
+mostrar detalhe interno a quem conversa (`RNF-30`). No dia em que a lista tiver nome legível
+(`listarTiposChamado` por service desk já devolve), isso passa a ser contexto útil e entra
+por `ContextoAgente`, sem mudar o resto.
+
+---
+
+### D-34 · O editor novo grava o conteúdo DUAS vezes, e a etiqueta de status não tem corpo
+
+**Data:** 10/08/2026 · **Contexto:** `RF-43`, `RF-39`, `RNF-30`, regra 4, piso de a11y
+
+Dois defeitos de fidelidade medidos na página inicial do espaço de documentação da Gocase, no
+app publicado. Nenhum dos dois dava erro, quebrava teste ou aparecia em log: os dois
+produziam **tela errada**, que é o único lugar onde `RF-43` pode falhar. Estão juntos aqui
+porque têm a mesma causa de fundo — **o critério "tem corpo?" não descreve o storage real**.
+
+#### 1. Painel do editor novo saía duas vezes, em dois idiomas
+
+O editor atual do Confluence grava painel como `ac:adf-extension`, com **dois** filhos: o nó
+(`ac:adf-node` → `ac:adf-content`) e uma cópia em HTML (`ac:adf-fallback`) que existe para
+editores antigos. As três tags eram desconhecidas para o sanitizador, e tag desconhecida é
+**desembrulhada** — então o conteúdo saía uma vez do nó e outra do fallback.
+
+O fallback estava em **inglês**. Na tela: o mesmo painel de boas-vindas com o título em
+português, e logo abaixo em inglês, com a lista de sugestões repetida. Ninguém lê duas vezes
+para descobrir que é o mesmo texto — **quem vê conteúdo repetido conclui que o app está
+quebrado, e quem conclui isso abre chamado**, que é o oposto do que a aba existe para fazer.
+
+**A regra é: conteúdo do nó, senão fallback. Nunca os dois.**
+
+- **O nó ganha** porque é o conteúdo de verdade, e o fallback é a cópia — foi ele que veio em
+  inglês. Preferir o fallback funcionaria hoje e entregaria a tradução errada.
+- ⚠️ **Mas o fallback não é decoração: ele é o caminho dos blocos INLINE.** `status`, `date` e
+  afins vêm como `ac:adf-node` **sem** `ac:adf-content` (o texto mora nos atributos), e o
+  fallback traz a `ac:structured-macro` equivalente, que o sanitizador já converte.
+  "Só o nó" faria toda etiqueta escrita no editor novo desaparecer.
+- `ac:adf-attribute`/`ac:adf-parameter` devolvem **nada**, e isso é necessário, não redundante:
+  desembrulhados, o **valor** deles viraria texto visível — a página mostrava
+  `1f5d1 #c9372c info` solto antes do painel, que além de ruído é parâmetro na tela
+  (`RNF-30`).
+- `panel-type` **é** lido e traduzido para a `VariantePainel` que a macro antiga já usava, para
+  que um aviso escrito no editor novo continue sendo aviso. Ele é apresentação; o que `RNF-30`
+  guarda é JQL, chave de espaço e id de filtro, que descrevem o interior da Atlassian.
+
+#### 2. `status` não tem corpo, e por isso virava "não sabemos mostrar"
+
+O critério do sanitizador para "dá para renderizar?" era ter `ac:rich-text-body`. A macro
+`status` não tem: o texto dela mora num **parâmetro** (`title`), como a linguagem do bloco de
+código. Então a macro que marca "Concluído"/"Em andamento" em toda página de processo caía no
+placeholder de `RF-43` — **acusando limitação nossa sobre um texto que estava no storage**, a
+um `parametroDaMacro` de distância. Apareceu duas vezes na mesma página.
+
+🚨 **A cor NÃO vai para a tela, e isso é decisão, não simplificação.** O lozenge do Confluence
+tem `colour` (`Green`, `Red`…). Pintar seria inventar paleta — a identidade GoGroup não tem
+vermelho nem verde (§1.3) — **e** comunicar estado por cor, que o piso de a11y do projeto
+proíbe. O que a pessoa escreveu no `title` é o estado: é o que vai para a tela, e é o que um
+leitor de tela lê. A forma é pílula, não o chip quadrado de `.doc-codigo-inline`, para que
+"Concluído" não se leia como trecho de código.
+
+⚠️ **`title` vazio devolve nada, não o placeholder.** Etiqueta sem texto é pílula vazia — o
+Confluence desenha assim, e não há informação a preservar. O placeholder ali seria o erro
+oposto: anunciar conteúdo escondido que não existe, exatamente o que a frase antiga de
+`RF-43` fazia (ver `D-31`).
+
+**O que sustenta em código:** `tests/rf43-adf-e-status.test.ts`, e a asserção que importa é de
+**contagem** (`vezes(html, …) === 1`), não de presença — presença passava antes do conserto.
+12 dos 13 casos reprovam contra o código anterior. A auditoria de `RF-43` continua registrando
+`adf:<tipo>` para nó ADF que não tenha nem conteúdo nem fallback, para a lista de "o que vale
+implementar" continuar medida.
+
+**Lição, a mesma de `D-23` e do `env.DB`:** o critério estava escrito a partir do storage que
+imaginávamos. Aqui a divergência não era da plataforma — era do **editor**, que mudou de
+formato e continuou servindo o antigo ao lado do novo.
+
+---
+
+### D-35 · O schema deixa de ser reaplicado por requisição, e a marca de versão é DERIVADA
 
 **Data:** 10/08/2026 · **Contexto:** `RNF-36` (novo), `RNF-15`, `T-135` · **Decisão de:** Kaique
 
@@ -1312,6 +1658,19 @@ não é verificável sem rede e seria instável na máquina de qualquer pessoa.
 2. **Uma sonda de UMA query** (`meta_schema`) para o caso que a memoização não cobre: isolate
    reciclado sobre banco já migrado. Sem ela o ganho dependeria de o `env.DB` ser a mesma
    instância entre requisições — o que a plataforma não promete.
+
+⚠️ **A parte 1 chegou por outro caminho, e as duas convivem — não são a mesma coisa** (merge
+com `D-32`, 10/08/2026). O mesmo defeito foi corrigido em duas frentes ao mesmo tempo: `D-32`
+trouxe a memoização como `garantirMigracao`, esta trouxe a sonda. Elas **não se substituem** —
+a sonda corta os 35 statements para 2 idas num isolate **novo**, e a memoização corta as 2
+para **zero** em toda requisição seguinte do **mesmo** isolate. Ficar só com uma delas deixa
+metade do custo de pé, e o sintoma é o mesmo de sempre: comportamento certo, tempo errado.
+
+⚠️ **E a divisão dos nomes é contrato:** `garantirMigracao` memoiza e é o que
+`montarContexto` chama; `migrar` continua exportada **sem** memoização, porque os testes de
+schema querem justamente forçar a reaplicação. Memoizar `migrar` "para simplificar" faz esses
+testes deixarem de reaplicar nada **em silêncio** — há um caso em
+`tests/migracao-custo-por-requisicao.test.ts` cobrando exatamente essa distinção.
 
 **A marca de versão é derivada do texto do schema, não escrita à mão.** Um número manual
 tem um passo esquecível: quem acrescenta tabela em `TABELAS` e não sobe o número produz um app

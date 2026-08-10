@@ -164,7 +164,13 @@ describe('modo demonstração', () => {
     })
     expect((override.corpo as { proposta: { titulo: string } }).proposta.titulo).toBeTruthy()
 
-    const criado = await chamar(`/api/conversas/${id}/confirmar`, { metodo: 'POST' })
+    // ⚠️ `declarouAnexo` é obrigatório porque o tipo da demonstração expõe campo de anexo
+    // (`RF-62`, T-417). Confirmar sem responder dá 400 — é a trava funcionando, e é o
+    // caminho que a tela oferece.
+    const criado = await chamar(`/api/conversas/${id}/confirmar`, {
+      metodo: 'POST',
+      corpo: { declarouAnexo: false },
+    })
     expect(criado.corpo).toMatchObject({ estado: 'criado', verificadoRegras: true })
   })
 })
@@ -235,6 +241,8 @@ describe('RNF-19 — Atlassian fora, a lista E o detalhe ainda mostram conteúdo
         tipoChamadoId: TIPO_CHAMADO_DEMO,
         prioridade: 'alta',
         chaveIdempotencia: 'k1',
+        // O tipo da demonstração aceita anexo, então a declaração é pré-condição (`RF-62`).
+        declarouAnexo: false,
       },
     })
     expect(criado.status).toBe(201)

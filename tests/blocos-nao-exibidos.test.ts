@@ -182,3 +182,64 @@ describe('o bloco de busca vira busca DE VERDADE quando a tela oferece o caminho
     expect(saida).toContain('disabled')
   })
 })
+
+describe('🎁 GRÁTIS: macro desconhecida com corpo tem o TEXTO renderizado', () => {
+  it('o texto dentro de uma macro que não conhecemos aparece — antes ia embora', () => {
+    // Era desperdício silencioso: a página tinha o texto, a caixa cinza aparecia no lugar
+    // dele, e a frase ainda dizia "o texto ao redor está completo".
+    const saida = render(
+      '<ac:structured-macro ac:name="macro-interna-da-gocase">' +
+        '<ac:rich-text-body><p>Rode a rotina <code>vendas_diario</code> antes das 9h.</p></ac:rich-text-body>' +
+        '</ac:structured-macro>',
+    )
+    expect(saida).toContain('Rode a rotina')
+    expect(saida).toContain('vendas_diario')
+    expect(saida).not.toContain('Bloco não exibido')
+  })
+
+  it('`panel` e abas (`deck`/`card`) também entregam o conteúdo', () => {
+    const abas = render(
+      '<ac:structured-macro ac:name="deck"><ac:rich-text-body>' +
+        '<ac:structured-macro ac:name="card"><ac:rich-text-body><p>conteúdo da aba</p></ac:rich-text-body></ac:structured-macro>' +
+        '</ac:rich-text-body></ac:structured-macro>',
+    )
+    expect(abas).toContain('conteúdo da aba')
+  })
+
+  it('`excerpt` mostra o próprio texto — a origem é esta página', () => {
+    const saida = render(
+      '<ac:structured-macro ac:name="excerpt"><ac:rich-text-body><p>resumo reaproveitado</p></ac:rich-text-body></ac:structured-macro>',
+    )
+    expect(saida).toContain('resumo reaproveitado')
+    // "Abra a página de origem" seria conselho errado aqui.
+    expect(saida).not.toContain('Abra a página de origem')
+  })
+
+  it('a sanitização continua valendo DENTRO do corpo — é a mesma allowlist', () => {
+    // ⚠️ A garantia não afrouxou: o corpo passa por `converterLista`, igual a todo o resto.
+    // Isto é "não sei desenhar a moldura", nunca "não posso mostrar o conteúdo".
+    const saida = render(
+      '<ac:structured-macro ac:name="desconhecida"><ac:rich-text-body>' +
+        '<p onclick="alert(1)">texto</p><script>alert(2)</script>' +
+        '</ac:rich-text-body></ac:structured-macro>',
+    )
+    expect(saida).toContain('texto')
+    expect(saida).not.toContain('onclick')
+    expect(saida).not.toContain('<script')
+    expect(saida).not.toContain('alert(2)')
+  })
+
+  it('macro SEM corpo continua sendo o placeholder honesto', () => {
+    // `livesearch` e companhia não têm corpo nenhum: aí a explicação é a única saída.
+    expect(render('<ac:structured-macro ac:name="contributors"></ac:structured-macro>')).toContain(
+      'ainda não sabe mostrar este bloco',
+    )
+  })
+
+  it('`children` aponta para a lista que a leitura JÁ mostra (T-115)', () => {
+    const saida = render('<ac:structured-macro ac:name="children"></ac:structured-macro>')
+    expect(saida).toContain('já aparecem listadas no fim da leitura')
+    // Dizer "não há o que trazer" seria falso: o conteúdo está na tela, logo abaixo.
+    expect(saida).not.toContain('não guarda texto dele')
+  })
+})

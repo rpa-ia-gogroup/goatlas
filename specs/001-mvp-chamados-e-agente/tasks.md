@@ -269,7 +269,7 @@ created: "2026-08-03"
       diz à pessoa que o agente está sem configuração.
 - [x] **T-135** 🚨 O schema era reaplicado **por requisição**: 36 idas ao banco antes
       de qualquer rota trabalhar.
-      _Requirements: RNF-36, D-31_
+      _Requirements: RNF-36, D-35_
       → Relato do usuário em 10/08/2026: "tudo demora pra aparecer, até a tela de
       admin mesmo já estando logada" — e o "já estando logada" é o que descarta o
       OAuth do edge. `montarContexto` roda a cada requisição `/api/*` (é ele que

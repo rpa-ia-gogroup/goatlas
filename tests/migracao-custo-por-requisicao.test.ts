@@ -13,12 +13,21 @@
  * um teste de duração seria instável na máquina de qualquer pessoa. O número de
  * round-trips é o que a plataforma cobra, então é ele que se afirma aqui.
  *
- * _Requirements: RNF-36_
+ * ⚠️ **As duas metades do conserto são medidas separadamente**, porque resolvem custos
+ * diferentes e nenhuma cobre a outra: a **sonda** `meta_schema` corta os 35 statements para
+ * 2 idas num isolate **novo**, e a **memoização** de `garantirMigracao` (`D-32`) corta as 2
+ * para zero em toda requisição seguinte do **mesmo** isolate. Por isso quem é chamado aqui é
+ * `garantirMigracao` — o caminho real de `montarContexto`. `migrar` continua exportada **sem**
+ * memoização de propósito, e há um caso abaixo cobrando essa distinção: se um dia alguém
+ * memoizar `migrar` também, os testes de schema que forçam a reaplicação passam a não
+ * reaplicar nada, em silêncio.
+ *
+ * _Requirements: RNF-36, D-35, D-32_
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { SqliteLocal } from '@/lib/db/sqlite-local'
-import { migrar, TABELAS, VERSAO_SCHEMA } from '@/lib/db/schema'
+import { garantirMigracao, migrar, TABELAS, VERSAO_SCHEMA } from '@/lib/db/schema'
 import { primeiraLinha, type Banco, type ResultadoExec, type ResultadoQuery } from '@/lib/db/tipos'
 
 /** Banco real, com contador de idas. Espião, não dublê: o SQLite por baixo é o mesmo. */
@@ -47,7 +56,7 @@ beforeEach(() => {
 
 describe('T-135 — migrar não cobra o schema inteiro por requisição', () => {
   it('a PRIMEIRA migração aplica tudo', async () => {
-    await migrar(db)
+    await garantirMigracao(db)
     // Banco novo: paga os CREATE, os ALTER e a gravação da marca.
     expect(db.execs).toBeGreaterThanOrEqual(TABELAS.length)
     const linha = await db.query(`SELECT versao FROM meta_schema WHERE id = 1`, [])
@@ -55,10 +64,10 @@ describe('T-135 — migrar não cobra o schema inteiro por requisição', () => 
   })
 
   it('🚨 a segunda chamada no MESMO banco não vai ao banco nenhuma vez', async () => {
-    await migrar(db)
+    await garantirMigracao(db)
     const depoisDaPrimeira = db.idas
 
-    await migrar(db)
+    await garantirMigracao(db)
 
     // Memoizado por instância de banco: zero idas. Era este número que valia 35.
     expect(db.idas - depoisDaPrimeira).toBe(0)
@@ -69,10 +78,10 @@ describe('T-135 — migrar não cobra o schema inteiro por requisição', () => 
     // Simular isso é envolver o MESMO SQLite numa instância nova de `Banco`, que é
     // uma chave nova no `WeakMap`.
     const interno = new SqliteLocal()
-    await migrar(new BancoContado(interno))
+    await garantirMigracao(new BancoContado(interno))
 
     const novoIsolate = new BancoContado(interno)
-    await migrar(novoIsolate)
+    await garantirMigracao(novoIsolate)
 
     expect(novoIsolate.queries).toBe(1) // a sonda
     expect(novoIsolate.execs).toBe(0) // e nenhum DDL
@@ -82,22 +91,22 @@ describe('T-135 — migrar não cobra o schema inteiro por requisição', () => 
     // Duas requisições chegam juntas no boot do isolate. Um booleano marcado só no
     // fim deixaria as duas migrarem em paralelo — o mesmo check-then-insert que o
     // outbox evita com constraint, na versão em memória.
-    await Promise.all([migrar(db), migrar(db), migrar(db)])
+    await Promise.all([garantirMigracao(db), garantirMigracao(db), garantirMigracao(db)])
 
     const umaVez = new BancoContado(new SqliteLocal())
-    await migrar(umaVez)
+    await garantirMigracao(umaVez)
     expect(db.execs).toBe(umaVez.execs)
   })
 })
 
 describe('T-135 — a sonda erra para o lado seguro', () => {
   it('marca de OUTRA versão reaplica o schema', async () => {
-    await migrar(db)
+    await garantirMigracao(db)
     // Simula deploy com schema novo: o código conhece uma versão, o banco tem outra.
     await db.exec(`UPDATE meta_schema SET versao = ? WHERE id = 1`, ['versao-antiga'])
 
     const isolateNovo = new BancoContado(db)
-    await migrar(isolateNovo)
+    await garantirMigracao(isolateNovo)
 
     expect(isolateNovo.execs).toBeGreaterThanOrEqual(TABELAS.length)
     const r = await db.query(`SELECT versao FROM meta_schema WHERE id = 1`, [])
@@ -114,7 +123,7 @@ describe('T-135 — a sonda erra para o lado seguro', () => {
       },
       exec: (sql, params) => db.exec(sql, params),
     }
-    await migrar(explode)
+    await garantirMigracao(explode)
     expect(db.execs).toBeGreaterThanOrEqual(TABELAS.length)
   })
 
@@ -128,12 +137,12 @@ describe('T-135 — a sonda erra para o lado seguro', () => {
       },
     }
 
-    await expect(migrar(instavel)).rejects.toThrow('banco fora do ar')
+    await expect(garantirMigracao(instavel)).rejects.toThrow('banco fora do ar')
 
     // A requisição seguinte tem de tentar de novo — memoizar a falha deixaria o app
     // sem schema até alguém reiniciar o isolate.
     permitir = true
-    await migrar(instavel)
+    await garantirMigracao(instavel)
     const r = await db.query(`SELECT versao FROM meta_schema WHERE id = 1`, [])
     expect(r.rows).toHaveLength(1)
   })
@@ -146,5 +155,20 @@ describe('T-135 — a sonda erra para o lado seguro', () => {
     expect(VERSAO_SCHEMA).toMatch(/^[0-9a-f]{16}-\d+$/)
     const comprimentoNaMarca = Number(VERSAO_SCHEMA.split('-')[1])
     expect(comprimentoNaMarca).toBeGreaterThan([...TABELAS].join('\n').length)
+  })
+})
+
+describe('T-135 — a divisão entre `migrar` e `garantirMigracao` é parte do contrato', () => {
+  it('`garantirMigracao` memoiza; `migrar` NÃO — e é isso que a mantém forçável', async () => {
+    await garantirMigracao(db)
+    const depois = db.idas
+
+    // O caminho do app: memoizado, zero idas.
+    await garantirMigracao(db)
+    expect(db.idas - depois).toBe(0)
+
+    // O caminho dos testes de schema: passa pela sonda de novo. Não é zero.
+    await migrar(db)
+    expect(db.idas - depois).toBeGreaterThan(0)
   })
 })

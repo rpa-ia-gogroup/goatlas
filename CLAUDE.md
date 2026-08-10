@@ -105,6 +105,24 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   tela **de propósito**: continuam em `ConfigValores` e mudáveis sem deploy, mas
   ninguém os decide sem ler o código, e cada um deles na tela custava atenção de quem
   precisa achar o que importa. Devolvê-los é reabrir `D-25`, não "completar a tela".
+- **O anexo NÃO viaja dentro da chamada de criação** (`D-26`). Parece a simplificação
+  óbvia — é o que o portal nativo do JSM faz — e é a que perde chamado: id temporário
+  vencido faz a **criação** responder 400, que `atlassian/http.ts` classifica como
+  **definitivo**, e submissão definitiva **nunca** é reprocessada. Um arquivo velho
+  apagaria o chamado da pessoa. São dois passos dentro da mesma confirmação: upload ao
+  escolher o arquivo, materialização **depois** da criação. Custo aceito: existe uma
+  janela curta em que o chamado existe sem o anexo.
+- **`RF-62` é fail-OPEN, e isso é desvio consciente** (`D-27`) — schema de request type
+  que não pôde ser lido **não pergunta** e abre o chamado. A distinção que sustenta:
+  `RF-62` é qualidade de produto, não trava de segurança; quem burla só abre o **próprio**
+  chamado sem responder uma pergunta, e o que perde é a evidência dele mesmo. Fail-closed
+  aqui seria não abrir chamado durante uma queda de leitura de schema — a parede que
+  `RNF-18` proíbe. O evento vai para a auditoria (`schema_tipo_indisponivel`) para ninguém
+  confundir "o tipo não aceita anexo" com "não deu para saber".
+- **A declaração de anexo trava RESPONDER, nunca ANEXAR** (`RN-11`). Quem diz "tenho",
+  desiste e volta para "não tenho" abre o chamado. E a copy da opção negativa é "não tenho
+  material para anexar" — **nunca "pular"**, que diria que anexar era o dever e faria a
+  resposta honesta virar a que ninguém escolhe.
 - **N8N está descartado.** Não propor voltar a ele.
 - **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
   olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe
@@ -139,7 +157,7 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   é caso de uso, e quem tem duas limpa os cookies. ⚠️ Isso **contraria `RF-03`** (P0,
   pede logout explícito) e está registrado como divergência consciente, aguardando o
   aval do João — não reintroduzir o botão sem passar por `D-08`.
-- **A fonte do Google NÃO bloqueia o primeiro paint** (`D-31`). O `<link>` da Poppins usa
+- **A fonte do Google NÃO bloqueia o primeiro paint** (`D-35`). O `<link>` da Poppins usa
   `media="print"` + `onload`, e existe um instante com fonte de sistema (FOUT) que antes não
   existia — porque antes a tela **inteira** esperava por dois domínios de terceiro. ⚠️
   `&display=swap` não substitui isto: ele governa quando o *texto* troca de fonte, não quando
@@ -255,6 +273,55 @@ destes reabre um vazamento que já foi fechado.
   teto de envio (8 MB) é **menor** que o de leitura (12 MB), e não há allowlist de tipo: o
   arquivo vai para o Jira, que aplica a própria política, e recusar `.zip` de log seria o
   app achando que é antivírus.
+- ⚠️ **A materialização do anexo mora FORA de `ServicoChamados.processar`, e a separação é
+  a trava** (`tickets/anexo-na-criacao.ts`). Dentro daquele `try/catch`, um id de anexo
+  vencido (4xx = definitivo) marcaria a submissão como `falha` e o chamado se perderia.
+  Nada em `materializarAnexosDoChamado` lança: o pior caso é `estado: 'falhou'` com os
+  nomes dos arquivos. Mover aquela chamada "para o lugar certo" reabre `D-26`.
+- ⚠️ **A reivindicação vem ANTES da chamada à Atlassian** (`anexos_pendentes.reivindicar`).
+  `UPDATE ... WHERE materializado_em IS NULL` é o lock: dois cliques disputam, um escreve.
+  Inverter (chamar e marcar depois) faria o arquivo aparecer **duas vezes** no chamado, e
+  anexo em dobro não tem caminho de volta. O custo — falha depois da reivindicação deixa o
+  arquivo fora daquela tentativa — é exatamente o estado que `RF-63` prevê e relata.
+- **A chave de idempotência tem UM produtor** (`tickets/chave-idempotencia.ts`). O upload
+  grava a linha em `anexos_pendentes` e a criação a procura: se um escrevesse a chave crua
+  e o outro a prefixada (`form:<email>:<chave>`), **nenhuma linha casaria** — chamado sem
+  anexo, sem erro nenhum, os dois lados "funcionando". Mesma classe de bug de
+  `urlDeLeituraNoApp`/`entradaDaUrl`. Por isso a chave é **obrigatória** na rota de upload:
+  inventar uma ali produz arquivo órfão por construção.
+- **O `temporaryAttachmentId` nunca trafega pelo navegador** (`RF-30` aplicado a arquivo).
+  O cliente manda o arquivo e recebe `{ ok, nome }`. Com o id no navegador, colar o anexo
+  de outra pessoa no próprio chamado seria trivial.
+- **O teto de anexo é por CHAMADO e a recusa é MENSAGEM, nunca `.slice()`.** O truncamento
+  silencioso fazia o quarto arquivo desaparecer sem nada na tela — a pessoa achava que o
+  print decisivo tinha ido (`SC-08`). Saiu também da rota de `RF-34`.
+- **O upload temporário é ESCRITA, mesmo sem `issueKey`** — o decorador de somente leitura
+  o recusa. Deixá-lo passar produziria o pior resultado do modo: tela dizendo "arquivo
+  enviado", pessoa confirmando, criação recusada depois, arquivo já na Atlassian.
+- ⚠️ **Nada decide "é anexo?" por `fieldId`** (`ScC-4`, teste estrutural em
+  `scc4-nenhum-fieldid-de-anexo.test.ts`). Quem responde é o **tipo** do campo, traduzido
+  de `jiraSchema.system` no cliente. Um `fieldId === 'attachment'` funcionaria no site da
+  Gocase e pararia de funcionar em outro **sem quebrar nada**: a pergunta simplesmente
+  deixaria de aparecer, e os chamados voltariam a chegar sem evidência.
+- **O indicador de evidência lê `submissoes`, não `anexos_pendentes`** (T-422). A tabela de
+  pendentes é expurgada em 12h: um painel que lesse dela mostraria a evidência caindo para
+  zero sem nada ter mudado — mediria o expurgo. E o denominador são os **perguntados**, não
+  os chamados: incluir quem nunca viu a pergunta faria a taxa cair quando alguém criasse um
+  request type sem anexo.
+- **O expurgo dos anexos pendentes pega carona no cron do OUTBOX**, não no da retenção
+  (T-415) — por duas razões que valem sozinhas: `aplicarRetencao` não apaga nada com
+  política `null` (`D-20`), e `/api/cron/retencao` mantém HMAC obrigatório e responde 403
+  hoje. Código pendurado lá nunca rodaria.
+- ⚠️ **O system prompt do agente é FUNÇÃO da instalação** (`montarPromptAgente`, `D-33`). Sem
+  `espacos_confluence` a busca devolve zero **por configuração** e sem os exemplos de `Q3` a
+  Regra 2 se declara indisponível — o prompt constante prometia as duas verificações sempre, e
+  o modelo, recebendo lista vazia, escrevia a conclusão natural: *"não encontrei nada sobre
+  isso"*. É a frase oposta à verdade (ninguém procurou) e manda a pessoa abrir chamado por algo
+  que pode estar escrito. Os dois predicados são **reaproveitados** (`buscaConfigurada`,
+  `regra2Disponivel`), nunca reescritos ali. E as horas do SLA vêm de
+  `SLA_PRIMEIRA_RESPOSTA_HORAS`: repetidas à mão, o agente promete um prazo e o cron cobra
+  outro, sem quebrar teste nenhum. ⚠️ Continua sendo **instrução, não trava** — `RF-08`/`RF-17`
+  seguem em `agent/gate.ts`, e nenhum valor de config entra no texto (`RNF-30`).
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -394,6 +461,21 @@ destes reabre um vazamento que já foi fechado.
   editável por qualquer pessoa (`R-07`). Ele abre em **outra aba** de propósito — a
   conversa vive em estado de React, e navegar na mesma aba destruiria o botão de
   override (`RF-13`) de quem aceitou ler primeiro.
+- ⚠️ **A visão da aba Documentação é DERIVADA, não guardada** (`visaoDaDocumentacao`). A
+  tela decidia por `busca !== null`, e apagar o campo mexia só em `termo`: os resultados
+  antigos ficavam **travados na tela**, sem caminho de volta para navegar por espaço (visto
+  no app real em 10/08/2026). O conserto não foi um `setBusca(null)` no `onChange` — isso
+  funciona hoje e quebra no próximo lugar que mexer em `termo` sem lembrar de limpar o resto.
+  A ordem das três regras É o comportamento: **página aberta ganha de tudo** (senão o deep
+  link `?pagina=` cairia nas categorias) · **campo vazio = começar de novo** · com termo e
+  resposta, resultados. Mesmo raciocínio de `bloqueio` × `temBloqueioPendente` (`D-21`).
+- ⚠️ **A lista de espaços tem TRÊS estados, e o título aparece nos três.** `espacos` nascia
+  `[]` e o componente devolvia `null` para lista vazia — então **carregar era indistinguível
+  de tela em branco**: nem título, nem sinal, ninguém percebia que havia algo a caminho. E
+  `falhou` é separado de `pronto: []` pelo motivo que `admin/paineis.tsx` já registra: `[]`
+  numa queda de rede vira "não tem documentação" e manda a pessoa abrir chamado por algo que
+  está escrito. Zero por configuração diz "nenhum espaço foi liberado", nunca "não há
+  documentação".
 - **A tela de documentação lê `?q=` e `?pagina=` no boot — e isso NÃO é um router.**
   `App.tsx` continua navegando por estado (Princípio V); o deep link existe por dois
   motivos concretos: link de página compartilhável entre colegas, e o link `ri:page` do
@@ -497,6 +579,45 @@ destes reabre um vazamento que já foi fechado.
   `false` ali e o aviso nunca apareceria no caso real. Fazê-lo aparecer exigiria adivinhar
   que aquele parágrafo é placeholder — heurística sobre conteúdo de terceiro. Espaço com home
   vazia é lacuna de documentação, e quem mede isso é `RF-42`.
+- 🎁 **Macro desconhecida COM corpo tem o corpo renderizado, nunca descartado.** Era
+  desperdício silencioso: `panel`, `deck`/`card`, `excerpt` e qualquer macro interna que
+  envolva texto caíam no placeholder **e o texto ia embora** — a página tinha, a pessoa não
+  via, e a tela ainda dizia "o texto ao redor está completo". Renderizar o corpo é grátis
+  (nenhuma chamada nova) e seguro: ele passa por `converterLista`, a **mesma** allowlist de
+  todo o resto. É a diferença entre "não sei desenhar esta moldura" (a moldura se perde, o
+  texto aparece) e "não posso mostrar este conteúdo". O `anotar` continua acontecendo: a
+  auditoria de `RF-43` é o que diz qual macro vale implementar de verdade um dia.
+- **`children`/`pagetree` apontam para a lista que a leitura JÁ mostra** (T-115) em vez de
+  dizer "não há o que trazer" — o conteúdo está na tela, alguns centímetros abaixo, com a
+  verificação de restrição por item que `RN-06` exige.
+- 🚨 **O editor novo grava o conteúdo DUAS vezes, e renderizar os dois duplicava a página**
+  (`converterAdf`, `D-34`). `ac:adf-extension` traz o nó (`ac:adf-node` → `ac:adf-content`)
+  **e** uma cópia em HTML (`ac:adf-fallback`) para editores antigos. As três tags eram
+  desconhecidas, e tag desconhecida é **desembrulhada** — então o painel de boas-vindas
+  aparecia com o título em português e, logo abaixo, em inglês (o fallback vem em inglês),
+  medido no app real em 10/08/2026. A regra é **conteúdo do nó, senão fallback, nunca os
+  dois**: o nó ganha porque é o conteúdo de verdade. ⚠️ **Mas "só o nó" quebraria os blocos
+  inline** — `status`/`date` vêm **sem** `ac:adf-content` (o texto mora nos atributos) e é o
+  fallback que traz a `ac:structured-macro` equivalente. E `ac:adf-attribute` devolve **nada**
+  por necessidade, não por zelo: desembrulhado, o **valor** viraria texto visível
+  (`1f5d1 #c9372c info` solto antes do painel — ruído **e** parâmetro na tela, `RNF-30`).
+  `panel-type` é a única exceção lida, porque é apresentação e é o que faz aviso escrito no
+  editor novo continuar sendo aviso.
+- 🚨 **`status` tem texto e NÃO tem corpo — o critério "tem `ac:rich-text-body`?" a jogava
+  no placeholder** (`D-34`). O texto mora num **parâmetro** (`title`), como a linguagem do
+  bloco de código, então a macro que marca "Concluído"/"Em andamento" dizia *"o goatlas ainda
+  não sabe mostrar este bloco"* — acusando limitação nossa sobre texto que estava no storage.
+  ⚠️ **A cor não vai para a tela** e isso é decisão: `Green`/`Red` seria inventar paleta (a
+  identidade não tem vermelho nem verde, §1.3) **e** comunicar estado só por cor. Quem diz o
+  estado é a palavra que a pessoa escreveu. E **`title` vazio devolve nada, não o
+  placeholder** — pílula vazia não carrega informação, e o placeholder ali anunciaria
+  conteúdo escondido que não existe.
+- 🚨 **`jira`/`jirachart` NÃO devem ser implementados** — e o motivo não é custo. A JQL vem
+  de dentro da página, que qualquer pessoa edita (`R-07`), e executá-la seria rodar consulta
+  **escolhida pelo conteúdo** com a conta de serviço, mostrando o resultado a qualquer
+  colaborador. É `RN-06` sem gate equivalente: no Confluence existe allowlist de espaço,
+  label e restrição por página; para Jira não existe nada disso. Fica placeholder de
+  propósito.
 - **O parâmetro da macro continua fora da tela** (`RNF-30`), inclusive nos blocos agora
   nomeados: JQL, `spaceKey` e id de filtro descrevem estrutura interna e podem citar projeto
   que quem lê não deveria conhecer.
@@ -507,6 +628,64 @@ destes reabre um vazamento que já foi fechado.
 - **Limite é parte da trava.** Página editável por qualquer pessoa é entrada não
   confiável **inclusive no tamanho**: há teto de entrada, de profundidade, de nós e
   de descartes. Conteúdo hostil não precisa de script para derrubar o Worker.
+- 🚨 **A migração roda UMA VEZ POR BANCO, não por requisição** (`db/schema.ts`,
+  `garantirMigracao`, `D-32`). São 35 `CREATE` + 3 `ALTER` sequenciais e `await`ados;
+  chamados de `montarContexto` eles eram o **piso de ~400 ms de toda rota** — medido nos
+  logs em 10/08/2026: `/api/cron/enviar-notificacoes` com a **fila vazia** levava 376–584 ms.
+  A memoização é `WeakMap` por objeto de banco, e é isso que a torna correta nos dois mundos:
+  em produção `env.DB` é a mesma referência por isolate; nos testes cada caso tem banco
+  próprio. ⚠️ Um `let migrado` global daria o mesmo ganho e faria o **segundo teste da suíte**
+  rodar contra um banco sem tabela nenhuma. E a falha **não** fica memoizada — senão um erro
+  transitório no primeiro boot condenaria o isolate a nunca ter schema.
+- 🚨 **O cache de `RNF-13` vive no MÓDULO, não na instância do cliente** (`contexto.ts`,
+  `cachesAtlassianDoIsolate`). Ele existia desde a Fase 1 e **nunca acertou em produção**:
+  morava na instância, e `montarContexto` cria uma por requisição. Vários comentários do
+  código já contavam com ele ("contido pelo cache de conteúdo") — logo, cada leitura de página
+  rebuscava metadados, labels, restrição e corpo, e cada nível do breadcrumb rebuscava os três
+  primeiros de novo. ⚠️ Compartilhar é seguro **porque a identidade é sempre a conta de
+  serviço** (`D-01`): não há resposta "de um usuário" para vazar para outro. Sob
+  `raiseOnBehalfOf` (`RNF-22`) a cache teria de ser por identidade — é por isso que ela mora
+  em `contexto.ts`, à vista. ⚠️ E ela guarda o **insumo**, nunca a **decisão**: `RN-06`
+  continua avaliada por requisição contra `ctx.valores`, então allowlist mudada no console
+  vale na requisição seguinte.
+- **Cache compartilhada tem TETO de entradas, e o corpo da página tem cache própria.**
+  Enquanto morria com a requisição, crescer sem limite era inócuo; por isolate é vazamento de
+  memória com prazo. O corpo vai a 400 KB (o teto da sanitização), então ele tem cache
+  separada com teto 30 — teto único obrigaria a escolher entre guardar poucas páginas ou
+  arriscar centenas de MB num Worker de 128 MB.
+- 🚨 **Laço de rede é paralelo COM TETO, nunca `Promise.all`** (`src/lib/paralelo.ts`,
+  `CONCORRENCIA_ATLASSIAN = 5`, `CONCORRENCIA_IA = 3`, `D-32`). Havia cinco laços
+  `for … await` sobre listas de rede — lista de chamados (até **100** `obterChamado` em
+  série), restrição por página na busca e na árvore, espaços da allowlist, classificação da
+  Regra 2 (uma chamada de IA por ticket) — e o tempo era a **soma**. ⚠️ O teto não é
+  timidez: o burst limit da Atlassian por API token **não é publicado** e os headers
+  `X-RateLimit-*` só aparecem no 429 (`RNF-15`, `R-02`); disparar a lista inteira é como se
+  descobre o limite do jeito ruim, e um turno que toma 429 e espera 2 s ficou **mais lento**
+  que o laço em série. O teto vale **por laço**, não global — dois usuários simultâneos somam.
+- **Todo laço paralelizado PRESERVA A ORDEM** (`mapearComLimite`). A busca ordena por
+  relevância, a árvore por título e a lista de chamados pelo banco; devolver na ordem de quem
+  respondeu primeiro faz a mesma tela aparecer diferente entre duas cargas, o que se lê como
+  defeito.
+- ⚠️ **A extração da proposta corre JUNTO com a última ida ao modelo** (`orquestrador.ts`,
+  `propostaEmVoo`). Um turno fazia **três** chamadas em série ao provedor, e a 2ª (texto para
+  a pessoa) e a 3ª (`extrairProposta`) partem do mesmo histórico — a resposta do modelo só é
+  persistida depois da extração, então a 3ª nunca viu a 2ª. É seguro por razão **estrutural**:
+  só arranca com as duas verificações concluídas, e nesse estado `toolsPermitidas` é lista
+  **vazia**, logo o ciclo seguinte não executa tool e não pode nascer bloqueio concorrente.
+  🚨 Mesmo assim `tentarMontarProposta` **reconfere `temBloqueioPendente` antes de gravar** —
+  entre começar a extração e voltar dela passa uma ida ao provedor, e `if` que rodou antes do
+  `await` não protege o que vem depois. `RN-07` já foi burlada uma vez (`D-21`).
+- ⚠️ **`max_tokens` NÃO é conserto de latência, e streaming conflita com o desenho** (`D-32`).
+  Num modelo com raciocínio o teto conta tokens de raciocínio: teto baixo devolve resposta
+  **vazia** (bug que o fake não pega), e teto generoso não corta nada. Streaming é o que mais
+  melhoraria a percepção e **não cabe** enquanto o servidor **descartar** o texto do modelo em
+  caso de bloqueio (`D-21`) — não se transmite texto que talvez seja jogado fora.
+- **Teste de latência afirma sobre CONTAGEM DE CHAMADAS e SIMULTANEIDADE**
+  (`tests/latencia.test.ts`), não sobre resultado. Os quatro defeitos de `D-32` conviveram com
+  800 asserções verdes porque o app respondia **certo** em todos eles. E o teste da
+  sobreposição das duas chamadas de IA falha por **deadlock**, não por tempo: o `chat` nº 2 só
+  termina depois de a extração começar, então serializar de novo trava o teste em vez de
+  produzir um número frágil.
 
 ## Automação do processo (hooks)
 
@@ -594,7 +773,7 @@ persistente.
   chamados vazia, config caindo nos defaults. Como os defaults vêm do bootstrap por env, o
   app *parecia* funcionar. **Nunca indexe `rows` direto**; há teste das duas formas.
 - 🚨 **Cada `await db.exec` é uma ida de REDE, e `montarContexto` roda por requisição**
-  (`RNF-36`, `D-31`). `migrar` reaplicava os 32 statements de DDL (17 tabelas + 15
+  (`RNF-36`, `D-35`). `migrar` reaplicava os 32 statements de DDL (17 tabelas + 15
   índices) mais os 3 `ALTER` em série a **cada** requisição `/api/*`: **36 idas ao banco**
   (35 na migração + 1 do `config.carregar()`) antes de a rota começar a trabalhar — piso
   medido de **442 ms** no cron mais barato, e o console de admin dispara seis requisições
@@ -655,7 +834,16 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 [001](specs/001-mvp-chamados-e-agente/tasks.md) ·
 [002](specs/002-confluence-e-governanca/tasks.md) ·
 [003](specs/003-sla-e-notificacoes/tasks.md) ·
-[004](specs/004-piloto-e-rollout/tasks.md).
+[004](specs/004-piloto-e-rollout/tasks.md) ·
+[005](specs/005-anexo-na-criacao/tasks.md).
+
+**A spec 005 (anexo na criação) está completa em código.** `RF-61`/`RF-62`/`RF-63`/`RN-11`:
+a declaração obrigatória travada no servidor nas duas rotas de criação, o upload em dois
+passos com o id vivendo só no servidor, a materialização depois da criação (e fora do
+`catch` que classifica falha), as duas telas e o indicador de evidência no console. A única
+tarefa aberta é **T-425**, que é **verificação** contra a Atlassian real (o request type do
+portal expõe campo de anexo?) e depende de `Q1` — sem o campo, o código já cai em `SC-05` e
+nada quebra.
 
 **No ar em SOMENTE LEITURA: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
 `version 20`, deploy de 07/08/2026). Login Google pelo edge, admin por allowlist.
@@ -676,7 +864,16 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**808 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**952 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
+10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
+porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`
+que nunca acertava, cinco laços de rede em série e três idas ao provedor de IA quando duas
+bastavam. As correções são medidas por **contagem de chamadas** em `tests/latencia.test.ts`;
+o p95 de `RNF-12` (busca < 2 s, primeira resposta do agente < 5 s) só se fecha medindo no app
+publicado.
+
+
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,
@@ -795,6 +992,7 @@ espaço `TECH` que circulava **nunca existiu**.
 | Baseline de assentos (Fase 0) | João | Sem ele a tela diz "sem baseline" em vez de comparar contra zero |
 | **T-235** — distinguir "defletido e resolveu" de "desistiu e foi pro chat" | Produto | Mitigado, não resolvido: o painel devolve `deflexaoResolvidaConhecida: false` e trata o número como **teto** |
 | Destino do alerta de SLA | Produto | Hoje vai ao solicitante, o único destino que o app conhece. Outro destinatário é uma linha na mesma função |
+| **O request type expõe campo de anexo?** (era `T-425` da spec 005) | time de tech | Verificação de go-live, não código: sem o campo o anexo na criação fica **dormente** e cai em `SC-05` sem quebrar nada; com ele funciona sem uma linha a mudar. Só se confirma observando o envio real, o que exige desligar `GOATLAS_SOMENTE_LEITURA` (`D-24`) |
 
 ### O que só o app REAL revelou (07/08/2026)
 

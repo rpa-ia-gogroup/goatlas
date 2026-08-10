@@ -70,6 +70,39 @@ export interface ResumoSla {
   readonly estourados: number
 }
 
+/**
+ * T-422 / `ScC-7` — a evidência que chega junto com o chamado.
+ *
+ * ## Por que isto precisa existir
+ *
+ * A spec 005 parte de uma intuição: "o chamado chega sem print, e a primeira resposta vira
+ * *consegue mandar um print?*". A pergunta obrigatória custa uma decisão a cada abertura.
+ * Sem este número, depois do piloto ninguém saberá dizer se ela valeu — e "achamos que
+ * melhorou" é o que faz features assim ficarem para sempre sem revisão.
+ *
+ * ## Os quatro estados, e por que nenhum pode ser somado ao outro
+ *
+ * - `comEvidencia` — chegou arquivo. É o numerador.
+ * - `declarouTerEFalhou` — a pessoa **tinha** material e o envio não subiu. Este é o
+ *   número que exige ação nossa, e é o único que ficaria escondido numa taxa: ele reduz
+ *   a evidência sem que ninguém tenha deixado de colaborar.
+ * - `declarouNaoTer` — resposta legítima. Não é falha de nada.
+ * - `semPergunta` — o tipo não aceita anexo, ou o schema não pôde ser lido (`SC-05b`).
+ *   Fora do denominador: cobrar evidência de quem nunca foi perguntado é medir o app
+ *   errado.
+ */
+export interface Evidencia {
+  readonly chamadosCriados: number
+  /** Denominador honesto: só quem foi perguntado. */
+  readonly perguntados: number
+  readonly comEvidencia: number
+  readonly declarouTerEFalhou: number
+  readonly declarouNaoTer: number
+  readonly semPergunta: number
+  /** `null` enquanto ninguém foi perguntado. Nunca `0%` — mesmo raciocínio de T-095. */
+  readonly taxaPct: number | null
+}
+
 export interface ResumoPainel {
   readonly chamadosPorArea: readonly { readonly area: string | null; readonly total: number }[]
   readonly chamadosPorPrioridade: Readonly<Record<string, number>>
@@ -100,6 +133,8 @@ export interface ResumoPainel {
   readonly deflexaoResolvidaConhecida: false
   readonly avisoDeflexao: string
   readonly deflexaoAparente: DeflexaoAparente
+  /** T-422 — `ScC-7`: o efeito da pergunta obrigatória, medido em vez de presumido. */
+  readonly evidencia: Evidencia
 }
 
 /** Limiar de 429 que liga o alerta de `RF-60`. Empírico — é o que a doc não publica. */
@@ -171,6 +206,47 @@ export interface EntradaPainel {
   }
   readonly sla: ResumoSla
   readonly deflexao: { readonly bloqueiosSemOverride: number; readonly semChamadoDepois: number }
+  /**
+   * T-422 — uma linha por chamado criado, com o que a submissão registrou.
+   *
+   * `declarouAnexo`: `true` tenho · `false` não tenho · `null` não fui perguntado.
+   * `anexosAnexados`: `null` não houve materialização · `0` tentou e falhou · `N` subiram.
+   */
+  readonly anexosPorChamado: readonly {
+    readonly declarouAnexo: boolean | null
+    readonly anexosAnexados: number | null
+  }[]
+}
+
+/**
+ * T-422 — os quatro estados de evidência, a partir do que a submissão registrou.
+ *
+ * ⚠️ **O denominador são os PERGUNTADOS, não os chamados.** Incluir quem nunca viu a
+ * pergunta (tipo que não aceita anexo) mediria a composição da fila em vez do efeito da
+ * pergunta: bastaria o time criar um request type sem anexo para a "taxa de evidência"
+ * cair, sem nada ter piorado.
+ */
+export function resumirEvidencia(
+  linhas: readonly {
+    readonly declarouAnexo: boolean | null
+    readonly anexosAnexados: number | null
+  }[],
+): Evidencia {
+  const comEvidencia = linhas.filter((l) => (l.anexosAnexados ?? 0) > 0).length
+  const perguntados = linhas.filter((l) => l.declarouAnexo !== null).length
+  return {
+    chamadosCriados: linhas.length,
+    perguntados,
+    comEvidencia,
+    // Declarou ter e nada subiu — inclui o caso de quem desistiu de escolher arquivo e o
+    // de quem escolheu e o envio falhou. A auditoria separa os dois; o painel não precisa.
+    declarouTerEFalhou: linhas.filter(
+      (l) => l.declarouAnexo === true && (l.anexosAnexados ?? 0) === 0,
+    ).length,
+    declarouNaoTer: linhas.filter((l) => l.declarouAnexo === false).length,
+    semPergunta: linhas.filter((l) => l.declarouAnexo === null).length,
+    taxaPct: taxaPct(comEvidencia, perguntados),
+  }
 }
 
 /** Função pura: entra o que o banco tem, sai o painel. */
@@ -227,6 +303,7 @@ export function montarPainel(e: EntradaPainel): ResumoPainel & { readonly sla: R
       custoMedioUsd: e.ia.conversas === 0 ? null : e.ia.custoTotalUsd / e.ia.conversas,
     },
     sla: e.sla,
+    evidencia: resumirEvidencia(e.anexosPorChamado),
     deflexaoResolvidaConhecida: false,
     avisoDeflexao: AVISO_DEFLEXAO,
     deflexaoAparente: {
@@ -300,11 +377,27 @@ export async function lerEntradaDoPainel(
   )
   const iaLinha = linhasComoObjetos<{ conversas: number; custo: number }>(iaBrutas)[0]
 
+  // T-422 — só chamados CRIADOS. Submissão pendente ainda não tem anexo materializado por
+  // construção (`SC-07b`), e contá-la como "sem evidência" culparia a feature por uma
+  // indisponibilidade da Atlassian.
+  const anexoBrutas = await db.query(
+    `SELECT declarou_anexo, anexos_anexados FROM submissoes WHERE estado = 'criado'`,
+    [],
+  )
+  const anexosPorChamado = linhasComoObjetos<{
+    declarou_anexo: number | null
+    anexos_anexados: number | null
+  }>(anexoBrutas).map((l) => ({
+    declarouAnexo: l.declarou_anexo == null ? null : l.declarou_anexo === 1,
+    anexosAnexados: l.anexos_anexados == null ? null : Number(l.anexos_anexados),
+  }))
+
   return {
     chamadosPorArea,
     prioridades,
     vias,
     bloqueios,
+    anexosPorChamado,
     deflexao: await contarDeflexaoAparente(db),
     thresholds: dados.thresholds,
     notificacoes: dados.notificacoes,
