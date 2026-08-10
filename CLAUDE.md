@@ -476,6 +476,13 @@ destes reabre um vazamento que já foi fechado.
   numa queda de rede vira "não tem documentação" e manda a pessoa abrir chamado por algo que
   está escrito. Zero por configuração diz "nenhum espaço foi liberado", nunca "não há
   documentação".
+- ⚠️ **`legend` ignora o `padding` e o `gap` do `fieldset`** (`estilos.css`,
+  `.pergunta-anexo`). O navegador o promove a *rendered legend* e o encaixa na borda de
+  cima — na pergunta do anexo isso punha "EVIDÊNCIA" **acima** da borda e o título colado
+  no topo do cartão (medido em 10/08/2026: `legend.top === fieldset.top`). O conserto é
+  `float: left` + `width: 100%`: o float tira o elemento daquela categoria e, num container
+  flex, é ignorado — sobra um item de flex comum, que respeita padding e gap. Não trocar o
+  `fieldset`/`legend` por `div`: são eles que nomeiam o grupo de rádio para leitor de tela.
 - **A tela de documentação lê `?q=` e `?pagina=` no boot — e isso NÃO é um router.**
   `App.tsx` continua navegando por estado (Princípio V); o deep link existe por dois
   motivos concretos: link de página compartilhável entre colegas, e o link `ri:page` do
