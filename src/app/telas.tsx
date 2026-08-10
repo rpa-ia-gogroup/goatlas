@@ -30,6 +30,12 @@ import {
   TrilhaVerificacao,
   Vazio,
 } from './componentes'
+import {
+  AVISO_DECLARACAO_PENDENTE,
+  PerguntaDeAnexo,
+  ResultadoDoAnexo,
+  type Declaracao,
+} from './anexo'
 
 /* ======================= conversa com o agente ========================= */
 
@@ -361,6 +367,27 @@ export function ReciboConfirmacao({
   const [erro, setErro] = useState<string | null>(null)
   const p = prioridadePor(prioridade)
 
+  // RF-61/RF-62 (T-418) — a pergunta só existe se o tipo aceitar anexo. `false` enquanto
+  // carrega e se a leitura falhar: o mesmo fail-open do servidor (`SC-05b`), pelo mesmo
+  // motivo — indisponibilidade de schema não pode virar botão que não abre chamado.
+  const [aceitaAnexo, setAceitaAnexo] = useState(false)
+  const [declarou, setDeclarou] = useState<Declaracao>(null)
+
+  useEffect(() => {
+    let vivo = true
+    api
+      .camposDoTipo(propostaInicial.tipoChamadoId)
+      .then((r) => {
+        if (vivo) setAceitaAnexo(r.aceitaAnexo)
+      })
+      .catch(() => {})
+    return () => {
+      vivo = false
+    }
+  }, [propostaInicial.tipoChamadoId])
+
+  const faltaDeclarar = aceitaAnexo && declarou === null
+
   async function confirmar() {
     setSalvando(true)
     setErro(null)
@@ -368,7 +395,7 @@ export function ReciboConfirmacao({
       if (prioridade !== propostaInicial.prioridade) {
         await api.salvarProposta(conversaId, { ...propostaInicial, prioridade })
       }
-      aoCriar(await api.confirmar(conversaId))
+      aoCriar(await api.confirmar(conversaId, aceitaAnexo ? (declarou ?? undefined) : undefined))
     } catch (e) {
       setErro(e instanceof ErroApi ? e.message : 'Não conseguimos abrir o chamado agora.')
     } finally {
@@ -438,13 +465,35 @@ export function ReciboConfirmacao({
         </dd>
       </dl>
 
+      {aceitaAnexo && (
+        <PerguntaDeAnexo
+          alvo={{ via: 'conversa', conversaId }}
+          declarou={declarou}
+          aoDeclarar={setDeclarou}
+        />
+      )}
+
       {erro && <Aviso atencao>{erro}</Aviso>}
 
       <div className="acoes">
-        <button type="button" className="botao botao-primario" onClick={confirmar} disabled={salvando}>
+        <button
+          type="button"
+          className="botao botao-primario"
+          onClick={confirmar}
+          disabled={salvando || faltaDeclarar}
+          // ⚠️ O botão desabilitado precisa DIZER o que falta. Botão morto sem
+          // explicação é indistinguível de app quebrado — e aqui a saída está a um
+          // clique de distância, logo acima.
+          aria-describedby={faltaDeclarar ? 'falta-declarar-recibo' : undefined}
+        >
           {salvando ? 'Abrindo…' : 'Abrir chamado'}
         </button>
       </div>
+      {faltaDeclarar && (
+        <p className="dica" id="falta-declarar-recibo">
+          {AVISO_DECLARACAO_PENDENTE}
+        </p>
+      )}
     </section>
   )
 }
@@ -483,6 +532,9 @@ function ChamadoAberto({
           <h2 className="titulo-secao">{resultado.issueKey ?? 'Estamos abrindo'}</h2>
         </div>
         <p>{resultado.mensagem}</p>
+        {/* RF-63 — o que aconteceu com o anexo vem DEPOIS da frase do chamado, nunca
+            no lugar dela. A ordem é o que evita a pessoa achar que o chamado falhou. */}
+        <ResultadoDoAnexo anexo={resultado.anexo} />
         <div className="chamado-meta">
           <Selo variante={resultado.prioridade === 'critica' ? 'lime' : 'neutro'}>
             {p.rotulo} · 1ª resposta em {p.horas}h
@@ -995,6 +1047,9 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
   // funcionar por causa do schema (RNF-18).
   const [campos, setCampos] = useState<CampoRequestType[] | null>(null)
   const [valoresCampos, setValoresCampos] = useState<Record<string, string>>({})
+  // RF-61/RF-62 (T-417) — o schema também diz se o tipo aceita arquivo.
+  const [aceitaAnexo, setAceitaAnexo] = useState(false)
+  const [declarou, setDeclarou] = useState<Declaracao>(null)
 
   useEffect(() => {
     api
@@ -1010,11 +1065,21 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
     if (!tipoChamadoId) return
     setCampos(null)
     setValoresCampos({})
+    // ⚠️ Trocar de tipo zera a declaração: a pergunta que ela respondia era de outro
+    // tipo de chamado. Manter o "não tenho" de antes seria registrar uma resposta que
+    // ninguém deu para esta pergunta.
+    setAceitaAnexo(false)
+    setDeclarou(null)
     api
       .camposDoTipo(tipoChamadoId)
-      .then((r) => setCampos(r.itens))
+      .then((r) => {
+        setCampos(r.itens)
+        setAceitaAnexo(r.aceitaAnexo)
+      })
       .catch(() => setCampos([]))
   }, [tipoChamadoId])
+
+  const faltaDeclarar = aceitaAnexo && declarou === null
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
@@ -1029,6 +1094,7 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
           prioridade,
           chaveIdempotencia: chave.current,
           ...(Object.keys(valoresCampos).length > 0 ? { camposDinamicos: valoresCampos } : {}),
+          ...(aceitaAnexo && declarou !== null ? { declarouAnexo: declarou } : {}),
         }),
       )
     } catch (err) {
@@ -1129,13 +1195,31 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
         </span>
       </div>
 
+      {aceitaAnexo && (
+        <PerguntaDeAnexo
+          alvo={{ via: 'formulario', chaveIdempotencia: chave.current }}
+          declarou={declarou}
+          aoDeclarar={setDeclarou}
+        />
+      )}
+
       {erro && <Aviso atencao>{erro}</Aviso>}
 
       <div className="acoes">
-        <button type="submit" className="botao botao-primario" disabled={enviando}>
+        <button
+          type="submit"
+          className="botao botao-primario"
+          disabled={enviando || faltaDeclarar}
+          aria-describedby={faltaDeclarar ? 'falta-declarar-form' : undefined}
+        >
           {enviando ? 'Abrindo…' : 'Abrir chamado'}
         </button>
       </div>
+      {faltaDeclarar && (
+        <p className="dica" id="falta-declarar-form">
+          {AVISO_DECLARACAO_PENDENTE}
+        </p>
+      )}
     </form>
   )
 }

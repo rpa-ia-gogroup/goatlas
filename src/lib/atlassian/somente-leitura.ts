@@ -93,6 +93,26 @@ export class ClienteAtlassianSomenteLeitura implements ClienteAtlassian {
     this.recusar('anexarArquivo')
   }
 
+  /**
+   * ⚠️ **O upload temporário é escrita, mesmo sem `issueKey`** — `SC-10`.
+   *
+   * Ele consome armazenamento na Atlassian e gasta a credencial única, e o único motivo
+   * de existir é virar anexo de um chamado. Deixá-lo passar "porque não altera nada"
+   * produziria o pior resultado possível do modo somente leitura: a tela dizendo
+   * "arquivo enviado", a pessoa confirmando, e a criação sendo recusada depois — com o
+   * arquivo já lá. Recusa honesta e explícita, nunca sucesso simulado.
+   */
+  async subirAnexoTemporario(
+    _serviceDeskId: string,
+    _arquivo: { nome: string; tipo: string; bytes: ArrayBuffer },
+  ): Promise<string> {
+    this.recusar('subirAnexoTemporario')
+  }
+
+  async materializarAnexosTemporarios(_issueKey: string, _ids: readonly string[]): Promise<void> {
+    this.recusar('materializarAnexosTemporarios')
+  }
+
   async transicionar(_issueKey: string, _transicaoId: string): Promise<void> {
     this.recusar('transicionar')
   }

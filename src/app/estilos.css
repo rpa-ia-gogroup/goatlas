@@ -1388,14 +1388,16 @@
   font-size: var(--fs-small);
 }
 
-/* Escolha de canal (T-224) como cartões de rádio: cada opção precisa de espaço para a
-   frase que a explica — e a diferença entre "não quero receber" e "ninguém definiu
-   canal ainda" é conteúdo, não estilo. */
-.opcoes-canal {
+/* Cartões de rádio — nasceram na escolha de canal (T-224) e servem à declaração de anexo
+   (T-417): cada opção precisa de espaço para a frase que a explica, porque em ambas a
+   diferença entre as opções é conteúdo, não estilo ("não quero receber" × "ninguém definiu
+   canal"; "não tenho material" × "não respondi"). O nome é `cartao` e não `canal` justamente
+   para que a segunda superfície não tivesse de duplicar as regras. */
+.opcoes-cartao {
   display: grid;
   gap: var(--space-3);
 }
-.opcao-canal {
+.opcao-cartao {
   display: flex;
   gap: var(--space-3);
   align-items: flex-start;
@@ -1405,37 +1407,37 @@
   background: var(--go-white);
   cursor: pointer;
 }
-.opcao-canal:hover {
+.opcao-cartao:hover {
   border-color: var(--go-blue);
 }
 /* Estado nunca só por cor (piso de a11y): a opção escolhida ganha borda grossa E o
    título em bold, além do próprio rádio marcado. */
-.opcao-canal:has(input:checked) {
+.opcao-cartao:has(input:checked) {
   border-color: var(--go-blue);
   border-width: 2px;
   padding: calc(var(--space-4) - 1px);
   box-shadow: var(--shadow-sm);
 }
-.opcao-canal:has(input:checked) .opcao-canal-titulo {
+.opcao-cartao:has(input:checked) .opcao-cartao-titulo {
   font-weight: var(--fw-bold);
 }
-.opcao-canal input {
+.opcao-cartao input {
   margin-top: 4px;
   accent-color: var(--go-blue);
   width: 18px;
   height: 18px;
   flex: none;
 }
-.opcao-canal-texto {
+.opcao-cartao-texto {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
-.opcao-canal-titulo {
+.opcao-cartao-titulo {
   font-weight: var(--fw-semibold);
   color: var(--go-text-heading);
 }
-.opcao-canal-nota {
+.opcao-cartao-nota {
   font-size: var(--fs-small);
   color: var(--go-text-primary);
 }
@@ -1522,4 +1524,93 @@
 }
 .doc-busca-espaco .dica {
   margin: 0;
+}
+
+/* ---------- pergunta do anexo na criação (T-417 a T-420) ------------------
+   Fica logo acima da linha de ações nas duas superfícies: é ali que a decisão
+   destrava o botão, e uma pergunta obrigatória longe do botão que ela bloqueia
+   parece um campo opcional que alguém esqueceu de preencher. */
+.pergunta-anexo {
+  border: 1px solid color-mix(in srgb, var(--go-blue) 16%, transparent);
+  border-left: 4px solid var(--go-accent);
+  border-radius: var(--radius-md);
+  background: var(--go-white);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  /* `fieldset` traz margem e padding de agente de usuário. */
+  margin: 0;
+  min-inline-size: 0;
+}
+.pergunta-anexo > legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0;
+}
+.pergunta-anexo-titulo {
+  font-size: var(--fs-h4);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+}
+.pergunta-anexo .dica {
+  margin: 0;
+}
+.pergunta-anexo .zona-anexo {
+  background: var(--go-cream);
+}
+
+/* Alvo de toque no celular: a linha inteira do cartão é clicável, com altura
+   confortável — não só o círculo do rádio. */
+@media (pointer: coarse) {
+  .opcao-cartao {
+    min-height: 56px;
+  }
+}
+
+/* O estado do envio, arquivo por arquivo.
+   A PALAVRA vem antes do nome, em coluna de largura fixa: assim a lista se lê como
+   resultados, não como nomes de arquivo. Símbolo + palavra + peso — nunca só cor
+   (piso de a11y, regra 9). */
+.lista-envios {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--fs-small);
+}
+.envio {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap: var(--space-1) var(--space-3);
+  align-items: baseline;
+}
+.envio-estado {
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+.envio-nome {
+  overflow-wrap: anywhere;
+}
+.envio-motivo {
+  grid-column: 2;
+  color: var(--go-text-primary);
+  font-size: var(--fs-caption);
+}
+.envio-enviado .envio-estado {
+  color: var(--go-blue);
+}
+.envio-falhou .envio-estado {
+  /* Vermelho não existe na identidade (§1): o alerta é peso + símbolo + a frase do
+     motivo logo abaixo, que é o que efetivamente diz o que fazer. */
+  color: var(--go-text-dark);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+.envio-enviando .envio-estado {
+  color: var(--go-text-primary);
 }

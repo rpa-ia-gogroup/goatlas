@@ -207,8 +207,11 @@ O agente é a porta de entrada. O colaborador descreve a demanda em linguagem na
 | RF-23 | Persistir a transcrição da conversa que originou o ticket e anexá-la (ou linká-la) ao chamado — é o contexto que o time de tech mais perde hoje. | P1 |
 | RF-24 | Chave de idempotência por submissão: duplo clique ou reenvio não geram chamados duplicados. | P0 |
 | RF-25 | Anexos: subir via `POST /rest/servicedeskapi/servicedesk/{serviceDeskId}/attachTemporaryFile` (que devolve apenas `temporaryAttachmentIds`) e materializar via `POST /rest/servicedeskapi/request/{issueIdOrKey}/attachment`. | P1 |
+| RF-61 | **Anexar na criação**, não só depois (**RF-34**). Numa única confirmação da pessoa, o chamado é criado e o anexo de **RF-25** é materializado nele. O schema do request type (**RF-27**) serve para **saber se o tipo aceita anexo** — nunca para carregar o arquivo, e nunca hardcoded. Vale para conversa e formulário direto (`D-04`). ⚠️ O anexo **não viaja dentro da chamada de criação** (`D-26`): id vencido responderia 400, que é classificado como definitivo, e a submissão nunca mais seria reprocessada. | P1 |
+| RF-62 | **Antes de confirmar, a pessoa declara se tem material para anexar** — escolha obrigatória, sem opção pré-marcada. "Tenho" abre o envio; "não tenho" libera a criação. A declaração é registrada com três estados (`1`/`0`/`NULL` — não respondeu). ⚠️ **Fail-OPEN, contra o padrão do projeto** (`D-27`): schema que não pôde ser lido não pergunta e abre o chamado, e o evento fica na auditoria. | P1 |
+| RF-63 | Falha no envio do anexo **não impede o chamado de nascer** e **nunca** marca a criação como falha definitiva (**RNF-17**, **RNF-18**): o chamado é criado, a tela diz que o anexo não subiu e oferece o caminho de **RF-34**. A garantia é estrutural: a materialização mora **fora** de `ServicoChamados.processar`, então nenhum erro dela alcança o `catch` que classifica falha (`D-26`). | P1 |
 | RF-26 | Confirmação final com a chave do chamado, prioridade, prazo de primeira resposta e link para acompanhamento interno. | P0 |
-| RF-27 | Fallback de formulário estruturado para quem preferir não conversar, renderizado dinamicamente a partir do schema de campos do tipo de chamado (`/servicedesk/{serviceDeskId}/requesttype/{requestTypeId}/field`). Campos não podem ser hardcoded. | P1 |
+| RF-27 | Fallback de formulário estruturado para quem preferir não conversar, renderizado dinamicamente a partir do schema de campos do tipo de chamado (`/servicedesk/{serviceDeskId}/requesttype/{requestTypeId}/field`). Campos não podem ser hardcoded — e as **chaves enviadas são validadas contra esse schema** no servidor, nunca aceitas do cliente (T-401). Schema indisponível descarta os campos adicionais e ainda assim abre o chamado (**RNF-18**). ⚠️ Este endurecimento **mudou comportamento** de `T-130`: campo extra que passava deixou de passar (`D-28`). | P1 |
 | RF-28 | Exibir apenas tipos de chamado presentes na allowlist do admin (**RF-49**). Nada exposto por padrão. | P0 |
 
 ### M3 — Acompanhamento de chamados
@@ -357,6 +360,7 @@ Organizados pelas características de qualidade da ISO/IEC 25010:2023.
 | RN-08 | O SLA é de **primeira resposta**, não de resolução. Isso precisa estar explícito em toda comunicação do app. |
 | RN-09 | Perfil admin é concedido por lista explícita, nunca por inferência. |
 | RN-10 | Toda ação que toca Atlassian ou IA gera registro de auditoria, inclusive as que falham. |
+| RN-11 | A declaração de anexo (**RF-62**) é **pergunta**, não campo opcional: **quando o tipo de chamado aceita anexo**, sem resposta não há criação. Tipo que não aceita — ou schema que não pôde ser lido — não pergunta e não bloqueia (**RNF-18**). E "tenho anexo" nunca vira exigência de arquivo: quem declara e desiste volta a "não tenho" e abre o chamado. A trava é responder, não anexar. |
 
 ---
 
@@ -470,6 +474,12 @@ M4 (**RF-37** a **RF-40**) como superfície própria, além de servir ao agente 
 
 **Fase 3 — SLA e notificações.**
 M5 completo, alerta de SLA, métricas de deflexão e adoção (**RF-55**).
+
+**Fase 3.5 — Anexo na criação (spec 005).**
+**RF-61**, **RF-62**, **RF-63** e **RN-11**. Entra depois da Fase 3 porque depende do
+formulário dinâmico de **RF-27** (pronto na Fase 2) e da leitura de chamado de **RF-34**
+(pronta na Fase 3), e **antes** do rollout: começar o piloto com a evidência chegando ao
+time de tech muda a qualidade da primeira resposta, que é o que **O4** mede.
 
 **Fase 4 — Rollout.**
 Piloto com 1–2 áreas (**Q13**), ajuste dos thresholds com dado real, depois FrontOffice e BackOffice.

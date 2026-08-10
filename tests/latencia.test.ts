@@ -25,7 +25,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { SqliteLocal } from '@/lib/db/sqlite-local'
-import { garantirMigracao, migrar, TABELAS } from '@/lib/db/schema'
+import { COLUNAS_ADICIONADAS, garantirMigracao, migrar, TABELAS } from '@/lib/db/schema'
 import type { Banco, ResultadoExec, ResultadoQuery } from '@/lib/db/tipos'
 import { CacheTtl } from '@/lib/atlassian/http'
 import {
@@ -105,7 +105,12 @@ describe('migração: uma vez por banco, não por requisição', () => {
     // paralelo — idempotentes, mas dobrando o custo justamente sob carga.
     const db = new BancoContado(new SqliteLocal())
     await Promise.all([garantirMigracao(db), garantirMigracao(db), garantirMigracao(db)])
-    expect(db.ddl).toBeLessThanOrEqual(TABELAS.length + 3)
+    // ⚠️ O teto é **derivado**, não cravado. Era `TABELAS.length + 3`, e o `3` era a
+    // quantidade de `COLUNAS_ADICIONADAS` na época — então qualquer coluna nova em qualquer
+    // feature quebrava este teste sem nada ter a ver com concorrência de migração. Foi
+    // exatamente o que aconteceu quando a spec 005 acrescentou duas.
+    const umaMigracaoCompleta = TABELAS.length + COLUNAS_ADICIONADAS.length
+    expect(db.ddl).toBeLessThanOrEqual(umaMigracaoCompleta)
   })
 
   it('banco DIFERENTE migra de novo — a memoização não é global', async () => {

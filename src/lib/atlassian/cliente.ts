@@ -245,7 +245,7 @@ interface CampoRequestTypeBruto {
   fieldId?: unknown
   name?: unknown
   required?: unknown
-  jiraSchema?: { type?: unknown; system?: unknown; custom?: unknown }
+  jiraSchema?: { type?: unknown; system?: unknown; custom?: unknown; items?: unknown }
   validValues?: { id?: unknown; value?: unknown; label?: unknown }[]
 }
 
@@ -272,12 +272,18 @@ export function camposAdicionais(brutos: readonly CampoRequestTypeBruto[]): Camp
     }))
     const custom = typeof bruto.jiraSchema?.custom === 'string' ? bruto.jiraSchema.custom : ''
     const tipoBruto = typeof bruto.jiraSchema?.type === 'string' ? bruto.jiraSchema.type : ''
+    const itens = typeof bruto.jiraSchema?.items === 'string' ? bruto.jiraSchema.items : ''
+    // ⚠️ Anexo é reconhecido ANTES do resto: o `else` final é `'texto'`, então sem
+    // este ramo o campo de anexo viraria uma caixa de texto na tela (RF-27) e o
+    // servidor não teria como saber que o tipo aceita arquivo (RF-62).
     const tipo: TipoCampoRequestType =
-      opcoes.length > 0 || tipoBruto === 'option'
-        ? 'selecao'
-        : custom.toLowerCase().includes('textarea')
-          ? 'texto_longo'
-          : 'texto'
+      sistema === 'attachment' || itens === 'attachment'
+        ? 'anexo'
+        : opcoes.length > 0 || tipoBruto === 'option'
+          ? 'selecao'
+          : custom.toLowerCase().includes('textarea')
+            ? 'texto_longo'
+            : 'texto'
 
     resultado.push({
       fieldId,
@@ -910,18 +916,29 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
       .filter((i) => i.issueKey.length > 0)
   }
 
-  /**
-   * Anexo em dois passos (RF-25, RF-34).
-   *
-   * ⚠️ O primeiro passo é **multipart com `X-Atlassian-Token: no-check`** — sem esse
-   * cabeçalho a Atlassian recusa o upload como possível CSRF, e o erro que ela devolve
-   * (403 genérico) não diz isso. É o tipo de detalhe que custa uma tarde.
-   */
+  /** Anexo em dois passos, os dois de uma vez — `RF-25`, `RF-34`. */
   async anexarArquivo(
     serviceDeskId: string,
     issueKey: string,
     arquivo: { nome: string; tipo: string; bytes: ArrayBuffer },
   ): Promise<void> {
+    // ⚠️ **Composição, não um terceiro caminho.** `RF-34` (anexar depois) e `RF-61`
+    // (anexar na criação) são os mesmos dois passos do JSM, em momentos diferentes.
+    // Reimplementar o multipart aqui faria o cabeçalho de CSRF viver em dois lugares —
+    // e o dia em que um deles mudasse, só metade dos anexos pararia de funcionar.
+    const id = await this.subirAnexoTemporario(serviceDeskId, arquivo)
+    await this.materializarAnexosTemporarios(issueKey, [id])
+  }
+
+  /**
+   * ⚠️ O primeiro passo é **multipart com `X-Atlassian-Token: no-check`** — sem esse
+   * cabeçalho a Atlassian recusa o upload como possível CSRF, e o erro que ela devolve
+   * (403 genérico) não diz isso. É o tipo de detalhe que custa uma tarde.
+   */
+  async subirAnexoTemporario(
+    serviceDeskId: string,
+    arquivo: { nome: string; tipo: string; bytes: ArrayBuffer },
+  ): Promise<string> {
     const form = new FormData()
     form.append('file', new Blob([arquivo.bytes], { type: arquivo.tipo }), arquivo.nome)
 
@@ -934,20 +951,25 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
       .map((t) => (typeof t.temporaryAttachmentId === 'string' ? t.temporaryAttachmentId : null))
       .filter((id): id is string => id !== null)
 
-    if (ids.length === 0) {
+    const primeiro = ids[0]
+    if (primeiro === undefined) {
       throw new ErroAtlassian('upload temporário não devolveu id de anexo', {
         transitorio: true,
         recurso: 'attachTemporaryFile',
       })
     }
+    return primeiro
+  }
 
+  async materializarAnexosTemporarios(issueKey: string, ids: readonly string[]): Promise<void> {
+    if (ids.length === 0) return
     await this.transporte.requisitar(
       `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/attachment`,
       {
         method: 'POST',
         // `public: true` de propósito: é o anexo DO SOLICITANTE no próprio chamado, e
         // anexo interno seria invisível para quem o mandou (`RF-34`).
-        body: JSON.stringify({ temporaryAttachmentIds: ids, public: true }),
+        body: JSON.stringify({ temporaryAttachmentIds: [...ids], public: true }),
       },
     )
   }

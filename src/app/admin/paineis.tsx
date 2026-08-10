@@ -18,6 +18,7 @@ import type {
   RegistroAuditoria,
   RespostaAssentos,
   ResumoMetricas,
+  ResumoPainel,
   TermoComLacuna,
 } from '../api'
 import { Selo } from '../componentes'
@@ -94,6 +95,63 @@ export function PainelMetricas({ metricas }: { metricas: ResumoMetricas }) {
         cedo demais — ou de que a página encontrada não responde. Taxa zerada com muitos
         bloqueios é o contrário: pode estar barrando quem já sabia.
       </p>
+
+      <PainelEvidencia evidencia={metricas.painel.evidencia} />
+    </div>
+  )
+}
+
+/* ---------- evidência na criação (T-422, ScC-7) -------------------------- */
+
+/**
+ * O efeito da pergunta obrigatória de anexo, medido em vez de presumido.
+ *
+ * ⚠️ **A taxa vem acompanhada dos três "por quês", na mesma caixa** — mesmo raciocínio da
+ * calibragem (T-310): um número solto empurra para a única ação visível. "40% chegam com
+ * evidência" sozinho sugere endurecer a pergunta; ao lado de "8 declararam ter e o envio
+ * falhou", a ação certa passa a ser óbvia e é outra.
+ *
+ * E o denominador são os **perguntados**, não os chamados: cobrar evidência de quem nunca
+ * viu a pergunta (tipo de chamado que não aceita anexo) mediria a composição da fila.
+ */
+export function PainelEvidencia({
+  evidencia,
+}: {
+  evidencia: ResumoPainel['evidencia']
+}) {
+  return (
+    <div className="recibo">
+      <div>
+        <span className="eyebrow">Evidência na abertura</span>
+        <h3 className="titulo-secao" style={{ fontSize: 'var(--fs-h4)' }}>
+          {evidencia.perguntados === 0
+            ? 'Ninguém foi perguntado ainda'
+            : `${formatarPct(evidencia.taxaPct)} chegam com anexo`}
+        </h3>
+      </div>
+      <dl>
+        <dt>Chegou arquivo</dt>
+        <dd>
+          {evidencia.comEvidencia} de {evidencia.perguntados} perguntados
+        </dd>
+        <dt>Disse que tinha e não subiu</dt>
+        <dd>{evidencia.declarouTerEFalhou}</dd>
+        <dt>Disse que não tinha</dt>
+        <dd>{evidencia.declarouNaoTer}</dd>
+        <dt>Não foi perguntado</dt>
+        <dd>{evidencia.semPergunta}</dd>
+      </dl>
+      <p className="dica">
+        {evidencia.declarouTerEFalhou > 0
+          ? 'Quem disse que tinha material e ficou sem anexo é o número a olhar primeiro: ou o envio está falhando, ou a tela perde a pessoa entre responder e escolher o arquivo.'
+          : 'Quem diz que não tem material é resposta legítima, não falha — o que importa é a diferença entre isso e não ter sido perguntado.'}
+      </p>
+      {evidencia.semPergunta > 0 && (
+        <p className="dica">
+          Chamado sem pergunta é tipo que não aceita anexo, ou schema que não pôde ser lido
+          na hora. A auditoria distingue os dois.
+        </p>
+      )}
     </div>
   )
 }

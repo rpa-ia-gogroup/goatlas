@@ -36,6 +36,15 @@ export interface DadosAbertura {
   readonly verificadoRegras: boolean
   /** RF-19, T-304 — congelada no vínculo. `null` = mapa não conhece o e-mail. */
   readonly area: string | null
+  /**
+   * RF-62 — a declaração de anexo. `null` = a pergunta não existia nesta criação.
+   *
+   * Chega **decidida** aqui: quem avalia se a pergunta se aplica é a rota, que já leu
+   * o schema do request type. O serviço não relê nada — reler seria uma segunda
+   * chamada com a credencial única para responder à mesma pergunta (`R-02`), e abriria
+   * a chance de as duas leituras discordarem no meio de uma criação.
+   */
+  readonly declarouAnexo?: boolean | null
   readonly payload: PayloadSubmissao
 }
 
@@ -61,6 +70,8 @@ export class ServicoChamados {
     chaveIdempotencia: string,
     /** RF-19, T-304 — área do solicitante no momento da criação. */
     area: string | null = null,
+    /** RF-62 — já decidida pela rota. `null` = a pergunta não se aplicava. */
+    declarouAnexo: boolean | null = null,
   ): Promise<ResultadoCriacao> {
     const autorizacao = autorizarCriacao(conversa)
     if (!autorizacao.ok) {
@@ -83,6 +94,7 @@ export class ServicoChamados {
       conversaId: conversa.id,
       verificadoRegras: autorizacao.verificadoPelasRegras,
       area,
+      declarouAnexo,
       payload: {
         titulo: proposta.titulo,
         descricao: proposta.descricao,
@@ -107,6 +119,7 @@ export class ServicoChamados {
     chaveIdempotencia: string
     payload: PayloadSubmissao
     area?: string | null
+    declarouAnexo?: boolean | null
   }): Promise<ResultadoCriacao> {
     return this.abrir({
       solicitanteEmail: dados.solicitanteEmail,
@@ -115,6 +128,7 @@ export class ServicoChamados {
       conversaId: null,
       verificadoRegras: false,
       area: dados.area ?? null,
+      declarouAnexo: dados.declarouAnexo ?? null,
       payload: dados.payload,
     })
   }
@@ -128,6 +142,7 @@ export class ServicoChamados {
       conversaId: dados.conversaId,
       via: dados.via,
       verificadoRegras: dados.verificadoRegras,
+      declarouAnexo: dados.declarouAnexo ?? null,
       payload: dados.payload,
     })
 
@@ -220,7 +235,14 @@ export class ServicoChamados {
         acao: 'chamado_criado',
         recurso: criado.issueKey,
         resultado: 'sucesso',
-        detalhe: { via: dados.via, verificadoRegras: dados.verificadoRegras },
+        detalhe: {
+          via: dados.via,
+          verificadoRegras: dados.verificadoRegras,
+          // SC-12 — a declaração fica no registro do chamado. `null` é gravado como
+          // `null` de propósito: "não respondeu" é um fato tão auditável quanto os
+          // outros dois, e omitir a chave faria as duas coisas parecerem iguais.
+          declarouAnexo: dados.declarouAnexo ?? null,
+        },
       })
 
       return {
@@ -301,6 +323,10 @@ export class ServicoChamados {
         // O reprocessamento não conhece a área: ela foi decidida na requisição original
         // e vive no vínculo, que este caminho só cria se ainda não existir.
         area: null,
+        // A declaração, ao contrário da área, **sobrevive**: ela foi gravada na
+        // submissão e é a resposta que a pessoa deu. Reler como `null` aqui apagaria
+        // da auditoria do chamado reprocessado o que ela respondeu.
+        declarouAnexo: s.declarouAnexo,
         payload: s.payload,
       })
       if (r.estado === 'criado') criados += 1

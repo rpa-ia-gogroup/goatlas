@@ -1171,6 +1171,97 @@ ganharam superfície. O preço é uma linha **por produto encontrado no inventá
 o console não inventa a lista de produtos que a organização assina. No dia em que o
 financeiro responder Q8, é preencher e salvar.
 
+### D-26 · O anexo não viaja na criação — e a v1 do plano perdia o chamado da pessoa
+
+**Data:** 10/08/2026 · **Contexto:** spec `005-anexo-na-criacao`, `plan.md` §0 e §2
+
+`RF-61` pede que abrir chamado com anexo seja **uma** ação. O caminho óbvio é o do
+portal nativo do JSM: mandar os `temporaryAttachmentIds` dentro do corpo da criação. A
+primeira versão do plano fazia isso, e o `/analyze` mostrou que aquela linha reta passa
+exatamente por cima da trava mais importante do projeto:
+
+1. id temporário expirado faz a **criação** responder **400**;
+2. `atlassian/http.ts` classifica 4xx como **definitivo**;
+3. `tickets/servico.ts` marca a submissão como `falha`;
+4. submissão `falha` **nunca** é reprocessada.
+
+Um arquivo velho apagaria o chamado de alguém. É a mesma família do bug que
+`rf24-outbox-degradacao` já pegou uma vez, na versão com arquivo — e teria passado por
+uma suíte verde, porque nenhum teste montava "id vencido".
+
+**Decisão:** o servidor faz **dois passos dentro da mesma confirmação**. O upload
+acontece quando a pessoa escolhe o arquivo (feedback imediato, criação intocada); a
+materialização acontece **depois** da criação, com o resultado do anexo separado do
+resultado da criação.
+
+| Alternativa | Por que não |
+|---|---|
+| Ids dentro do `requestFieldValues` da criação | A cadeia acima: falha de anexo vira falha definitiva de criação, e o chamado é perdido |
+| Upload só no clique de confirmar | 8 MB subindo dentro da confirmação: a pessoa espera sem retorno, e queda de rede derruba a criação junto |
+
+**Custo aceito e explícito:** existe uma janela curta em que o chamado existe sem o
+anexo. Para o solicitante é invisível (uma tela só); para quem observa a fila, um chamado
+pode aparecer segundos antes do arquivo. É barato perto de perder chamado.
+
+**Consequências que moram em código:** `subirAnexoTemporario` e
+`materializarAnexosTemporarios` existem separados na interface do cliente (e
+`anexarArquivo` de `RF-34` passou a ser a composição dos dois) · o
+`temporaryAttachmentId` vive em `anexos_pendentes` e **nunca** trafega pelo navegador ·
+`materializarAnexosDoChamado` **não lança**, nunca, e mora fora de
+`ServicoChamados.processar` justamente para não alcançar o `catch` que classifica erro.
+
+---
+
+### D-27 · `RF-62` é fail-OPEN, contra o padrão do projeto — e a distinção é o que resolve
+
+**Data:** 10/08/2026 · **Contexto:** spec `005`, `plan.md` §6 e §9
+
+Em todo o resto do goatlas, ausência de informação **nega**. Aqui, schema de request type
+que **não pôde ser lido** faz a pergunta de `RF-62` não existir e o chamado abrir.
+
+**Por que o desvio é legítimo:** `RF-62` é **qualidade de produto, não trava de
+segurança**. Quem "burla" só consegue abrir o **próprio** chamado sem responder uma
+pergunta — não há dado de terceiro, não há exposição, não há escrita indevida. O que se
+perde é a evidência dele mesmo. Uma trava de segurança fail-open convida à burla (derrubar
+a chamada de schema viraria o caminho); esta não tem prêmio.
+
+**Por que fail-closed seria pior:** significaria **não abrir chamado** durante uma
+indisponibilidade de leitura de schema — a parede que `RNF-18` proíbe. Trocar "chamado sem
+print" por "chamado nenhum" é péssimo negócio.
+
+**Mitigação que já existe:** o schema vem do cache de metadados (`ttlMetadadosSeg`), então
+uma indisponibilidade curta não faz a pergunta sumir para quem acabou de vê-la.
+
+**O que impede a confusão:** o evento vai para a auditoria como
+`schema_tipo_indisponivel`. "O tipo não aceita anexo" e "não deu para saber se aceita" têm
+a mesma cara na tela; na auditoria não podem ter, senão uma indisponibilidade prolongada
+apareceria como uma feature que ninguém usa.
+
+---
+
+### D-28 · `RF-27` endureceu: campo extra fora do schema deixou de passar
+
+**Data:** 10/08/2026 · **Contexto:** spec `005`, `plan.md` §4 (pré-requisito de segurança
+independente da feature) · **Afeta:** `T-130` da spec 002, que entregou `RF-27`
+
+`camposDinamicos` chegava do corpo da requisição e era mesclado em `requestFieldValues`
+**sem allowlist de chave** — só `summary` e `description` eram removidos. O dano era
+contido porque *o Jira* recusa campo que não pertence ao request type: a contenção era do
+outro lado, não nossa.
+
+Com um campo de **anexo** no schema, aquela folga passaria a ser o caminho para colar o
+id do anexo de outra pessoa no próprio chamado — `RF-30` aplicado a arquivo.
+
+**Decisão:** as chaves de `camposDinamicos` são validadas contra o schema do request type,
+e o campo de anexo é **sempre** excluído — o arquivo entra só pelo caminho de `D-26`.
+
+⚠️ **É mudança de comportamento em `RF-27`:** campo extra que passava deixou de passar. E
+**schema indisponível descarta os campos adicionais** (fail-closed no campo) mas **abre o
+chamado** (fail-open no chamado): validação que se desliga sob pressão não é validação, e
+perder campo extra numa indisponibilidade é aceitável — perder o chamado não seria.
+
+---
+
 ### D-29 · Q5 fechada: 7 espaços na allowlist, escolhidos sobre a lista medida
 
 **Data:** 10/08/2026 · **Decisão de:** Kaique · **Contexto:** `Q5`, `RN-06`, `D-01`, `RF-49`

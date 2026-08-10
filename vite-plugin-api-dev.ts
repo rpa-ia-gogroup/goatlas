@@ -194,6 +194,12 @@ export function apiDev(): Plugin {
             { id: 'homolog', rotulo: 'Homologação' },
           ],
         },
+        // RF-61/RF-62 (T-417) — o campo de anexo. Sem ele a pergunta obrigatória não
+        // aparece em dev e a feature só existiria nos testes.
+        //
+        // ⚠️ Ele **não** é renderizado como campo: a rota o filtra (T-406c) e devolve
+        // `aceitaAnexo: true`. Quem desenha o seletor é `PerguntaDeAnexo`.
+        { fieldId: 'customfield_20031', rotulo: 'Anexo', obrigatorio: false, tipo: 'anexo', opcoes: [] },
       ])
       fake.estado.paginas = [
         {

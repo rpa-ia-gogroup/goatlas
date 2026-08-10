@@ -322,6 +322,45 @@ export const TABELAS = [
      avaliado_em     TEXT NOT NULL,
      CHECK (estado IN ('respondido', 'ok', 'risco', 'estourado'))
    )`,
+  /**
+   * Anexos que a pessoa subiu **antes** de o chamado existir — `RF-61`, T-408.
+   *
+   * ## Por que uma tabela, e não memória do Worker
+   *
+   * O `temporaryAttachmentId` nasce no upload e é usado na confirmação, que é **outra
+   * requisição**. O Worker é stateless: guardar em memória já foi bug real neste app (a
+   * demonstração perdia o chamado entre requisições). E mandar o id para o navegador
+   * seria `RF-30` aplicado a arquivo — quem tem o id de outra pessoa anexa o arquivo
+   * dela no próprio chamado. O id fica aqui, e sai daqui com o e-mail no `WHERE`.
+   *
+   * ## As duas constraints, e o que cada uma impede
+   *
+   * - `UNIQUE (chave_idempotencia, nome_arquivo)` — T-411: duplo clique no seletor não
+   *   gera dois temporários do mesmo arquivo. Como em todo o resto do projeto, a
+   *   idempotência vem da constraint, não de um `SELECT` antes do `INSERT`.
+   * - `materializado_em` — T-413b: a materialização acontece **uma vez**. Reconfirmar
+   *   devolve `duplicada: true` com o mesmo `issueKey` (`RF-24`); sem esta coluna, o
+   *   segundo clique anexaria o arquivo de novo.
+   *
+   * ⚠️ **`conversa_id` é nulo no formulário**, e não é redundante com a chave: a chave
+   * correlaciona, o `conversa_id` é o que permite expurgar/auditar por conversa sem
+   * parsear string.
+   */
+  `CREATE TABLE IF NOT EXISTS anexos_pendentes (
+     id                      TEXT PRIMARY KEY,
+     solicitante_email       TEXT NOT NULL,
+     conversa_id             TEXT,
+     chave_idempotencia      TEXT NOT NULL,
+     temporary_attachment_id TEXT NOT NULL,
+     nome_arquivo            TEXT NOT NULL,
+     criado_em               TEXT NOT NULL,
+     materializado_em        TEXT,
+     UNIQUE (chave_idempotencia, nome_arquivo)
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_chave
+     ON anexos_pendentes (chave_idempotencia, solicitante_email)`,
+  `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_pessoa
+     ON anexos_pendentes (solicitante_email, criado_em)`,
 ] as const
 
 /**
@@ -332,7 +371,7 @@ export const TABELAS = [
  * `ALTER` roda uma vez e falha nas seguintes com "duplicate column" — engolir **só**
  * esse erro é o que torna a migração idempotente sem tabela de versão.
  */
-const COLUNAS_ADICIONADAS = [
+export const COLUNAS_ADICIONADAS = [
   // T-304 / RF-19 — a área **no momento da criação** é o dado histórico correto,
   // mesmo que a pessoa mude de área depois.
   `ALTER TABLE vinculos ADD COLUMN area TEXT`,
@@ -348,6 +387,29 @@ const COLUNAS_ADICIONADAS = [
    * porque o agente ajustou o resumo três vezes.
    */
   `ALTER TABLE vinculos ADD COLUMN ultimo_status_notificado TEXT`,
+  /**
+   * T-403 / RF-62 — a declaração de anexo, verificável no servidor.
+   *
+   * ⚠️ **Três estados, e o terceiro é o que dá valor aos outros dois:** `1` tenho ·
+   * `0` não tenho · `NULL` **não respondeu** (ou não havia o que responder, porque o
+   * tipo de chamado não aceita anexo). Um `NOT NULL DEFAULT 0` aqui apagaria a
+   * distinção que a spec §1 existe para criar: chamado de quem declarou não ter
+   * material é informação sobre o caso; chamado de quem nunca foi perguntado é
+   * omissão. Com default, os dois viram "disse que não tinha".
+   */
+  `ALTER TABLE submissoes ADD COLUMN declarou_anexo INTEGER`,
+  /**
+   * T-422 / ScC-7 — quantos anexos efetivamente subiram para este chamado.
+   *
+   * ⚠️ **Por que não contar de `anexos_pendentes`:** aquela tabela é expurgada em
+   * `TTL_ANEXO_PENDENTE_HORAS` (T-415). Um indicador que lê dela mostraria a evidência
+   * chegando hoje e **caindo para zero** amanhã, sem nada ter mudado — o gráfico mediria
+   * o expurgo, não a feature. Aqui o número é durável porque mora onde o chamado mora.
+   *
+   * Três estados, de novo: `NULL` = nunca houve materialização (não havia arquivo, ou a
+   * criação foi diferida) · `0` = tentou e nenhum subiu · `N` = subiram N.
+   */
+  `ALTER TABLE submissoes ADD COLUMN anexos_anexados INTEGER`,
 ] as const
 
 /**

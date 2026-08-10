@@ -20,7 +20,7 @@ import { ERROS, erro, json, lerJson } from './respostas'
 import { verificarLimite } from './limite'
 import { CONCORRENCIA_ATLASSIAN, mapearComLimite } from '../paralelo'
 import { CriacaoRecusada, MENSAGEM_RECUSA } from '../agent/gate'
-import { SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos'
+import { ErroAtlassian, SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos'
 import type { PropostaChamado } from '../agent/estado'
 import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
 import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
@@ -41,6 +41,27 @@ import { verificarCron } from './cron-auth'
 import { areaDoEmail, areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
+import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
+import {
+  exigeDeclaracaoDeAnexo,
+  tipoAceitaAnexo,
+  validarDeclaracao,
+  type SchemaDoTipo,
+} from '../tickets/declaracao-anexo'
+import {
+  chaveDoClienteValida,
+  normalizarChaveIdempotencia,
+} from '../tickets/chave-idempotencia'
+import {
+  JANELA_ENVIOS_PENDENTES_MS,
+  MAX_ANEXOS_POR_CHAMADO,
+  MAX_ENVIOS_PENDENTES_POR_JANELA,
+  TTL_ANEXO_PENDENTE_HORAS,
+} from '../tickets/anexos-pendentes'
+import {
+  materializarAnexosDoChamado,
+  type ResultadoAnexoNaCriacao,
+} from '../tickets/anexo-na-criacao'
 import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
 import { buscaConfigurada } from '../config/diagnostico'
 
@@ -259,15 +280,6 @@ async function rotear(
     if (!conversa.proposta) {
       return ERROS.dadosInvalidos('Ainda não há um chamado montado para confirmar.')
     }
-    await ctx.conversas.registrarConfirmacao(conversa.id)
-    await ctx.auditoria.registrar({
-      atorEmail: eu.email,
-      acao: 'confirmacao_registrada',
-      recurso: conversa.id,
-      resultado: 'sucesso',
-    })
-
-    const atual = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email)
     const serviceDeskId = ctx.valores.service_desk_id
     if (!serviceDeskId) {
       // RNF-25 + Q1: sem service desk configurado não se inventa um.
@@ -278,21 +290,67 @@ async function rotear(
     const piloto = await verificarPiloto(ctx, eu, caminho)
     if (piloto) return piloto
 
+    // ⚠️ **RF-62 (T-402) vem ANTES de `registrarConfirmacao`, e a ordem é a trava.**
+    //
+    // Registrar a confirmação e só então recusar deixaria a conversa marcada como
+    // confirmada **sem** chamado: `confirmacao_registrada` apareceria duas ou três
+    // vezes na auditoria de `RF-17` para uma única abertura, e o carimbo de
+    // `confirmadoEm` passaria a significar "clicou" em vez de "autorizou a criação".
+    // Como a pessoa pode responder e confirmar de novo (`SC-03`), o caminho recusado
+    // não é raro — é o caminho normal de quem ainda não respondeu.
+    const corpoConfirmacao = await lerJson<Record<string, unknown>>(req)
+    const schema = await lerSchemaDoTipo(
+      ctx,
+      eu.email,
+      serviceDeskId,
+      conversa.proposta.tipoChamadoId,
+    )
+    const declaracao = await autorizarDeclaracaoDeAnexo(
+      ctx,
+      eu.email,
+      conversa.proposta.tipoChamadoId,
+      schema,
+      corpoConfirmacao?.declarouAnexo,
+    )
+    if ('recusa' in declaracao) return declaracao.recusa
+
+    await ctx.conversas.registrarConfirmacao(conversa.id)
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'confirmacao_registrada',
+      recurso: conversa.id,
+      resultado: 'sucesso',
+    })
+
+    const atual = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email)
+
     // A chave de idempotência é derivada da CONVERSA, não gerada por requisição:
-    // é o que faz duplo clique e reenvio caírem na mesma submissão (RF-24).
+    // é o que faz duplo clique e reenvio caírem na mesma submissão (RF-24). E é escrita
+    // pela mesma função que a rota de upload usa (T-409b) — se as duas divergirem, o
+    // anexo não casa com o chamado e ninguém vê erro nenhum.
+    const chaveDaConversa = normalizarChaveIdempotencia({
+      via: 'conversa',
+      conversaId: conversa.id,
+    })
     const r = await ctx.chamados.abrirPorConversa(
       atual!,
       serviceDeskId,
-      `conversa:${conversa.id}`,
+      chaveDaConversa,
       areaDoEmail(eu.email, ctx.valores.areas_por_email),
+      declaracao.declarouAnexo,
     )
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
+    const anexo = await materializarAnexosDoChamado(ctx, {
+      chaveIdempotencia: chaveDaConversa,
+      solicitanteEmail: eu.email,
+      issueKey: r.issueKey,
+    })
     await avisarCriacao(ctx, r, {
       solicitanteEmail: eu.email,
       titulo: atual!.proposta!.titulo,
       prioridade: atual!.proposta!.prioridade,
     })
-    return json(respostaCriacao(r, atual!.proposta!.prioridade), 201)
+    return json(respostaCriacao(r, atual!.proposta!.prioridade, anexo), 201)
   }
 
   // --- formulário mínimo, caminho sem IA (D-04) -----------------------------
@@ -309,20 +367,55 @@ async function rotear(
     const piloto = await verificarPiloto(ctx, eu, caminho)
     if (piloto) return piloto
 
-    const chave =
-      typeof corpo?.chaveIdempotencia === 'string' && corpo.chaveIdempotencia.length > 0
-        ? `form:${eu.email}:${corpo.chaveIdempotencia}`
-        : `form:${eu.email}:${ctx.novoId()}`
+    // T-409b — a MESMA função que a rota de upload usa. Chave ausente ainda é tolerada
+    // aqui (o formulário sem anexo não pode regredir), e nesse caso simplesmente não há
+    // anexo para casar.
+    const chave = normalizarChaveIdempotencia({
+      via: 'formulario',
+      solicitanteEmail: eu.email,
+      chaveDoCliente: chaveDoClienteValida(corpo?.chaveIdempotencia) ?? ctx.novoId(),
+    })
 
     // RF-27 (T-130) — campos adicionais do request type, coletados pelo
     // formulário dinâmico. Ausente/inválido = nenhum, nunca erro: o caminho sem
     // IA não pode regredir por causa de um campo extra malformado.
-    const camposDinamicos = extrairCamposDinamicos(corpo?.camposDinamicos)
+    //
+    // ⚠️ T-401 — e as CHAVES são validadas contra o schema, não aceitas do cliente.
+    // Schema indisponível descarta todos (fail-closed no campo) e ainda assim abre o
+    // chamado (fail-open no chamado, `RNF-18`): validação que se desliga sob pressão
+    // não é validação, mas recusar chamado por causa dela seria a parede que o
+    // caminho sem IA existe para não ser.
+    const schema = await lerSchemaDoTipo(
+      ctx,
+      eu.email,
+      serviceDeskId,
+      validada.proposta.tipoChamadoId,
+    )
+
+    // RF-62 (T-402/T-404) — a pergunta é pré-condição da criação, e a recusa vem ANTES
+    // de qualquer efeito: nada persistido, nada no JSM.
+    const declaracao = await autorizarDeclaracaoDeAnexo(
+      ctx,
+      eu.email,
+      validada.proposta.tipoChamadoId,
+      schema,
+      corpo?.declarouAnexo,
+    )
+    if ('recusa' in declaracao) return declaracao.recusa
+
+    const camposDinamicos = await filtrarCamposComSchema(
+      ctx,
+      eu.email,
+      validada.proposta.tipoChamadoId,
+      extrairCamposDinamicos(corpo?.camposDinamicos),
+      schema,
+    )
 
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
       area: areaDoEmail(eu.email, ctx.valores.areas_por_email),
+      declarouAnexo: declaracao.declarouAnexo,
       payload: {
         titulo: validada.proposta.titulo,
         descricao: validada.proposta.descricao,
@@ -332,12 +425,17 @@ async function rotear(
         ...(camposDinamicos ? { camposDinamicos } : {}),
       },
     })
+    const anexo = await materializarAnexosDoChamado(ctx, {
+      chaveIdempotencia: chave,
+      solicitanteEmail: eu.email,
+      issueKey: r.issueKey,
+    })
     await avisarCriacao(ctx, r, {
       solicitanteEmail: eu.email,
       titulo: validada.proposta.titulo,
       prioridade: validada.proposta.prioridade,
     })
-    return json(respostaCriacao(r, validada.proposta.prioridade), 201)
+    return json(respostaCriacao(r, validada.proposta.prioridade, anexo), 201)
   }
 
   // RF-27 (T-130) — schema de campos adicionais do request type, para o
@@ -356,8 +454,17 @@ async function rotear(
       )
     }
     try {
-      const itens = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, requestTypeId)
-      return json({ itens })
+      const campos = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, requestTypeId)
+      return json({
+        // ⚠️ **T-406c — o campo de anexo sai da lista.** Quem desenha o seletor de
+        // arquivo é a tela de `RF-61`; deixá-lo aqui mostraria os dois lado a lado, e
+        // como o desconhecido cai em `'texto'`, o campo "Anexo" apareceria como uma
+        // caixa de texto ao lado do seletor de verdade.
+        itens: campos.filter((c) => c.tipo !== 'anexo'),
+        // ...e a informação de que ele existe continua chegando, porque é ela que faz a
+        // pergunta de `RF-62` aparecer (ou não) na tela.
+        aceitaAnexo: tipoAceitaAnexo(campos),
+      })
     } catch {
       return ERROS.conteudoIndisponivel()
     }
@@ -558,6 +665,125 @@ async function rotear(
     return json({ ok: true }, 201)
   }
 
+  // --- anexo ANTES do chamado existir (RF-61, T-409) -------------------------
+  //
+  // ## O que esta rota é
+  //
+  // O primeiro dos dois passos do JSM, isolado: sobe o arquivo como temporário e guarda
+  // o id **no servidor**. A materialização acontece na confirmação, depois de o chamado
+  // nascer (`plan.md` §2).
+  //
+  // ⚠️ **Devolve `{ ok, nome }` e nada mais.** O `temporaryAttachmentId` não trafega: com
+  // ele no navegador, colar o arquivo de outra pessoa no próprio chamado seria trivial —
+  // `RF-30` aplicado a arquivo (`SC-11`).
+  if (caminho === '/api/anexos-pendentes' && req.method === 'POST') {
+    const serviceDeskId = ctx.valores.service_desk_id
+    if (!serviceDeskId) {
+      return ERROS.dadosInvalidos(
+        'O envio de anexos ainda não foi configurado nesta instalação. Fale com o time de tech.',
+      )
+    }
+    // T-410 — os mesmos gates das rotas de criação. Esta rota gasta a credencial única e
+    // escreve na Atlassian; ficar fora do gate de piloto faria dela o caminho aberto.
+    const piloto = await verificarPiloto(ctx, eu, caminho)
+    if (piloto) return piloto
+
+    let form: FormData
+    try {
+      form = await req.formData()
+    } catch {
+      return ERROS.dadosInvalidos('Não consegui ler o arquivo enviado. Tente novamente.')
+    }
+
+    // ⚠️ A chave é **obrigatória** (T-409b). Gerar uma aqui produziria um arquivo órfão
+    // por construção: a criação procuraria outra chave, nenhuma linha casaria, e a tela
+    // teria dito "enviado".
+    const chaveDoCliente = chaveDoClienteValida(form.get('chaveIdempotencia'))
+    const conversaId = typeof form.get('conversaId') === 'string' ? String(form.get('conversaId')) : null
+    if ((chaveDoCliente === null) === (conversaId === null)) {
+      return ERROS.dadosInvalidos(
+        'Não consegui identificar a que chamado este arquivo pertence. Recarregue a página e tente de novo.',
+      )
+    }
+
+    let chaveIdempotencia: string
+    if (conversaId !== null) {
+      // A chave da conversa não embute e-mail, então a posse é verificada aqui — e um id
+      // de outra pessoa responde 404 como todo o resto (`RF-30`).
+      const conversa = await ctx.conversas.obterDoSolicitante(conversaId, eu.email)
+      if (!conversa) return ERROS.naoEncontrado()
+      chaveIdempotencia = normalizarChaveIdempotencia({ via: 'conversa', conversaId })
+    } else {
+      chaveIdempotencia = normalizarChaveIdempotencia({
+        via: 'formulario',
+        solicitanteEmail: eu.email,
+        chaveDoCliente: chaveDoCliente!,
+      })
+    }
+
+    const validado = await validarAnexoEnviado(form.get('arquivo'))
+    if (!validado.ok) return ERROS.dadosInvalidos(validado.mensagem)
+
+    // T-409c — o teto é por CHAMADO e a recusa é mensagem. `.slice()` faria o arquivo
+    // excedente desaparecer sem nada na tela (`SC-08`).
+    const jaEnviados = await ctx.anexosPendentes.contarDaChave(chaveIdempotencia, eu.email)
+    if (jaEnviados >= MAX_ANEXOS_POR_CHAMADO) {
+      return ERROS.dadosInvalidos(
+        `Você já anexou ${MAX_ANEXOS_POR_CHAMADO} arquivos neste chamado, que é o limite. Abra o chamado e anexe o resto depois, ou junte tudo num arquivo só.`,
+      )
+    }
+
+    // T-410 / R-02 — teto por pessoa na janela, contra envio que nunca vira chamado.
+    const desde = new Date(Date.parse(ctx.agora()) - JANELA_ENVIOS_PENDENTES_MS).toISOString()
+    const naJanela = await ctx.anexosPendentes.contarDaPessoaDesde(eu.email, desde)
+    if (naJanela >= MAX_ENVIOS_PENDENTES_POR_JANELA) return ERROS.limiteRequisicoes()
+
+    let temporaryAttachmentId: string
+    try {
+      temporaryAttachmentId = await ctx.atlassian.subirAnexoTemporario(serviceDeskId, {
+        nome: validado.nome,
+        tipo: validado.tipo,
+        bytes: validado.bytes,
+      })
+    } catch (e) {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'anexo_enviado',
+        recurso: chaveIdempotencia,
+        resultado: 'falha',
+        detalhe: { etapa: 'temporario', nome: validado.nome },
+      })
+      // A mensagem do modo somente leitura chega à pessoa (`SC-10`): recusa honesta,
+      // nunca sucesso simulado. Indisponibilidade comum cai na frase genérica.
+      const mensagem =
+        e instanceof ErroAtlassian && !e.detalhe.transitorio
+          ? e.message
+          : 'Não consegui enviar o arquivo agora. Tente novamente em instantes — você também pode abrir o chamado e anexar depois.'
+      return json({ ok: false, mensagem }, 503)
+    }
+
+    const { duplicado } = await ctx.anexosPendentes.registrar({
+      id: ctx.novoId(),
+      solicitanteEmail: eu.email,
+      conversaId,
+      chaveIdempotencia,
+      temporaryAttachmentId,
+      nomeArquivo: validado.nome,
+    })
+
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'anexo_enviado',
+      recurso: chaveIdempotencia,
+      resultado: 'sucesso',
+      detalhe: { etapa: 'temporario', nome: validado.nome, duplicado },
+    })
+
+    // Duplo clique responde 201 de propósito (`SC-09`): não é erro da pessoa, e a
+    // constraint já garantiu que existe uma linha só.
+    return json({ ok: true, nome: validado.nome, anexados: duplicado ? jaEnviados : jaEnviados + 1 }, 201)
+  }
+
   // --- anexo enviado pelo solicitante (RF-25, RF-34, T-240) ------------------
   //
   // Dois passos no JSM (ver `atlassian/cliente.ts#anexarArquivo`), um vínculo antes:
@@ -583,8 +809,16 @@ async function rotear(
       return ERROS.dadosInvalidos('Não consegui ler o arquivo enviado. Tente novamente.')
     }
 
-    const arquivos = form.getAll('arquivo').slice(0, MAX_ANEXOS_POR_ENVIO)
+    const arquivos = form.getAll('arquivo')
     if (arquivos.length === 0) return ERROS.dadosInvalidos('Anexe um arquivo para enviar.')
+    // ⚠️ **Recusa, nunca `.slice()`** (`plan.md` §11, T-409c). O truncamento silencioso
+    // fazia o quarto arquivo desaparecer sem nada na tela — a pessoa achava que o print
+    // decisivo tinha ido. `SC-08` exige dizer o limite.
+    if (arquivos.length > MAX_ANEXOS_POR_ENVIO) {
+      return ERROS.dadosInvalidos(
+        `Envie no máximo ${MAX_ANEXOS_POR_ENVIO} arquivos por vez. Mande os primeiros e repita o envio para os demais.`,
+      )
+    }
 
     const enviados: string[] = []
     for (const bruto of arquivos) {
@@ -1478,12 +1712,21 @@ function estadoVerificacao(
 function respostaCriacao(
   r: { issueKey: string | null; estado: string; duplicada: boolean; verificadoRegras: boolean },
   prioridade: Prioridade,
+  /**
+   * `RF-63` — o resultado do anexo é um dado **separado** do resultado da criação.
+   *
+   * ⚠️ Separado no tipo, não só no texto: aninhar o anexo dentro do estado da criação
+   * (um `estado: 'criado_sem_anexo'`, por exemplo) faria a tela decidir o que mostrar
+   * sobre o chamado a partir de algo que aconteceu com um arquivo.
+   */
+  anexo: ResultadoAnexoNaCriacao,
 ) {
   return {
     issueKey: r.issueKey,
     estado: r.estado,
     duplicada: r.duplicada,
     verificadoRegras: r.verificadoRegras,
+    anexo,
     prioridade,
     // RN-08 — sempre PRIMEIRA RESPOSTA, e o rótulo deixa isso explícito.
     slaPrimeiraRespostaHoras: SLA_PRIMEIRA_RESPOSTA_HORAS[prioridade],
@@ -1501,16 +1744,105 @@ function respostaCriacao(
  * campo adicional", não erro — o formulário fixo (título/descrição/tipo/
  * prioridade) não pode deixar de funcionar por causa de um extra torto.
  */
-function extrairCamposDinamicos(bruto: unknown): Record<string, string> | null {
-  if (!bruto || typeof bruto !== 'object' || Array.isArray(bruto)) return null
-  const saida: Record<string, string> = {}
-  for (const [chave, valor] of Object.entries(bruto as Record<string, unknown>)) {
-    if (typeof valor !== 'string') continue
-    const limpo = valor.trim()
-    if (limpo.length === 0) continue
-    saida[chave] = limpo
+/**
+ * Lê o schema do request type **uma vez por criação** — T-401 + T-404.
+ *
+ * ⚠️ Uma leitura, duas decisões: quais campos adicionais passam (T-401) e se a
+ * pergunta de `RF-62` existe (T-404). Duas leituras seriam duas chamadas com a
+ * credencial única para responder à mesma pergunta (`R-02`) — e, pior, poderiam
+ * **discordar** no meio de uma criação, com o filtro aceitando um campo que o gate
+ * decidiu não existir.
+ *
+ * Indisponibilidade devolve `{ conhecido: false }` e **audita**. O `null` não serve
+ * aqui: "o tipo não tem campos" e "não deu para saber quais tem" levam a decisões
+ * opostas em `exigeDeclaracaoDeAnexo`.
+ */
+async function lerSchemaDoTipo(
+  ctx: Contexto,
+  atorEmail: string,
+  serviceDeskId: string,
+  tipoChamadoId: string,
+): Promise<SchemaDoTipo> {
+  try {
+    const campos = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, tipoChamadoId)
+    return { conhecido: true, campos }
+  } catch {
+    await ctx.auditoria.registrar({
+      atorEmail,
+      acao: 'schema_tipo_indisponivel',
+      recurso: tipoChamadoId,
+      resultado: 'falha',
+      detalhe: { tipoChamadoId, consequencia: 'declaracao_de_anexo_nao_exigida' },
+    })
+    return { conhecido: false }
   }
-  return Object.keys(saida).length > 0 ? saida : null
+}
+
+/**
+ * Aplica o schema já lido sobre os campos que o cliente mandou — T-401.
+ *
+ * ⚠️ **Schema indisponível descarta tudo**, e o descarte é auditado. Silêncio aqui
+ * esconderia duas coisas diferentes com a mesma cara: "o tipo não tem esse campo" e
+ * "não deu para saber quais campos o tipo tem".
+ */
+async function filtrarCamposComSchema(
+  ctx: Contexto,
+  atorEmail: string,
+  tipoChamadoId: string,
+  campos: Record<string, string> | null,
+  schema: SchemaDoTipo,
+): Promise<Record<string, string> | null> {
+  if (!campos) return null
+  if (!schema.conhecido) {
+    await ctx.auditoria.registrar({
+      atorEmail,
+      acao: 'campos_dinamicos_descartados',
+      recurso: tipoChamadoId,
+      resultado: 'negado',
+      detalhe: { motivo: 'schema_indisponivel', campos: Object.keys(campos) },
+    })
+    return null
+  }
+  const filtrados = filtrarPeloSchema(campos, schema.campos)
+  const descartadas = Object.keys(campos).filter((c) => !filtrados || !(c in filtrados))
+  if (descartadas.length > 0) {
+    await ctx.auditoria.registrar({
+      atorEmail,
+      acao: 'campos_dinamicos_descartados',
+      recurso: tipoChamadoId,
+      resultado: 'negado',
+      // Só os NOMES dos campos: o valor é conteúdo do chamado e não tem por que
+      // ser duplicado na auditoria.
+      detalhe: { motivo: 'fora_do_schema', campos: descartadas },
+    })
+  }
+  return filtrados
+}
+
+/**
+ * O gate de `RF-62`, nas duas rotas de criação — T-402, T-403, T-404.
+ *
+ * Devolve a declaração já decidida, ou a `Response` de recusa. Uma função só para os
+ * dois caminhos porque a trava precisa ser a mesma: um segundo lugar decidindo isto
+ * seria um caminho de criação que não pergunta, e "qual dos dois esqueceu" é o tipo de
+ * divergência que ninguém vê até alguém abrir chamado sem evidência pelo lado errado.
+ */
+async function autorizarDeclaracaoDeAnexo(
+  ctx: Contexto,
+  atorEmail: string,
+  tipoChamadoId: string,
+  schema: SchemaDoTipo,
+  bruto: unknown,
+): Promise<{ readonly declarouAnexo: boolean | null } | { readonly recusa: Response }> {
+  const r = validarDeclaracao(bruto, exigeDeclaracaoDeAnexo(schema))
+  if (r.ok) return { declarouAnexo: r.declarouAnexo }
+  await ctx.auditoria.registrar({
+    atorEmail,
+    acao: 'declaracao_anexo_ausente',
+    recurso: tipoChamadoId,
+    resultado: 'negado',
+  })
+  return { recusa: ERROS.dadosInvalidos(r.mensagem) }
 }
 
 type ValidacaoProposta = { proposta: PropostaChamado } | { erro: string }
@@ -1730,13 +2062,35 @@ async function tratarCron(
 
   if (caminho === '/api/cron/reprocessar-submissoes') {
     const r = await ctx.chamados.reprocessarPendentes(25)
+
+    /**
+     * T-415 — o expurgo dos anexos pendentes pega carona AQUI, e não na retenção.
+     *
+     * ⚠️ Duas razões, e as duas valem por si:
+     *
+     * 1. `aplicarRetencao` **não apaga nada** com política `null`, que é o default do
+     *    MVP (`D-20`, e apagar dado pessoal é irreversível). Apoiar-se nela deixaria a
+     *    tabela crescer para sempre.
+     * 2. `/api/cron/retencao` é a rota **destrutiva**, a única que mantém HMAC
+     *    obrigatório — e por isso responde **403** hoje (`CLAUDE.md`). Pendurar o
+     *    expurgo lá seria escrever código que nunca roda.
+     *
+     * Aqui é seguro porque este expurgo não é destrutivo no sentido que importa: a linha
+     * já não vale nada (o id expirou do lado da Atlassian horas antes), não é histórico
+     * de ninguém, e o chamado — que é o dado real — não é tocado.
+     */
+    const limite = new Date(
+      Date.parse(ctx.agora()) - TTL_ANEXO_PENDENTE_HORAS * 3600 * 1000,
+    ).toISOString()
+    const anexosPendentesExpurgados = await ctx.anexosPendentes.expurgarAnterioresA(limite)
+
     await ctx.auditoria.registrar({
       atorEmail: '(cron)',
       acao: 'submissao_reprocessada',
       resultado: 'sucesso',
-      detalhe: r,
+      detalhe: { ...r, anexosPendentesExpurgados },
     })
-    return json(r)
+    return json({ ...r, anexosPendentesExpurgados })
   }
 
   if (caminho === '/api/cron/reconciliar-vinculos') {

@@ -118,7 +118,12 @@ export interface TipoChamado {
 
 /* ---------- campos adicionais do formulário sem IA (RF-27, T-130) ------ */
 
-export type TipoCampoRequestType = 'texto' | 'texto_longo' | 'selecao'
+/**
+ * ⚠️ `'anexo'` existe no contrato do servidor e **nunca chega em `itens`**: a rota o
+ * filtra (T-406c), porque quem desenha o seletor de arquivo é `PerguntaDeAnexo`. Ele fica
+ * aqui para o tipo não mentir sobre o que o servidor pode devolver.
+ */
+export type TipoCampoRequestType = 'texto' | 'texto_longo' | 'selecao' | 'anexo'
 
 export interface OpcaoCampoRequestType {
   readonly id: string
@@ -133,11 +138,24 @@ export interface CampoRequestType {
   readonly opcoes: readonly OpcaoCampoRequestType[]
 }
 
+/**
+ * RF-63 — o que aconteceu com o anexo, **separado** do que aconteceu com o chamado.
+ *
+ * `adiado` é o caso de `SC-07b`: a criação foi para a fila e o arquivo não vai com ela.
+ */
+export interface ResultadoAnexo {
+  readonly estado: 'sem_anexo' | 'anexado' | 'parcial' | 'falhou' | 'adiado'
+  readonly anexados: readonly string[]
+  readonly falharam: readonly string[]
+  readonly mensagem: string
+}
+
 export interface ResultadoCriacao {
   readonly issueKey: string | null
   readonly estado: 'criado' | 'pendente'
   readonly duplicada: boolean
   readonly verificadoRegras: boolean
+  readonly anexo: ResultadoAnexo
   readonly prioridade: Prioridade
   readonly slaPrimeiraRespostaHoras: number
   readonly mensagem: string
@@ -392,6 +410,22 @@ export interface ResumoPainel {
     readonly conversasNoTeto: number
   }
   readonly sla: ResumoSla
+  /**
+   * T-422 / `ScC-7` — a evidência que chega junto com o chamado.
+   *
+   * `declarouTerEFalhou` é o número que exige ação nossa, e o único que uma taxa
+   * sozinha esconderia: ele derruba a evidência sem ninguém ter deixado de colaborar.
+   */
+  readonly evidencia: {
+    readonly chamadosCriados: number
+    readonly perguntados: number
+    readonly comEvidencia: number
+    readonly declarouTerEFalhou: number
+    readonly declarouNaoTer: number
+    readonly semPergunta: number
+    /** `null` enquanto ninguém foi perguntado. Nunca `0%`. */
+    readonly taxaPct: number | null
+  }
   /** T-235: o número é PROXY, não medição (`D-20`). O painel diz isso na tela. */
   readonly deflexaoResolvidaConhecida: false
   readonly avisoDeflexao: string
@@ -575,9 +609,14 @@ export const api = {
       { method: 'PUT', body: JSON.stringify(proposta) },
     ),
 
-  confirmar: (conversaId: string) =>
+  /**
+   * RF-62 — `declarouAnexo` só vai quando o tipo aceita anexo. Mandar `false` num tipo
+   * que não pergunta gravaria "disse que não tinha" para quem nunca foi perguntado.
+   */
+  confirmar: (conversaId: string, declarouAnexo?: boolean) =>
     chamar<ResultadoCriacao>(`/api/conversas/${encodeURIComponent(conversaId)}/confirmar`, {
       method: 'POST',
+      ...(declarouAnexo === undefined ? {} : { body: JSON.stringify({ declarouAnexo }) }),
     }),
 
   abrirPorFormulario: (dados: {
@@ -588,12 +627,48 @@ export const api = {
     chaveIdempotencia: string
     /** RF-27 (T-130) — valores dos campos adicionais do request type. */
     camposDinamicos?: Record<string, string>
+    /** RF-62 — ausente quando o tipo não expõe campo de anexo. */
+    declarouAnexo?: boolean
   }) => chamar<ResultadoCriacao>('/api/chamados', { method: 'POST', body: JSON.stringify(dados) }),
 
   camposDoTipo: (requestTypeId: string) =>
-    chamar<{ itens: CampoRequestType[] }>(
+    chamar<{ itens: CampoRequestType[]; aceitaAnexo: boolean }>(
       `/api/tipos-chamado/${encodeURIComponent(requestTypeId)}/campos`,
     ),
+
+  /**
+   * RF-61 (T-409) — anexo ANTES de o chamado existir.
+   *
+   * Manda a chave crua (ou o id da conversa) e o arquivo; recebe `{ ok, nome }`. Nenhum
+   * identificador de anexo trafega nos dois sentidos — quem normaliza a chave e guarda o
+   * id temporário é o servidor.
+   *
+   * `FormData` sem `Content-Type` explícito de propósito: o `fetch` gera o boundary junto
+   * com o corpo, e declarar o tipo à mão produz um boundary que não corresponde.
+   */
+  anexarAntesDoChamado: async (
+    alvo:
+      | { readonly via: 'formulario'; readonly chaveIdempotencia: string }
+      | { readonly via: 'conversa'; readonly conversaId: string },
+    arquivo: File,
+  ) => {
+    const form = new FormData()
+    if (alvo.via === 'conversa') form.append('conversaId', alvo.conversaId)
+    else form.append('chaveIdempotencia', alvo.chaveIdempotencia)
+    form.append('arquivo', arquivo)
+    const resposta = await fetch('/api/anexos-pendentes', { method: 'POST', body: form })
+    const dados = (await resposta.json().catch(() => null)) as
+      | { ok?: boolean; nome?: string; erro?: string; mensagem?: string }
+      | null
+    if (!resposta.ok) {
+      throw new ErroApi(
+        dados?.erro ?? dados?.mensagem ?? 'Não consegui enviar o arquivo agora.',
+        'anexo_pendente',
+        resposta.status,
+      )
+    }
+    return { nome: dados?.nome ?? arquivo.name }
+  },
 
   meusChamados: (filtros: { status?: string; termo?: string } = {}) => {
     const q = new URLSearchParams()

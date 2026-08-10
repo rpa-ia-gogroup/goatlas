@@ -347,6 +347,16 @@ created: "2026-08-04"
       `campos` virar `[]` — o formulário fixo **continua funcionando** (RNF-18).
       Verificado em `npm run dev`: validação nativa bloqueia obrigatório vazio, os
       três tipos renderizam e o chamado abre com os valores corretos.
+      ⚠️ **ENDURECIDO PELA SPEC 005 (T-400/T-401, `D-28`), e é mudança de
+      comportamento desta tarefa:** as chaves de `camposDinamicos` passaram a ser
+      **validadas contra o schema** — campo extra que passava aqui deixou de passar.
+      A folga não era teórica: com um campo de **anexo** no schema, ela seria o
+      caminho para colar o id do anexo de outra pessoa no próprio chamado (`RF-30`
+      aplicado a arquivo). Schema indisponível descarta os campos adicionais
+      (fail-closed no campo) e **ainda abre o chamado** (fail-open no chamado). E o
+      campo de tipo `anexo` **sai** da lista que esta tarefa renderiza (T-406c):
+      quem desenha o seletor de arquivo é `RF-61`, e sem o filtro a tela mostraria
+      uma caixa de texto chamada "Anexo" ao lado do seletor de verdade.
 - [x] **T-131** `RF-57` (P2): revogar produto pelo console, **dupla confirmação** e
       auditoria. Única escrita da credencial de Org Admin.
       _Requirements: RF-57, RN-10_
