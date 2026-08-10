@@ -440,6 +440,23 @@ destes reabre um vazamento que já foi fechado.
 - **Entidade é decodificada em UMA passagem.** `&amp;lt;` para em `&lt;`. Um laço
   "decodifica até não mudar" transformaria dupla codificação em tag — é o bug
   clássico de sanitizador. E o resultado **nunca** é reparseado.
+- 🚨 **A tabela de entidades é DUAS, e o lookup de letra é case-SENSITIVE**
+  (`confluence/sanitizar.ts`). `&Eacute;` é **É** e `&eacute;` é **é**; `&COPY;` e
+  `&copy;` são o mesmo `©`. Havia uma tabela só, consultada com `nome.toLowerCase()`, e
+  **nenhuma letra do Latin-1 dentro dela** — então a aba Documentação mostrava
+  `Pr&eacute;-requisitos` literal (medido no app real em 07/08/2026, `version 22`, e
+  viola a regra 4 na única superfície feita para ler). ⚠️ O conserto "óbvio" — só
+  acrescentar as entradas em minúscula — faria `&Eacute; preciso` virar `é preciso`:
+  acento certo, **caixa errada, em silêncio**, que é pior que o bug original porque
+  parece consertado. Por isso são duas tabelas e `letraOuSimbolo` busca a letra
+  **exata** antes de cair no caminho tolerante do símbolo. As maiúsculas são
+  **derivadas** (`eacute` → `Eacute`, `é` → `É`), o que é correto porque a entidade
+  maiúscula capitaliza só a primeira letra do nome — `&EACUTE;` não existe e continua
+  saindo cru, como no navegador. E `&szlig;` fica fora da derivação: `&Szlig;` não
+  existe.
+- **Entidade NUMÉRICA nunca esteve quebrada** — `doPontoDeCodigo` resolve qualquer
+  código. Por isso o bug acima dependia de *como o autor da página digitou*, e é o tipo
+  de defeito que atravessa revisão inteira sem ninguém reproduzir.
 - **A sanitização tem DUAS passagens e a bruta não sai do arquivo.** Tokenizar +
   árvore bruta (malformado, profundidade, tamanho) → converter (allowlist).
   Misturar as duas espalha a checagem por cima do tratamento de erro de parse, e um
@@ -602,7 +619,7 @@ tipos `70,134,108,68`, espaços `GT,DTE,GN`.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**698 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**777 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 Pronto na Fase 1: fundação, as seis travas críticas, clientes de Atlassian e IA,
 runtime do agente, rotas, worker, frontend e `docs/DEPLOY.md`. Pronto na Fase 2: a
 **trava da fase** — sanitização e renderização do Confluence (`RNF-06`, `RF-39`,

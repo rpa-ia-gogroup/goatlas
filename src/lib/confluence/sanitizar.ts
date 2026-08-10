@@ -142,7 +142,11 @@ const IMAGEM_EXTERNA_PERMITIDA: boolean = false
 /* Entidades                                                              */
 /* ---------------------------------------------------------------------- */
 
-const ENTIDADES_NOMEADAS: Readonly<Record<string, string>> = {
+/**
+ * Símbolos — o lookup **ignora a caixa**, e aqui isso é correto: `&COPY;` e `&copy;` são o
+ * mesmo `©`, e o HTML tolera as duas formas.
+ */
+const ENTIDADES_SIMBOLO: Readonly<Record<string, string>> = {
   amp: '&',
   lt: '<',
   gt: '>',
@@ -178,6 +182,78 @@ const ENTIDADES_NOMEADAS: Readonly<Record<string, string>> = {
 }
 
 /**
+ * Letras acentuadas, em MINÚSCULA. A maiúscula é derivada abaixo.
+ *
+ * ## Por que esta tabela não existia, e o que isso causou
+ *
+ * Medido no app real em 07/08/2026 (`version 22`): uma página do Confluence aparecia na aba
+ * Documentação com `Pr&eacute;-requisitos` e `&Eacute; preciso` **literais** — violando a
+ * regra 4 do projeto na única superfície feita para as pessoas lerem.
+ *
+ * Só a entidade **nomeada** falhava. A numérica (`&#233;`) sempre funcionou, porque
+ * `doPontoDeCodigo` resolve qualquer código: o sintoma dependia de como o autor da página
+ * digitou, que é o tipo de bug que atravessa revisão inteira sem ninguém reproduzir.
+ *
+ * ## 🚨 Por que é SEPARADA dos símbolos, e não mais entradas na mesma tabela
+ *
+ * Porque o lookup de letra é **case-sensitive** e o de símbolo não. `&Eacute;` é **É** e
+ * `&eacute;` é **é**. Uma tabela só, consultada com `toLowerCase()` como era antes,
+ * transformaria `&Eacute; preciso` em `é preciso` — acento certo, **caixa errada, em
+ * silêncio**. Isso é pior que o bug original: parece consertado.
+ *
+ * Cobertura: português inteiro, mais as vizinhas que aparecem em documentação técnica
+ * (espanhol, francês, alemão, italiano). Não pretende ser a lista HTML5 completa — são
+ * 2.231 entidades, e o que falta continua saindo cru, que é o comportamento honesto.
+ */
+const LETRAS_MINUSCULAS: Readonly<Record<string, string>> = {
+  aacute: 'á', agrave: 'à', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ',
+  ccedil: 'ç',
+  eacute: 'é', egrave: 'è', ecirc: 'ê', euml: 'ë',
+  iacute: 'í', igrave: 'ì', icirc: 'î', iuml: 'ï',
+  ntilde: 'ñ',
+  oacute: 'ó', ograve: 'ò', ocirc: 'ô', otilde: 'õ', ouml: 'ö', oslash: 'ø',
+  uacute: 'ú', ugrave: 'ù', ucirc: 'û', uuml: 'ü',
+  yacute: 'ý', yuml: 'ÿ',
+}
+
+/**
+ * `ß` fica fora da derivação: **não existe `&Szlig;`**. Derivar produziria uma entidade que
+ * o navegador não reconhece, e nós decodificaríamos algo que ele deixa cru.
+ */
+const LETRAS_SEM_MAIUSCULA: Readonly<Record<string, string>> = { szlig: 'ß' }
+
+/**
+ * As duas caixas de cada letra, **derivadas** em vez de digitadas.
+ *
+ * ⚠️ A derivação é correta porque a forma maiúscula da entidade HTML capitaliza **só a
+ * primeira letra do nome** (`&Eacute;`, `&Ccedil;`, `&Atilde;`) — nunca o nome inteiro.
+ * `&EACUTE;` não é entidade, e continua saindo cru, como no navegador.
+ *
+ * Derivar elimina a classe de erro mais provável aqui: um par trocado (`Eacute: 'é'`) que
+ * ninguém enxerga lendo 56 linhas de tabela.
+ */
+const ENTIDADES_LETRA: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries([
+    ...Object.entries(LETRAS_SEM_MAIUSCULA),
+    ...Object.entries(LETRAS_MINUSCULAS).flatMap(([nome, letra]) => [
+      [nome, letra],
+      [nome.charAt(0).toUpperCase() + nome.slice(1), letra.toUpperCase()],
+    ]),
+  ]),
+)
+
+/**
+ * Resolve o nome da entidade — **letra por busca EXATA, símbolo por caixa livre**.
+ *
+ * A exatidão na letra é o conserto; o `toLowerCase()` sobrevive só no caminho do símbolo,
+ * onde é o comportamento certo. Trocar a ordem ou aplicar `toLowerCase()` antes reabre o
+ * bug de caixa, e ele volta **sem quebrar nada visível**.
+ */
+function letraOuSimbolo(nome: string): string | undefined {
+  return ENTIDADES_LETRA[nome] ?? ENTIDADES_SIMBOLO[nome.toLowerCase()]
+}
+
+/**
  * Decodifica entidades em **uma passagem só**.
  *
  * A passagem única é o ponto: `&amp;lt;` vira `&lt;` e **para aí**, porque o `&lt;`
@@ -187,6 +263,9 @@ const ENTIDADES_NOMEADAS: Readonly<Record<string, string>> = {
  * Numeral aceita ponto-e-vírgula opcional (o navegador também aceita, e é por aí
  * que `&#106;avascript` chega); nomeada exige o `;`, senão "AT&T" viraria outra
  * coisa.
+ *
+ * ⚠️ A resolução do nome é **case-sensitive para letra** e tolerante para símbolo — ver
+ * `letraOuSimbolo`. Foi um bug real: `&Eacute;` virava `é`.
  */
 export function decodificarEntidades(entrada: string): string {
   if (!entrada.includes('&')) return entrada
@@ -195,7 +274,7 @@ export function decodificarEntidades(entrada: string): string {
     (todo, decimal?: string, hexa?: string, nome?: string) => {
       if (decimal !== undefined) return doPontoDeCodigo(Number.parseInt(decimal, 10)) ?? todo
       if (hexa !== undefined) return doPontoDeCodigo(Number.parseInt(hexa, 16)) ?? todo
-      if (nome !== undefined) return ENTIDADES_NOMEADAS[nome.toLowerCase()] ?? todo
+      if (nome !== undefined) return letraOuSimbolo(nome) ?? todo
       return todo
     },
   )
