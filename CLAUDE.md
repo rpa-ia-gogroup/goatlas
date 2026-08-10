@@ -583,6 +583,28 @@ destes reabre um vazamento que já foi fechado.
 - **`children`/`pagetree` apontam para a lista que a leitura JÁ mostra** (T-115) em vez de
   dizer "não há o que trazer" — o conteúdo está na tela, alguns centímetros abaixo, com a
   verificação de restrição por item que `RN-06` exige.
+- 🚨 **O editor novo grava o conteúdo DUAS vezes, e renderizar os dois duplicava a página**
+  (`converterAdf`, `D-34`). `ac:adf-extension` traz o nó (`ac:adf-node` → `ac:adf-content`)
+  **e** uma cópia em HTML (`ac:adf-fallback`) para editores antigos. As três tags eram
+  desconhecidas, e tag desconhecida é **desembrulhada** — então o painel de boas-vindas
+  aparecia com o título em português e, logo abaixo, em inglês (o fallback vem em inglês),
+  medido no app real em 10/08/2026. A regra é **conteúdo do nó, senão fallback, nunca os
+  dois**: o nó ganha porque é o conteúdo de verdade. ⚠️ **Mas "só o nó" quebraria os blocos
+  inline** — `status`/`date` vêm **sem** `ac:adf-content` (o texto mora nos atributos) e é o
+  fallback que traz a `ac:structured-macro` equivalente. E `ac:adf-attribute` devolve **nada**
+  por necessidade, não por zelo: desembrulhado, o **valor** viraria texto visível
+  (`1f5d1 #c9372c info` solto antes do painel — ruído **e** parâmetro na tela, `RNF-30`).
+  `panel-type` é a única exceção lida, porque é apresentação e é o que faz aviso escrito no
+  editor novo continuar sendo aviso.
+- 🚨 **`status` tem texto e NÃO tem corpo — o critério "tem `ac:rich-text-body`?" a jogava
+  no placeholder** (`D-34`). O texto mora num **parâmetro** (`title`), como a linguagem do
+  bloco de código, então a macro que marca "Concluído"/"Em andamento" dizia *"o goatlas ainda
+  não sabe mostrar este bloco"* — acusando limitação nossa sobre texto que estava no storage.
+  ⚠️ **A cor não vai para a tela** e isso é decisão: `Green`/`Red` seria inventar paleta (a
+  identidade não tem vermelho nem verde, §1.3) **e** comunicar estado só por cor. Quem diz o
+  estado é a palavra que a pessoa escreveu. E **`title` vazio devolve nada, não o
+  placeholder** — pílula vazia não carrega informação, e o placeholder ali anunciaria
+  conteúdo escondido que não existe.
 - 🚨 **`jira`/`jirachart` NÃO devem ser implementados** — e o motivo não é custo. A JQL vem
   de dentro da página, que qualquer pessoa edita (`R-07`), e executá-la seria rodar consulta
   **escolhida pelo conteúdo** com a conta de serviço, mostrando o resultado a qualquer
@@ -823,7 +845,7 @@ abrindo o console.
 antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
 de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
 
-**930 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**943 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`

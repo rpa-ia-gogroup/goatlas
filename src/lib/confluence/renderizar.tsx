@@ -172,6 +172,12 @@ function Fragmento({ no, opcoes }: { no: No; opcoes: OpcoesRender }): ReactNode 
         </aside>
       )
 
+    case 'etiqueta':
+      // Pílula com contorno, sem cor de estado: a identidade não tem vermelho nem verde
+      // (§1.3) e estado nunca é comunicado só por cor. Quem diz o estado é a palavra que a
+      // pessoa escreveu — e ela é lida por leitor de tela como texto comum, de propósito.
+      return <span className="doc-etiqueta">{no.texto}</span>
+
     case 'macroNaoSuportada':
       // ⚠️ O bloco de busca é resolvido AQUI, no renderizador — a sanitização continua
       // tratando `livesearch` como macro não suportada, e é de propósito: ela é a camada

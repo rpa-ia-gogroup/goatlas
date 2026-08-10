@@ -1368,6 +1368,8 @@ o conteúdo viria**.
 | Bloco | O que é feito | Por quê |
 |---|---|---|
 | Macro desconhecida **com corpo** (`panel`, `deck`/`card`, `excerpt`, macros internas) | ✅ **Corpo renderizado** | O texto já vem no storage. Grátis, e a caixa cinza estava aparecendo **no lugar do texto** |
+| `status` (o "lozenge") | ✅ **Etiqueta**, sem a cor (`D-34`) | O texto está no storage — num **parâmetro**, não num corpo, e era só isso que o fazia cair no placeholder |
+| Bloco do **editor novo** (`ac:adf-extension`) | ✅ **Um dos dois lados**, nunca os dois (`D-34`) | O storage traz o nó **e** um fallback em HTML com a mesma coisa. Renderizar os dois duplicava a página |
 | `livesearch` | ✅ **Busca de verdade**, escopada no espaço (`D-30`) | Não é um resultado a reproduzir — é uma caixa de busca, e o app já busca melhor que o Confluence para quem não tem assento |
 | `children`, `pagetree` | ✅ Aponta para a lista que a leitura **já** mostra (T-115) | O conteúdo está na tela, centímetros abaixo, com restrição verificada por item |
 | `contributors`, `recently-updated`, `listlabels`, `toc` | ⏳ **Placeholder** | Custam chamada por visualização — e os dois do meio, **uma verificação de restrição por item** (`RN-06`, `R-02`). Valor baixo para deflexão: uma lista de páginas alteradas não responde "por que meu relatório está errado" |
@@ -1540,6 +1542,75 @@ prompt** (`RNF-30`).
 mostrar detalhe interno a quem conversa (`RNF-30`). No dia em que a lista tiver nome legível
 (`listarTiposChamado` por service desk já devolve), isso passa a ser contexto útil e entra
 por `ContextoAgente`, sem mudar o resto.
+
+---
+
+### D-34 · O editor novo grava o conteúdo DUAS vezes, e a etiqueta de status não tem corpo
+
+**Data:** 10/08/2026 · **Contexto:** `RF-43`, `RF-39`, `RNF-30`, regra 4, piso de a11y
+
+Dois defeitos de fidelidade medidos na página inicial do espaço de documentação da Gocase, no
+app publicado. Nenhum dos dois dava erro, quebrava teste ou aparecia em log: os dois
+produziam **tela errada**, que é o único lugar onde `RF-43` pode falhar. Estão juntos aqui
+porque têm a mesma causa de fundo — **o critério "tem corpo?" não descreve o storage real**.
+
+#### 1. Painel do editor novo saía duas vezes, em dois idiomas
+
+O editor atual do Confluence grava painel como `ac:adf-extension`, com **dois** filhos: o nó
+(`ac:adf-node` → `ac:adf-content`) e uma cópia em HTML (`ac:adf-fallback`) que existe para
+editores antigos. As três tags eram desconhecidas para o sanitizador, e tag desconhecida é
+**desembrulhada** — então o conteúdo saía uma vez do nó e outra do fallback.
+
+O fallback estava em **inglês**. Na tela: o mesmo painel de boas-vindas com o título em
+português, e logo abaixo em inglês, com a lista de sugestões repetida. Ninguém lê duas vezes
+para descobrir que é o mesmo texto — **quem vê conteúdo repetido conclui que o app está
+quebrado, e quem conclui isso abre chamado**, que é o oposto do que a aba existe para fazer.
+
+**A regra é: conteúdo do nó, senão fallback. Nunca os dois.**
+
+- **O nó ganha** porque é o conteúdo de verdade, e o fallback é a cópia — foi ele que veio em
+  inglês. Preferir o fallback funcionaria hoje e entregaria a tradução errada.
+- ⚠️ **Mas o fallback não é decoração: ele é o caminho dos blocos INLINE.** `status`, `date` e
+  afins vêm como `ac:adf-node` **sem** `ac:adf-content` (o texto mora nos atributos), e o
+  fallback traz a `ac:structured-macro` equivalente, que o sanitizador já converte.
+  "Só o nó" faria toda etiqueta escrita no editor novo desaparecer.
+- `ac:adf-attribute`/`ac:adf-parameter` devolvem **nada**, e isso é necessário, não redundante:
+  desembrulhados, o **valor** deles viraria texto visível — a página mostrava
+  `1f5d1 #c9372c info` solto antes do painel, que além de ruído é parâmetro na tela
+  (`RNF-30`).
+- `panel-type` **é** lido e traduzido para a `VariantePainel` que a macro antiga já usava, para
+  que um aviso escrito no editor novo continue sendo aviso. Ele é apresentação; o que `RNF-30`
+  guarda é JQL, chave de espaço e id de filtro, que descrevem o interior da Atlassian.
+
+#### 2. `status` não tem corpo, e por isso virava "não sabemos mostrar"
+
+O critério do sanitizador para "dá para renderizar?" era ter `ac:rich-text-body`. A macro
+`status` não tem: o texto dela mora num **parâmetro** (`title`), como a linguagem do bloco de
+código. Então a macro que marca "Concluído"/"Em andamento" em toda página de processo caía no
+placeholder de `RF-43` — **acusando limitação nossa sobre um texto que estava no storage**, a
+um `parametroDaMacro` de distância. Apareceu duas vezes na mesma página.
+
+🚨 **A cor NÃO vai para a tela, e isso é decisão, não simplificação.** O lozenge do Confluence
+tem `colour` (`Green`, `Red`…). Pintar seria inventar paleta — a identidade GoGroup não tem
+vermelho nem verde (§1.3) — **e** comunicar estado por cor, que o piso de a11y do projeto
+proíbe. O que a pessoa escreveu no `title` é o estado: é o que vai para a tela, e é o que um
+leitor de tela lê. A forma é pílula, não o chip quadrado de `.doc-codigo-inline`, para que
+"Concluído" não se leia como trecho de código.
+
+⚠️ **`title` vazio devolve nada, não o placeholder.** Etiqueta sem texto é pílula vazia — o
+Confluence desenha assim, e não há informação a preservar. O placeholder ali seria o erro
+oposto: anunciar conteúdo escondido que não existe, exatamente o que a frase antiga de
+`RF-43` fazia (ver `D-31`).
+
+**O que sustenta em código:** `tests/rf43-adf-e-status.test.ts`, e a asserção que importa é de
+**contagem** (`vezes(html, …) === 1`), não de presença — presença passava antes do conserto.
+12 dos 13 casos reprovam contra o código anterior. A auditoria de `RF-43` continua registrando
+`adf:<tipo>` para nó ADF que não tenha nem conteúdo nem fallback, para a lista de "o que vale
+implementar" continuar medida.
+
+**Lição, a mesma de `D-23` e do `env.DB`:** o critério estava escrito a partir do storage que
+imaginávamos. Aqui a divergência não era da plataforma — era do **editor**, que mudou de
+formato e continuou servindo o antigo ao lado do novo.
 
 ---
 
