@@ -1393,6 +1393,99 @@ registrando o nome de toda macro que aparece, **inclusive as que passaram a ter 
 renderizado**. É essa lista que diz qual bloco vale implementar de verdade um dia, medida em
 vez de suposta.
 
+---
+
+### D-32 · A latência era quatro defeitos somados, e nenhum dava erro
+
+**Data:** 10/08/2026 · **Contexto:** `RNF-12`, `RNF-13`, `RNF-15`, `RNF-16`, `R-02` ·
+**Decisão de:** Kaique
+
+**O sintoma relatado:** o agente levava ~12 s para responder, a página parecia lenta em
+tudo, e a aba Documentação e o console de admin demoravam demais para aparecer. **`RNF-12`
+pede busca < 2 s e primeira resposta do agente < 5 s no p95** — os três eram violação de
+requisito, não impressão.
+
+**A medição, antes de mexer em qualquer coisa** (`getAppLogs`, `appId 9c47f42f`):
+`POST /api/cron/enviar-notificacoes` **com a fila vazia** levava **376–584 ms**. Aquela
+rota monta o contexto e lê uma tabela; não havia trabalho nenhum ali para justificar meio
+segundo. Foi o fio que revelou os quatro defeitos:
+
+1. **`migrar` rodava a cada requisição.** 35 `CREATE TABLE IF NOT EXISTS` + 3 `ALTER`,
+   sequenciais e `await`ados, cada um uma ida ao serviço de banco. Era o piso de ~400 ms que
+   **toda** rota pagava antes de começar — inclusive o turno do agente e a leitura de página.
+   Agora `garantirMigracao` memoiza **por objeto de banco** (`WeakMap`): uma vez por isolate
+   em produção, uma vez por banco nos testes.
+2. **O cache de `RNF-13` nunca acertava.** `CacheTtl` existia desde a Fase 1 e vários
+   comentários do código contavam com ele ("contido pelo cache de conteúdo") — mas ele morava
+   na **instância** do cliente, e `montarContexto` cria uma instância **por requisição**. O TTL
+   era decorativo: cada leitura de página rebuscava metadados, labels, restrição e corpo, e
+   cada nível do breadcrumb rebuscava os três primeiros de novo. Agora as caches vivem no
+   **módulo** (escopo de isolate), com teto de entradas.
+3. **Cinco laços `for … await` sobre listas de rede.** Lista de chamados (até **100**
+   `obterChamado` em série), restrição por página na busca e na árvore (`RN-06`), espaços da
+   allowlist, e a classificação da Regra 2 (uma chamada de IA por ticket, até 20). O tempo era
+   a **soma**.
+4. **Três idas ao provedor de IA em série por turno**, sendo que a segunda (resposta ao
+   usuário) e a terceira (`extrairProposta`) partem do **mesmo** histórico e não dependem uma
+   da outra.
+
+**As decisões, e o que cada uma recusa:**
+
+- **Paralelismo tem teto, sempre** (`src/lib/paralelo.ts`, `CONCORRENCIA_ATLASSIAN = 5`,
+  `CONCORRENCIA_IA = 3`). ⚠️ `Promise.all` na lista inteira é o conserto **errado**: o burst
+  limit da Atlassian por API token não é publicado e os headers `X-RateLimit-*` só aparecem
+  no 429 (`RNF-15`, `R-02`) — 100 requisições simultâneas com a credencial única é como se
+  descobre o limite do jeito ruim, e o custo cai sobre o app inteiro, não sobre quem clicou.
+  Um turno que toma 429 e espera 2 s ficou **mais lento** que o laço em série.
+- **A ordem do resultado é preservada** em todo laço paralelizado. Ordenar por "quem
+  respondeu primeiro" faria a mesma tela mostrar a lista em ordens diferentes entre duas
+  cargas — parece defeito, e é.
+- **Cache compartilhada exige teto de entradas.** Enquanto morria com a requisição, crescer
+  sem limite era inócuo; por isolate, é vazamento de memória com prazo. E o corpo da página
+  ganhou cache **própria** com teto pequeno (30), porque é o único valor grande (até 400 KB) —
+  teto único obrigaria a escolher entre guardar poucas páginas ou arriscar centenas de MB num
+  Worker de 128 MB.
+- ⚠️ **Compartilhar a cache é seguro por causa do proxy total** (`D-01`): a identidade perante
+  a Atlassian é sempre a mesma conta de serviço, então não existe resposta "de um usuário"
+  para vazar para outro. Num mundo com `raiseOnBehalfOf` por pessoa (`RNF-22`) a cache teria
+  de ser por identidade — e é por isso que ela mora em `contexto.ts`, visível, e não escondida
+  dentro do cliente.
+- ⚠️ **A cache guarda o insumo, nunca a decisão.** `RN-06` continua avaliada por requisição
+  contra a allowlist de `ctx.valores`: mudar a allowlist no console vale na requisição
+  seguinte, mesmo com metadados em cache.
+- **A extração da proposta arranca junto com a última ida ao modelo** (`orquestrador.ts`), e é
+  seguro por razão **estrutural**, não por otimismo: só arranca quando as duas verificações
+  estão concluídas, e nesse estado `toolsPermitidas` devolve lista **vazia** — o ciclo seguinte
+  não pode executar tool, logo não pode nascer bloqueio concorrente. ⚠️ Ainda assim
+  `tentarMontarProposta` **reconfere `temBloqueioPendente` antes de gravar**: entre começar a
+  extração e voltar dela passa uma ida ao provedor, e um `if` que rodou antes do `await` não
+  protege o que acontece depois dele. `RN-07` já foi burlada uma vez (`D-21`).
+
+**O que foi TENTADO e DESCARTADO:**
+
+- **`max_tokens` no turno do chat.** Parecia o conserto óbvio (o corpo saía sem limite de
+  geração). Não é: num modelo com raciocínio o teto conta **tokens de raciocínio**, e um teto
+  baixo devolve resposta **vazia** — regressão de comportamento que o fake não pegaria, exatamente
+  a classe de bug do `env.DB`. E um teto generoso não corta latência nenhuma, porque uma resposta
+  de agente de suporte não chega perto dele. Fica como guarda de custo a considerar, não como
+  conserto de latência.
+- **Streaming da resposta do agente.** É o que mais melhoraria a percepção, e **conflita com o
+  desenho**: quando uma regra bloqueia, o servidor **descarta** o texto do modelo e fala no lugar
+  dele (`D-21`). Não se transmite texto que talvez seja jogado fora. Streaming exigiria reabrir
+  aquela decisão primeiro.
+- **Paralelizar a subida do breadcrumb** (`ancestraisExpostos`). A subida é dependente por
+  construção (cada nível dá o `parentId` do seguinte), e buscar os níveis "adiantado" para
+  descartar depois significaria ler metadados de páginas **acima de um ancestral fechado** —
+  funciona hoje e vaza no dia em que alguém devolver o que leu. O que ficou: a subida começa
+  **antes** das três escritas de banco da rota e é esperada no fim, então ela acontece durante
+  elas; e na árvore ela roda em paralelo com a listagem dos filhos, que é independente.
+
+**O que ficou por medir:** os números acima são de contagem de chamadas, não de p95 em
+produção. `RNF-12` só se fecha medindo no app publicado depois do deploy — o mesmo raciocínio
+de "teste de integração contra o app publicado não é luxo de fim de projeto".
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

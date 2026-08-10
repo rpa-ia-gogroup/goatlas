@@ -18,6 +18,7 @@ import { resolverIdentidade, HEADER_EMAIL, MENSAGEM_NEGACAO, type Identidade } f
 import type { Contexto } from '../contexto'
 import { ERROS, erro, json, lerJson } from './respostas'
 import { verificarLimite } from './limite'
+import { CONCORRENCIA_ATLASSIAN, mapearComLimite } from '../paralelo'
 import { CriacaoRecusada, MENSAGEM_RECUSA } from '../agent/gate'
 import { ErroAtlassian, SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos'
 import type { PropostaChamado } from '../agent/estado'
@@ -530,11 +531,20 @@ async function rotear(
       resultado: 'sucesso',
       detalhe: { quantidade: vinculos.length },
     })
-    const itens = []
-    for (const v of vinculos) {
+    /**
+     * Um `obterChamado` por vínculo, **em paralelo com teto** (`paralelo.ts`).
+     *
+     * ⚠️ Este laço era `for … await`: até 100 idas ao Jira **em série** antes de a lista
+     * aparecer. Quem tinha 40 chamados esperava dezenas de segundos com tudo funcionando
+     * perfeitamente — nada no log parecia errado, porque nada estava errado, só somado. O
+     * teto é baixo de propósito (a credencial é única e o burst limit não é publicado,
+     * `R-02`); a ordem do resultado é preservada, porque `listarDoSolicitante` já ordena e
+     * a lista dançar entre dois carregamentos parece defeito.
+     */
+    const itens = await mapearComLimite(vinculos, CONCORRENCIA_ATLASSIAN, async (v) => {
       try {
         const chamado = await ctx.atlassian.obterChamado(v.issueKey)
-        itens.push({
+        return {
           issueKey: chamado.issueKey,
           titulo: chamado.titulo,
           status: chamado.status,
@@ -542,14 +552,14 @@ async function rotear(
           atualizadoEm: chamado.atualizadoEm,
           via: v.via,
           verificadoRegras: v.verificadoRegras,
-        })
+        }
       } catch {
         // RNF-19: um chamado ilegível não derruba a lista. E em vez de mostrar
         // "título indisponível", usa o que NÓS gravamos no outbox — o dado já
         // estava lá. A pessoa vê seus chamados com conteúdo mesmo com a Atlassian
         // fora; só o status é que fica honestamente marcado como indisponível.
         const submissao = await ctx.outbox.obterPorIssueKey(v.issueKey)
-        itens.push({
+        return {
           issueKey: v.issueKey,
           titulo: submissao?.payload.titulo ?? null,
           status: 'indisponivel',
@@ -558,9 +568,9 @@ async function rotear(
           via: v.via,
           verificadoRegras: v.verificadoRegras,
           area: v.area,
-        })
+        }
       }
-    }
+    })
 
     // T-241 / RF-35 — filtro por status e busca textual.
     //
@@ -1085,6 +1095,20 @@ async function rotear(
       return r.motivo === 'indisponivel' ? ERROS.conteudoIndisponivel() : ERROS.naoEncontrado()
     }
 
+    /**
+     * O breadcrumb (`RF-41`) começa AQUI, não na montagem da resposta.
+     *
+     * Ele é uma subida de até cinco níveis, cada um com verificação de exposição — é rede,
+     * e é a parte mais lenta da leitura. As três escritas abaixo (clique, leitura,
+     * auditoria) são banco. Encadeados, os dois tempos somam; iniciada aqui e esperada no
+     * fim, a subida acontece **durante** as escritas.
+     *
+     * ⚠️ Só depois de o gate ter aprovado (`r.ok`): começar antes seria consultar a
+     * hierarquia de uma página que talvez não possa ser exposta, e a ordem
+     * "decidir → depois olhar" é o desenho de `confluence/acesso.ts`.
+     */
+    const ancestrais = ancestraisExpostos(ctx.atlassian, ctx.valores, r.metadados)
+
     // T-116 — o `?de=` diz de qual busca a pessoa veio. `via` é DERIVADO: só vale
     // `busca` se o id pertencer a quem está lendo (o e-mail está no `WHERE`).
     const veioDaBusca = await ctx.conhecimento.marcarClique(
@@ -1117,7 +1141,8 @@ async function rotear(
       atualizadoEm: r.metadados.atualizadoEm,
       urlOriginal: r.metadados.url,
       // RF-41 — o caminho até aqui, já filtrado por RN-06 (ver `ancestraisExpostos`).
-      ancestrais: await ancestraisExpostos(ctx.atlassian, ctx.valores, r.metadados),
+      // Iniciado acima, esperado agora.
+      ancestrais: await ancestrais,
       nos: r.conteudo.nos,
       truncado: r.conteudo.truncado,
     })
@@ -1129,19 +1154,27 @@ async function rotear(
   // achou). A allowlist não é segredo: ela é exatamente o que a pessoa pode ver, e
   // esconder o nome do espaço não protegeria nada — só deixaria a navegação sem porta.
   if (caminho === '/api/confluence/espacos' && req.method === 'GET') {
-    const itens: { chave: string; nome: string; homepageId: string }[] = []
-    for (const chave of ctx.valores.espacos_confluence) {
-      try {
-        const espaco = await ctx.atlassian.obterEspaco(chave)
-        // Espaço sem homepage não tem raiz para navegar; melhor omitir que oferecer um
-        // caminho que morre no clique.
-        if (espaco.homepageId) {
-          itens.push({ chave: espaco.chave, nome: espaco.nome, homepageId: espaco.homepageId })
+    // Em paralelo com teto: é a PRIMEIRA coisa que a aba Documentação pede, e em série
+    // custava uma ida à Atlassian por espaço configurado antes de a tela desenhar
+    // qualquer coisa (`D-29` deixou 7 espaços — 7 idas). A ordem da config é preservada
+    // porque é ela que a tela mostra, e ordem que muda entre cargas parece defeito.
+    const resolvidos = await mapearComLimite(
+      ctx.valores.espacos_confluence,
+      CONCORRENCIA_ATLASSIAN,
+      async (chave) => {
+        try {
+          return await ctx.atlassian.obterEspaco(chave)
+        } catch {
+          // Espaço configurado que não resolve não vira erro da tela: os outros valem.
+          return null
         }
-      } catch {
-        // Espaço configurado que não resolve não vira erro da tela: os outros valem.
-      }
-    }
+      },
+    )
+    const itens = resolvidos
+      // Espaço sem homepage não tem raiz para navegar; melhor omitir que oferecer um
+      // caminho que morre no clique.
+      .filter((e): e is NonNullable<typeof e> => Boolean(e?.homepageId))
+      .map((e) => ({ chave: e.chave, nome: e.nome, homepageId: e.homepageId as string }))
     return json({ itens })
   }
 
@@ -1187,12 +1220,21 @@ async function rotear(
           : ERROS.naoEncontrado()
       }
 
-      const filhos = await ctx.atlassian.listarFilhosDaPagina({
-        idPai,
-        espacosPermitidos: ctx.valores.espacos_confluence,
-        labelsBloqueadas: ctx.valores.labels_bloqueadas,
-        limite: LIMITE_NIVEL_ARVORE,
-      })
+      /**
+       * Descer um nível e subir o breadcrumb são **independentes** — as duas só precisam do
+       * pai já aprovado — e estavam em série. Somadas, um clique na árvore custava a busca
+       * de filhos (com uma verificação de restrição por item) **mais** até cinco níveis de
+       * subida. Em paralelo, o clique custa o mais lento dos dois.
+       */
+      const [filhos, ancestrais] = await Promise.all([
+        ctx.atlassian.listarFilhosDaPagina({
+          idPai,
+          espacosPermitidos: ctx.valores.espacos_confluence,
+          labelsBloqueadas: ctx.valores.labels_bloqueadas,
+          limite: LIMITE_NIVEL_ARVORE,
+        }),
+        ancestraisExpostos(ctx.atlassian, ctx.valores, exposicaoPai.metadados),
+      ])
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: 'arvore_navegada',
@@ -1203,7 +1245,7 @@ async function rotear(
       return json({
         espaco: { chave: espaco.chave, nome: espaco.nome },
         pai: { id: exposicaoPai.metadados.id, titulo: exposicaoPai.metadados.titulo },
-        ancestrais: await ancestraisExpostos(ctx.atlassian, ctx.valores, exposicaoPai.metadados),
+        ancestrais,
         itens: filhos.map((f) => ({ id: f.id, titulo: f.titulo })),
       })
     } catch {

@@ -149,7 +149,7 @@ que seguem as cinco fases deste arquivo. Decisões registradas em `D-26` (o anex
 na criação), `D-27` (`RF-62` é fail-open, e por quê) e `D-28` (o endurecimento de `RF-27`,
 anotado também na spec 002, que o entregou).
 
-**896 testes · typecheck limpo · build limpo** (a suíte inteira, já com os consertos da aba Documentação de 10/08 incorporados). Verificado também em `npm run dev`, não só
+**920 testes · typecheck limpo · build limpo** (a suíte inteira, já com os consertos da aba Documentação de 10/08 incorporados). Verificado também em `npm run dev`, não só
 na suíte: criar sem declarar responde 400 com a mensagem da pessoa, e com a declaração o
 chamado nasce já com `anexo.estado = "anexado"`.
 
