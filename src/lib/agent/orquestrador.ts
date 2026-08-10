@@ -14,8 +14,9 @@
  */
 
 import type { ClienteIA } from '../ia/tipos'
-import { PROMPT_AGENTE } from '../ia/prompts'
-import { MENSAGEM_BLOQUEIO_PENDENTE } from '../rules'
+import { montarPromptAgente } from '../ia/prompts'
+import { MENSAGEM_BLOQUEIO_PENDENTE, regra2Disponivel } from '../rules'
+import { buscaConfigurada } from '../config/diagnostico'
 import type { Auditoria } from '../audit'
 import type { ConfigValores } from '../config'
 import { toolAutorizada, toolsPermitidas, TOOLS } from './gate'
@@ -144,7 +145,7 @@ export class Orquestrador {
 
       const permitidas = toolsPermitidas(atual)
       const resposta = await this.ia.chat({
-        mensagens: [{ papel: 'system', conteudo: PROMPT_AGENTE }, ...historico],
+        mensagens: [{ papel: 'system', conteudo: this.promptDoAgente(config) }, ...historico],
         toolsPermitidas: permitidas,
       })
       custoTurno += resposta.custoEstimadoUsd
@@ -291,6 +292,23 @@ export class Orquestrador {
     const custo = await this.tentarMontarProposta(conversa, config)
     if (custo > 0) await this.conversas.somarCusto(conversa.id, custo)
     return Boolean((await this.conversas.obter(conversa.id))?.proposta)
+  }
+
+  /**
+   * O system prompt desta instalação — RNF-24, RNF-18.
+   *
+   * ⚠️ Os dois predicados são **reaproveitados**, não reescritos: `buscaConfigurada` é o
+   * mesmo que a rota de busca aplica e `regra2Disponivel` é o mesmo que `ExecutorTools`
+   * consulta antes de rodar a Regra 2. Uma condição escrita só aqui divergiria em
+   * silêncio no dia em que a de origem mudasse, e o sintoma seria o agente prometendo
+   * uma verificação que o servidor já não faz — que é o bug que este contexto existe para
+   * fechar.
+   */
+  private promptDoAgente(config: ConfigValores): string {
+    return montarPromptAgente({
+      buscaDocumentacaoDisponivel: buscaConfigurada(config.espacos_confluence),
+      historicoDisponivel: regra2Disponivel(config.regra2_exemplos_ajuste_operacional),
+    })
   }
 
   /** Ambas as tools foram TENTADAS — verificada ou falhada (RNF-18). */
