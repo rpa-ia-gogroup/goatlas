@@ -345,6 +345,13 @@ async function rotear(
         auditoria: ctx.auditoria,
       }),
       declaracao.declarouAnexo,
+      // RF-21 / `D-36` — os MESMOS campos que o formulário preenche, resolvidos com o
+      // `schema` que `RF-62` já leu logo acima. Sem isto, um chamado de um tipo que exige
+      // nome e e-mail nasceria vazio quando aberto pela conversa, e só por lá.
+      //
+      // ⚠️ A conversa não tem formulário dinâmico, então aqui não há valor do cliente para
+      // vencer o do login (`FR-3`) — o que chega é sempre a identidade da sessão.
+      resolverCamposDoSolicitante(conversa.proposta.tipoChamadoId, schema, eu),
     )
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
     const anexo = await materializarAnexosDoChamado(ctx, {
