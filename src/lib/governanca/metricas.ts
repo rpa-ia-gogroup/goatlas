@@ -45,6 +45,27 @@ export interface ResumoMetricas {
   readonly taxaOverrideGlobalPct: number | null
   readonly chamadosPorVia: Readonly<Record<string, number>>
   readonly buscas: ResumoBuscas
+  /** T-520 — a fonte organizacional da área do solicitante (`RF-19`, `D-37`). */
+  readonly area: ResumoArea
+}
+
+/**
+ * Quantos chamados nasceram **sem** área, e por quê.
+ *
+ * ⚠️ Os dois números são separados porque pedem trabalho oposto — é a mesma razão de
+ * serem duas ações de auditoria (`D-37`): `naoEncontrada` é cadastro faltando na
+ * TeamGuide, e resolve-se cadastrando; `indisponivel` é a fonte fora do ar, e resolve-se
+ * olhando o token ou a API. Um número só mandaria alguém investigar a coisa errada
+ * metade das vezes.
+ *
+ * `comArea` vem do vínculo, não da auditoria: é o que de fato ficou gravado, incluindo
+ * quem caiu no `areas_por_email` depois de a fonte falhar (`FR-13`).
+ */
+export interface ResumoArea {
+  readonly comArea: number
+  readonly semArea: number
+  readonly naoEncontrada: number
+  readonly indisponivel: number
 }
 
 function taxa(numerador: number, denominador: number): number | null {
@@ -55,6 +76,7 @@ export function calcularMetricas(
   bloqueios: readonly LinhaBloqueio[],
   vias: readonly string[],
   resultadosBuscas: readonly number[],
+  area: ResumoArea = { comArea: 0, semArea: 0, naoEncontrada: 0, indisponivel: 0 },
 ): ResumoMetricas {
   const porRegra = new Map<string, { total: number; overrides: number }>()
   for (const regra of ORDEM_REGRAS) porRegra.set(regra, { total: 0, overrides: 0 })
@@ -92,6 +114,7 @@ export function calcularMetricas(
       semResultado,
       taxaSemResultadoPct: taxa(semResultado, totalBuscas),
     },
+    area,
   }
 }
 
@@ -107,13 +130,35 @@ export async function obterResumoMetricas(db: Banco): Promise<ResumoMetricas> {
     houve_override: number
   }>(bloqueiosBrutos).map((l) => ({ regra: l.regra, houveOverride: l.houve_override === 1 }))
 
-  const viasBrutas = await db.query('SELECT via FROM vinculos', [])
-  const vias = linhasComoObjetos<{ via: string }>(viasBrutas).map((l) => l.via)
+  const viasBrutas = await db.query('SELECT via, area FROM vinculos', [])
+  const linhasVinculo = linhasComoObjetos<{ via: string; area: string | null }>(viasBrutas)
+  const vias = linhasVinculo.map((l) => l.via)
+
+  // T-520 — a área vem de duas fontes de propósito: o **vínculo** diz o que ficou
+  // gravado (incluindo quem caiu no `areas_por_email`), e a **auditoria** diz por que
+  // faltou. Contar só o vínculo esconderia o motivo; contar só a auditoria contaria
+  // tentativa, não resultado.
+  const areaBruta = await db.query(
+    `SELECT acao, COUNT(*) AS n FROM auditoria
+      WHERE acao IN ('area_nao_encontrada', 'area_indisponivel')
+      GROUP BY acao`,
+    [],
+  )
+  const porAcao = new Map(
+    linhasComoObjetos<{ acao: string; n: number }>(areaBruta).map((l) => [l.acao, Number(l.n)]),
+  )
+  const comArea = linhasVinculo.filter((l) => (l.area ?? '').trim().length > 0).length
+  const area = {
+    comArea,
+    semArea: linhasVinculo.length - comArea,
+    naoEncontrada: porAcao.get('area_nao_encontrada') ?? 0,
+    indisponivel: porAcao.get('area_indisponivel') ?? 0,
+  }
 
   const buscasBrutas = await db.query('SELECT resultados FROM buscas', [])
   const resultadosBuscas = linhasComoObjetos<{ resultados: number }>(buscasBrutas).map((l) =>
     Number(l.resultados),
   )
 
-  return calcularMetricas(bloqueios, vias, resultadosBuscas)
+  return calcularMetricas(bloqueios, vias, resultadosBuscas, area)
 }

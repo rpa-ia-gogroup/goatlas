@@ -447,6 +447,15 @@ export interface ResumoMetricas {
   readonly taxaOverrideGlobalPct: number | null
   readonly chamadosPorVia: Readonly<Record<string, number>>
   readonly buscas: ResumoBuscasMetricas
+  /** T-520 — a fonte organizacional da área do solicitante (`RF-19`, `D-37`). */
+  readonly area: {
+    readonly comArea: number
+    readonly semArea: number
+    /** Cadastro faltando na TeamGuide — resolve-se cadastrando. */
+    readonly naoEncontrada: number
+    /** A fonte fora do ar — resolve-se olhando o token ou a API. */
+    readonly indisponivel: number
+  }
   readonly painel: ResumoPainel
   readonly baselineAssentos: BaselineAssentos | null
   readonly canalNotificacaoDefinido: boolean

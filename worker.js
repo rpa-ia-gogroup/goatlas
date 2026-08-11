@@ -6912,7 +6912,7 @@ var ORDEM_REGRAS = ["regra1_confluence", "regra2_ajuste_operacional"];
 function taxa(numerador, denominador) {
   return denominador === 0 ? null : numerador / denominador * 100;
 }
-function calcularMetricas(bloqueios, vias, resultadosBuscas) {
+function calcularMetricas(bloqueios, vias, resultadosBuscas, area = { comArea: 0, semArea: 0, naoEncontrada: 0, indisponivel: 0 }) {
   const porRegra = /* @__PURE__ */ new Map();
   for (const regra of ORDEM_REGRAS) porRegra.set(regra, { total: 0, overrides: 0 });
   for (const b of bloqueios) {
@@ -6941,19 +6941,37 @@ function calcularMetricas(bloqueios, vias, resultadosBuscas) {
       total: totalBuscas,
       semResultado,
       taxaSemResultadoPct: taxa(semResultado, totalBuscas)
-    }
+    },
+    area
   };
 }
 async function obterResumoMetricas(db) {
   const bloqueiosBrutos = await db.query("SELECT regra, houve_override FROM bloqueios", []);
   const bloqueios = linhasComoObjetos(bloqueiosBrutos).map((l) => ({ regra: l.regra, houveOverride: l.houve_override === 1 }));
-  const viasBrutas = await db.query("SELECT via FROM vinculos", []);
-  const vias = linhasComoObjetos(viasBrutas).map((l) => l.via);
+  const viasBrutas = await db.query("SELECT via, area FROM vinculos", []);
+  const linhasVinculo = linhasComoObjetos(viasBrutas);
+  const vias = linhasVinculo.map((l) => l.via);
+  const areaBruta = await db.query(
+    `SELECT acao, COUNT(*) AS n FROM auditoria
+      WHERE acao IN ('area_nao_encontrada', 'area_indisponivel')
+      GROUP BY acao`,
+    []
+  );
+  const porAcao = new Map(
+    linhasComoObjetos(areaBruta).map((l) => [l.acao, Number(l.n)])
+  );
+  const comArea = linhasVinculo.filter((l) => (l.area ?? "").trim().length > 0).length;
+  const area = {
+    comArea,
+    semArea: linhasVinculo.length - comArea,
+    naoEncontrada: porAcao.get("area_nao_encontrada") ?? 0,
+    indisponivel: porAcao.get("area_indisponivel") ?? 0
+  };
   const buscasBrutas = await db.query("SELECT resultados FROM buscas", []);
   const resultadosBuscas = linhasComoObjetos(buscasBrutas).map(
     (l) => Number(l.resultados)
   );
-  return calcularMetricas(bloqueios, vias, resultadosBuscas);
+  return calcularMetricas(bloqueios, vias, resultadosBuscas, area);
 }
 
 // src/lib/governanca/painel.ts

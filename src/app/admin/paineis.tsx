@@ -97,6 +97,60 @@ export function PainelMetricas({ metricas }: { metricas: ResumoMetricas }) {
       </p>
 
       <PainelEvidencia evidencia={metricas.painel.evidencia} />
+      <PainelArea area={metricas.area} />
+    </div>
+  )
+}
+
+/* ---------- fonte organizacional (T-520, D-37) --------------------------- */
+
+/**
+ * De onde veio a área de quem abriu chamado — e, quando não veio, **por quê**.
+ *
+ * ⚠️ Os dois motivos aparecem separados de propósito, e é a mesma razão de serem duas
+ * ações de auditoria: *"não achei a pessoa"* é cadastro faltando na TeamGuide, e resolve-se
+ * cadastrando; *"a fonte caiu"* é token ou API, e resolve-se olhando o secret. Um número
+ * só mandaria alguém investigar a coisa errada metade das vezes.
+ *
+ * E o painel **não** tem campo para editar: não há o que decidir aqui — o token é secret,
+ * está lá ou não está. É `D-25` aplicado: o console mostra o que se decide, e relata o
+ * resto. Nenhum chamado deixa de abrir por causa disto (`RNF-18`), então a frase do rodapé
+ * diz o efeito real em vez de alarmar.
+ */
+export function PainelArea({
+  area,
+}: {
+  area: ResumoMetricas['area']
+}) {
+  const total = area.comArea + area.semArea
+  if (total === 0) {
+    // Mesmo raciocínio de `taxaOverrideGlobalPct: null`: zero por falta de dado e zero
+    // por tudo ter funcionado são coisas opostas.
+    return (
+      <div className="recibo">
+        <span className="eyebrow">Área de quem abre</span>
+        <p className="dica">Nenhum chamado aberto ainda — sem dado para mostrar.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="recibo">
+      <span className="eyebrow">Área de quem abre</span>
+      <dl>
+        <dt>Com área</dt>
+        <dd>
+          {area.comArea} de {total}
+        </dd>
+        <dt>Não achei na TeamGuide</dt>
+        <dd>{area.naoEncontrada}</dd>
+        <dt>Fonte fora do ar</dt>
+        <dd>{area.indisponivel}</dd>
+      </dl>
+      <p className="dica">
+        Chamado sem área abre normalmente — a área é informação de apoio, e a falta dela
+        nunca impede ninguém. "Não achei na TeamGuide" costuma ser cadastro faltando ou
+        e-mail diferente do login; "fonte fora do ar" é a integração, não a pessoa.
+      </p>
     </div>
   )
 }
