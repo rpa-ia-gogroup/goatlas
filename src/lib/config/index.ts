@@ -33,13 +33,12 @@ export interface ConfigValores {
   tipos_chamado_permitidos: string[]
   /** RNF-25 — service desk alvo, nunca hardcoded. Q1. */
   service_desk_id: string | null
-  /**
-   * RF-21, R-03 — id do campo customizado "Solicitante" no Jira, ex.:
-   * `customfield_10050`. `null` = ainda não sabemos (Q4): o solicitante real
-   * segue indo só na descrição (cinto e suspensório, ver
-   * `atlassian/cliente.ts#montarCamposSolicitante`) — nunca vazio nem inventado.
-   */
-  campo_solicitante_id: string | null
+  // 🚨 `campo_solicitante_id` SAIU daqui em `D-36` (11/08/2026). Era um id **global**,
+  // e medição contra o Jira real mostrou que o mesmo `fieldId` significa coisas
+  // diferentes por request type (`customfield_10092`: cargo no tipo 108, sistema do bug
+  // no 70). Um id global escreveria o e-mail do solicitante no campo errado com HTTP 201.
+  // O mapa é **por request type** e mora em `tickets/campos-do-solicitante.ts`.
+  // Não reintroduzir aqui sem reabrir `D-36`.
 
   /** RNF-25 — organização Atlassian alvo da Organizations API (governança de
    * assentos). Q1: a credencial de Org Admin ainda não existe. */
@@ -151,7 +150,6 @@ export const CONFIG_PADRAO: Readonly<ConfigValores> = Object.freeze({
   labels_bloqueadas: ['confidencial'],
   tipos_chamado_permitidos: [],
   service_desk_id: null,
-  campo_solicitante_id: null,
   org_id: null,
   assentos_ocioso_dias: 90,
   custo_mensal_por_produto: {},
@@ -204,7 +202,6 @@ export interface BootstrapEnv {
   /** Lista separada por vírgula de e-mails admin (RF-02, RN-09). */
   readonly GOATLAS_ADMINS?: string
   readonly GOATLAS_SERVICE_DESK_ID?: string
-  readonly GOATLAS_CAMPO_SOLICITANTE_ID?: string
   readonly GOATLAS_TIPOS_CHAMADO?: string
   readonly GOATLAS_ESPACOS_CONFLUENCE?: string
   readonly GOATLAS_ORG_ID?: string
@@ -247,9 +244,6 @@ export function valoresDoBootstrap(env: BootstrapEnv): Partial<ConfigValores> {
     .filter((v) => v.length > 0)
   if (espacos.length > 0) parcial.espacos_confluence = espacos
   if (env.GOATLAS_SERVICE_DESK_ID) parcial.service_desk_id = env.GOATLAS_SERVICE_DESK_ID
-  if (env.GOATLAS_CAMPO_SOLICITANTE_ID) {
-    parcial.campo_solicitante_id = env.GOATLAS_CAMPO_SOLICITANTE_ID
-  }
   if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID
   if (env.GOATLAS_BASE_PUBLICA) {
     // Barra final removida aqui pelo mesmo motivo de `LLM_BASE_URL`: quem copia URL do

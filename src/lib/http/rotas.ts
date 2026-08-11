@@ -42,6 +42,7 @@ import { areaDoEmail, areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
+import { resolverCamposDoSolicitante } from '../tickets/campos-do-solicitante'
 import {
   exigeDeclaracaoDeAnexo,
   tipoAceitaAnexo,
@@ -411,6 +412,21 @@ async function rotear(
       schema,
     )
 
+    // RF-21 / D-36 — nome e e-mail do solicitante, **por request type** e cruzados com
+    // o schema. Entram como PADRÃO, não como imposição: o valor que a pessoa mandou
+    // vence (`FR-3`), porque o tipo 108 tem a forma de um pedido de acesso que pode ser
+    // **para outra pessoa**, e travar na identidade gravaria dado errado em silêncio.
+    // A autoria verificável continua no vínculo e no cabeçalho de `D-13`, que o cliente
+    // não forja — então isto não enfraquece `RF-30`.
+    //
+    // ⚠️ Vai por `camposDinamicos` de propósito: é esse objeto que o outbox persiste, e
+    // por isso o reprocessamento de `RNF-17` reproduz exatamente os mesmos campos sem
+    // precisar reler o schema.
+    const camposComSolicitante = {
+      ...resolverCamposDoSolicitante(validada.proposta.tipoChamadoId, schema, eu),
+      ...(camposDinamicos ?? {}),
+    }
+
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
@@ -422,7 +438,9 @@ async function rotear(
         tipoChamadoId: validada.proposta.tipoChamadoId,
         serviceDeskId,
         prioridade: validada.proposta.prioridade,
-        ...(camposDinamicos ? { camposDinamicos } : {}),
+        ...(Object.keys(camposComSolicitante).length > 0
+          ? { camposDinamicos: camposComSolicitante }
+          : {}),
       },
     })
     const anexo = await materializarAnexosDoChamado(ctx, {
@@ -1325,8 +1343,20 @@ async function rotear(
   if (caminho === '/api/tipos-chamado' && req.method === 'GET') {
     const permitidos = new Set(ctx.valores.tipos_chamado_permitidos)
     const todos = await ctx.atlassian.listarTiposChamado()
+    const desk = ctx.valores.service_desk_id
+    // 🐛 **`listarTiposChamado` varre TODOS os service desks do site**, não o
+    // configurado (medido em 11/08/2026: com a allowlist ampliada voltaram tipos dos
+    // desks 7, 8 e 9 ao lado dos do 4). A allowlist era a única coisa limitando — e ela
+    // é lista de ids, então um id de outro desk passa por ela e por `validarProposta`
+    // para **falhar só na criação**, quando o corpo leva `serviceDeskId` fixo da config.
+    // Filtrar aqui é o que faz a lista dizer a verdade sobre o que dá para abrir.
+    //
+    // Sem desk configurado a lista é vazia, coerente com a rota de criação, que já
+    // recusa nesse estado — oferecer assunto que não se consegue abrir é pior que
+    // oferecer nenhum.
+    const doDesk = desk === null ? [] : todos.filter((t) => t.serviceDeskId === desk)
     // Negação por padrão: allowlist vazia expõe ZERO tipos (RNF-07, RF-28).
-    return json({ itens: todos.filter((t) => permitidos.has(t.id)) })
+    return json({ itens: doDesk.filter((t) => permitidos.has(t.id)) })
   }
 
   // --- admin (RF-49, RF-50) -------------------------------------------------

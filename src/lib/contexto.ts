@@ -216,7 +216,6 @@ export async function montarContexto(
         // RF-21, Q4 — configurável (RNF-25), nunca hardcoded. `null` até o time
         // de tech confirmar o id do campo "Solicitante"; o solicitante real
         // continua indo na descrição enquanto isso (cinto e suspensório).
-        campoSolicitanteId: valores.campo_solicitante_id,
       })
 
   /**

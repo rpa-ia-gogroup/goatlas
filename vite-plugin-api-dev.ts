@@ -65,7 +65,14 @@ export function apiDev(): Plugin {
       if ((await config.obter('dominios_permitidos')).length === 0) {
         await config.definir('dominios_permitidos', [dominio], EMAIL_DEV, new Date().toISOString())
         await config.definir('admins', [EMAIL_DEV], EMAIL_DEV, new Date().toISOString())
-        await config.definir('tipos_chamado_permitidos', ['rt-dev'], EMAIL_DEV, new Date().toISOString())
+        await config.definir(
+          'tipos_chamado_permitidos',
+          // `rt-dev` continua porque é o tipo que o fake de IA propõe na conversa; os
+          // demais são os 15 reais do `GN` (`D-23`, medidos em 11/08/2026).
+          ['rt-dev', '68', '70', '71', '89', '90', '91', '92', '93', '94', '95', '96', '108', '134', '143', '144'],
+          EMAIL_DEV,
+          new Date().toISOString(),
+        )
         await config.definir('service_desk_id', 'sd-dev', EMAIL_DEV, new Date().toISOString())
         await config.definir('espacos_confluence', ['TECH'], EMAIL_DEV, new Date().toISOString())
         await config.definir('org_id', 'org-dev', EMAIL_DEV, new Date().toISOString())
@@ -166,7 +173,117 @@ export function apiDev(): Plugin {
       }
       fake.estado.tiposChamado = [
         { id: 'rt-dev', serviceDeskId: 'sd-dev', nome: 'Suporte de tecnologia', descricao: null },
+        // Os 15 tipos REAIS do `GN`, medidos em 11/08/2026 contra a Atlassian.
+        //
+        // ⚠️ Os ids são os de verdade **de propósito**. O mapa de
+        // `campos-do-solicitante.ts` é por request type: com ids inventados o dev
+        // exercitaria o formulário sem exercitar o agrupamento, que é justamente o que
+        // precisa ser olhado. E uma lista de um item só fazia o dev não se parecer com
+        // produção no ponto em que a decisão é tomada — escolher o assunto.
+        //
+        // O `69` ("Solicitação enviada por e-mail") fica fora aqui pelo mesmo motivo que
+        // fica fora da allowlist real (`D-23`): é o canal de entrada por e-mail do próprio
+        // JSM, não um formulário para alguém escolher.
+        { id: '68', serviceDeskId: 'sd-dev', nome: 'Outras questões / dúvidas', descricao: 'Não encontrou o que estava procurando? Selecione essa opção e iremos ajudá-lo.' },
+        { id: '70', serviceDeskId: 'sd-dev', nome: 'Relatar um bug', descricao: 'Conte-nos sobre o problema que você está tendo' },
+        { id: '71', serviceDeskId: 'sd-dev', nome: 'Sugira uma nova funcionalidade / melhoria', descricao: 'Conte-nos sua ideia sobre uma nova função' },
+        { id: '89', serviceDeskId: 'sd-dev', nome: 'Produção parada', descricao: 'A produção está totalmente parada? Nos avise imediatamente.' },
+        { id: '90', serviceDeskId: 'sd-dev', nome: 'Solicitação/problema no Site ou Checkout', descricao: 'O site está fora do ar? Nos avise agora mesmo.' },
+        { id: '91', serviceDeskId: 'sd-dev', nome: 'Problema com pedido de cliente', descricao: 'Utilize esta opção para problemas com pagamentos, reembolso, edição de pedidos' },
+        { id: '92', serviceDeskId: 'sd-dev', nome: 'Problema com Nota Fiscal específica ou grupo de Notas', descricao: 'Alguma NF não está sendo gerada? Vamos verificar o que está acontecendo.' },
+        { id: '93', serviceDeskId: 'sd-dev', nome: 'Lançamento de produto', descricao: 'Faça solicitações para o lançamento de novos produtos' },
+        { id: '94', serviceDeskId: 'sd-dev', nome: 'Lote não gera', descricao: 'Utilize esta opção quando não conseguir destravar lotes' },
+        { id: '95', serviceDeskId: 'sd-dev', nome: 'Problemas com configuração do Totem, Webgex ou Meu Atendimento', descricao: 'Utilize esta função para solicitar, perguntar ou alinhar problemas com os softwares utilizados na loja' },
+        { id: '96', serviceDeskId: 'sd-dev', nome: 'Problemas com grid', descricao: 'Utilize esta opção para problemas com grid' },
+        { id: '108', serviceDeskId: 'sd-dev', nome: 'Solicitar acesso/permissão a um Sistema', descricao: 'Utilize esse formulário para solicitar acesso a um sistema interno da Gocase' },
+        { id: '134', serviceDeskId: 'sd-dev', nome: 'Relatar um problema (Sistema)', descricao: 'Utilize esta opção para problemas com pagamentos, reembolso, edição de pedidos' },
+        { id: '143', serviceDeskId: 'sd-dev', nome: 'Solicitação de nova Question/Dashboard', descricao: null },
+        { id: '144', serviceDeskId: 'sd-dev', nome: 'Edição de Question/Dashboard', descricao: 'Solicitação para modificar uma Question/Dashboard existente' },
       ]
+      // Os schemas reais dos tipos que têm campo — os outros não têm nenhum, e é assim
+      // mesmo (medido). Aceitam anexo: **68, 70 e 134**; o 108 e os de dashboard, não.
+      // É o que faz a pergunta de `RF-62` aparecer em três dos quinze.
+      fake.estado.camposPorTipo.set('68', [
+        {
+          fieldId: 'components',
+          rotulo: 'Componentes',
+          obrigatorio: false,
+          tipo: 'selecao',
+          opcoes: [
+            { id: '10070', rotulo: 'Chaplin' },
+            { id: '10066', rotulo: 'Factory' },
+            { id: '10073', rotulo: 'Influencers' },
+            { id: '10069', rotulo: 'Printing Room' },
+            { id: '10067', rotulo: 'V4 - Site' },
+          ],
+        },
+        { fieldId: 'customfield_anexo', rotulo: 'Anexo', obrigatorio: false, tipo: 'anexo', opcoes: [] },
+      ])
+      // ⚠️ `customfield_10092` aqui é "Em que sistema o Bug está ocorrendo?" — o MESMO id
+      // que no 108 é "Cargo/Função". É o bug de `D-36` reproduzível na tela: se o mapa
+      // voltasse a ser um id global, o cargo da pessoa apareceria neste campo.
+      fake.estado.camposPorTipo.set('70', [
+        { fieldId: 'customfield_10092', rotulo: 'Em que sistema o Bug está ocorrendo?', obrigatorio: true, tipo: 'texto', opcoes: [] },
+        {
+          fieldId: 'customfield_10071',
+          rotulo: 'Recorrência',
+          obrigatorio: true,
+          tipo: 'selecao',
+          opcoes: [
+            { id: '10124', rotulo: '0' },
+            { id: '10127', rotulo: '3' },
+            { id: '10129', rotulo: '5' },
+          ],
+        },
+        { fieldId: 'customfield_anexo', rotulo: 'Anexo', obrigatorio: false, tipo: 'anexo', opcoes: [] },
+      ])
+      // `134` — mesmo caso do 70: aceita anexo, e o `customfield_10093` aqui é "Em que
+      // sistema o erro está acontecendo?", enquanto no 108 o mesmo id é "Sistema que
+      // solicita acesso". O segundo par de ids reusados de `D-36`.
+      fake.estado.camposPorTipo.set('134', [
+        { fieldId: 'customfield_10093', rotulo: 'Em que sistema o erro está acontecendo?', obrigatorio: true, tipo: 'texto', opcoes: [] },
+        {
+          fieldId: 'customfield_10071',
+          rotulo: 'Recorrência',
+          obrigatorio: true,
+          tipo: 'selecao',
+          opcoes: [
+            { id: '10124', rotulo: '0' },
+            { id: '10127', rotulo: '3' },
+            { id: '10129', rotulo: '5' },
+          ],
+        },
+        { fieldId: 'customfield_anexo', rotulo: 'Anexo', obrigatorio: false, tipo: 'anexo', opcoes: [] },
+      ])
+      // Os seis campos obrigatórios do 108, na ordem em que o portal os devolve. Os dois
+      // primeiros são os que o app preenche; os quatro seguintes continuam sendo perguntas
+      // que só quem pede sabe responder — é o contraste que a tela precisa mostrar.
+      fake.estado.camposPorTipo.set('108', [
+        { fieldId: 'customfield_10089', rotulo: 'Nome do Colaborador', obrigatorio: true, tipo: 'texto', opcoes: [] },
+        { fieldId: 'customfield_10091', rotulo: 'E-mail', obrigatorio: true, tipo: 'texto', opcoes: [] },
+        {
+          fieldId: 'customfield_10092',
+          rotulo: 'Cargo/Função que exercerá dentro do time',
+          obrigatorio: true,
+          tipo: 'texto',
+          opcoes: [],
+        },
+        { fieldId: 'customfield_10093', rotulo: 'Sistema que solicita acesso', obrigatorio: true, tipo: 'texto', opcoes: [] },
+        {
+          fieldId: 'customfield_10094',
+          rotulo: 'Breve descrição do que irá fazer',
+          obrigatorio: true,
+          tipo: 'texto_longo',
+          opcoes: [],
+        },
+        {
+          fieldId: 'customfield_10095',
+          rotulo: 'Email da pessoa referência para copiar permissões',
+          obrigatorio: true,
+          tipo: 'texto_longo',
+          opcoes: [],
+        },
+      ])
       // RF-27 (T-130) — schema de campos adicionais, para exercitar o formulário
       // dinâmico em dev sem esperar a credencial real (Q1).
       fake.estado.camposPorTipo.set('rt-dev', [

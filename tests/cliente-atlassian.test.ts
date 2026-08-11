@@ -57,7 +57,7 @@ describe('listarTiposChamado usa o caminho estável, não o experimental', () =>
       })
     }) as unknown as typeof fetch
     return {
-      cliente: new ClienteAtlassianHttp({ ...BASE, campoSolicitanteId: null, fetchImpl }),
+      cliente: new ClienteAtlassianHttp({ ...BASE, fetchImpl }),
       urls,
     }
   }
@@ -149,7 +149,7 @@ describe('RNF-07 — allowlist vazia não busca nada, e não sai requisição', 
     let chamou = false
     const cliente = new ClienteAtlassianHttp({
       ...BASE,
-      campoSolicitanteId: null,
+
       fetchImpl: (async () => {
         chamou = true
         return new Response('{}', { status: 200 })
@@ -208,27 +208,28 @@ describe('RF-21 / R-03 — o solicitante real vai no chamado, com e sem o campo 
     chaveIdempotencia: 'chave-123',
   }
 
-  it('com o campo configurado (Q4 respondida): campo estruturado E descrição', () => {
-    const cliente = new ClienteAtlassianHttp({ ...BASE, campoSolicitanteId: 'customfield_10050' })
-    const { descricao, camposExtra } = cliente.montarCamposSolicitante(dados)
-    expect(camposExtra.customfield_10050).toBe('ana@gocase.com')
+  it('o CLIENTE não decide campo de solicitante — quem decide é o mapa por tipo (D-36)', () => {
+    // 🚨 Antes existia `campoSolicitanteId` nas opções, e um id GLOBAL. Medição de
+    // 11/08/2026: o mesmo `fieldId` significa coisas diferentes por request type, então
+    // um id global escreveria o e-mail do solicitante no campo errado com HTTP 201.
+    // O cliente voltou a ser burro quanto a política — como já é para `RN-06`.
+    const cliente = new ClienteAtlassianHttp({ ...BASE })
+    const { camposExtra } = cliente.montarCamposSolicitante(dados)
+    expect(Object.keys(camposExtra)).toHaveLength(0)
+  })
+
+  it('a descrição identifica quem pediu, SEMPRE — é a garantia, não o extra', () => {
+    // Cinto e suspensório de propósito: 14 dos 15 tipos do `GN` não têm campo de
+    // solicitante, então sem isto quase todo chamado chegaria ao time de tech como
+    // "aberto pelo robô" — o risco R-03 inteiro.
+    const cliente = new ClienteAtlassianHttp({ ...BASE })
+    const { descricao } = cliente.montarCamposSolicitante(dados)
     expect(descricao).toContain('**Solicitante:** ana@gocase.com')
     expect(descricao).toContain('O pipeline diário não rodou.')
   })
 
-  it('SEM o campo (Q4 em aberto): a descrição ainda identifica quem pediu', () => {
-    // Cinto e suspensório de propósito: sem isso, todo chamado chega ao time de
-    // tech como "aberto pelo robô" — o risco R-03 inteiro. Deixar a identificação
-    // depender de uma config que pode estar ausente é aceitar o pior caso em
-    // silêncio.
-    const cliente = new ClienteAtlassianHttp({ ...BASE, campoSolicitanteId: null })
-    const { descricao, camposExtra } = cliente.montarCamposSolicitante(dados)
-    expect(Object.keys(camposExtra)).toHaveLength(0)
-    expect(descricao).toContain('**Solicitante:** ana@gocase.com')
-  })
-
   it('a chave de idempotência vai no corpo — é o que permite reconciliar (RNF-21)', () => {
-    const cliente = new ClienteAtlassianHttp({ ...BASE, campoSolicitanteId: null })
+    const cliente = new ClienteAtlassianHttp({ ...BASE })
     const { descricao } = cliente.montarCamposSolicitante(dados)
     expect(descricao).toContain('chave-123')
   })
@@ -294,7 +295,7 @@ describe('RF-27 (T-130) — criarChamado inclui camposDinamicos em requestFieldV
     let corpoEnviado: Record<string, unknown> | null = null
     const cliente = new ClienteAtlassianHttp({
       ...BASE,
-      campoSolicitanteId: null,
+
       maxTentativas: 1,
       fetchImpl: (async (_url: string, init: { body?: string }) => {
         corpoEnviado = JSON.parse(init.body ?? '{}')
@@ -321,7 +322,7 @@ describe('RF-27 (T-130) — criarChamado inclui camposDinamicos em requestFieldV
     let corpoEnviado: Record<string, unknown> | null = null
     const cliente = new ClienteAtlassianHttp({
       ...BASE,
-      campoSolicitanteId: null,
+
       maxTentativas: 1,
       fetchImpl: (async (_url: string, init: { body?: string }) => {
         corpoEnviado = JSON.parse(init.body ?? '{}')
@@ -415,7 +416,7 @@ const PAGINA_V2 = {
 const clienteV2 = (mapa: Parameters<typeof fetchV2>[0]) =>
   new ClienteAtlassianHttp({
     ...BASE,
-    campoSolicitanteId: null,
+
     maxTentativas: 1,
     fetchImpl: fetchV2(mapa),
   })
