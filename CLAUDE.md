@@ -439,6 +439,16 @@ destes reabre um vazamento que já foi fechado.
   veículo do erro. O mapa é **por request type e fica no código**, com teste. ⚠️ A emenda é
   estreita: `service_desk_id` e as allowlists continuam em config — os dois foram alterados
   em 11/08, que é a prova de que variam.
+- 🚨 **Campo obrigatório do request type faltando NÃO abria chamado — dava 500** (`D-38`,
+  medido na staging em 11/08/2026 com o tipo 70). A pessoa lia "Algo deu errado do nosso
+  lado" e o chamado **não existia**. ⚠️ E **quatro testes verdes afirmavam que abria**: o
+  `ClienteAtlassianFake` não valida nada, então o dublê escondia a divergência — mesma
+  família de `linhasComoObjetos`. Agora `obrigatoriosFaltando` recusa **antes de qualquer
+  efeito**, com os **rótulos** (nunca o `fieldId`, `RNF-30`), nas duas rotas.
+  ⚠️ Isso **não** contraria `RNF-18`: "não bloquear" nunca resultou em chamado aberto.
+  Tipo **sem** obrigatório continua abrindo sem campo nenhum, e campo extra malformado
+  continua não derrubando — os dois têm teste. Schema desconhecido **não** recusa (`D-27`),
+  e o campo de **anexo** fica fora da checagem, senão `RN-11` viraria "anexe um arquivo".
 - 🚨 **A área do solicitante é GUARDADA, nunca enviada** (`D-37`, `teamguide/area.ts`). O
   campo `Setor Gocase` do Jira é multi-checkbox com **15 opções fixas**, e a área real da
   primeira pessoa medida (`RPA`) **não está entre elas** — mandar valor fora da lista dá

@@ -1810,6 +1810,51 @@ de um quebra o outro sem aviso** — e no goatlas quebra **em silêncio**, porqu
 fail-open: a área simplesmente para de vir e cai no mapa. É o primeiro item a revisitar no dia
 em que o godocs rotacionar.
 
+### D-38 · Campo obrigatório faltando é RECUSA com o rótulo, não 500 depois
+
+**Data:** 11/08/2026 · **Medido por:** teste na staging · **Contexto:** `RF-27`, `RNF-17`,
+`RNF-18`, `D-27`
+
+**A medição que forçou a decisão.** Com a escrita ligada por ~90 segundos na staging, uma
+criação do request type **70** ("Relatar um bug") **sem** os campos obrigatórios dele
+(*"Em que sistema o Bug está ocorrendo?"* e *"Recorrência"*) devolveu:
+
+```
+POST /api/chamados  →  HTTP 500  {"codigo":"erro_interno"}
+GET  /api/chamados  →  nenhum chamado novo
+```
+
+Ou seja: a pessoa lia *"Algo deu errado do nosso lado"* e **o chamado não existia**.
+
+🚨 **E havia quatro testes verdes afirmando que isso abria chamado.** Eles passavam porque o
+`ClienteAtlassianFake` **não valida nada** — a mesma família de `linhasComoObjetos` e do
+`env.DB`: o dublê implementa o contrato documentado, e onde a Atlassian diverge ele esconde
+a divergência em vez de revelá-la.
+
+**A decisão:** `obrigatoriosFaltando` recusa **antes de qualquer efeito**, com os **rótulos**
+do que falta (nunca o `fieldId` — quem lê é quem abre o chamado, `RNF-30`), nas **duas**
+rotas de criação.
+
+**Por que isto NÃO contraria `RNF-18`.** A leitura anterior era *"campo adicional não pode
+derrubar o caminho sem IA"*, e ela continua valendo — tem teste próprio: tipo **sem**
+obrigatório abre chamado sem campo nenhum, e `camposDinamicos` malformado não derruba a
+submissão. O que mudou é que ninguém tinha medido que request type **tem** campo
+obrigatório: "não bloquear" nunca resultou em chamado aberto, resultou em 500. Trocar um 500
+genérico por um erro que diz o que corrigir é degradar melhor, não degradar menos.
+
+**Fail-open onde a incerteza é nossa** (`D-27`): schema desconhecido **não** recusa. Schema
+que não pôde ser lido não é evidência de que falta campo, e recusar aí transformaria
+indisponibilidade de leitura em parede.
+
+⚠️ **O campo de anexo fica FORA da checagem**, mesmo marcado obrigatório. Quem governa
+arquivo é `RF-62`/`RN-11`, e ali a regra é explícita: a declaração trava **responder**, nunca
+**anexar**. Incluí-lo aqui transformaria "responda se tem evidência" em "anexe um arquivo",
+que é a parede que a spec 005 recusa por escrito.
+
+**Consequência para o caminho da conversa:** ela não coletava campo extra nenhum, então
+**qualquer** tipo com obrigatório (70, 134, 108, 93 — medidos) morria no 500. Daí a tela de
+confirmação passar a coletá-los, como o formulário já fazia.
+
 ---
 
 ## Perguntas em aberto
