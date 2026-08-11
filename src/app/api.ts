@@ -447,6 +447,15 @@ export interface ResumoMetricas {
   readonly taxaOverrideGlobalPct: number | null
   readonly chamadosPorVia: Readonly<Record<string, number>>
   readonly buscas: ResumoBuscasMetricas
+  /** T-520 — a fonte organizacional da área do solicitante (`RF-19`, `D-37`). */
+  readonly area: {
+    readonly comArea: number
+    readonly semArea: number
+    /** Cadastro faltando na TeamGuide — resolve-se cadastrando. */
+    readonly naoEncontrada: number
+    /** A fonte fora do ar — resolve-se olhando o token ou a API. */
+    readonly indisponivel: number
+  }
   readonly painel: ResumoPainel
   readonly baselineAssentos: BaselineAssentos | null
   readonly canalNotificacaoDefinido: boolean
@@ -612,11 +621,28 @@ export const api = {
    * RF-62 — `declarouAnexo` só vai quando o tipo aceita anexo. Mandar `false` num tipo
    * que não pergunta gravaria "disse que não tinha" para quem nunca foi perguntado.
    */
-  confirmar: (conversaId: string, declarouAnexo?: boolean) =>
-    chamar<ResultadoCriacao>(`/api/conversas/${encodeURIComponent(conversaId)}/confirmar`, {
-      method: 'POST',
-      ...(declarouAnexo === undefined ? {} : { body: JSON.stringify({ declarouAnexo }) }),
-    }),
+  confirmar: (
+    conversaId: string,
+    declarouAnexo?: boolean,
+    /**
+     * RF-27 na conversa (`D-38`). Sem isto, um tipo com campo obrigatório — 70, 134, 108,
+     * 93 — não abria chamado por aqui: dava 500 e a pessoa não sabia o que corrigir.
+     */
+    camposDinamicos?: Record<string, string>,
+  ) => {
+    const corpo: Record<string, unknown> = {}
+    if (declarouAnexo !== undefined) corpo.declarouAnexo = declarouAnexo
+    if (camposDinamicos && Object.keys(camposDinamicos).length > 0) {
+      corpo.camposDinamicos = camposDinamicos
+    }
+    return chamar<ResultadoCriacao>(
+      `/api/conversas/${encodeURIComponent(conversaId)}/confirmar`,
+      {
+        method: 'POST',
+        ...(Object.keys(corpo).length === 0 ? {} : { body: JSON.stringify(corpo) }),
+      },
+    )
+  },
 
   abrirPorFormulario: (dados: {
     titulo: string

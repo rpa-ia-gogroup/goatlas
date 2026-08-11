@@ -171,10 +171,21 @@ describe('RF-27 — a chave dos campos adicionais vem do SCHEMA, nunca do client
     expect(JSON.parse(linhas[0]!.detalhe_json).motivo).toBe('schema_indisponivel')
   })
 
-  it('nenhum campo adicional continua abrindo chamado sem campo nenhum', async () => {
+  it('obrigatório do schema faltando: RECUSA nomeando o rótulo, sem tocar a Atlassian', async () => {
+    // ⚠️ Este teste **afirmava 201** e foi trocado com base em medição, não em gosto:
+    // em 11/08/2026, criar na staging um chamado do tipo 70 sem os campos obrigatórios do
+    // request type devolveu **HTTP 500** e **nenhum chamado**. Ou seja, o 201 que este
+    // teste protegia era verdade só contra o fake — que não valida nada — e em produção
+    // significava chamado perdido com "algo deu errado" na tela.
+    //
+    // O que a decisão original protegia continua valendo e tem teste próprio em
+    // `rf27-campos-dinamicos`: tipo **sem** obrigatório abre chamado sem campo nenhum, e
+    // campo extra malformado não derruba a submissão (`RNF-18`).
     const r = await tratarRequisicao(req('/api/chamados', { ...BASE, chaveIdempotencia: 'k5' }), ctx, {})
-    expect(r.status).toBe(201)
-    const enviado = ultimaCriacao()
-    expect(enviado.camposDinamicos).toBeUndefined()
+    expect(r.status).toBe(400)
+    const corpo = (await r.json()) as { erro: string }
+    expect(corpo.erro).toContain('Sistema afetado')
+    expect(corpo.erro).not.toContain('customfield_')
+    expect(fake.chamadas.some((c) => c.operacao === 'criarChamado')).toBe(false)
   })
 })

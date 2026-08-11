@@ -4443,7 +4443,7 @@ var ServicoChamados = class {
    * existe caminho alternativo: é a diferença entre a regra ser garantia e ser
    * recomendação.
    */
-  async abrirPorConversa(conversa, serviceDeskId, chaveIdempotencia, area = null, declarouAnexo = null) {
+  async abrirPorConversa(conversa, serviceDeskId, chaveIdempotencia, area = null, declarouAnexo = null, camposDinamicos = null) {
     const autorizacao = autorizarCriacao(conversa);
     if (!autorizacao.ok) {
       await this.auditoria.registrar({
@@ -4470,7 +4470,8 @@ var ServicoChamados = class {
         descricao: proposta.descricao,
         tipoChamadoId: proposta.tipoChamadoId,
         serviceDeskId,
-        prioridade: proposta.prioridade
+        prioridade: proposta.prioridade,
+        ...camposDinamicos && Object.keys(camposDinamicos).length > 0 ? { camposDinamicos } : {}
       }
     });
   }
@@ -6911,7 +6912,7 @@ var ORDEM_REGRAS = ["regra1_confluence", "regra2_ajuste_operacional"];
 function taxa(numerador, denominador) {
   return denominador === 0 ? null : numerador / denominador * 100;
 }
-function calcularMetricas(bloqueios, vias, resultadosBuscas) {
+function calcularMetricas(bloqueios, vias, resultadosBuscas, area = { comArea: 0, semArea: 0, naoEncontrada: 0, indisponivel: 0 }) {
   const porRegra = /* @__PURE__ */ new Map();
   for (const regra of ORDEM_REGRAS) porRegra.set(regra, { total: 0, overrides: 0 });
   for (const b of bloqueios) {
@@ -6940,19 +6941,37 @@ function calcularMetricas(bloqueios, vias, resultadosBuscas) {
       total: totalBuscas,
       semResultado,
       taxaSemResultadoPct: taxa(semResultado, totalBuscas)
-    }
+    },
+    area
   };
 }
 async function obterResumoMetricas(db) {
   const bloqueiosBrutos = await db.query("SELECT regra, houve_override FROM bloqueios", []);
   const bloqueios = linhasComoObjetos(bloqueiosBrutos).map((l) => ({ regra: l.regra, houveOverride: l.houve_override === 1 }));
-  const viasBrutas = await db.query("SELECT via FROM vinculos", []);
-  const vias = linhasComoObjetos(viasBrutas).map((l) => l.via);
+  const viasBrutas = await db.query("SELECT via, area FROM vinculos", []);
+  const linhasVinculo = linhasComoObjetos(viasBrutas);
+  const vias = linhasVinculo.map((l) => l.via);
+  const areaBruta = await db.query(
+    `SELECT acao, COUNT(*) AS n FROM auditoria
+      WHERE acao IN ('area_nao_encontrada', 'area_indisponivel')
+      GROUP BY acao`,
+    []
+  );
+  const porAcao = new Map(
+    linhasComoObjetos(areaBruta).map((l) => [l.acao, Number(l.n)])
+  );
+  const comArea = linhasVinculo.filter((l) => (l.area ?? "").trim().length > 0).length;
+  const area = {
+    comArea,
+    semArea: linhasVinculo.length - comArea,
+    naoEncontrada: porAcao.get("area_nao_encontrada") ?? 0,
+    indisponivel: porAcao.get("area_indisponivel") ?? 0
+  };
   const buscasBrutas = await db.query("SELECT resultados FROM buscas", []);
   const resultadosBuscas = linhasComoObjetos(buscasBrutas).map(
     (l) => Number(l.resultados)
   );
-  return calcularMetricas(bloqueios, vias, resultadosBuscas);
+  return calcularMetricas(bloqueios, vias, resultadosBuscas, area);
 }
 
 // src/lib/governanca/painel.ts
@@ -7458,6 +7477,17 @@ function resolverCamposDoSolicitante(tipoChamadoId, schema, identidade) {
   return saida;
 }
 
+// src/lib/tickets/campos-obrigatorios.ts
+function obrigatoriosFaltando(schema, valores) {
+  if (!schema.conhecido) return [];
+  const preenchidos = valores ?? {};
+  return schema.campos.filter((c) => c.obrigatorio && c.tipo !== "anexo").filter((c) => (preenchidos[c.fieldId] ?? "").trim().length === 0).map((c) => c.rotulo);
+}
+function mensagemObrigatoriosFaltando(rotulos) {
+  const lista2 = rotulos.join(", ");
+  return rotulos.length === 1 ? `Falta preencher "${lista2}" \u2014 o Jira exige esse campo para este tipo de chamado.` : `Faltam preencher: ${lista2}. O Jira exige esses campos para este tipo de chamado.`;
+}
+
 // src/lib/tickets/declaracao-anexo.ts
 function tipoAceitaAnexo(campos) {
   return campos.some((c) => c.tipo === "anexo");
@@ -7920,6 +7950,20 @@ async function rotear(req, ctx, eu, caminho, url) {
       corpoConfirmacao?.declarouAnexo
     );
     if ("recusa" in declaracao) return declaracao.recusa;
+    const camposDaConversa = {
+      ...resolverCamposDoSolicitante(conversa.proposta.tipoChamadoId, schema, eu),
+      ...await filtrarCamposComSchema(
+        ctx,
+        eu.email,
+        conversa.proposta.tipoChamadoId,
+        extrairCamposDinamicos(corpoConfirmacao?.camposDinamicos),
+        schema
+      ) ?? {}
+    };
+    const faltandoNaConversa = obrigatoriosFaltando(schema, camposDaConversa);
+    if (faltandoNaConversa.length > 0) {
+      return ERROS.dadosInvalidos(mensagemObrigatoriosFaltando(faltandoNaConversa));
+    }
     await ctx.conversas.registrarConfirmacao(conversa.id);
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -7942,7 +7986,14 @@ async function rotear(req, ctx, eu, caminho, url) {
         areasPorEmail: ctx.valores.areas_por_email,
         auditoria: ctx.auditoria
       }),
-      declaracao.declarouAnexo
+      declaracao.declarouAnexo,
+      // RF-21 / `D-36` — os MESMOS campos que o formulário preenche, resolvidos com o
+      // `schema` que `RF-62` já leu logo acima. Sem isto, um chamado de um tipo que exige
+      // nome e e-mail nasceria vazio quando aberto pela conversa, e só por lá.
+      //
+      // ⚠️ A conversa não tem formulário dinâmico, então aqui não há valor do cliente para
+      // vencer o do login (`FR-3`) — o que chega é sempre a identidade da sessão.
+      camposDaConversa
     );
     if (r.estado === "criado") await ctx.conversas.definirEstado(conversa.id, "criado");
     const anexo = await materializarAnexosDoChamado(ctx, {
@@ -7999,6 +8050,10 @@ async function rotear(req, ctx, eu, caminho, url) {
       ...resolverCamposDoSolicitante(validada.proposta.tipoChamadoId, schema, eu),
       ...camposDinamicos ?? {}
     };
+    const faltando = obrigatoriosFaltando(schema, camposComSolicitante);
+    if (faltando.length > 0) {
+      return ERROS.dadosInvalidos(mensagemObrigatoriosFaltando(faltando));
+    }
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,

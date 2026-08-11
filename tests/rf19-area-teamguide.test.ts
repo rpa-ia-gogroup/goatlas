@@ -16,6 +16,7 @@ import { ClienteTeamGuideFake } from '@/lib/teamguide/fake'
 import { TeamGuideIndisponivel } from '@/lib/teamguide/contrato'
 import { ClienteTeamGuideHttp, novaCacheTeamGuide } from '@/lib/teamguide/http'
 import { resolverArea } from '@/lib/teamguide/area'
+import { obterResumoMetricas } from '@/lib/governanca/metricas'
 
 const ANA = 'ana@gocase.com'
 let db: SqliteLocal
@@ -185,5 +186,36 @@ describe('ClienteTeamGuideHttp', () => {
       estado: 'indisponivel',
       motivo: 'formato_inesperado',
     })
+  })
+})
+
+describe('T-520 — o console relata a área, e SEPARA os dois motivos', () => {
+  it('conta com/sem área pelo vínculo e os motivos pela auditoria', async () => {
+    // ⚠️ Duas fontes de propósito: o vínculo diz o que **ficou gravado** (incluindo quem
+    // caiu no `areas_por_email` depois de a fonte falhar), a auditoria diz **por quê**.
+    // Contar só um dos dois esconde metade da informação que decide a ação.
+    await db.exec(
+      `INSERT INTO vinculos (issue_key, solicitante_email, via, verificado_regras, area, criado_em)
+       VALUES ('GN-1', 'ana@gocase.com', 'formulario', 0, 'RPA', '2026-08-11T00:00:00.000Z'),
+              ('GN-2', 'bruno@gocase.com', 'formulario', 0, NULL, '2026-08-11T00:00:00.000Z')`,
+      [],
+    )
+    await resolverArea({
+      email: 'ninguem@gocase.com',
+      teamguide: new ClienteTeamGuideFake(),
+      areasPorEmail: {},
+      auditoria,
+    })
+    const fora = new ClienteTeamGuideFake()
+    fora.falha = 'http_500'
+    await resolverArea({ email: ANA, teamguide: fora, areasPorEmail: {}, auditoria })
+
+    const r = await obterResumoMetricas(db)
+    expect(r.area).toEqual({ comArea: 1, semArea: 1, naoEncontrada: 1, indisponivel: 1 })
+  })
+
+  it('sem chamado nenhum, os números são zero — a TELA é quem diz "sem dado"', async () => {
+    const r = await obterResumoMetricas(db)
+    expect(r.area).toEqual({ comArea: 0, semArea: 0, naoEncontrada: 0, indisponivel: 0 })
   })
 })

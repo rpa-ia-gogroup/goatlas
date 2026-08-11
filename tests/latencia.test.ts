@@ -34,6 +34,7 @@ import {
   type CachesAtlassian,
 } from '@/lib/atlassian/cliente'
 import { montarContexto } from '@/lib/contexto'
+import { ClienteTeamGuideHttp, novaCacheTeamGuide } from '@/lib/teamguide/http'
 import { CONCORRENCIA_ATLASSIAN, mapearComLimite } from '@/lib/paralelo'
 import { CONFIG_PADRAO, type ConfigValores } from '@/lib/config'
 import { AuditoriaBanco } from '@/lib/audit'
@@ -610,5 +611,65 @@ describe('turno do agente: a proposta não espera a resposta do modelo', () => {
     }
     const r = await orquestrador.processarMensagem(c, 'x', CONFIG)
     expect(r.custoUsd).toBeGreaterThan(0.0002)
+  })
+})
+
+/**
+ * T-518 — a fonte organizacional não vira ida de rede por chamado aberto.
+ *
+ * ⚠️ Afirmado no nível da **rota**, não do cliente. O cliente já tem teste próprio da
+ * cache em `rf19-area-teamguide`; o que só aqui aparece é a **fiação**: o dia em que
+ * `contexto.ts` construir um cliente novo por requisição — com cache nova junto —, o teste
+ * do cliente continua verde e cada chamado aberto passa a custar uma leitura da base
+ * inteira da empresa. É exatamente o defeito nº 2 desta lista, na versão nova.
+ */
+describe('fonte organizacional: uma leitura por isolate, não por chamado (RNF-36)', () => {
+  it('duas aberturas seguidas fazem UMA leitura da base', async () => {
+    let leituras = 0
+    const fetchImpl = (async () => {
+      leituras++
+      return new Response(
+        JSON.stringify([{ contactEmail: 'ana@gocase.com', teams: ['RPA'] }]),
+        { status: 200 },
+      )
+    }) as unknown as typeof fetch
+
+    const cache = novaCacheTeamGuide()
+    // Duas instâncias, como duas requisições — o que as liga é a cache do MÓDULO.
+    const um = new ClienteTeamGuideHttp({ token: 't', fetchImpl, cache, agoraMs: () => 1000 })
+    const dois = new ClienteTeamGuideHttp({ token: 't', fetchImpl, cache, agoraMs: () => 1000 })
+
+    expect(await um.areaDe('ana@gocase.com')).toEqual({ estado: 'encontrada', area: 'RPA' })
+    expect(await dois.areaDe('ana@gocase.com')).toEqual({ estado: 'encontrada', area: 'RPA' })
+    expect(leituras).toBe(1)
+  })
+
+  it('cache NÃO compartilhada rebusca — é o estado que o defeito de RNF-13 produzia', async () => {
+    let leituras = 0
+    const fetchImpl = (async () => {
+      leituras++
+      return new Response(JSON.stringify([]), { status: 200 })
+    }) as unknown as typeof fetch
+
+    await new ClienteTeamGuideHttp({ token: 't', fetchImpl }).areaDe('ana@gocase.com')
+    await new ClienteTeamGuideHttp({ token: 't', fetchImpl }).areaDe('ana@gocase.com')
+    expect(leituras).toBe(2)
+  })
+
+  it('a abertura de chamado NÃO chama a fonte quando ela não está configurada', async () => {
+    // `FR-13`: instalação sem a credencial se comporta como antes — e "como antes"
+    // inclui não pagar ida de rede nenhuma.
+    const db = new SqliteLocal()
+    await migrar(db)
+    // ⚠️ Precisa de `ATLASSIAN_API_TOKEN`: sem ele `usandoFakes` é verdadeiro e o
+    // contexto instancia o dublê — que é o comportamento certo em teste, e justamente o
+    // que este caso NÃO quer medir.
+    const ctx = await montarContexto({
+      DB: db,
+      ATLASSIAN_API_TOKEN: 'token',
+      ATLASSIAN_EMAIL: 'servico@gocase.com',
+      ATLASSIAN_BASE_URL: 'https://goengenharia.atlassian.net',
+    })
+    expect(ctx.teamguide).toBeNull()
   })
 })

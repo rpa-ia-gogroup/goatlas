@@ -40,7 +40,7 @@ beforeEach(async () => {
   const config = new Config(db)
   await config.definir('dominios_permitidos', ['gocase.com'], CHEFE, AGORA)
   await config.definir('admins', [CHEFE], CHEFE, AGORA)
-  await config.definir('tipos_chamado_permitidos', ['rt-1'], CHEFE, AGORA)
+  await config.definir('tipos_chamado_permitidos', ['rt-1', 'rt-livre'], CHEFE, AGORA)
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
   ctx = await montarContexto(
     { DB: db, GOATLAS_USAR_FAKES: '1' },
@@ -50,7 +50,26 @@ beforeEach(async () => {
   fake = ctx.atlassian as ClienteAtlassianFake
   fake.estado.tiposChamado = [
     { id: 'rt-1', serviceDeskId: 'sd-1', nome: 'Suporte', descricao: null },
+    // ⚠️ Um tipo **sem campo obrigatório**, para os testes de "aditivo" e "malformado não
+    // derruba" continuarem afirmando o que sempre afirmaram.
+    //
+    // Medido em 11/08/2026 contra a Atlassian real: criação **sem** um campo obrigatório
+    // do request type **não abre chamado** — a pessoa recebe um 500 genérico e o chamado
+    // se perde. Então "abre chamado mesmo faltando obrigatório" nunca foi verdade em
+    // produção; era verdade só contra o fake, que não valida nada. O que a decisão original
+    // protegia — campo **extra** não pode derrubar o caminho sem IA (`RNF-18`) — continua
+    // valendo, e é o que estes testes passam a exercitar sem a confusão.
+    { id: 'rt-livre', serviceDeskId: 'sd-1', nome: 'Sem obrigatório', descricao: null },
   ]
+  fake.estado.camposPorTipo.set('rt-livre', [
+    {
+      fieldId: 'customfield_2',
+      rotulo: 'Ambiente',
+      obrigatorio: false,
+      tipo: 'selecao',
+      opcoes: [{ id: '1', rotulo: 'Produção' }],
+    },
+  ])
   fake.estado.camposPorTipo.set('rt-1', [
     { fieldId: 'customfield_1', rotulo: 'Sistema afetado', obrigatorio: true, tipo: 'texto', opcoes: [] },
     {
@@ -143,7 +162,7 @@ describe('POST /api/chamados — camposDinamicos chega até criarChamado', () =>
     })
   })
 
-  it('RF-27 é ADITIVO — o formulário continua funcionando SEM nenhum campo adicional', async () => {
+  it('RF-27 é ADITIVO — tipo SEM obrigatório abre chamado sem campo adicional nenhum', async () => {
     const r = await chamar(
       req('/api/chamados', {
         metodo: 'POST',
@@ -151,7 +170,7 @@ describe('POST /api/chamados — camposDinamicos chega até criarChamado', () =>
         corpo: {
           titulo: 'Pipeline de vendas falhou',
           descricao: 'O pipeline diário não gerou os dados de ontem.',
-          tipoChamadoId: 'rt-1',
+          tipoChamadoId: 'rt-livre',
           prioridade: 'alta',
         },
       }),
@@ -167,7 +186,7 @@ describe('POST /api/chamados — camposDinamicos chega até criarChamado', () =>
         corpo: {
           titulo: 'Pipeline de vendas falhou',
           descricao: 'O pipeline diário não gerou os dados de ontem.',
-          tipoChamadoId: 'rt-1',
+          tipoChamadoId: 'rt-livre',
           prioridade: 'alta',
           camposDinamicos: ['isso não é um objeto'],
         },
@@ -184,7 +203,7 @@ describe('POST /api/chamados — camposDinamicos chega até criarChamado', () =>
         corpo: {
           titulo: 'Pipeline de vendas falhou',
           descricao: 'O pipeline diário não gerou os dados de ontem.',
-          tipoChamadoId: 'rt-1',
+          tipoChamadoId: 'rt-livre',
           prioridade: 'alta',
           // `customfield_3` NÃO está no schema deste tipo. Ele passava antes de
           // T-401 — a allowlist era de valor, não de chave. Ver
@@ -196,5 +215,29 @@ describe('POST /api/chamados — camposDinamicos chega até criarChamado', () =>
     const chamada = fake.chamadas.find((c) => c.operacao === 'criarChamado')
     const params = chamada?.params as { camposDinamicos?: Record<string, string> }
     expect(params?.camposDinamicos).toEqual({ customfield_2: 'Produção' })
+  })
+
+  it('🚨 obrigatório faltando é RECUSA com o rótulo, não 500 depois', async () => {
+    // Medido em 11/08/2026 na staging: criar o tipo 70 sem os obrigatórios devolveu
+    // **HTTP 500 "Algo deu errado do nosso lado"** e nenhum chamado. A pessoa perdia o
+    // chamado e não sabia o que corrigir. A recusa vem ANTES de qualquer efeito.
+    const r = await chamar(
+      req('/api/chamados', {
+        metodo: 'POST',
+        email: ANA,
+        corpo: {
+          titulo: 'Pipeline de vendas falhou',
+          descricao: 'O pipeline diário não gerou os dados de ontem.',
+          tipoChamadoId: 'rt-1',
+          prioridade: 'alta',
+        },
+      }),
+    )
+    expect(r.status).toBe(400)
+    const corpo = (await r.json()) as { erro: string }
+    // O RÓTULO, não o `fieldId` — quem lê é quem abre o chamado (`RNF-30`).
+    expect(corpo.erro).toContain('Sistema afetado')
+    expect(corpo.erro).not.toContain('customfield_')
+    expect(fake.chamadas.some((c) => c.operacao === 'criarChamado')).toBe(false)
   })
 })

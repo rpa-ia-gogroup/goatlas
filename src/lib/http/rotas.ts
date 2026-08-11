@@ -45,6 +45,10 @@ import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
 import { resolverCamposDoSolicitante } from '../tickets/campos-do-solicitante'
 import {
+  mensagemObrigatoriosFaltando,
+  obrigatoriosFaltando,
+} from '../tickets/campos-obrigatorios'
+import {
   exigeDeclaracaoDeAnexo,
   tipoAceitaAnexo,
   validarDeclaracao,
@@ -316,6 +320,29 @@ async function rotear(
     )
     if ('recusa' in declaracao) return declaracao.recusa
 
+    // RF-27 na CONVERSA (T-505b). A tela de confirmação passou a coletar os campos extras
+    // do request type, pelo mesmo caminho do formulário: filtro pelo schema, e os do
+    // solicitante entrando como padrão.
+    //
+    // 🚨 E a recusa vem ANTES de `registrarConfirmacao`, pela mesma razão que `RF-62`:
+    // registrar a confirmação e só então recusar deixaria a conversa marcada como
+    // confirmada **sem** chamado, e `confirmadoEm` passaria a significar "clicou" em vez
+    // de "autorizou a criação".
+    const camposDaConversa = {
+      ...resolverCamposDoSolicitante(conversa.proposta.tipoChamadoId, schema, eu),
+      ...((await filtrarCamposComSchema(
+        ctx,
+        eu.email,
+        conversa.proposta.tipoChamadoId,
+        extrairCamposDinamicos(corpoConfirmacao?.camposDinamicos),
+        schema,
+      )) ?? {}),
+    }
+    const faltandoNaConversa = obrigatoriosFaltando(schema, camposDaConversa)
+    if (faltandoNaConversa.length > 0) {
+      return ERROS.dadosInvalidos(mensagemObrigatoriosFaltando(faltandoNaConversa))
+    }
+
     await ctx.conversas.registrarConfirmacao(conversa.id)
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -345,6 +372,13 @@ async function rotear(
         auditoria: ctx.auditoria,
       }),
       declaracao.declarouAnexo,
+      // RF-21 / `D-36` — os MESMOS campos que o formulário preenche, resolvidos com o
+      // `schema` que `RF-62` já leu logo acima. Sem isto, um chamado de um tipo que exige
+      // nome e e-mail nasceria vazio quando aberto pela conversa, e só por lá.
+      //
+      // ⚠️ A conversa não tem formulário dinâmico, então aqui não há valor do cliente para
+      // vencer o do login (`FR-3`) — o que chega é sempre a identidade da sessão.
+      camposDaConversa,
     )
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
     const anexo = await materializarAnexosDoChamado(ctx, {
@@ -431,6 +465,14 @@ async function rotear(
     const camposComSolicitante = {
       ...resolverCamposDoSolicitante(validada.proposta.tipoChamadoId, schema, eu),
       ...(camposDinamicos ?? {}),
+    }
+
+    // 🚨 Recusa ANTES de qualquer efeito. Mandar sem obrigatório dá 400, que este projeto
+    // classifica como definitivo — a submissão vira `falha` e nunca é reprocessada, ou
+    // seja, o chamado da pessoa morre. Aqui vira erro corrigível, com o que falta nomeado.
+    const faltando = obrigatoriosFaltando(schema, camposComSolicitante)
+    if (faltando.length > 0) {
+      return ERROS.dadosInvalidos(mensagemObrigatoriosFaltando(faltando))
     }
 
     const r = await ctx.chamados.abrirPorFormulario({

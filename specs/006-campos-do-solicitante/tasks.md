@@ -67,15 +67,17 @@ e é o primeiro item a revisitar se um dia o godocs rotacionar.
 - [x] **T-516** — `resolverArea` nas **duas** rotas de criação. _Requirements: RF-19, FR-7_
 - [x] **T-517** — Teste estrutural: `criarChamado` e `NovoChamado` não conhecem "área".
       _Requirements: FR-7 (ScC-4)_
-- [~] **T-518** — A propriedade ("uma leitura por isolate, não por chamado") tem teste em
-      `rf19-area-teamguide`. ⚠️ **Não** foi acrescentada asserção em `tests/latencia.test.ts`,
-      que mede contagem no nível da rota — é onde uma regressão de fiação apareceria.
-      _Requirements: RNF-12, RNF-36_
+- [x] **T-518** — Asserção em `tests/latencia.test.ts`, no nível da **fiação**: duas
+      instâncias que compartilham a cache do módulo fazem **uma** leitura; sem compartilhar,
+      duas (o estado que o defeito de `RNF-13` produzia); e sem credencial o contexto nem
+      cria cliente. _Requirements: RNF-12, RNF-36_
 - [x] **T-519** — `D-37`, `docs/DEPLOY.md` (privilégio, o que lê, e o acoplamento do token
       com o godocs), `RF-19` reescrito e `CLAUDE.md`. _Requirements: RNF-01, RNF-27_
-- [ ] **T-520** — O console de admin não mostra nada sobre a fonte organizacional. Hoje só a
-      auditoria diz que houve `area_indisponivel`. Provável seção em `D-25`, se o volume
-      justificar.
+- [x] **T-520** — Painel "Área de quem abre" nas métricas: com/sem área pelo **vínculo**,
+      e os dois motivos **separados** pela auditoria. ⚠️ Sem campo editável — não há o que
+      decidir (o token é secret, está lá ou não), e `D-25` diz que o console mostra o que se
+      decide e **relata** o resto. Sem chamado nenhum, a tela diz "sem dado" em vez de `0`.
+      _Requirements: RF-19, RF-55, D-25, D-37_
 
 ## Fora desta spec
 

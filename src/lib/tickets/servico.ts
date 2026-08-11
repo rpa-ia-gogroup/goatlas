@@ -72,6 +72,16 @@ export class ServicoChamados {
     area: string | null = null,
     /** RF-62 — já decidida pela rota. `null` = a pergunta não se aplicava. */
     declarouAnexo: boolean | null = null,
+    /**
+     * RF-21 / `D-36` — campos do request type, com os do solicitante já resolvidos pela
+     * rota (que é quem tem o schema).
+     *
+     * ⚠️ Existe para que os **dois** caminhos de criação produzam o mesmo chamado. Enquanto
+     * só o formulário preenchia, um chamado do tipo 108 aberto pela conversa nascia sem
+     * nome e sem e-mail — e ninguém veria, porque o tipo 108 raramente chega por lá.
+     * Divergência silenciosa entre dois caminhos é o defeito que a spec 006 §8 nomeia.
+     */
+    camposDinamicos: Readonly<Record<string, string>> | null = null,
   ): Promise<ResultadoCriacao> {
     const autorizacao = autorizarCriacao(conversa)
     if (!autorizacao.ok) {
@@ -101,6 +111,9 @@ export class ServicoChamados {
         tipoChamadoId: proposta.tipoChamadoId,
         serviceDeskId,
         prioridade: proposta.prioridade,
+        ...(camposDinamicos && Object.keys(camposDinamicos).length > 0
+          ? { camposDinamicos }
+          : {}),
       },
     })
   }

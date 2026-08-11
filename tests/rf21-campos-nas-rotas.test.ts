@@ -149,6 +149,42 @@ describe('RF-21 / T-502 — nome e e-mail no chamado do tipo 108', () => {
     expect(params.solicitanteEmail).toBe(ANA)
   })
 
+  it('T-505 — a CONVERSA preenche os mesmos campos que o formulário', async () => {
+    // ⚠️ A trava contra divergência silenciosa entre os dois caminhos de criação
+    // (spec 006 §8). Enquanto só o formulário preenchia, um chamado do tipo 108 aberto
+    // pela conversa nascia sem nome e sem e-mail — e ninguém veria.
+    const { ctx, fake } = await ctxDoTipo108()
+    fake.estado.tiposChamado = [
+      { id: '108', serviceDeskId: 'sd-1', nome: 'Solicitar acesso', descricao: '' },
+    ]
+
+    const nova = await chamar(ctx, '/api/conversas', { metodo: 'POST' })
+    const conversaId = (nova.corpo as { id: string }).id
+    await ctx.conversas.definirProposta(conversaId, {
+      titulo: 'Preciso de acesso ao Metabase',
+      descricao: 'Vou montar o relatório de logística.',
+      tipoChamadoId: '108',
+      prioridade: 'normal',
+      area: null,
+      componente: null,
+    })
+    // O gate de `RF-08`/`RF-17` exige as duas verificações antes de autorizar; o teste
+    // encena isso pelo repositório, que é o mesmo estado que o agente produziria.
+    await ctx.conversas.marcarConfluenceVerificado(conversaId, false)
+    await ctx.conversas.marcarHistoricoVerificado(conversaId, false)
+
+    const r = await chamar(ctx, `/api/conversas/${conversaId}/confirmar`, {
+      metodo: 'POST',
+      corpo: { declarouAnexo: false },
+    })
+    expect(r.status).toBe(201)
+    const criacao = fake.chamadas.find((c) => c.operacao === 'criarChamado')
+    const campos = (criacao?.params as { camposDinamicos?: Record<string, string> })
+      .camposDinamicos
+    expect(campos?.customfield_10091).toBe(ANA)
+    expect(campos?.customfield_10089).toBeTruthy()
+  })
+
   it('tipo SEM os campos no schema não recebe nada — o mapa é interseção', async () => {
     const ctx = await ctxCom({
       dominios_permitidos: ['gocase.com'],
