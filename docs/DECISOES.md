@@ -1761,6 +1761,55 @@ padrão de `D-25` continua disponível — valor em `ConfigValores` **fora** da 
 e o mapa por request type sobrevive à mudança, porque o que ele corrige é a *forma*, não o
 *lugar* do valor.
 
+### D-37 · A área vem da TeamGuide, é GUARDADA e nunca enviada — e a quarta credencial
+
+**Data:** 11/08/2026 · **Decisão de:** Kaique · **Contexto:** `RF-19`, `RNF-01`, `RNF-04`,
+`RNF-18`, `RNF-36`, spec 006 Fase 3
+
+**O problema:** `areas_por_email` é uma tabela mantida à mão. Ninguém a atualiza quando
+alguém muda de time, e ela é o insumo do gate de piloto (`R-06`) e dos painéis por área.
+
+**A decisão, em três partes:**
+
+**1. A área é derivada e persistida, nunca enviada.** Ela vive no vínculo, como `RF-19` já
+define, e **não entra em nenhuma requisição à Atlassian**. Motivo medido: o campo
+`Setor Gocase` (`customfield_10090`) é multi-checkbox com **15 opções fixas** e a área real
+da primeira pessoa testada (`RPA`) **não está entre elas**. Mandar valor fora da lista faz o
+JSM responder **400**, que este projeto classifica como definitivo — submissão definitiva
+nunca é reprocessada, e o chamado da pessoa se perde (`RNF-17`). Além disso o campo **não
+está publicado em nenhum formulário de portal** dos 15 tipos, então nem alcançável ele é.
+Enviar fica para o futuro, e depende de o campo ser publicado **e** de um de-para com
+default seguro (área desconhecida → não manda o campo, nunca manda algo inválido).
+
+**2. Uma chamada, não a árvore.** `GET /employees/refs?unpaged=true` traz a base inteira com
+`contactEmail` e `teams`, e o que se grava é o **time folha** da pessoa.
+🚨 **O godocs deriva o "nó-área canônico"** subindo a árvore de `/teams`, com **sete nomes de
+líder embutidos no código** para achar as raízes e os nós passthrough. Não foi copiado, e a
+razão não é preguiça: aqui a área não precisa casar com vocabulário nenhum (ver parte 1);
+nomes de pessoas no repositório mudam quando alguém sai, e a falha seria **silenciosa**
+(raiz não encontrada → área errada para todo mundo); e custaria uma segunda chamada e a
+lógica de árvore inteira por um dado de apoio. **Caminho de saída:** se um dia a área
+precisar casar com vocabulário fixo, a regra pronta está em
+`godocs-main/src/lib/areas/teamguide.server.ts`.
+
+**3. Fail-open em três degraus, e dois eventos distintos.** Sem token → `null` · fonte fora
+do ar → `area_indisponivel` · e-mail desconhecido → `area_nao_encontrada`. Os dois últimos
+dão o mesmo resultado para quem abre o chamado e pedem trabalho **oposto** de quem
+administra: um é cadastro faltando, o outro é plantão. Em todos os casos o fallback é
+`areas_por_email`, o que preserva exatamente o comportamento de instalações sem a credencial.
+
+⚠️ **A QUARTA credencial.** O `CLAUDE.md` e a constituição falavam em "as três credenciais".
+`TG_API_TOKEN` entra com o mesmo tratamento: secret do GoDeploy, lida **em um lugar só**
+(`contexto.ts`), nunca em log, resposta ou bundle — e `tests/rnf01-vazamento-credenciais`
+passou a cobri-la **no mesmo dia em que ela passou a existir**, senão `RNF-01` valeria para
+três das quatro, e a de fora seria justo a mais nova.
+
+🚨 **Custo aceito, e ele precisa estar escrito: o token é o MESMO do godocs.** Decisão do
+mantenedor. Os dois apps passam a depender de uma credencial só, então **rotacionar por causa
+de um quebra o outro sem aviso** — e no goatlas quebra **em silêncio**, porque a derivação é
+fail-open: a área simplesmente para de vir e cai no mapa. É o primeiro item a revisitar no dia
+em que o godocs rotacionar.
+
 ---
 
 ## Perguntas em aberto

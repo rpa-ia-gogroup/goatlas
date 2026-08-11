@@ -200,7 +200,7 @@ O agente é a porta de entrada. O colaborador descreve a demanda em linguagem na
 | RF-16 | A prioridade sugerida pela IA é **exibida e editável** antes da criação. Priorização automática sem revisão vira jogo: as pessoas aprendem as palavras que produzem "Crítica". | P0 |
 | RF-17 | **Confirmação explícita do usuário** antes de `create_ticket` executar. O agente nunca cria chamado sozinho. | P0 |
 | RF-18 | Antes de confirmar, exibir o resumo estruturado do que será criado: título, descrição, tipo, componente, área, prioridade e SLA correspondente. | P0 |
-| RF-19 | Roteamento por área a partir do e-mail do solicitante e do mapa de áreas (seção 3), com possibilidade de correção manual. | P1 |
+| RF-19 | Roteamento por área a partir do e-mail do solicitante, com possibilidade de correção manual. A área vem da **fonte organizacional** (TeamGuide) e cai no mapa de áreas (seção 3) quando ela não resolve — indisponibilidade e pessoa desconhecida são auditadas como eventos **distintos** e nunca impedem abrir chamado (`D-37`, `RNF-18`). ⚠️ A área é **guardada no vínculo e nunca enviada à Atlassian**. | P1 |
 | RF-20 | Criar o chamado via `POST /rest/servicedeskapi/request`, com a conta de serviço como reporter. | P0 |
 | RF-21 | Gravar o solicitante real em campo customizado do Jira ("Solicitante") **e** como request participant quando aplicável. Sem isso, todo chamado chega ao time de tech como aberto pelo robô (**R-03**). | P0 |
 | RF-22 | Persistir o vínculo `issueKey ↔ e-mail do solicitante ↔ timestamp`, base do acompanhamento e do isolamento. | P0 |

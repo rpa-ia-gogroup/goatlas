@@ -57,9 +57,12 @@ quando alguma é esquecida (ver "Automação do processo").
    inclui os testes de **bypass** (tentar burlar pelo prompt).
 4. **Português com acentuação** em todo texto visível ao usuário — UI, erros e
    prompts de IA.
-5. **Três credenciais, zero vazamento** — API token Jira/Confluence · API key de
+5. **Quatro credenciais, zero vazamento** — API token Jira/Confluence · API key de
    organização (Bearer, `api.atlassian.com/admin`, exige Org Admin) · chave da API
-   de IA. Só em secrets do GoDeploy. Nunca em repo, log, resposta ou bundle.
+   de IA · **`TG_API_TOKEN` da TeamGuide** (`D-37`, fonte da área do solicitante). Só
+   em secrets do GoDeploy, lidas **em um lugar só** (`contexto.ts`). Nunca em repo,
+   log, resposta ou bundle. ⚠️ O token da TeamGuide é **o mesmo do godocs**: rotacionar
+   por causa de um quebra o outro, e no goatlas quebra em silêncio (fail-open).
 6. **Config é para o que VARIA** (**RNF-25**, emendado em `D-36`). IDs de projeto,
    service desk, request type e espaço do Confluence variam — configuração/secret.
    O mapeamento *campo customizado → significado, **por request type*** não varia:
@@ -436,6 +439,25 @@ destes reabre um vazamento que já foi fechado.
   veículo do erro. O mapa é **por request type e fica no código**, com teste. ⚠️ A emenda é
   estreita: `service_desk_id` e as allowlists continuam em config — os dois foram alterados
   em 11/08, que é a prova de que variam.
+- 🚨 **A área do solicitante é GUARDADA, nunca enviada** (`D-37`, `teamguide/area.ts`). O
+  campo `Setor Gocase` do Jira é multi-checkbox com **15 opções fixas**, e a área real da
+  primeira pessoa medida (`RPA`) **não está entre elas** — mandar valor fora da lista dá
+  **400 = definitivo = chamado perdido** (`RNF-17`). E o campo sequer está publicado num
+  formulário de portal. Há teste estrutural afirmando que `criarChamado` e `NovoChamado`
+  não conhecem a palavra "área": o caminho errado funcionaria, e o sintoma seria um campo
+  do Jira preenchido com dado que ninguém pediu.
+- ⚠️ **`area_indisponivel` e `area_nao_encontrada` são DUAS ações de auditoria, não uma
+  com `motivo`.** As duas deixam a pessoa sem área e o chamado aberto (`RNF-18`), e pedem
+  trabalho oposto: cadastro faltando × fonte fora do ar. Mesma família de
+  `buscaConfigurada` e `schema_tipo_indisponivel`.
+- **A base da TeamGuide é UMA chamada, e a árvore NÃO foi copiada** (`D-37`). O godocs
+  deriva o nó-área canônico subindo `/teams` com **sete nomes de líder embutidos no
+  código**; aqui grava-se o **time folha** de `/employees/refs`. Nome de pessoa no repo
+  muda quando alguém sai, e a falha seria silenciosa (raiz não achada → área errada para
+  todos). Cache no **módulo** com TTL, pelo mesmo motivo de `cachesAtlassianDoIsolate`:
+  sem ela é uma ida de rede por chamado (`RNF-36`); sem TTL o isolate quente serve o
+  retrato velho da empresa para sempre. E **só o sucesso é cacheado** — falha memoizada
+  condenaria o isolate a responder `indisponivel` até morrer.
 - **A allowlist nunca vem do cliente.** Na busca (`RF-37`), `espacosPermitidos` e
   `labelsBloqueadas` saem de `ctx.valores`, e `?espacos=`/`?labelsBloqueadas=` são
   ignorados — é o mesmo raciocínio da identidade: quem consulta não escolhe o próprio

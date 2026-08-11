@@ -69,6 +69,18 @@ export type AcaoAuditada =
    * que ninguém usa.
    */
   | 'schema_tipo_indisponivel'
+  /**
+   * `RF-19` — a área do solicitante não veio da fonte organizacional.
+   *
+   * ⚠️ **São duas ações, não uma com um campo `motivo`.** As duas produzem o mesmo
+   * resultado para quem abre o chamado (área ausente, chamado aberto — `RNF-18`) e pedem
+   * trabalho oposto de quem administra: `area_nao_encontrada` é cadastro faltando na
+   * TeamGuide; `area_indisponivel` é a fonte fora do ar. Colapsá-las apagaria a distinção
+   * no único lugar onde ela ainda é recuperável — mesmo raciocínio de
+   * `buscaConfigurada` e de `schema_tipo_indisponivel`.
+   */
+  | 'area_nao_encontrada'
+  | 'area_indisponivel'
   /** Coleta diária da Organizations API (RF-51, RF-52, T-124) — toca a Atlassian,
    * então é auditada mesmo quando falha. */
   | 'inventario_coletado'

@@ -1664,6 +1664,100 @@ var ClienteOrganizacaoFake = class {
   }
 };
 
+// src/lib/teamguide/fake.ts
+var ClienteTeamGuideFake = class {
+  /** e-mail (minúsculo) → área. Fora do mapa = `nao_encontrada`. */
+  areas = /* @__PURE__ */ new Map();
+  /** Quando definido, TODA consulta devolve `indisponivel` com este motivo. */
+  falha = null;
+  /** Toda consulta feita, para o teste afirmar sobre contagem de chamadas (`RNF-36`). */
+  chamadas = [];
+  constructor(inicial = {}) {
+    for (const [email, area] of Object.entries(inicial)) {
+      this.areas.set(email.trim().toLowerCase(), area);
+    }
+  }
+  async areaDe(email) {
+    this.chamadas.push(email);
+    if (this.falha) return { estado: "indisponivel", motivo: this.falha };
+    const area = this.areas.get(email.trim().toLowerCase());
+    return area ? { estado: "encontrada", area } : { estado: "nao_encontrada" };
+  }
+};
+
+// src/lib/teamguide/http.ts
+var BASE = "https://api.teamguide.app";
+var TTL_MS = 10 * 60 * 1e3;
+var TIMEOUT_MS = 8e3;
+function novaCacheTeamGuide() {
+  return { em: 0, promessa: null };
+}
+var ClienteTeamGuideHttp = class {
+  constructor(opcoes) {
+    this.opcoes = opcoes;
+    this.cache = opcoes.cache ?? novaCacheTeamGuide();
+    this.agora = opcoes.agoraMs ?? (() => Date.now());
+    this.fetchImpl = opcoes.fetchImpl ?? fetch;
+  }
+  cache;
+  agora;
+  fetchImpl;
+  async areaDe(email) {
+    const alvo = (email ?? "").trim().toLowerCase();
+    if (!alvo) return { estado: "nao_encontrada" };
+    let base;
+    try {
+      base = await this.baseCacheada();
+    } catch (e) {
+      return { estado: "indisponivel", motivo: motivoDe(e) };
+    }
+    const area = base.get(alvo);
+    return area ? { estado: "encontrada", area } : { estado: "nao_encontrada" };
+  }
+  baseCacheada() {
+    const vencida = this.agora() - this.cache.em > TTL_MS;
+    if (!this.cache.promessa || vencida) {
+      this.cache.em = this.agora();
+      this.cache.promessa = this.carregarBase().catch((e) => {
+        this.cache.promessa = null;
+        this.cache.em = 0;
+        throw e;
+      });
+    }
+    return this.cache.promessa;
+  }
+  async carregarBase() {
+    const controle = new AbortController();
+    const timer = setTimeout(() => controle.abort(), TIMEOUT_MS);
+    try {
+      const r = await this.fetchImpl(`${BASE}/employees/refs?unpaged=true&page=0`, {
+        headers: { Authorization: `Bearer ${this.opcoes.token}`, Accept: "application/json" },
+        signal: controle.signal
+      });
+      if (!r.ok) throw new Error(`http_${r.status}`);
+      const bruto = await r.json();
+      if (!Array.isArray(bruto)) throw new Error("formato_inesperado");
+      const porEmail = /* @__PURE__ */ new Map();
+      for (const p of bruto) {
+        const email = (p?.contactEmail ?? "").trim().toLowerCase();
+        if (!email || porEmail.has(email)) continue;
+        const time = (p?.teams ?? []).map((t) => (t ?? "").trim()).find((t) => t.length > 0);
+        if (time) porEmail.set(email, time);
+      }
+      return porEmail;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+};
+function motivoDe(e) {
+  if (e instanceof Error) {
+    if (e.name === "AbortError") return "timeout";
+    return /^[a-z0-9_]+$/.test(e.message) ? e.message : "erro_de_rede";
+  }
+  return "erro_de_rede";
+}
+
 // src/lib/ia/tipos.ts
 var ErroIA = class extends Error {
   constructor(message, detalhe) {
@@ -5531,6 +5625,7 @@ function novoIdPadrao() {
   return crypto.randomUUID();
 }
 var cachesAtlassianDoIsolate = novasCachesAtlassian();
+var cacheTeamGuideDoIsolate = novaCacheTeamGuide();
 async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).toISOString(), novoId = novoIdPadrao, reaproveitar = {}) {
   await garantirMigracao(env.DB);
   const modoDemo = env.GOATLAS_MODO_DEMO === "1";
@@ -5561,6 +5656,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     ...env.LLM_FALLBACK_MODEL ? { modeloFallback: env.LLM_FALLBACK_MODEL } : {}
   });
   const organizacao = reaproveitar.organizacao ? reaproveitar.organizacao : usandoFakes ? new ClienteOrganizacaoFake() : env.ATLASSIAN_ORG_API_KEY ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY }) : null;
+  const teamguide = usandoFakes ? new ClienteTeamGuideFake() : env.TG_API_TOKEN ? new ClienteTeamGuideHttp({ token: env.TG_API_TOKEN, cache: cacheTeamGuideDoIsolate }) : null;
   if (modoDemo) {
     if (atlassianBase instanceof ClienteAtlassianFake) {
       semearAtlassianDemo(atlassianBase);
@@ -5637,6 +5733,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     chamados,
     orquestrador,
     organizacao,
+    teamguide,
     inventarioAssentos,
     notificacoes: repoNotificacoes,
     acoesProprias,
@@ -7227,6 +7324,27 @@ function areasConhecidas(mapa) {
   return [...new Set(Object.values(mapa).map((a) => a.trim()).filter((a) => a.length > 0))].sort();
 }
 
+// src/lib/teamguide/area.ts
+async function resolverArea(p) {
+  const doMapa = areaDoEmail(p.email, p.areasPorEmail);
+  if (!p.teamguide) return doMapa;
+  const r = await p.teamguide.areaDe(p.email);
+  if (r.estado === "encontrada") return r.area;
+  await p.auditoria.registrar({
+    atorEmail: p.email,
+    acao: r.estado === "indisponivel" ? "area_indisponivel" : "area_nao_encontrada",
+    recurso: "teamguide",
+    resultado: r.estado === "indisponivel" ? "falha" : "negado",
+    detalhe: {
+      ...r.estado === "indisponivel" ? { motivo: r.motivo } : {},
+      // Diz se a pessoa fica sem área ou se o mapa cobriu — é a diferença entre "temos um
+      // buraco" e "temos um buraco que a configuração está tapando".
+      caiuNoMapa: doMapa !== null
+    }
+  });
+  return doMapa;
+}
+
 // src/lib/retencao.ts
 var PISO_AUDITORIA_DIAS = 180;
 function limite(agoraMs, dias) {
@@ -7818,7 +7936,12 @@ async function rotear(req, ctx, eu, caminho, url) {
       atual,
       serviceDeskId,
       chaveDaConversa,
-      areaDoEmail(eu.email, ctx.valores.areas_por_email),
+      await resolverArea({
+        email: eu.email,
+        teamguide: ctx.teamguide,
+        areasPorEmail: ctx.valores.areas_por_email,
+        auditoria: ctx.auditoria
+      }),
       declaracao.declarouAnexo
     );
     if (r.estado === "criado") await ctx.conversas.definirEstado(conversa.id, "criado");
@@ -7879,7 +8002,12 @@ async function rotear(req, ctx, eu, caminho, url) {
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
-      area: areaDoEmail(eu.email, ctx.valores.areas_por_email),
+      area: await resolverArea({
+        email: eu.email,
+        teamguide: ctx.teamguide,
+        areasPorEmail: ctx.valores.areas_por_email,
+        auditoria: ctx.auditoria
+      }),
       declarouAnexo: declaracao.declarouAnexo,
       payload: {
         titulo: validada.proposta.titulo,
