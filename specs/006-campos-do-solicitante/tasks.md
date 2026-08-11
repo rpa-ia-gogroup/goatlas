@@ -53,23 +53,29 @@ que precisa estar escrito: os dois apps passam a depender de uma credencial só,
 porque a derivação de área é fail-open (`SC-05`). Vai para `docs/DEPLOY.md` junto do secret,
 e é o primeiro item a revisitar se um dia o godocs rotacionar.
 
-- [ ] **T-512** — `src/lib/teamguide/contrato.ts` + `fake.ts` roteirizável, com falha
-      injetável por operação. _Requirements: RNF-04, RNF-18_
-- [ ] **T-513** — Testes: área derivada · fonte fora do ar → `null` + `area_indisponivel` ·
-      e-mail desconhecido → `null` + `area_nao_encontrada` · fallback `areas_por_email`.
-      _Requirements: RF-19, RNF-18, RF-58_
-- [ ] **T-514** — `teamguide/http.ts` com transporte próprio (Bearer, host próprio), cache
-      por isolate com TTL, sem enumeração de membros. _Requirements: RNF-04, RNF-13_
-- [ ] **T-515** — Token lido **só** em `contexto.ts`; `tests/rnf01-vazamento-credenciais.ts`
-      passa a cobrir o quarto secret. _Requirements: RNF-01_
-- [ ] **T-516** — Ligar na abertura: área derivada → vínculo. **Nunca** no payload.
-      _Requirements: RF-19, FR-7_
-- [ ] **T-517** — Teste estrutural: a área não aparece em nenhum payload enviado à
-      Atlassian. _Requirements: FR-7 (ScC-4)_
-- [ ] **T-518** — `tests/latencia.test.ts`: a abertura não ganha ida de rede por chamado.
+- [x] **T-512** — `teamguide/contrato.ts` (três estados no tipo, nada lança) + `fake.ts`
+      roteirizável + `TeamGuideIndisponivel`. _Requirements: RNF-04, RNF-18_
+- [x] **T-513** — Testes: área derivada vence o mapa · fonte fora do ar → `area_indisponivel`
+      · e-mail desconhecido → `area_nao_encontrada` · sem cliente = comportamento de antes.
+      _Requirements: RF-19, RNF-18, RF-58, FR-13_
+- [x] **T-514** — `teamguide/http.ts` com transporte próprio, cache no **módulo** com TTL,
+      **uma** chamada (`/employees/refs`), sem a árvore. ⚠️ Só o sucesso é cacheado.
+      _Requirements: RNF-04, RNF-13, RNF-36_
+- [x] **T-515** — `TG_API_TOKEN` lido só em `contexto.ts`, e coberto por
+      `rnf01-vazamento-credenciais` no mesmo dia em que passou a existir.
+      _Requirements: RNF-01_
+- [x] **T-516** — `resolverArea` nas **duas** rotas de criação. _Requirements: RF-19, FR-7_
+- [x] **T-517** — Teste estrutural: `criarChamado` e `NovoChamado` não conhecem "área".
+      _Requirements: FR-7 (ScC-4)_
+- [~] **T-518** — A propriedade ("uma leitura por isolate, não por chamado") tem teste em
+      `rf19-area-teamguide`. ⚠️ **Não** foi acrescentada asserção em `tests/latencia.test.ts`,
+      que mede contagem no nível da rota — é onde uma regressão de fiação apareceria.
       _Requirements: RNF-12, RNF-36_
-- [ ] **T-519** — `D-37` (quarta credencial) + `docs/DEPLOY.md` (privilégio, rotação, dono).
-      _Requirements: RNF-01, RNF-27_
+- [x] **T-519** — `D-37`, `docs/DEPLOY.md` (privilégio, o que lê, e o acoplamento do token
+      com o godocs), `RF-19` reescrito e `CLAUDE.md`. _Requirements: RNF-01, RNF-27_
+- [ ] **T-520** — O console de admin não mostra nada sobre a fonte organizacional. Hoje só a
+      auditoria diz que houve `area_indisponivel`. Provável seção em `D-25`, se o volume
+      justificar.
 
 ## Fora desta spec
 

@@ -331,6 +331,22 @@ em log, em resposta de API ou no bundle do frontend.
 | `ATLASSIAN_API_TOKEN` + `ATLASSIAN_EMAIL` | JSM REST e Confluence em `goengenharia.atlassian.net` (Basic auth) | Conta de serviço **dedicada ao app**, com acesso de agente ao projeto do portal e leitura nos espaços da allowlist | **Q1** |
 | `ATLASSIAN_ORG_API_KEY` | Organizations API em `api.atlassian.com/admin` (Bearer) | **Org Admin** — privilégio alto | Fase 2 · **Q1** |
 | `LLM_API_KEY` (+ `LLM_BASE_URL`) | Proxy de IA corporativo (`D-05`) | Token do gateway | — |
+| `TG_API_TOKEN` | TeamGuide (`api.teamguide.app`, Bearer) — a área do solicitante (`RF-19`, `D-37`) | **Leitura**; não-admin basta. Só `GET /employees/refs` é usado | Fase 3 da spec 006 |
+
+**Sobre o `TG_API_TOKEN`** — é a **quarta** credencial do sistema, e vale ler `D-37` antes
+de mexer nela:
+
+- **Ausência não quebra nada.** Sem o secret, `ctx.teamguide` é `null` e a área volta a sair
+  de `areas_por_email`, exatamente como antes da feature (`FR-13`). Não há tela dizendo
+  "indisponível" porque não há degradação visível — é dado de apoio.
+- 🚨 **Hoje é o MESMO token do godocs** (decisão do mantenedor, 11/08/2026). Consequência a
+  não esquecer: **rotacionar por causa de um app quebra o outro**, e no goatlas a quebra é
+  **silenciosa** — a derivação é fail-open, então a área simplesmente para de vir e cai no
+  mapa de configuração. Se um dia o godocs rotacionar, este é o primeiro lugar a conferir.
+  Um token próprio de leitura para o goatlas resolve, e custa um cadastro.
+- **O que ele lê:** a base de funcionários inteira numa requisição (~440 pessoas, com nome,
+  e-mail, cargo e times). Só o registro da pessoa que abre o chamado é consultado, em
+  memória, e **só a área é persistida** — o cargo não (`FR-11`).
 
 `GOATLAS_ORG_ID` (bootstrap do `org_id` — `RNF-25`, não é secret) identifica a
 organização Atlassian alvo da Organizations API. Sem `ATLASSIAN_ORG_API_KEY` **e**

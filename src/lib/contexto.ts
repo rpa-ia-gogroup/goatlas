@@ -13,6 +13,9 @@ import { ClienteAtlassianSomenteLeitura } from './atlassian/somente-leitura'
 import type { ClienteAtlassian } from './atlassian/tipos'
 import { ClienteOrganizacaoFake } from './atlassian/organizacao-fake'
 import { ClienteOrganizacaoHttp, type ClienteOrganizacao } from './atlassian/organizacao'
+import type { ClienteTeamGuide } from './teamguide/contrato'
+import { ClienteTeamGuideFake } from './teamguide/fake'
+import { ClienteTeamGuideHttp, novaCacheTeamGuide } from './teamguide/http'
 import { ClienteIAHttp } from './ia/cliente'
 import { ClienteIAFake } from './ia/fake'
 import { ClienteIAIndisponivel } from './ia/indisponivel'
@@ -50,6 +53,11 @@ export interface EnvGoDeploy extends BootstrapEnv {
   readonly ATLASSIAN_EMAIL?: string
   readonly ATLASSIAN_API_TOKEN?: string
   readonly ATLASSIAN_ORG_API_KEY?: string
+  /**
+   * Token de leitura da TeamGuide (`RF-19`, `D-37`). É a **quarta** credencial do
+   * sistema, e como as outras três é lida só aqui (`RNF-01`).
+   */
+  readonly TG_API_TOKEN?: string
   readonly LLM_BASE_URL?: string
   readonly LLM_API_KEY?: string
   readonly LLM_MODEL?: string
@@ -106,6 +114,11 @@ export interface Contexto {
    * "ninguém emitiu a credencial de Org Admin ainda" (Q1) e "a governança quebrou".
    */
   readonly organizacao: ClienteOrganizacao | null
+  /**
+   * `null` = **não configurada** (sem `TG_API_TOKEN`). `resolverArea` cai no mapa
+   * `areas_por_email`, preservando o comportamento de antes desta feature (`FR-13`).
+   */
+  readonly teamguide: ClienteTeamGuide | null
   readonly inventarioAssentos: RepositorioInventario
   /** Fase 3 — notificação, dedupe e alerta de SLA (RF-44 a RF-48). */
   readonly notificacoes: RepositorioNotificacoes
@@ -179,6 +192,15 @@ export interface ClientesReaproveitados {
  * cache evita é rebuscar o **insumo**, não repetir a **decisão**.
  */
 const cachesAtlassianDoIsolate = novasCachesAtlassian()
+
+/**
+ * A base da TeamGuide, pelo mesmo motivo e no mesmo lugar (`RF-19`, `RNF-36`).
+ *
+ * Sem ela, cada chamado aberto custaria uma ida de rede para descobrir a área de quem
+ * abriu — e a base inteira tem ~440 pessoas, então é a leitura mais cara do caminho.
+ * Com TTL, porque um isolate quente serviria o retrato velho da organização para sempre.
+ */
+const cacheTeamGuideDoIsolate = novaCacheTeamGuide()
 
 export async function montarContexto(
   env: EnvGoDeploy,
@@ -256,6 +278,21 @@ export async function montarContexto(
       : env.ATLASSIAN_ORG_API_KEY
         ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY })
         : null
+
+  // A fonte organizacional (`RF-19`). Mesmos três estados da governança — fake · real ·
+  // não configurada — e o mesmo raciocínio de `usandoFakes` de T-132: fora de teste e
+  // demonstração, credencial ausente **não** vira dublê. Aqui `null` já é a recusa
+  // honesta, e `resolverArea` cai no mapa de configuração (`FR-13`).
+  //
+  // ⚠️ A cache vive no MÓDULO, não na instância: `montarContexto` roda por requisição, e
+  // uma cache por instância nunca acertaria — foi exatamente o bug de `RNF-13` que o
+  // `D-32` descreve. Compartilhar entre pessoas é seguro porque o dado é o mesmo para
+  // todas (a base da empresa), e a resolução por e-mail acontece depois, em memória.
+  const teamguide: ClienteTeamGuide | null = usandoFakes
+    ? new ClienteTeamGuideFake()
+    : env.TG_API_TOKEN
+      ? new ClienteTeamGuideHttp({ token: env.TG_API_TOKEN, cache: cacheTeamGuideDoIsolate })
+      : null
 
   if (modoDemo) {
     // Os fakes são semeados a cada montagem porque o Worker é stateless: o estado
@@ -360,6 +397,7 @@ export async function montarContexto(
     chamados,
     orquestrador,
     organizacao,
+    teamguide,
     inventarioAssentos,
     notificacoes: repoNotificacoes,
     acoesProprias,

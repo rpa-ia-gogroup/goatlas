@@ -48,6 +48,10 @@ describe('RNF-01 — as três credenciais só são lidas em contexto.ts', () => 
     { nome: 'ATLASSIAN_ORG_API_KEY', regex: /\benv\.ATLASSIAN_ORG_API_KEY\b/ },
     { nome: 'LLM_API_KEY', regex: /\benv\.LLM_API_KEY\b/ },
     { nome: 'LLM_FALLBACK', regex: /\benv\.LLM_FALLBACK\b/ },
+    // A QUARTA credencial (`D-37`, `RF-19`). Entrou na mesma lista no mesmo dia em que
+    // passou a existir — se ficasse de fora, `RNF-01` valeria para três das quatro, e a
+    // que sobrou seria justamente a mais nova, que é onde o segundo leitor aparece.
+    { nome: 'TG_API_TOKEN', regex: /\benv\.TG_API_TOKEN\b/ },
   ]
 
   it.each(PADROES)('$nome nunca é lida fora de lib/contexto.ts', ({ regex }) => {
@@ -73,6 +77,41 @@ describe('RNF-01 — as três credenciais só são lidas em contexto.ts', () => 
     expect(contexto).toMatch(/\benv\.ATLASSIAN_API_TOKEN\b/)
     expect(contexto).toMatch(/\benv\.LLM_API_KEY\b/)
     expect(contexto).toMatch(/\benv\.LLM_FALLBACK\b/)
+    expect(contexto).toMatch(/\benv\.TG_API_TOKEN\b/)
+  })
+})
+
+describe('FR-7 — a área NUNCA vai para a Atlassian', () => {
+  it('nenhum payload de criação carrega a área', () => {
+    // 🚨 Decisão do mantenedor em 11/08/2026: a área é **derivada e guardada**, e não
+    // trafega. Ela já vive no vínculo e nunca esteve em `requestFieldValues` — este teste
+    // existe para que continue assim depois que alguém a vir "disponível ali do lado".
+    //
+    // Estrutural pelo mesmo motivo de `obterCorpoStorage`: o caminho errado funcionaria,
+    // e o sintoma seria um campo do Jira preenchido com dado que ninguém pediu.
+    const cliente = readFileSync(
+      fileURLToPath(new URL('../src/lib/atlassian/cliente.ts', import.meta.url)),
+      'utf8',
+    )
+    const corpoDaCriacao = cliente.slice(
+      cliente.indexOf('async criarChamado'),
+      cliente.indexOf('async obterChamado'),
+    )
+    expect(corpoDaCriacao.length).toBeGreaterThan(0)
+    expect(corpoDaCriacao).not.toMatch(/\barea\b/i)
+  })
+
+  it('`NovoChamado` não tem campo de área', () => {
+    const tipos = readFileSync(
+      fileURLToPath(new URL('../src/lib/atlassian/tipos.ts', import.meta.url)),
+      'utf8',
+    )
+    const novoChamado = tipos.slice(
+      tipos.indexOf('export interface NovoChamado'),
+      tipos.indexOf('export interface ChamadoCriado'),
+    )
+    expect(novoChamado.length).toBeGreaterThan(0)
+    expect(novoChamado).not.toMatch(/^\s*readonly area/m)
   })
 })
 

@@ -38,7 +38,8 @@ import {
 } from '../notificacoes/webhook'
 import { validarPreferencia } from '../notificacoes/preferencias'
 import { verificarCron } from './cron-auth'
-import { areaDoEmail, areasConhecidas, dentroDoPiloto } from '../piloto/areas'
+import { areasConhecidas, dentroDoPiloto } from '../piloto/areas'
+import { resolverArea } from '../teamguide/area'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
@@ -337,7 +338,12 @@ async function rotear(
       atual!,
       serviceDeskId,
       chaveDaConversa,
-      areaDoEmail(eu.email, ctx.valores.areas_por_email),
+      await resolverArea({
+        email: eu.email,
+        teamguide: ctx.teamguide,
+        areasPorEmail: ctx.valores.areas_por_email,
+        auditoria: ctx.auditoria,
+      }),
       declaracao.declarouAnexo,
     )
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
@@ -430,7 +436,12 @@ async function rotear(
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
-      area: areaDoEmail(eu.email, ctx.valores.areas_por_email),
+      area: await resolverArea({
+        email: eu.email,
+        teamguide: ctx.teamguide,
+        areasPorEmail: ctx.valores.areas_por_email,
+        auditoria: ctx.auditoria,
+      }),
       declarouAnexo: declaracao.declarouAnexo,
       payload: {
         titulo: validada.proposta.titulo,
