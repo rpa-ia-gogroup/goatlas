@@ -33,6 +33,9 @@ const PROPOSTA: Proposta = {
 function render(proposta: Proposta = PROPOSTA): string {
   return renderToStaticMarkup(
     createElement(ReciboConfirmacao, {
+      // A identidade preenche os campos do solicitante (`RF-21`); aqui ela só precisa
+      // existir, porque este teste afirma sobre a copy do recibo, não sobre campo.
+      eu: { email: 'ana@gocase.com', nome: 'Ana', isAdmin: false, modoDemo: false, somenteLeitura: false },
       conversaId: 'c1',
       propostaInicial: proposta,
       aoCriar: () => {},

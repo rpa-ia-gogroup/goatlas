@@ -55,7 +55,13 @@ interface Fala {
   readonly texto: string
 }
 
-export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void }) {
+export function TelaConversa({
+  eu,
+  aoAbrirChamado,
+}: {
+  eu: Identidade
+  aoAbrirChamado: () => void
+}) {
   const [conversaId, setConversaId] = useState<string | null>(null)
   const [falas, setFalas] = useState<Fala[]>([
     {
@@ -177,6 +183,7 @@ export function TelaConversa({ aoAbrirChamado }: { aoAbrirChamado: () => void })
 
       {proposta && conversaId && !bloqueado && (
         <ReciboConfirmacao
+          eu={eu}
           conversaId={conversaId}
           propostaInicial={proposta}
           aoCriar={setCriado}
@@ -359,10 +366,12 @@ export function CaminhoOverride({
  * revisão vira jogo, e as pessoas aprendem as palavras que produzem "Crítica".
  */
 export function ReciboConfirmacao({
+  eu,
   conversaId,
   propostaInicial,
   aoCriar,
 }: {
+  eu: Identidade
   conversaId: string
   propostaInicial: Proposta
   aoCriar: (r: ResultadoCriacao) => void
@@ -377,21 +386,47 @@ export function ReciboConfirmacao({
   // motivo — indisponibilidade de schema não pode virar botão que não abre chamado.
   const [aceitaAnexo, setAceitaAnexo] = useState(false)
   const [declarou, setDeclarou] = useState<Declaracao>(null)
+  // 🚨 RF-27 na conversa (`D-38`). Sem coletar isto, tipo com campo obrigatório — 70
+  // ("Relatar um bug"), 134, 108, 93 — **não abria chamado** por aqui: o JSM recusava e a
+  // pessoa lia "algo deu errado". `null` = ainda carregando; `[]` = sem campo extra OU a
+  // leitura falhou, tratados igual pelo mesmo fail-open de sempre.
+  const [campos, setCampos] = useState<CampoRequestType[] | null>(null)
+  const [valoresCampos, setValoresCampos] = useState<Record<string, string>>({})
+
+  const idsDoSolicitante = camposPreenchidosPeloApp(propostaInicial.tipoChamadoId)
+  const camposDoSolicitante = (campos ?? []).filter((c) => idsDoSolicitante.includes(c.fieldId))
+  const camposComuns = (campos ?? []).filter((c) => !idsDoSolicitante.includes(c.fieldId))
 
   useEffect(() => {
     let vivo = true
     api
       .camposDoTipo(propostaInicial.tipoChamadoId)
       .then((r) => {
-        if (vivo) setAceitaAnexo(r.aceitaAnexo)
+        if (!vivo) return
+        setAceitaAnexo(r.aceitaAnexo)
+        setCampos(r.itens)
+        setValoresCampos(
+          resolverCamposDoSolicitante(
+            propostaInicial.tipoChamadoId,
+            { conhecido: true, campos: r.itens },
+            eu,
+          ),
+        )
       })
-      .catch(() => {})
+      .catch(() => {
+        if (vivo) setCampos([])
+      })
     return () => {
       vivo = false
     }
-  }, [propostaInicial.tipoChamadoId])
+  }, [propostaInicial.tipoChamadoId, eu])
 
   const faltaDeclarar = aceitaAnexo && declarou === null
+  // A mesma regra do servidor (`obrigatoriosFaltando`), na tela — camada 1 das duas. O
+  // servidor recusa de qualquer jeito; isto evita a pessoa descobrir só depois de clicar.
+  const obrigatoriosVazios = (campos ?? []).filter(
+    (c) => c.obrigatorio && c.tipo !== 'anexo' && (valoresCampos[c.fieldId] ?? '').trim() === '',
+  )
 
   async function confirmar() {
     setSalvando(true)
@@ -400,7 +435,13 @@ export function ReciboConfirmacao({
       if (prioridade !== propostaInicial.prioridade) {
         await api.salvarProposta(conversaId, { ...propostaInicial, prioridade })
       }
-      aoCriar(await api.confirmar(conversaId, aceitaAnexo ? (declarou ?? undefined) : undefined))
+      aoCriar(
+        await api.confirmar(
+          conversaId,
+          aceitaAnexo ? (declarou ?? undefined) : undefined,
+          valoresCampos,
+        ),
+      )
     } catch (e) {
       setErro(e instanceof ErroApi ? e.message : 'Não conseguimos abrir o chamado agora.')
     } finally {
@@ -470,6 +511,40 @@ export function ReciboConfirmacao({
         </dd>
       </dl>
 
+      {camposDoSolicitante.length > 0 && (
+        <fieldset className="grupo-solicitante">
+          <legend>
+            <span className="eyebrow">De quem é o acesso</span>
+            <span className="grupo-solicitante-titulo">Quem vai usar</span>
+            <span className="dica">
+              Preenchemos com a sua conta. Se o acesso é para outra pessoa, troque o nome e o
+              e-mail.
+            </span>
+          </legend>
+          {camposDoSolicitante.map((c) => (
+            <CampoDinamico
+              key={c.fieldId}
+              campo={c}
+              valor={valoresCampos[c.fieldId] ?? ''}
+              aoMudar={(v) => setValoresCampos((atuais) => ({ ...atuais, [c.fieldId]: v }))}
+            />
+          ))}
+        </fieldset>
+      )}
+
+      {camposComuns.length > 0 && (
+        <div className="pilha">
+          {camposComuns.map((c) => (
+            <CampoDinamico
+              key={c.fieldId}
+              campo={c}
+              valor={valoresCampos[c.fieldId] ?? ''}
+              aoMudar={(v) => setValoresCampos((atuais) => ({ ...atuais, [c.fieldId]: v }))}
+            />
+          ))}
+        </div>
+      )}
+
       {aceitaAnexo && (
         <PerguntaDeAnexo
           alvo={{ via: 'conversa', conversaId }}
@@ -485,11 +560,17 @@ export function ReciboConfirmacao({
           type="button"
           className="botao botao-primario"
           onClick={confirmar}
-          disabled={salvando || faltaDeclarar}
+          disabled={salvando || faltaDeclarar || obrigatoriosVazios.length > 0}
           // ⚠️ O botão desabilitado precisa DIZER o que falta. Botão morto sem
           // explicação é indistinguível de app quebrado — e aqui a saída está a um
           // clique de distância, logo acima.
-          aria-describedby={faltaDeclarar ? 'falta-declarar-recibo' : undefined}
+          aria-describedby={
+            faltaDeclarar
+              ? 'falta-declarar-recibo'
+              : obrigatoriosVazios.length > 0
+                ? 'falta-obrigatorio-recibo'
+                : undefined
+          }
         >
           {salvando ? 'Abrindo…' : 'Abrir chamado'}
         </button>
@@ -497,6 +578,12 @@ export function ReciboConfirmacao({
       {faltaDeclarar && (
         <p className="dica" id="falta-declarar-recibo">
           {AVISO_DECLARACAO_PENDENTE}
+        </p>
+      )}
+      {!faltaDeclarar && obrigatoriosVazios.length > 0 && (
+        <p className="dica" id="falta-obrigatorio-recibo">
+          O Jira exige {obrigatoriosVazios.length === 1 ? 'este campo' : 'estes campos'} para
+          este tipo de chamado: {obrigatoriosVazios.map((c) => c.rotulo).join(', ')}.
         </p>
       )}
     </section>

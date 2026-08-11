@@ -123,8 +123,10 @@ export function App() {
               </nav>
             )}
 
-            {tela.nome === 'conversa' && (
-              <TelaConversa aoAbrirChamado={() => setTela({ nome: 'chamados' })} />
+            {/* ⚠️ `eu &&` pelo mesmo motivo do formulário: sem identidade não há com que
+                preencher os campos do solicitante (`RF-21`). */}
+            {tela.nome === 'conversa' && eu && (
+              <TelaConversa eu={eu} aoAbrirChamado={() => setTela({ nome: 'chamados' })} />
             )}
             {tela.nome === 'documentacao' && (
               <TelaDocumentacao
