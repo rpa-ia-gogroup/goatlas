@@ -1,8 +1,9 @@
 ---
 # Constituição do Projeto — regras inegociáveis que governam todo o SDD.
 project: "goatlas"
-version: 1.0.1
+version: 1.1.0
 ratified: "2026-08-03"
+amended: "2026-08-11"
 requirements_source: "docs/REQUISITOS.md"
 ---
 
@@ -97,8 +98,21 @@ cron dentro do app.
 **Convenções:**
 - **Português do Brasil com acentuação** em todo texto visível ao usuário
   (`producao` → `produção`). Vale para UI, mensagens de erro e prompts de IA.
-- **Zero hardcode** de IDs de projeto, service desk, request type, espaço do
-  Confluence ou campo customizado — configuração ou secret (**RNF-25**).
+- **Configuração é para o que VARIA; o que não varia mora no código** (**RNF-25**,
+  emendado em 11/08/2026 — ver `D-36`). O critério é um só: *este valor muda sem
+  o código mudar?*
+  - **Varia → config/secret.** ID de service desk e allowlist de request type
+    (a fila do time muda; a allowlist foi ajustada em 11/08), chaves de espaço do
+    Confluence (`RF-49` exige mudar sem deploy), thresholds, canal de notificação,
+    lista do piloto, retenção, `org_id`, custo por produto.
+  - **Não varia → código, com teste.** O caso fundador é o mapeamento
+    *campo customizado → significado, por request type*: ele não é preferência de
+    instalação, é a forma de um formulário do Jira, e um id aplicado ao tipo errado
+    escreve dado no campo errado com HTTP 201 — falha que config nenhuma evita.
+  - ⚠️ **A regra anterior era "zero hardcode" sem exceção**, e ela empurrava para
+    config coisas que ninguém decide — cada uma custando uma linha na tela do
+    console (`D-25`) e um caminho a mais para ficar errada em silêncio. O custo
+    aceito da emenda: valor fixado que um dia mudar exige deploy.
 - **Prompts versionados** em arquivos do repositório, revisáveis em PR
   (**RNF-24**). Prompt é regra de negócio, não string solta no meio do código.
 - **Branch e worktree:** uma branch por tarefa (`<NNN>-<slug>` para feature,

@@ -60,7 +60,6 @@ const FAMILIA: Record<ChaveConfig, Familia> = {
   // `null` é uma resposta legítima: "ainda não sabemos" (Q1, Q4). Diferente de
   // string vazia, que seria um id inventado.
   service_desk_id: 'texto_ou_vazio',
-  campo_solicitante_id: 'texto_ou_vazio',
   org_id: 'texto_ou_vazio',
 
   regra2_campo_agrupamento: 'texto',

@@ -35,7 +35,6 @@ export type ChaveEditavel =
   | 'admins'
   | 'service_desk_id'
   | 'tipos_chamado_permitidos'
-  | 'campo_solicitante_id'
   | 'espacos_confluence'
   | 'labels_bloqueadas'
   | 'regra1_threshold_score'
@@ -185,19 +184,12 @@ export const SECOES: readonly DescritorSecao[] = [
             ? 'Hoje nenhum assunto é oferecido — a lista vazia não libera todos, não oferece nenhum.'
             : `Hoje ${contar(c.tipos_chamado_permitidos.length, 'assunto está disponível', 'assuntos estão disponíveis')}.`,
       },
-      {
-        chave: 'campo_solicitante_id',
-        rotulo: 'Campo do Jira que recebe quem pediu',
-        ajuda:
-          'Todo chamado nasce pela conta de serviço, então o Jira não sabe de quem ele é. Este campo devolve essa informação. Peça ao time de tech o identificador do campo "Solicitante" no projeto do portal.',
-        tipo: 'texto',
-        exemplo: 'customfield_10050',
-        opcional: true,
-        efeito: (c) =>
-          c.campo_solicitante_id === null
-            ? 'Hoje o nome de quem pediu vai só na descrição do chamado — que é o suficiente para ler, mas não dá para filtrar por ele no Jira.'
-            : 'Hoje o nome de quem pediu vai na descrição e também no campo estruturado, dá para filtrar por ele no Jira.',
-      },
+      // 🚨 "Campo do Jira que recebe quem pediu" SAIU da tela em `D-36`, e não é
+      // simplificação: o campo pedia **um id**, e o mesmo id significa coisas diferentes
+      // por tipo de chamado. Quem preenchesse com o valor da tela de campos do Jira
+      // escreveria o e-mail do solicitante dentro de "Em que sistema o Bug está
+      // ocorrendo?" nos chamados de bug — sem erro, sem aviso. Agora o mapa é por request
+      // type e mora no código. Devolver este campo é reabrir `D-36`.
     ],
   },
   {

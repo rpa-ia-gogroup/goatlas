@@ -7,9 +7,10 @@
  * organização como Bearer** em `api.atlassian.com/admin` e papel de Org Admin.
  * Este arquivo trata só da primeira.
  *
- * ⚠️ **Zero hardcode** (RNF-25): service desk, request type, espaço e o id do campo
- * customizado "Solicitante" chegam por parâmetro/config. Nenhum valor de ambiente
- * aparece aqui.
+ * ⚠️ **Nenhum valor de ambiente aparece aqui** (RNF-25): service desk, request type e
+ * espaço chegam por parâmetro/config. O campo estruturado do solicitante saiu da config
+ * em `D-36` e é resolvido **por request type** em `tickets/campos-do-solicitante.ts` —
+ * fora deste cliente, que continua burro quanto a política.
  *
  * ⚠️ Sobre a API do Confluence (R-09): a busca por **CQL só existe na v1**
  * (`/wiki/rest/api/search`), enquanto o **conteúdo já tem v2**
@@ -87,11 +88,6 @@ export interface OpcoesCliente extends OpcoesHttp {
    * querem (isolamento entre casos) e é o que **não** se quer em produção.
    */
   readonly caches?: CachesAtlassian
-  /**
-   * Id do campo customizado "Solicitante" no Jira (RF-21), ex.: `customfield_10050`.
-   * `null` = ainda não sabemos (Q4) — ver `montarCamposSolicitante`.
-   */
-  readonly campoSolicitanteId: string | null
   /** Nome do campo de prioridade no request type, quando houver. */
   readonly campoPrioridadeId?: string | null
 }
@@ -399,15 +395,19 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
   /**
    * Campos que carregam o solicitante real — RF-21, mitigação de R-03.
    *
-   * ⚠️ **Cinto e suspensório, de propósito.** O e-mail vai no campo customizado
-   * *quando ele existe* (Q4) **e** sempre no corpo da descrição. Motivo: sem o
-   * campo, todo chamado chega ao time de tech como "aberto pelo robô" — o risco
-   * R-03 inteiro. Deixar a identificação depender de uma configuração que pode
-   * estar ausente seria aceitar que o pior caso aconteça em silêncio.
+   * ⚠️ **Cinto e suspensório, de propósito.** O e-mail vai nos campos estruturados
+   * *quando o request type os expõe* **e** sempre no corpo da descrição. Motivo: sem
+   * a linha na descrição, todo chamado de um tipo sem esses campos chega ao time de
+   * tech como "aberto pelo robô" — o risco R-03 inteiro. Hoje **14 dos 15** tipos do
+   * `GN` não têm campo de solicitante, então o cabeçalho não é redundância: é a
+   * garantia, e o campo estruturado é o extra.
    *
-   * Quando Q4 responder, o campo customizado passa a ser a fonte estruturada (é
-   * ele que a automação de roteamento do Jira lê); a linha na descrição continua,
-   * porque é ela que um humano vê primeiro.
+   * 🚨 **O campo estruturado NÃO se decide aqui, e nem por config global** (`D-36`).
+   * Quem resolve é `tickets/campos-do-solicitante.ts`, **por request type** e cruzando
+   * com o schema, porque o mesmo `fieldId` significa coisas diferentes em tipos
+   * diferentes (`customfield_10092`: cargo no 108, sistema do bug no 70). O valor chega
+   * aqui já resolvido, dentro de `camposDinamicos` — este cliente continua burro quanto
+   * a política, como já é para `RN-06`.
    */
   montarCamposSolicitante(dados: NovoChamado): {
     descricao: string
@@ -415,9 +415,6 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
   } {
     const cabecalho = `**Solicitante:** ${dados.solicitanteEmail}\n**Aberto via:** goatlas\n**Ref:** ${dados.chaveIdempotencia}\n\n---\n\n`
     const camposExtra: Record<string, unknown> = {}
-    if (this.opcoes.campoSolicitanteId) {
-      camposExtra[this.opcoes.campoSolicitanteId] = dados.solicitanteEmail
-    }
     if (this.opcoes.campoPrioridadeId) {
       camposExtra[this.opcoes.campoPrioridadeId] = { name: ROTULO_PRIORIDADE[dados.prioridade] }
     }

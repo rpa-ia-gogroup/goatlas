@@ -281,7 +281,6 @@ export interface ConfigValores {
   readonly labels_bloqueadas: string[]
   readonly tipos_chamado_permitidos: string[]
   readonly service_desk_id: string | null
-  readonly campo_solicitante_id: string | null
   readonly org_id: string | null
   readonly assentos_ocioso_dias: number
   readonly custo_mensal_por_produto: Record<string, number>

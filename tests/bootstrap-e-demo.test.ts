@@ -175,7 +175,7 @@ describe('modo demonstração', () => {
   })
 })
 
-describe('RF-21 / Q4 — campo_solicitante_id é CONFIG, nunca hardcoded', () => {
+describe('RF-21 / D-36 — o campo do solicitante é mapa por request type, não config global', () => {
   it('sem config, o cliente real nasce sem o campo (só a descrição identifica)', async () => {
     const ctx = await montarContexto({
       DB: db,
@@ -196,26 +196,18 @@ describe('RF-21 / Q4 — campo_solicitante_id é CONFIG, nunca hardcoded', () =>
     expect(Object.keys(camposExtra)).toHaveLength(0)
   })
 
-  it('com o valor salvo no banco (RF-49, sem deploy), o cliente real passa a usar o campo', async () => {
+  it('`campo_solicitante_id` NÃO existe mais como chave de config (D-36)', async () => {
+    // 🚨 Era um id **global**, e o mesmo `fieldId` significa coisas diferentes por
+    // request type (medido em 11/08/2026: `customfield_10092` é "cargo" no tipo 108 e
+    // "em que sistema o bug está ocorrendo" no 70). Gravá-lo faria o app escrever o
+    // e-mail do solicitante no campo errado — com HTTP 201 e nada na tela.
+    //
+    // Este teste é a trava contra a chave voltar: `definir` só aceita `keyof
+    // ConfigValores`, então reintroduzi-la em `ConfigValores` faz este arquivo compilar
+    // de novo e o teste falhar — que é o momento de reabrir `D-36`, não de "consertar".
     const config = new Config(db)
-    await config.definir('campo_solicitante_id', 'customfield_10050', 'chefe@gocase.com', '2026-08-05T00:00:00.000Z')
-    const ctx = await montarContexto({
-      DB: db,
-      ATLASSIAN_API_TOKEN: 'token',
-      ATLASSIAN_EMAIL: 'servico@gocase.com',
-      ATLASSIAN_BASE_URL: 'https://goengenharia.atlassian.net',
-    })
-    const cliente = ctx.atlassian as ClienteAtlassianHttp
-    const { camposExtra } = cliente.montarCamposSolicitante({
-      serviceDeskId: 'sd-1',
-      tipoChamadoId: 'rt-1',
-      titulo: 't',
-      descricao: 'd',
-      prioridade: 'normal',
-      solicitanteEmail: 'ana@gocase.com',
-      chaveIdempotencia: 'k1',
-    })
-    expect(camposExtra.customfield_10050).toBe('ana@gocase.com')
+    const chaves = Object.keys(await config.carregar())
+    expect(chaves).not.toContain('campo_solicitante_id')
   })
 })
 

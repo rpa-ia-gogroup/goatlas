@@ -323,7 +323,7 @@ Organizados pelas características de qualidade da ISO/IEC 25010:2023.
 | RNF-22 | O cliente Atlassian é uma **camada isolada**. Trocar a estratégia de identidade (proxy total → `raiseOnBehalfOf` por usuário) deve ser mudança localizada. É a saída de emergência do risco **R-01**. |
 | RNF-23 | A camada de IA é isolada atrás de uma interface própria — trocar de modelo ou de provedor não deve tocar a lógica de negócio. |
 | RNF-24 | Prompts versionados no repositório, revisáveis em pull request. Prompt é regra de negócio, não configuração solta. |
-| RNF-25 | Zero hardcode de IDs de projeto, service desk, espaço ou campo customizado. Tudo em configuração ou secret. |
+| RNF-25 | Configuração é para o que **varia**; o que não varia mora no código, com teste. IDs de projeto, service desk, request type e espaço do Confluence variam por instalação e por decisão de roteamento — ficam em configuração ou secret. O mapeamento *campo customizado → significado, por request type* **não** varia: é a forma do formulário do Jira, e fica fixo no código (emendado em 11/08/2026 — ver `D-36`). |
 | RNF-26 | Logs estruturados legíveis via `getAppLogs` do GoDeploy; erros de frontend encaminhados ao backend para caírem no mesmo lugar. |
 | RNF-27 | README com privilégios exigidos de cada credencial, variáveis de ambiente, procedimento de rotação e como rodar local. |
 

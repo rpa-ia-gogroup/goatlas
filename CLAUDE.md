@@ -60,8 +60,11 @@ quando alguma é esquecida (ver "Automação do processo").
 5. **Três credenciais, zero vazamento** — API token Jira/Confluence · API key de
    organização (Bearer, `api.atlassian.com/admin`, exige Org Admin) · chave da API
    de IA. Só em secrets do GoDeploy. Nunca em repo, log, resposta ou bundle.
-6. **Nada hardcoded** — IDs de projeto, service desk, request type, espaço do
-   Confluence e campo customizado vêm de configuração/secret (**RNF-25**).
+6. **Config é para o que VARIA** (**RNF-25**, emendado em `D-36`). IDs de projeto,
+   service desk, request type e espaço do Confluence variam — configuração/secret.
+   O mapeamento *campo customizado → significado, **por request type*** não varia:
+   é a forma do formulário do Jira, e mora no código com teste. O critério é um só:
+   *este valor muda sem o código mudar?*
 7. **Zero chamada à Atlassian ou à IA a partir do navegador** (**RNF-02**).
 8. **Negação por padrão** — allowlist explícita de espaços e de tipos de chamado;
    nada exposto por default (**RNF-07**, **RN-06**).
@@ -380,6 +383,12 @@ destes reabre um vazamento que já foi fechado.
   ("experimental" = pode mudar sem aviso, e isto é trava de roteamento): é o caminho
   estável **por service desk** (`/servicedesk/{id}/requesttype`, 200 sem cabeçalho). ⚠️ Lá
   o `serviceDeskId` **não vem em cada item** — tem de vir do laço, senão viraria `''`.
+- 🐛 **`GET /api/tipos-chamado` devolve tipos dos CINCO service desks, não do configurado**
+  (medido em 11/08/2026 ampliando a allowlist na staging: voltaram ids dos desks 7, 8 e 9 ao
+  lado dos do 4). `listarTiposChamado` varre todos os desks e a allowlist é a **única** coisa
+  que limita — então um id de outro desk na allowlist passa por `validarProposta` e **falha
+  só na criação**, porque `serviceDeskId` vem fixo da config. Filtrar pelo desk configurado é
+  o conserto; a allowlist não é o lugar de descobrir que a fila é outra.
 - **Filtro que pode não filtrar é VERIFICADO, não acreditado** (`organizacao.ts`). Como
   "responde 200 sem filtrar" é comportamento medido desta API, as duas varreduras de
   `isSuspended` são comparadas: interseção não vazia prova que o filtro não separou nada, e
@@ -414,15 +423,19 @@ destes reabre um vazamento que já foi fechado.
   `admin/campos.tsx` é decisão (`D-25`), não esquecimento: TTL, rate limit e teto de
   tickets da Regra 2 continuam configuráveis, só não têm tela — `tests/tela-admin.test.ts`
   falha se voltarem sem passar pela decisão.
-- **Pergunta em aberto (Q1/Q4/Q5/Q8...) não é motivo para hardcode.** O padrão do
-  projeto é sempre o mesmo: o valor que falta vira campo de `ConfigValores`
-  (`RNF-25`), com `null`/vazio como default fail-closed, e o código já fica pronto
-  para o dia em que a resposta chegar — só um campo no console de admin, sem
-  deploy (`RF-49`). `campo_solicitante_id` (Q4) segue esse padrão: sem ele, o
-  solicitante real ainda vai na descrição (cinto e suspensório); com ele, vira
-  também campo estruturado. O oposto — deixar `campoSolicitanteId: null` fixo no
-  código enquanto a pergunta não responde — obrigaria um deploy no dia da
-  resposta, que é exatamente o atraso que `RF-49` existe para evitar.
+- **Pergunta em aberto (Q1/Q5/Q8...) não é motivo para hardcode** — quando o valor que
+  falta **varia**. O padrão é o mesmo: vira campo de `ConfigValores`, com `null`/vazio
+  como default fail-closed, e o código fica pronto para o dia da resposta — um campo no
+  console, sem deploy (`RF-49`).
+- 🚨 **`campo_solicitante_id` (Q4) era o CONTRA-EXEMPLO, e ele caiu** (`D-36`, 11/08/2026).
+  Medido contra a Atlassian real: **`customfield_10092` é "Cargo/Função que exercerá dentro
+  do time" no request type 108 e "Em que sistema o Bug está ocorrendo?" no 70**; `10093` tem
+  a mesma duplicidade (108 × 134). Logo **um id de campo não significa nada fora do request
+  type**, e um `campo_solicitante_id` **global** escreveria o e-mail do solicitante dentro do
+  campo do sistema do bug — com **HTTP 201** e nada na tela. Config não conserta: config é o
+  veículo do erro. O mapa é **por request type e fica no código**, com teste. ⚠️ A emenda é
+  estreita: `service_desk_id` e as allowlists continuam em config — os dois foram alterados
+  em 11/08, que é a prova de que variam.
 - **A allowlist nunca vem do cliente.** Na busca (`RF-37`), `espacosPermitidos` e
   `labelsBloqueadas` saem de `ctx.valores`, e `?espacos=`/`?labelsBloqueadas=` são
   ignorados — é o mesmo raciocínio da identidade: quem consulta não escolhe o próprio
@@ -848,9 +861,9 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 a declaração obrigatória travada no servidor nas duas rotas de criação, o upload em dois
 passos com o id vivendo só no servidor, a materialização depois da criação (e fora do
 `catch` que classifica falha), as duas telas e o indicador de evidência no console. A única
-tarefa aberta é **T-425**, que é **verificação** contra a Atlassian real (o request type do
-portal expõe campo de anexo?) e depende de `Q1` — sem o campo, o código já cai em `SC-05` e
-nada quebra.
+tarefa aberta era **T-425** — ✅ **respondida em 11/08/2026**:
+`GET /api/tipos-chamado/68/campos` na staging devolveu **`aceitaAnexo: true`**. O request
+type expõe campo de anexo, então o anexo na criação funciona sem uma linha a mudar.
 
 **No ar em SOMENTE LEITURA: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
 `version 20`, deploy de 07/08/2026). Login Google pelo edge, admin por allowlist.
@@ -867,9 +880,30 @@ fora (`listAppSecrets` não devolve valor, `/api/admin/config` está atrás do e
 abrindo o console.
 
 🚨 **Desligar `GOATLAS_SOMENTE_LEITURA` é o go-live, e tem pré-requisito:** a staging
-(`3936ca2d`, criada e **incompleta** — falta o `LLM_API_KEY`) passa a ser obrigatória
-antes disso (`D-24`). É naquele instante que o primeiro chamado real nasce na fila do time
-de tech, e `criarChamado` (`T-063`) **nunca executou** contra o JSM.
+(`3936ca2d`) passa a ser obrigatória antes disso (`D-24`).
+
+✅ **`criarChamado` (`T-063`) EXECUTOU** — 11/08/2026, `GN-6894`, `HTTP 201`, criado pela
+staging com o somente-leitura desligado por ~30 segundos e religado em seguida. Lido de
+volta pela rota isolada por e-mail: a descrição chegou com o bloco de autoria do `D-13` e a
+chave `form:<email>:<chave>`. ⚠️ **É um chamado de teste numa fila real** (`[TESTE goatlas -
+ignorar]`) — alguém do time de tech precisa apagá-lo; o app não tem essa operação.
+⚠️ **Mandamos `prioridade: "normal"` e o chamado voltou com `prioridade: null` e
+`slaPrimeiraResposta: null`** — ou o tipo 68 não expõe campo de prioridade, ou o mapeamento
+não está sendo aplicado. Se for o segundo, `RF-16` (prioridade editável) não tem efeito no
+Jira. **Não investigado.**
+
+⚠️ **A allowlist de tipos foi ampliada em 11/08** para os **15** tipos do `GN`
+(`68,70,71,89,90,91,92,93,94,95,96,108,134,143,144`), em prod e staging. O **`69`
+("Solicitação enviada por e-mail") continua fora de propósito** — `D-23`: é o canal de
+entrada por e-mail do próprio JSM, não um formulário para alguém escolher.
+
+⚠️ **Não existe fila do RPA, e o "ambiente do RPA" não serve para teste** (11/08). O site
+tem 5 service desks (`GN` 4 · `SHPF` 7 · `OMI2020` 8 · `GOSHOP` 9 · `JTK` 11) e nenhum é do
+RPA. A área do time é `TASK`, um projeto **Jira Work Management** (`/jira/core/projects/`) —
+o cliente inteiro fala `servicedeskapi`, então `TASK` é inalcançável, e escrever
+`/rest/api/3/issue` só para testar testaria um caminho que não vai ao ar (sem request type,
+sem comentário público/interno, sem SLA). Há também um espaço `IA` no Confluence (2 páginas),
+que é documentação, não fila.
 
 **952 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,

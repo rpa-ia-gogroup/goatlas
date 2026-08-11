@@ -1715,6 +1715,52 @@ sendo Poppins; o que mudou é o que se vê antes dela chegar. Voltar a um `<link
   reintroduziria o no-op silencioso que o `CLAUDE.md` já descreve para
   `GOATLAS_ESPACOS_CONFLUENCE`, agora do outro lado.
 
+### D-36 · Config é para o que VARIA — o mapeamento de campo customizado vira código
+
+**Data:** 11/08/2026 · **Decisão de:** Kaique (mantenedor) · **Contexto:** `RNF-25`,
+Princípio VIII da constituição, `RF-21`, `Q4`, spec 006 · **Emenda:** constituição 1.0.1 → 1.1.0
+
+**A regra anterior era "zero hardcode", sem exceção.** Ela nasceu certa — IDs de projeto,
+service desk, espaço e request type mudam por instalação e por decisão de roteamento, e o
+projeto inteiro depende de mudá-los sem deploy (`RF-49`). Só que ela era aplicada como
+absoluto, e empurrava para config coisas que **ninguém decide**.
+
+**O que forçou a revisão:** medição contra a Atlassian real em 11/08/2026 mostrou que
+`customfield_10092` é *"Cargo/Função que exercerá dentro do time"* no request type 108 e
+*"Em que sistema o Bug está ocorrendo?"* no 70. `customfield_10093` idem (108 × 134).
+Ou seja, **um id de campo não tem significado fora do request type** — e `campo_solicitante_id`,
+o campo de config que `Q4` esperava preencher, é um **id global**. Preenchê-lo faria o app
+escrever o e-mail do solicitante dentro do campo "Em que sistema o Bug está ocorrendo?" de
+todo chamado de bug, com **HTTP 201** e nada na tela indicando erro.
+
+🚨 **Config não conserta isso — config é o veículo do erro.** O valor certo não é uma
+preferência da instalação: é a forma do formulário do Jira, e ela é verificável em teste.
+
+**A decisão:** o critério deixa de ser "hardcode é proibido" e passa a ser
+***este valor muda sem o código mudar?***
+
+| Varia → config/secret | Não varia → código, com teste |
+|---|---|
+| `service_desk_id`, allowlist de request type (ajustada em 11/08), espaços do Confluence (`RF-49`), thresholds, canal, piloto, retenção, `org_id`, custo por produto | mapeamento *campo customizado → significado, por request type* |
+
+**Consequências:**
+- `campo_solicitante_id` **sai** de `ConfigValores` e do console de admin; no lugar entra um
+  mapeamento por request type, fixo no código.
+- **`Q4` deixa de ser bloqueio** — a pergunta ("o campo Solicitante existe?") foi respondida
+  pela medição: o que existe é um par nome/e-mail no tipo 108, e ele já está mapeado.
+- **Custo aceito:** se o Jira mudar um id de campo, é deploy. Aceito porque a alternativa
+  comprovadamente escreve dado no campo errado em silêncio, e porque id de campo do Jira não
+  muda sozinho — quem o muda é uma pessoa reconfigurando o formulário.
+- ⚠️ **A emenda é estreita de propósito.** O mantenedor pediu "remover a regra, tudo fixo
+  (a não ser que seja variável mesmo)"; o parêntese é a regra, e ele preserva em config tudo
+  o que de fato varia. Ampliar isto para fixar `service_desk_id` ou a allowlist de espaços
+  **reabre `D-36`** — os dois foram alterados neste mesmo dia, o que é a prova de que variam.
+
+**Caminho de saída:** se um dia a instalação precisar de mapeamento diferente sem deploy, o
+padrão de `D-25` continua disponível — valor em `ConfigValores` **fora** da tela do console —
+e o mapa por request type sobrevive à mudança, porque o que ele corrige é a *forma*, não o
+*lugar* do valor.
+
 ---
 
 ## Perguntas em aberto
@@ -1727,7 +1773,7 @@ implementado antes da resposta.
 | Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | ✅ **RESPONDIDA na parte de credencial — `D-23`, 07/08/2026.** `ATATT` clássico validado (`/rest/api/3/myself` → 200), `ATCTT` em `ATLASSIAN_ORG_API_KEY`, org id validado, `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"). **T-063 saiu do bloqueio** — falta escolher os tipos da allowlist de `RF-28`, que é roteamento. ⚠️ **Pendências que não são "qual credencial":** a conta é **pessoal do João** (contra `RNF-03` — conta de serviço dedicada continua a fazer), o `ATCTT` precisa de **rotação** e pode virar chave só-leitura, e a **escrita** de governança exige reivindicar o domínio, não credencial |
 | Q2 | Qual campo do Jira delimita "mesmo tipo de ticket" para a Regra 2 — label, componente ou tipo de issue? | João + time de tech | RF-10, RF-11 (o agrupamento do `check_jira_history`) |
 | Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | RF-14 — e sem ele a Regra 2 classifica mal (é pré-requisito, não refinamento) |
-| Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | **Só o valor** — `campo_solicitante_id` já é config (RNF-25), editável sem deploy assim que a resposta chegar. RF-21, RNF-21 (reconciliação) |
+| Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | ✅ **RESPONDIDA pela medição — `D-36`, 11/08/2026.** Não existe um campo "Solicitante": o que existe é um par **`customfield_10089` (Nome do Colaborador)** + **`customfield_10091` (E-mail)**, obrigatórios, **só no request type 108**. 🚨 E o mesmo id significa outra coisa em outro tipo (`10092`: cargo no 108, sistema do bug no 70), então `campo_solicitante_id` — um id **global** — tinha a forma errada: sai da config e vira mapeamento **por request type**, fixo no código. RF-21, RNF-21 (reconciliação) |
 | Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | **Lista autoritativa em mãos (`D-23`): 32 espaços, com nome e tipo.** ⚠️ O `TECH` que circulava **nunca existiu**, e a recomendação do `D-22` estava furada: **`GO` é "Go Shopify"**, não engenharia. Candidatos reais: `GT` (GO Tecnologia, `knowledge_base`), `DTE`, `GN`, `DE` (Devops), `GI` (GO INFRA), `dicas`, `GLPI`. **Parcialmente aplicada:** o secret existe desde 07/08 17:35 e o `CLAUDE.md` registra `GT,DTE,GN` (3 de 31 espaços reais). ⚠️ **O que resta é conflito, não ausência** — a sugestão do João inclui `GO`/`PROD` e a `D-23` §7 diz que `GO` não é engenharia. Ver `D-29` |
 | Q6 | ~~Qual API de IA?~~ Resta: qual a **política de retenção/treinamento** do provedor atrás do proxy corporativo? | João | **Provedor decidido — ver D-05.** O que resta bloqueia o *rollout* (conformidade **RNF-34**), não a arquitetura |
 | Q7 | Quais domínios de e-mail além de `@gocase.com` são válidos? | João | RF-01, RF-05 (allowlist de domínio no servidor) |
