@@ -8,6 +8,7 @@
  * _Requirements: RF-21, RF-62, RNF-17, D-36_
  */
 
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { CampoRequestType } from '../src/lib/atlassian/tipos'
 import type { SchemaDoTipo } from '../src/lib/tickets/declaracao-anexo'
@@ -90,5 +91,35 @@ describe('o mapa em si (D-36)', () => {
   it('camposPreenchidosPeloApp devolve vazio para tipo sem mapa', () => {
     expect(camposPreenchidosPeloApp('108')).toHaveLength(2)
     expect(camposPreenchidosPeloApp('70')).toEqual([])
+  })
+})
+
+describe('T-511 — a TELA usa o mesmo mapa que o servidor', () => {
+  // ⚠️ O risco aqui não é visual, é **divergência silenciosa**: uma lista de ids escrita
+  // à parte no frontend continuaria compilando e renderizando, e o sintoma seria a tela
+  // agrupando um campo como "seu" enquanto o servidor o trata como campo comum — ou o
+  // contrário, um campo do solicitante aparecendo solto no meio dos outros.
+  //
+  // Mesma família do teste que gera `urlDeLeituraNoApp` de um lado e lê com
+  // `entradaDaUrl` do outro: o que se afirma é que existe **uma** fonte.
+  const fonte = readFileSync(new URL('../src/app/telas.tsx', import.meta.url), 'utf8')
+
+  it('nenhum `customfield_` aparece escrito na tela', () => {
+    expect(fonte).not.toMatch(/customfield_/)
+  })
+
+  it('a tela importa o mapa compartilhado', () => {
+    expect(fonte).toMatch(/from '@\/lib\/tickets\/campos-do-solicitante'/)
+  })
+
+  it('os campos do solicitante NÃO são renderizados como somente leitura', () => {
+    // `FR-3`: o valor é padrão, não imposição — o tipo 108 tem a forma de um pedido de
+    // acesso que pode ser para outra pessoa. Um `readonly`/`disabled` no grupo faria a
+    // resposta honesta ser impossível de dar.
+    const grupo = fonte.slice(
+      fonte.indexOf('grupo-solicitante'),
+      fonte.indexOf('camposComuns.length > 0'),
+    )
+    expect(grupo).not.toMatch(/readOnly|disabled/)
   })
 })

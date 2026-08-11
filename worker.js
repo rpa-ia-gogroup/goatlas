@@ -392,15 +392,19 @@ var ClienteAtlassianHttp = class {
   /**
    * Campos que carregam o solicitante real — RF-21, mitigação de R-03.
    *
-   * ⚠️ **Cinto e suspensório, de propósito.** O e-mail vai no campo customizado
-   * *quando ele existe* (Q4) **e** sempre no corpo da descrição. Motivo: sem o
-   * campo, todo chamado chega ao time de tech como "aberto pelo robô" — o risco
-   * R-03 inteiro. Deixar a identificação depender de uma configuração que pode
-   * estar ausente seria aceitar que o pior caso aconteça em silêncio.
+   * ⚠️ **Cinto e suspensório, de propósito.** O e-mail vai nos campos estruturados
+   * *quando o request type os expõe* **e** sempre no corpo da descrição. Motivo: sem
+   * a linha na descrição, todo chamado de um tipo sem esses campos chega ao time de
+   * tech como "aberto pelo robô" — o risco R-03 inteiro. Hoje **14 dos 15** tipos do
+   * `GN` não têm campo de solicitante, então o cabeçalho não é redundância: é a
+   * garantia, e o campo estruturado é o extra.
    *
-   * Quando Q4 responder, o campo customizado passa a ser a fonte estruturada (é
-   * ele que a automação de roteamento do Jira lê); a linha na descrição continua,
-   * porque é ela que um humano vê primeiro.
+   * 🚨 **O campo estruturado NÃO se decide aqui, e nem por config global** (`D-36`).
+   * Quem resolve é `tickets/campos-do-solicitante.ts`, **por request type** e cruzando
+   * com o schema, porque o mesmo `fieldId` significa coisas diferentes em tipos
+   * diferentes (`customfield_10092`: cargo no 108, sistema do bug no 70). O valor chega
+   * aqui já resolvido, dentro de `camposDinamicos` — este cliente continua burro quanto
+   * a política, como já é para `RN-06`.
    */
   montarCamposSolicitante(dados) {
     const cabecalho = `**Solicitante:** ${dados.solicitanteEmail}
@@ -411,9 +415,6 @@ var ClienteAtlassianHttp = class {
 
 `;
     const camposExtra = {};
-    if (this.opcoes.campoSolicitanteId) {
-      camposExtra[this.opcoes.campoSolicitanteId] = dados.solicitanteEmail;
-    }
     if (this.opcoes.campoPrioridadeId) {
       camposExtra[this.opcoes.campoPrioridadeId] = { name: ROTULO_PRIORIDADE[dados.prioridade] };
     }
@@ -2241,7 +2242,6 @@ var CONFIG_PADRAO = Object.freeze({
   labels_bloqueadas: ["confidencial"],
   tipos_chamado_permitidos: [],
   service_desk_id: null,
-  campo_solicitante_id: null,
   org_id: null,
   assentos_ocioso_dias: 90,
   custo_mensal_por_produto: {},
@@ -2284,9 +2284,6 @@ function valoresDoBootstrap(env) {
   const espacos = (env.GOATLAS_ESPACOS_CONFLUENCE ?? "").split(",").map((v) => v.trim()).filter((v) => v.length > 0);
   if (espacos.length > 0) parcial.espacos_confluence = espacos;
   if (env.GOATLAS_SERVICE_DESK_ID) parcial.service_desk_id = env.GOATLAS_SERVICE_DESK_ID;
-  if (env.GOATLAS_CAMPO_SOLICITANTE_ID) {
-    parcial.campo_solicitante_id = env.GOATLAS_CAMPO_SOLICITANTE_ID;
-  }
   if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID;
   if (env.GOATLAS_BASE_PUBLICA) {
     parcial.base_publica_app = env.GOATLAS_BASE_PUBLICA.trim().replace(/\/+$/, "");
@@ -5550,11 +5547,10 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     ttlMetadadosSeg: valores.ttl_metadados_seg,
     ttlConteudoSeg: valores.ttl_conteudo_seg,
     // O que faz o TTL acima valer de verdade — ver `cachesAtlassianDoIsolate`.
-    caches: cachesAtlassianDoIsolate,
+    caches: cachesAtlassianDoIsolate
     // RF-21, Q4 — configurável (RNF-25), nunca hardcoded. `null` até o time
     // de tech confirmar o id do campo "Solicitante"; o solicitante real
     // continua indo na descrição enquanto isso (cinto e suspensório).
-    campoSolicitanteId: valores.campo_solicitante_id
   });
   const atlassian = somenteLeitura ? new ClienteAtlassianSomenteLeitura(atlassianBase) : atlassianBase;
   const ia = reaproveitar.ia ? reaproveitar.ia : usandoFakes ? new ClienteIAFake() : !env.LLM_API_KEY ? new ClienteIAIndisponivel() : new ClienteIAHttp({
@@ -7323,6 +7319,27 @@ function filtrarPeloSchema(campos, schema) {
   return Object.keys(saida).length > 0 ? saida : null;
 }
 
+// src/lib/tickets/campos-do-solicitante.ts
+var MAPA_CAMPOS_DO_SOLICITANTE = {
+  "108": {
+    customfield_10089: "nome_solicitante",
+    customfield_10091: "email_solicitante"
+  }
+};
+function resolverCamposDoSolicitante(tipoChamadoId, schema, identidade) {
+  const mapa = MAPA_CAMPOS_DO_SOLICITANTE[tipoChamadoId];
+  if (!mapa) return {};
+  if (!schema.conhecido) return {};
+  const expostos = new Set(schema.campos.map((c) => c.fieldId));
+  const saida = {};
+  for (const [fieldId, papel] of Object.entries(mapa)) {
+    if (!expostos.has(fieldId)) continue;
+    const valor = (papel === "nome_solicitante" ? identidade.nome : identidade.email).trim();
+    if (valor.length > 0) saida[fieldId] = valor;
+  }
+  return saida;
+}
+
 // src/lib/tickets/declaracao-anexo.ts
 function tipoAceitaAnexo(campos) {
   return campos.some((c) => c.tipo === "anexo");
@@ -7435,7 +7452,6 @@ var FAMILIA = {
   // `null` é uma resposta legítima: "ainda não sabemos" (Q1, Q4). Diferente de
   // string vazia, que seria um id inventado.
   service_desk_id: "texto_ou_vazio",
-  campo_solicitante_id: "texto_ou_vazio",
   org_id: "texto_ou_vazio",
   regra2_campo_agrupamento: "texto",
   regra1_threshold_score: "fracao",
@@ -7856,6 +7872,10 @@ async function rotear(req, ctx, eu, caminho, url) {
       extrairCamposDinamicos(corpo?.camposDinamicos),
       schema
     );
+    const camposComSolicitante = {
+      ...resolverCamposDoSolicitante(validada.proposta.tipoChamadoId, schema, eu),
+      ...camposDinamicos ?? {}
+    };
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
@@ -7867,7 +7887,7 @@ async function rotear(req, ctx, eu, caminho, url) {
         tipoChamadoId: validada.proposta.tipoChamadoId,
         serviceDeskId,
         prioridade: validada.proposta.prioridade,
-        ...camposDinamicos ? { camposDinamicos } : {}
+        ...Object.keys(camposComSolicitante).length > 0 ? { camposDinamicos: camposComSolicitante } : {}
       }
     });
     const anexo = await materializarAnexosDoChamado(ctx, {
@@ -8500,7 +8520,9 @@ async function rotear(req, ctx, eu, caminho, url) {
   if (caminho === "/api/tipos-chamado" && req.method === "GET") {
     const permitidos = new Set(ctx.valores.tipos_chamado_permitidos);
     const todos = await ctx.atlassian.listarTiposChamado();
-    return json({ itens: todos.filter((t) => permitidos.has(t.id)) });
+    const desk = ctx.valores.service_desk_id;
+    const doDesk = desk === null ? [] : todos.filter((t) => t.serviceDeskId === desk);
+    return json({ itens: doDesk.filter((t) => permitidos.has(t.id)) });
   }
   if (caminho === "/api/admin/config") {
     if (!eu.isAdmin) return ERROS.semPermissao();

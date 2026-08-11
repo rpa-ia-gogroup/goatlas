@@ -13,6 +13,7 @@ import {
   prioridadePor,
   type CampoRequestType,
   type DetalheChamado,
+  type Identidade,
   type EstadoVerificacao,
   type Prioridade,
   type Proposta,
@@ -21,6 +22,10 @@ import {
   type TipoChamado,
   type TransicaoDisponivel,
 } from './api'
+import {
+  camposPreenchidosPeloApp,
+  resolverCamposDoSolicitante,
+} from '@/lib/tickets/campos-do-solicitante'
 import {
   Aviso,
   Selo,
@@ -1028,7 +1033,13 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
  * de chamados da empresa. A copy é honesta sobre a diferença: aqui não há
  * verificação, e o chamado nasce marcado como não verificado.
  */
-export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void }) {
+export function TelaFormulario({
+  eu,
+  aoAbrirChamado,
+}: {
+  eu: Identidade
+  aoAbrirChamado: () => void
+}) {
   const [tipos, setTipos] = useState<TipoChamado[] | null>(null)
   const [titulo, setTitulo] = useState('')
   const [descricao, setDescricao] = useState('')
@@ -1061,6 +1072,14 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
       .catch(() => setTipos([]))
   }, [])
 
+  // RF-21 / D-36 — quais campos deste tipo o app preenche a partir do login. Vem do
+  // MESMO mapa que o servidor usa: uma lista escrita à parte aqui divergiria em
+  // silêncio, e o sintoma seria a tela mostrando um campo como "seu" enquanto o
+  // servidor o trata como campo comum (ou o contrário).
+  const idsDoSolicitante = camposPreenchidosPeloApp(tipoChamadoId)
+  const camposDoSolicitante = (campos ?? []).filter((c) => idsDoSolicitante.includes(c.fieldId))
+  const camposComuns = (campos ?? []).filter((c) => !idsDoSolicitante.includes(c.fieldId))
+
   useEffect(() => {
     if (!tipoChamadoId) return
     setCampos(null)
@@ -1075,9 +1094,18 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
       .then((r) => {
         setCampos(r.itens)
         setAceitaAnexo(r.aceitaAnexo)
+        // Pré-preenche o que o app sabe. É PADRÃO, não imposição: a pessoa edita, e o
+        // servidor respeita o que ela mandar (`FR-3`). Quem abriu continua sendo a
+        // identidade da sessão, que não sai deste corpo.
+        const meus = resolverCamposDoSolicitante(
+          tipoChamadoId,
+          { conhecido: true, campos: r.itens },
+          eu,
+        )
+        if (Object.keys(meus).length > 0) setValoresCampos(meus)
       })
       .catch(() => setCampos([]))
-  }, [tipoChamadoId])
+  }, [tipoChamadoId, eu])
 
   const faltaDeclarar = aceitaAnexo && declarou === null
 
@@ -1163,9 +1191,30 @@ export function TelaFormulario({ aoAbrirChamado }: { aoAbrirChamado: () => void 
         </select>
       </div>
 
-      {campos && campos.length > 0 && (
+      {camposDoSolicitante.length > 0 && (
+        <fieldset className="grupo-solicitante">
+          <legend>
+            <span className="eyebrow">De quem é o acesso</span>
+            <span className="grupo-solicitante-titulo">Quem vai usar</span>
+            <span className="dica">
+              Preenchemos com a sua conta. Se o acesso é para outra pessoa, troque o nome e o
+              e-mail.
+            </span>
+          </legend>
+          {camposDoSolicitante.map((c) => (
+            <CampoDinamico
+              key={c.fieldId}
+              campo={c}
+              valor={valoresCampos[c.fieldId] ?? ''}
+              aoMudar={(v) => setValoresCampos((atuais) => ({ ...atuais, [c.fieldId]: v }))}
+            />
+          ))}
+        </fieldset>
+      )}
+
+      {camposComuns.length > 0 && (
         <div className="pilha">
-          {campos.map((c) => (
+          {camposComuns.map((c) => (
             <CampoDinamico
               key={c.fieldId}
               campo={c}

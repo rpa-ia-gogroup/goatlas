@@ -138,8 +138,13 @@ export function App() {
                 aoConversar={() => setTela({ nome: 'conversa' })}
               />
             )}
-            {tela.nome === 'formulario' && (
-              <TelaFormulario aoAbrirChamado={() => setTela({ nome: 'chamados' })} />
+            {/* ⚠️ `eu &&` não é defensividade à toa: sem identidade o formulário não teria
+                com que preencher os campos do solicitante (`RF-21`), e renderizá-lo com
+                string vazia gravaria campo obrigatório em branco no chamado. Enquanto a
+                identidade carrega, a aba fica sem conteúdo — que é o mesmo instante em que
+                a tela inteira ainda não sabe quem é a pessoa. */}
+            {tela.nome === 'formulario' && eu && (
+              <TelaFormulario eu={eu} aoAbrirChamado={() => setTela({ nome: 'chamados' })} />
             )}
             {tela.nome === 'avisos' && <TelaAvisos />}
             {tela.nome === 'admin' && <TelaAdmin />}

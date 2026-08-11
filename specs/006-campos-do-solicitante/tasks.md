@@ -33,12 +33,25 @@ Teste antes do código em toda tarefa que muda comportamento (`Princípio III`).
 
 ## Fase 2 — a tela (skill `frontend-design` antes)
 
-- [ ] **T-510** — Campos do solicitante visíveis e **editáveis**, com marca de origem, no
-      formulário e na confirmação. _Requirements: RF-27, RNF-06 (a11y)_
-- [ ] **T-511** — Teste de tela: valor pré-preenchido presente, editável, e rótulo
-      associado para leitor de tela. _Requirements: RF-27_
+- [x] **T-510** — Bloco "Quem vai usar" no formulário: `fieldset` com espinha lime, os
+      campos do solicitante pré-preenchidos do login e **editáveis**, com uma linha de
+      orientação. ⚠️ **Um bloco, não um selo por campo** — o selo nomearia o mecanismo
+      ("preenchido automaticamente") e repetiria duas vezes o que é uma informação só.
+      Reusa o `legend` com `float: left` de `.pergunta-anexo`, no **mesmo seletor**, para
+      o gotcha continuar tendo uma explicação só. _Requirements: RF-27, RF-21_
+- [x] **T-511** — Teste estrutural: a tela **não escreve `customfield_`**, importa o mapa
+      compartilhado, e o grupo não é `readOnly`/`disabled`. ⚠️ O que se protege é
+      divergência silenciosa entre tela e servidor, não aparência. _Requirements: RF-27_
+- [ ] **T-511b** — A tela da **conversa** (`RF-17`) não mostra esses campos, porque a rota
+      dela ainda não os envia (ver `T-505`). Os dois caminhos precisam coincidir.
 
 ## Fase 3 — área via TeamGuide (precisa de `TG_API_TOKEN`)
+
+⚠️ **Decisão do mantenedor (11/08/2026): reusar o MESMO token do godocs.** Custo aceito e
+que precisa estar escrito: os dois apps passam a depender de uma credencial só, então
+**rotacionar por causa de um quebra o outro sem aviso** — e o goatlas falharia em silêncio,
+porque a derivação de área é fail-open (`SC-05`). Vai para `docs/DEPLOY.md` junto do secret,
+e é o primeiro item a revisitar se um dia o godocs rotacionar.
 
 - [ ] **T-512** — `src/lib/teamguide/contrato.ts` + `fake.ts` roteirizável, com falha
       injetável por operação. _Requirements: RNF-04, RNF-18_

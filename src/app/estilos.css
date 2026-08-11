@@ -1607,7 +1607,8 @@
    shrink-to-fit e a pergunta ficaria estreita com o resto contornando ao lado.
    O `fieldset`/`legend` continuam sendo os elementos certos (grupo de rádio nomeado
    para leitor de tela) — o que muda é só onde a caixa é desenhada. */
-.pergunta-anexo > legend {
+.pergunta-anexo > legend,
+.grupo-solicitante > legend {
   float: left;
   width: 100%;
   display: flex;
@@ -1615,6 +1616,36 @@
   gap: var(--space-1);
   padding: 0;
 }
+/* RF-21 / D-36 — os campos que o app preenche a partir do login.
+   ⚠️ **Um bloco, não dois selos.** A alternativa óbvia era marcar cada campo com um
+   "preenchido automaticamente": ela nomeia o mecanismo em vez do fato, e repete duas
+   vezes o que é UMA informação — de quem é o acesso. Agrupados, a orientação aparece
+   uma vez, e no lugar onde ela é acionável: se o pedido é para outra pessoa, trocar.
+   A espinha lime é a mesma da leitura de página, de propósito: é o vocabulário que o
+   app já usa para "isto é um bloco à parte", e não um device novo.
+   Os campos continuam sendo inputs comuns — nada de `readonly`, nada de cadeado: o
+   valor é padrão, não imposição (`FR-3`). */
+.grupo-solicitante {
+  border: 1px solid color-mix(in srgb, var(--go-blue) 16%, transparent);
+  border-left: 4px solid var(--go-accent);
+  border-radius: var(--radius-md);
+  background: var(--go-white);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  min-inline-size: 0;
+}
+.grupo-solicitante-titulo {
+  font-size: var(--fs-h4);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+}
+.grupo-solicitante .dica {
+  margin: 0;
+}
+
 .pergunta-anexo-titulo {
   font-size: var(--fs-h4);
   font-weight: var(--fw-semibold);
