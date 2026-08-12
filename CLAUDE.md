@@ -491,6 +491,26 @@ destes reabre um vazamento que já foi fechado.
   acesso de quem já não tem acesso. E `parcial` existe porque o teto de páginas era atingido
   **em silêncio** — apesar de o comentário do próprio código jurar o contrário. Coleta
   parcial ou cega quanto a suspensão **não** é auditada como `sucesso`.
+- 🚨 **`fetch` guardado em propriedade vai SEMPRE com `fetch.bind(globalThis)`** (`D-50`, e
+  antes dele 07/08/2026). `this.fetchImpl = opcoes.fetchImpl ?? fetch` chama o global com o
+  **cliente** como receptor, e o runtime dos Workers recusa com `TypeError: Illegal
+  invocation` **antes de abrir conexão** — o app não faz uma única requisição, e o sintoma é
+  um erro de rede genérico com a credencial certa e o host no ar. ⚠️ **No Node dos testes o
+  `fetch` não confere o receptor**, então isto é invisível para qualquer teste de
+  comportamento: foram 643 testes verdes na primeira vez (quatro clientes) e **1181 na
+  segunda** (a TeamGuide, que nasceu depois e repetiu a linha porque a correção vivia só num
+  comentário dentro do arquivo já corrigido). A trava agora é uma **varredura de `src/`** em
+  `tests/rf19-area-teamguide.test.ts` — comentário no arquivo certo não alcança o arquivo que
+  ainda não existe.
+- **Credencial que vai num cabeçalho é APARADA e VERIFICADA na fronteira** (`teamguide/http.ts`,
+  `D-50`). O secret é colado à mão no console do GoDeploy; um `\n` no fim é invisível e faz o
+  `fetch` lançar `TypeError` sem abrir conexão — **a mesma assinatura** do item acima, o que
+  torna as duas causas indistinguíveis se ninguém as separar. O `trim` resolve a ponta; o que
+  ele não alcança (controle no meio, caractere fora do ASCII imprimível) é **recusado antes de
+  qualquer ida de rede**, com `credencial_malformada` + `classe`. ⚠️ E o saneamento é
+  **denunciado inclusive no sucesso** (`ok · credencial_saneada`): pista que só aparece na
+  falha some justamente quando o problema passa a funcionar. Nunca o valor, nem pedaço, nem o
+  tamanho (`RNF-01`).
 - **A Organizations API tem TRANSPORTE PRÓPRIO** (`atlassian/organizacao.ts`,
   `RNF-04`) — não a mesma instância do cliente de Jira/Confluence. A credencial é
   **Org Admin**: "economizar" reaproveitando `atlassian/http.ts` (que já resolve
@@ -1168,10 +1188,15 @@ criações na staging às 12:08 e 12:21). As duas registraram
 fail-open de `D-37` funciona), mas `vinculos.area` fica `null`. **Este caminho nunca rodou
 fora do fake** — até 11/08 a TeamGuide só tinha sido chamada por `curl`, de fora do Worker.
 `D-40` desfez a indistinção do rótulo (fase + classe, e o timeout pelo sinal) e pôs a sonda em
-`/api/health`; **a causa continua em aberto**, e o que a fecha é `dependencias.teamguide.detalhe`
-na staging — a tabela de leitura está no `D-40`. ⚠️ Nada foi paginado nem teve o timeout
-mexido de propósito: mudar o comportamento no mesmo movimento em que se instala o instrumento
-estraga a medição.
+`/api/health`. ✅ **A causa foi achada e corrigida em `D-50`, no mesmo dia:** `fetch` guardado
+sem `bind` — `Illegal invocation` no runtime dos Workers, antes de abrir conexão. 🚨 **E a
+tabela de leitura do `D-40` apontava essa exata assinatura para "egress da plataforma", que
+estava errado**: o godocs roda a mesma chamada, no mesmo GoDeploy, contra o mesmo host, com o
+mesmo token, e funciona — foi esse contraexemplo que desfez a conclusão. ⚠️ **Falta medir na
+staging**: `dependencias.teamguide.detalhe` deve responder `ok` (ou `ok · credencial_saneada`,
+ou `http_401` — os três significam que a conexão passou a sair). Tabela revisada no `D-50`.
+⚠️ Nada foi paginado nem teve o timeout mexido: mudar comportamento no mesmo movimento em que
+se instala o instrumento estraga a medição.
 
 🚨 **A pessoa não via os anexos do próprio chamado** (medido em 12/08/2026 no `GN-6898`, que
 nasceu com arquivo anexado). `RF-31` é P0 e cita anexos desde o texto do requisito, e `T-081`
@@ -1182,7 +1207,7 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1181 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1187 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste.

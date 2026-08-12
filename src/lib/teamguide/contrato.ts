@@ -55,7 +55,11 @@ export type FaseTeamGuide = 'conexao' | 'corpo' | 'promessa'
  * e `formato_inesperado` já dizem tudo; `erro_de_rede` e `timeout` não dizem nada sem elas.
  */
 export interface FalhaTeamGuide {
-  /** `http_<status>` · `formato_inesperado` · `timeout` · `erro_de_rede` · `credencial_ausente`. */
+  /**
+   * `http_<status>` · `formato_inesperado` · `timeout` · `erro_de_rede` ·
+   * `credencial_ausente` · `credencial_malformada` (`D-50` — o valor não cabe num
+   * cabeçalho HTTP; `classe` diz o quê, nunca o valor).
+   */
   readonly motivo: string
   readonly fase?: FaseTeamGuide
   /** Nome/classe do erro em `snake_case` — nunca a mensagem. */

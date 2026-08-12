@@ -2216,15 +2216,19 @@ function novaCacheTeamGuide() {
   return { em: 0, promessa: null };
 }
 var ClienteTeamGuideHttp = class {
-  constructor(opcoes) {
-    this.opcoes = opcoes;
-    this.cache = opcoes.cache ?? novaCacheTeamGuide();
-    this.agora = opcoes.agoraMs ?? (() => Date.now());
-    this.fetchImpl = opcoes.fetchImpl ?? fetch;
-  }
   cache;
   agora;
   fetchImpl;
+  credencial;
+  // ⚠️ O `token` **não** fica guardado cru: o que sobrevive ao construtor é a `Credencial`
+  // já aparada e verificada. Um segundo lugar lendo `opcoes.token` reabriria o caminho que
+  // manda o valor bruto para dentro do cabeçalho.
+  constructor(opcoes) {
+    this.cache = opcoes.cache ?? novaCacheTeamGuide();
+    this.agora = opcoes.agoraMs ?? (() => Date.now());
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis);
+    this.credencial = prepararCredencial(opcoes.token);
+  }
   async areaDe(email) {
     const alvo = (email ?? "").trim().toLowerCase();
     if (!alvo) return { estado: "nao_encontrada" };
@@ -2246,11 +2250,12 @@ var ClienteTeamGuideHttp = class {
    * abertura de chamado mediria.
    */
   async verificarSaude() {
+    const nota = this.credencial.saneada ? "credencial_saneada" : null;
     try {
       await this.baseCacheada();
-      return { ok: true, detalhe: "ok" };
+      return { ok: true, detalhe: ["ok", nota].filter((p) => !!p).join(" \xB7 ") };
     } catch (e) {
-      return { ok: false, detalhe: rotuloDaFalha(falhaDe(e)) };
+      return { ok: false, detalhe: [rotuloDaFalha(falhaDe(e)), nota].filter((p) => !!p).join(" \xB7 ") };
     }
   }
   baseCacheada() {
@@ -2266,13 +2271,19 @@ var ClienteTeamGuideHttp = class {
     return this.cache.promessa;
   }
   async carregarBase() {
+    if (this.credencial.invalida) {
+      throw new ErroTeamGuide({
+        motivo: "credencial_malformada",
+        classe: this.credencial.invalida
+      });
+    }
     const controle = new AbortController();
     const timer = setTimeout(() => controle.abort(), TIMEOUT_MS);
     try {
       let r;
       try {
         r = await this.fetchImpl(`${BASE}/employees/refs?unpaged=true&page=0`, {
-          headers: { Authorization: `Bearer ${this.opcoes.token}`, Accept: "application/json" },
+          headers: { Authorization: `Bearer ${this.credencial.valor}`, Accept: "application/json" },
           signal: controle.signal
         });
       } catch (e) {
@@ -2292,6 +2303,20 @@ var ClienteTeamGuideHttp = class {
     }
   }
 };
+function prepararCredencial(bruto) {
+  const cru = bruto ?? "";
+  const valor = cru.trim();
+  return { valor, saneada: valor !== cru, invalida: problemaEmCabecalho(valor) };
+}
+function problemaEmCabecalho(valor) {
+  if (!valor) return "vazia";
+  for (const caractere of valor) {
+    const ponto = caractere.codePointAt(0);
+    if (ponto < 32 || ponto === 127) return "caractere_de_controle";
+    if (ponto > 126) return "caractere_nao_ascii";
+  }
+  return null;
+}
 function indexarPorEmail(pessoas) {
   const porEmail = /* @__PURE__ */ new Map();
   for (const p of pessoas) {

@@ -9,6 +9,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { SqliteLocal } from '@/lib/db/sqlite-local'
 import { migrar } from '@/lib/db/schema'
 import { AuditoriaBanco } from '@/lib/audit'
@@ -31,6 +33,20 @@ beforeEach(async () => {
 
 async function acoesAuditadas(): Promise<string[]> {
   return (await auditoria.listarRecentes(20)).map((r) => r.acao)
+}
+
+/** Todo `.ts`/`.tsx` sob um diretório — a varredura de `D-50`, mesmo padrão de `ScC-4`. */
+function arquivosDeCodigo(dir: string): string[] {
+  const saida: string[] = []
+  for (const nome of readdirSync(dir)) {
+    const caminho = join(dir, nome)
+    if (statSync(caminho).isDirectory()) {
+      saida.push(...arquivosDeCodigo(caminho))
+      continue
+    }
+    if (/\.(ts|tsx)$/.test(nome)) saida.push(caminho)
+  }
+  return saida
 }
 
 describe('resolverArea', () => {
@@ -349,6 +365,133 @@ describe('D-40 — a falha diz ONDE quebrou, e o timeout é o sinal', () => {
       ok: false,
       detalhe: 'erro_de_rede · conexao · typeerror_enotfound',
     })
+  })
+})
+
+/**
+ * `D-50` — a chamada **nem saía do Worker**.
+ *
+ * A staging registrou `erro_de_rede · conexao · typeerror` em toda leitura, sempre igual,
+ * com o host no ar e a mesma credencial que o godocs usa em produção. A causa é uma linha:
+ * `fetch` guardado numa propriedade **sem `bind`** é chamado com o cliente como receptor, e
+ * o runtime dos Workers recusa com `Illegal invocation` antes de abrir conexão.
+ *
+ * 🚨 **Por que a suíte inteira não pegava:** no Node o `fetch` não confere o receptor. Os
+ * dois testes abaixo existem para que isso deixe de ser verdade — um encena o receptor, o
+ * outro varre o código, porque a mesma correção já tinha sido feita em 07/08/2026 nos outros
+ * quatro clientes e voltou aqui por viver só num comentário.
+ *
+ * _Requirements: RF-19, RF-58, RF-59, RNF-01, RNF-04_
+ */
+describe('D-50 — o `fetch` global exige o `this` do global', () => {
+  const BASE = [{ contactEmail: 'ana@gocase.com', teams: ['RPA'] }]
+
+  /** Encena o runtime dos Workers: receptor que não é o global é `Illegal invocation`. */
+  function comFetchQueConfereOReceptor(corpo: () => Response, executar: () => Promise<void>) {
+    const original = globalThis.fetch
+    globalThis.fetch = function (this: unknown) {
+      if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation')
+      return Promise.resolve(corpo())
+    } as unknown as typeof fetch
+    return executar().finally(() => {
+      globalThis.fetch = original
+    })
+  }
+
+  it('🚨 sem `bind`, a requisição não sai — e nenhum teste de comportamento via isso', async () => {
+    await comFetchQueConfereOReceptor(
+      () => new Response(JSON.stringify(BASE), { status: 200 }),
+      async () => {
+        // Sem `fetchImpl`: é o caminho de produção, o único que usa o `fetch` global.
+        const cliente = new ClienteTeamGuideHttp({ token: 'tok', cache: novaCacheTeamGuide() })
+        expect(await cliente.areaDe('ana@gocase.com')).toEqual({
+          estado: 'encontrada',
+          area: 'RPA',
+        })
+      },
+    )
+  })
+
+  it('nenhum arquivo de `src/` guarda o `fetch` global sem amarrar o `this`', () => {
+    // Teste estrutural, e não "mais um caso": a correção de 07/08/2026 vivia só num
+    // comentário de `atlassian/http.ts`, então o cliente seguinte a repetiu inteira. O que
+    // impede a terceira vez é a varredura, como em `scc4-nenhum-fieldid-de-anexo`.
+    const semBind = /(?:\?\?|=)\s*fetch\b(?!\s*(?:\.bind|\())/
+    const reincidentes = arquivosDeCodigo('src').filter((caminho) =>
+      semBind.test(readFileSync(caminho, 'utf8')),
+    )
+    expect(reincidentes).toEqual([])
+  })
+})
+
+/**
+ * `D-50` — a credencial é verificada **antes** de qualquer ida de rede.
+ *
+ * ⚠️ Um token com `\n` no fim (o secret é colado à mão no console do GoDeploy) produz
+ * **exatamente a mesma assinatura** do bug acima: `TypeError`, sem conexão, sempre. Enquanto
+ * as duas causas fossem indistinguíveis, consertar uma não provaria nada sobre a outra.
+ */
+describe('D-50 — o valor do token não vira `erro_de_rede`', () => {
+  it('quebra de linha no fim é aparada, e o health DENUNCIA que o secret está sujo', async () => {
+    let enviado: string | undefined
+    const fetchImpl = (async (_u: string, init: RequestInit) => {
+      enviado = (init.headers as Record<string, string>).Authorization
+      return new Response(JSON.stringify([{ contactEmail: 'ana@gocase.com', teams: ['RPA'] }]), {
+        status: 200,
+      })
+    }) as unknown as typeof fetch
+    const cliente = new ClienteTeamGuideHttp({
+      token: '  tok\n',
+      fetchImpl,
+      agoraMs: () => 1000,
+      cache: novaCacheTeamGuide(),
+    })
+
+    expect(await cliente.areaDe('ana@gocase.com')).toEqual({ estado: 'encontrada', area: 'RPA' })
+    expect(enviado).toBe('Bearer tok')
+    // A pista sobrevive ao sucesso: sem ela, ninguém saberia que o secret precisa ser
+    // recolado — e o próximo isolate frio repetiria a dúvida.
+    expect(await cliente.verificarSaude()).toEqual({ ok: true, detalhe: 'ok · credencial_saneada' })
+  })
+
+  it('o que o `trim` não conserta é recusado ANTES da rede, com nome próprio', async () => {
+    const cliente = new ClienteTeamGuideHttp({
+      token: 'to\nk',
+      fetchImpl: (() => {
+        throw new Error('não deveria ir à rede com credencial malformada')
+      }) as unknown as typeof fetch,
+      agoraMs: () => 1000,
+      cache: novaCacheTeamGuide(),
+    })
+    expect(await cliente.areaDe('ana@gocase.com')).toEqual({
+      estado: 'indisponivel',
+      motivo: 'credencial_malformada',
+      classe: 'caractere_de_controle',
+    })
+  })
+
+  it('🚨 a recusa não carrega o token, nem pedaço dele', async () => {
+    const cliente = new ClienteTeamGuideHttp({
+      // Controle no MEIO do valor (o `trim` só alcança as pontas) e um "segredo" plantado
+      // dentro dele, para provar que ele não sai daqui.
+      token: 'ATCTT-segredo',
+      fetchImpl: (() => {
+        throw new Error('não deveria ir à rede')
+      }) as unknown as typeof fetch,
+      cache: novaCacheTeamGuide(),
+    })
+    const detalhe = (await cliente.verificarSaude()).detalhe
+    expect(detalhe).not.toContain('segredo')
+    expect(detalhe).toBe('credencial_malformada · caractere_de_controle')
+  })
+
+  it('token limpo não ganha nota nenhuma — o sinal só existe onde há o que dizer', async () => {
+    const cliente = new ClienteTeamGuideHttp({
+      token: 'tok',
+      fetchImpl: (async () => new Response('[]', { status: 200 })) as unknown as typeof fetch,
+      cache: novaCacheTeamGuide(),
+    })
+    expect(await cliente.verificarSaude()).toEqual({ ok: true, detalhe: 'ok' })
   })
 })
 
