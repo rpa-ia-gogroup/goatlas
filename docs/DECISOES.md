@@ -3450,6 +3450,68 @@ recusasse tudo passaria nas duas primeiras).
 
 ---
 
+### D-59 · O agente pedia anexo onde não havia onde anexar
+
+**Data:** 12/08/2026 · **Origem:** relato de uma pessoa usando o app de verdade ·
+**Contexto:** `RF-61`, `RF-62`, `RF-63`, `RN-11`, `RNF-02`, `RNF-28`, `RNF-30`
+
+> *"o bot pediu um anexo pra ver o que tava rolando sendo que não tinha um campo pra
+> inserir anexo"*
+
+Ela estava certa. **Duas causas somadas**, as duas medidas:
+
+1. **O controle vivia só no cartão de confirmação** (`telas.tsx`), que só existe depois das
+   duas verificações e da proposta montada. Durante a conversa **não havia clipe nenhum** —
+   e é durante a conversa que o agente pedia.
+2. **Em 4 dos 15 tipos do `GN`** — `93`, `108`, `143`, `144` — o cartão condiciona a
+   pergunta a `aceitaAnexo`, e o controle **nunca** aparecia.
+
+🚨 **E a causa 2 era pior do que parecia: o campo era desnecessário.** `aceitaAnexo` mede se
+o **formulário do request type** expõe um campo de anexo — **não** se o chamado aceita
+arquivo. O `GN-6903` é do tipo **144** (`aceitaAnexo: false`) e **tem a transcrição de
+`D-54` anexada**: prova direta de que anexar funciona ali. O app estava sendo mais
+restritivo que a Atlassian, escondendo o controle de 4 tipos sem motivo técnico.
+
+#### As duas metades do conserto
+
+**O agente parou de pedir arquivo.** A instrução dizia *"Peça o que for específico do caso:
+print da tela, …"*. Agora pede o específico **em texto** (mensagem de erro copiada, número
+do pedido, link) e é explícita: **nunca peça print, arquivo, captura ou anexo** — quem
+decide anexar é a pessoa, e a tela oferece sozinha. ⚠️ O pedido de evidência **não sumiu**,
+mudou de mídia: "não peça arquivo" virando "não peça nada" traria de volta o chamado sem
+detalhe. E o prompt diz que o clipe existe, senão o modelo se desculpa ("não consigo receber
+arquivos"), que é o erro oposto e igualmente falso.
+
+**O anexo passou a existir durante a conversa** (`useAnexoNaConversa`), por três caminhos que
+chamam a mesma função: o **clipe** no compositor, **soltar** em qualquer lugar da área da
+conversa, e **colar**. ⚠️ Colar é o que mais importa: "print da tela" quase sempre nasce no
+clipboard, e obrigar a pessoa a salvar em disco antes é a fricção que faz a evidência não
+chegar — o problema inteiro que `RF-61` existe para resolver. A interceptação só acontece
+quando há **arquivo** no clipboard; colar texto continua colando texto.
+
+#### O que ficou de fora, e por quê
+
+⚠️ **A caixa tracejada permanente foi recusada.** É o padrão que o godocs usa na aba de
+enviar documentação, e está certo **lá**, onde subir arquivo *é* a tarefa. Aqui a tarefa é
+conversar, e a maioria nunca vai arrastar nada: moldura fixa cobra atenção de todos por uma
+ação de poucos. O realce só aparece com o arquivo já no ar; quem nunca arrastar vê só o
+clipe. O pedido era literalmente *"sempre presente, sem poluir"*.
+
+⚠️ **A pergunta de `RF-62` continua no cartão e continua condicionada a `aceitaAnexo`.** Ela
+é outro mecanismo — a **decisão** ("você tem material?"), não o **meio** —, e a copy de
+`RN-11` depende dela. Este componente não a substitui e não consulta `aceitaAnexo`: o
+caminho de upload não depende do campo do formulário.
+
+⚠️ **`useAnexoNaConversa` é hook, e o nome diz isso.** Devolve `elemento` **e** `enviar`,
+porque quem solta (a área da conversa) e quem cola (a caixa de mensagem) não são o
+componente do clipe. Um `ref` disparando o input escondido daria o mesmo resultado por um
+caminho que ninguém entende ao ler.
+
+**Deploy:** direto em prod, **pulando a staging** — dispensa explícita do mantenedor para
+esta mudança. A regra 10 continua valendo para as próximas.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

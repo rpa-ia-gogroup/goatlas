@@ -5,7 +5,7 @@
  * meus chamados, detalhe do chamado e o formulário sem IA (D-04).
  */
 
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react'
 import {
   api,
   ErroApi,
@@ -38,7 +38,13 @@ import {
   TrilhaVerificacao,
   Vazio,
 } from './componentes'
-import { PerguntaDeAnexo, ResultadoDoAnexo, type Declaracao } from './anexo'
+import {
+  PerguntaDeAnexo,
+  ResultadoDoAnexo,
+  useAnexoNaConversa,
+  type Declaracao,
+} from './anexo'
+import { MAX_ANEXOS_POR_CHAMADO } from '@/lib/tickets/anexos-pendentes'
 import {
   faltaAlgumaCoisa,
   mensagemDePendencias,
@@ -161,7 +167,17 @@ function ConversaEmCurso({
   // `D-53` — o nome do assunto acompanha a proposta, mas não faz parte dela.
   const [tipoNome, setTipoNome] = useState<string | null>(null)
   const [criado, setCriado] = useState<ResultadoCriacao | null>(null)
+  // `D-59` — só o **realce** do arrasto. O upload em si é do hook abaixo.
+  const [arrastando, setArrastando] = useState(false)
   const fim = useRef<HTMLDivElement>(null)
+
+  // `D-59` — o anexo passa a existir DURANTE a conversa, não só no cartão. Fica aqui, e
+  // não dentro do compositor, porque as três formas de entregar o arquivo (clipe, soltar,
+  // colar) nascem em lugares diferentes da tela e precisam da mesma função.
+  const anexo = useAnexoNaConversa({
+    conversaId: conversaId ?? '',
+    maximo: MAX_ANEXOS_POR_CHAMADO,
+  })
 
   useEffect(() => {
     fim.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -251,13 +267,44 @@ function ConversaEmCurso({
         emAndamento={enviando}
       />
 
-      <div className="conversa">
+      {/* ⚠️ **A área inteira é o alvo, e ela só se anuncia enquanto o arquivo está no ar.**
+          Uma caixa tracejada permanente ocuparia a conversa para uma ação que a maioria das
+          pessoas não faz — e o pedido era o contrário: sempre disponível, sem poluir. Quem
+          nunca arrastar nada vê só o clipe no compositor. */}
+      <div
+        className={arrastando ? 'conversa conversa-soltando' : 'conversa'}
+        onDragEnter={(e) => {
+          if (conversaId) {
+            e.preventDefault()
+            setArrastando(true)
+          }
+        }}
+        onDragOver={(e) => {
+          if (conversaId) {
+            e.preventDefault()
+            setArrastando(true)
+          }
+        }}
+        onDragLeave={() => setArrastando(false)}
+        onDrop={(e) => {
+          if (!conversaId) return
+          e.preventDefault()
+          setArrastando(false)
+          const arquivos = Array.from(e.dataTransfer.files ?? [])
+          if (arquivos.length > 0) void anexo.enviar(arquivos)
+        }}
+      >
         {falas.map((f, i) => (
           <EntradaConversa key={i} fala={f} />
         ))}
         {enviando && (
           <p className="carregando" aria-live="polite">
             Verificando antes de responder…
+          </p>
+        )}
+        {arrastando && (
+          <p className="conversa-soltar-aviso" aria-hidden="true">
+            Solte para anexar ao chamado
           </p>
         )}
         <div ref={fim} />
@@ -291,6 +338,10 @@ function ConversaEmCurso({
         aoEnviar={enviar}
         enviando={enviando}
         justificando={justificando}
+        anexo={conversaId ? anexo.elemento : null}
+        aoColarArquivos={(arquivos) => {
+          if (conversaId) void anexo.enviar(arquivos)
+        }}
       />
     </div>
   )
@@ -346,12 +397,17 @@ export function Compositor({
   aoEnviar,
   enviando,
   justificando,
+  anexo,
+  aoColarArquivos,
 }: {
   valor: string
   aoMudar: (v: string) => void
   aoEnviar: (e: FormEvent) => void
   enviando: boolean
   justificando: boolean
+  /** `D-59` — o clipe e a lista de enviados. `null` antes de a conversa existir. */
+  anexo?: ReactElement | null
+  aoColarArquivos?: (arquivos: readonly File[]) => void
 }) {
   return (
     <form className="compositor" onSubmit={aoEnviar}>
@@ -364,6 +420,18 @@ export function Compositor({
           placeholder="Ex.: o relatório de vendas de ontem não atualizou"
           disabled={enviando || justificando}
           aria-describedby={justificando ? 'mensagem-pausada' : undefined}
+          // 🚨 **Colar é o caminho que mais importa** (`D-59`). "Print da tela" quase sempre
+          // nasce no clipboard, e obrigar a pessoa a salvar em disco antes é a fricção que
+          // faz a evidência não chegar — o problema inteiro que `RF-61` existe para
+          // resolver. ⚠️ Só intercepta quando há **arquivo**: colar texto continua colando
+          // texto, e quebrar isso seria trocar um defeito por outro pior.
+          onPaste={(e) => {
+            const arquivos = Array.from(e.clipboardData?.files ?? [])
+            if (arquivos.length > 0 && aoColarArquivos) {
+              e.preventDefault()
+              aoColarArquivos(arquivos)
+            }
+          }}
         />
         {justificando && (
           <span className="dica" id="mensagem-pausada">
@@ -371,7 +439,8 @@ export function Compositor({
           </span>
         )}
       </div>
-      <div className="acoes">
+      <div className="acoes acoes-compositor">
+        {anexo}
         <button
           type="submit"
           className="botao botao-primario"

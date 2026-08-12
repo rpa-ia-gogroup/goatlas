@@ -1855,3 +1855,85 @@
 .envio-enviando .envio-estado {
   color: var(--go-text-primary);
 }
+
+/* ---------- anexo durante a conversa (D-59) ----------------------------- */
+
+/*
+ * ⚠️ **O realce do arrasto é o ÚNICO momento em que isto ocupa a tela.**
+ *
+ * A caixa tracejada permanente — o padrão de dropzone que o godocs usa na aba de enviar
+ * documentação — está certa lá, onde subir arquivo **é** a tarefa. Aqui a tarefa é
+ * conversar, e a maioria das pessoas nunca vai arrastar nada: uma moldura fixa cobraria
+ * atenção de todo mundo por uma ação de poucos. O pedido era literalmente "sempre presente,
+ * sem poluir" — então o que fica visível é o clipe, e a área só se anuncia com o arquivo
+ * já no ar.
+ */
+.conversa-soltando {
+  outline: 2px dashed var(--go-lime);
+  outline-offset: var(--space-3);
+  border-radius: var(--radius-lg);
+}
+
+.conversa-soltar-aviso {
+  align-self: center;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--go-lime) 22%, transparent);
+  color: var(--go-text-heading);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-small);
+}
+
+/* O clipe divide a linha com o botão de enviar, e empurra o botão para a direita. */
+.acoes-compositor {
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.anexo-conversa {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-right: auto;
+}
+
+/*
+ * Discreto por padrão, mas **é um botão** — e portanto tem alvo de toque, foco visível
+ * (reemitido de `.entrada-arquivo:focus-visible`) e nome acessível em palavras, nunca só
+ * o ícone.
+ */
+.rotulo-clipe {
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--go-blue) 18%, transparent);
+  cursor: pointer;
+  min-height: 40px;
+}
+.rotulo-clipe:hover {
+  background: color-mix(in srgb, var(--go-lime) 18%, transparent);
+}
+.rotulo-clipe[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.anexo-conversa-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversa-soltando {
+    outline-style: solid;
+  }
+}
