@@ -155,10 +155,23 @@ export function anexosParaExibir(
   // aqui seria deixar a queda da Atlassian apagar o print dela da tela.
   if (doChamado === null) return { itens: meus, indisponivel: true }
   if (doChamado.length === 0) return { itens: meus, indisponivel: false }
+
+  // 🚨 **O que sobra depois de tirar os nossos é o que a prova precisa cobrir** (`D-56`).
+  //
+  // Medido na staging em 12/08/2026: a expansão `attachment` dos comentários volta vazia
+  // nesta instalação, então `prova.disponivel` é **sempre** `false` — e a tela dizia
+  // "pode haver arquivos do time que não consegui confirmar" em **todo** chamado, para
+  // sempre. Aviso que nunca desliga é aviso que ninguém lê, e este mandava a pessoa
+  // desconfiar de uma lista completa.
+  //
+  // A pergunta certa não é "a prova funcionou?", é "sobrou algo que ela precisaria
+  // provar?". Chamado cujo único anexo é o que **nós** enviamos não tem nada de
+  // desconhecido: `anexos_enviados` já é prova melhor que a interseção (`D-51`).
+  const desconhecidos = doChamado.filter((a) => !jaListado(a))
+  if (desconhecidos.length === 0) return { itens: meus, indisponivel: false }
   if (!prova.disponivel) return { itens: meus, indisponivel: true }
 
-  const publicos = doChamado
-    .filter((a) => !jaListado(a))
+  const publicos = desconhecidos
     .filter((a) => prova.anexos.some((p) => mesmoArquivo(a, p)))
   return {
     itens: [

@@ -2376,6 +2376,90 @@ function delimitarConteudoNaoConfiavel(rotulo, conteudo) {
   ].join("\n");
 }
 
+// src/lib/rules/index.ts
+function avaliarRegra1(paginas, thresholdScore) {
+  if (paginas.length === 0) {
+    return { bloquear: false, motivoTecnico: "nenhuma p\xE1gina relevante encontrada" };
+  }
+  const acimaDoThreshold = paginas.filter((p) => p.score >= thresholdScore).sort((a, b) => b.score - a.score);
+  if (acimaDoThreshold.length === 0) {
+    const melhor = Math.max(...paginas.map((p) => p.score));
+    return {
+      bloquear: false,
+      motivoTecnico: `melhor score ${melhor.toFixed(2)} abaixo do threshold ${thresholdScore}`
+    };
+  }
+  return {
+    bloquear: true,
+    regra: "regra1_confluence",
+    motivoTecnico: `${acimaDoThreshold.length} p\xE1gina(s) com score >= ${thresholdScore}`,
+    evidencia: {
+      paginas: acimaDoThreshold.map((p) => ({
+        id: p.id,
+        titulo: p.titulo,
+        url: p.url,
+        score: p.score
+      }))
+    }
+  };
+}
+function avaliarRegra2(classificados, thresholdRecorrencia) {
+  const ajustes = classificados.filter((c) => c.classe === "ajuste_operacional");
+  if (ajustes.length < thresholdRecorrencia) {
+    return {
+      bloquear: false,
+      motivoTecnico: `${ajustes.length} ajuste(s) operacional(is) em ${classificados.length} ticket(s), abaixo do threshold ${thresholdRecorrencia}`
+    };
+  }
+  return {
+    bloquear: true,
+    regra: "regra2_ajuste_operacional",
+    motivoTecnico: `${ajustes.length} ajuste(s) operacional(is) recorrente(s), threshold ${thresholdRecorrencia}`,
+    evidencia: {
+      ticketsAjusteOperacional: ajustes.map((c) => ({
+        issueKey: c.ticket.issueKey,
+        titulo: c.ticket.titulo
+      })),
+      totalAnalisado: classificados.length
+    }
+  };
+}
+function urlDeLeituraNoApp(idPagina) {
+  return `/?pagina=${encodeURIComponent(idPagina)}`;
+}
+var MENSAGEM_BLOQUEIO_PENDENTE = 'Ainda n\xE3o consigo abrir o chamado: primeiro preciso registrar o que a documenta\xE7\xE3o n\xE3o resolveu no seu caso. Use o bot\xE3o "Isso n\xE3o resolve meu caso" aqui embaixo e me conte em uma frase \u2014 abro o chamado na sequ\xEAncia.';
+function montarMensagemBloqueio(veredito) {
+  if (veredito.regra === "regra1_confluence") {
+    const ev2 = veredito.evidencia;
+    const links = ev2.paginas.slice(0, 3).map((p) => `- [${p.titulo}](${p.id ? urlDeLeituraNoApp(p.id) : p.url})`).join("\n");
+    return [
+      "Achei documenta\xE7\xE3o que parece responder exatamente isso \u2014 vale olhar antes de abrir o chamado, porque a resposta pode estar a um clique daqui:",
+      "",
+      links,
+      "",
+      // ⚠️ A copy aponta o BOTÃO, não a caixa de mensagem. A versão anterior dizia
+      // "me diga o que ficou de fora" e convidava a digitar no chat — o caminho que
+      // não registra o override. Duas portas, uma só registrada, e a copy indicando
+      // justamente a outra: o motivo de a taxa de deflexão parecer melhor do que era.
+      'Se essas p\xE1ginas n\xE3o resolvem o **seu** caso, use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo. Vou pedir uma frase sobre o que faltou \u2014 \xE9 ela que manda a documenta\xE7\xE3o para a fila de melhoria \u2014 e sigo com o chamado na sequ\xEAncia.'
+    ].join("\n");
+  }
+  const ev = veredito.evidencia;
+  const lista2 = ev.ticketsAjusteOperacional.slice(0, 5).map((t) => `- ${t.issueKey} \u2014 ${t.titulo}`).join("\n");
+  return [
+    `Esse problema j\xE1 apareceu ${ev.ticketsAjusteOperacional.length} vezes, e nas vezes anteriores foi resolvido com um ajuste manual em vez de corre\xE7\xE3o da causa raiz:`,
+    "",
+    lista2,
+    "",
+    "Abrir de novo provavelmente traria o mesmo ajuste tempor\xE1rio. Faz mais sentido tratar a causa \u2014 posso registrar isso como um chamado de causa raiz, com o hist\xF3rico anexado.",
+    "",
+    'Se o seu caso \xE9 diferente dos anteriores, use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo e me conte o que muda \u2014 abro o chamado na sequ\xEAncia.'
+  ].join("\n");
+}
+function regra2Disponivel(exemplos) {
+  return exemplos.length > 0;
+}
+
 // src/lib/ia/prompts.ts
 function montarPromptAgente(ctx) {
   const h = SLA_PRIMEIRA_RESPOSTA_HORAS;
@@ -2404,6 +2488,8 @@ Voc\xEA **n\xE3o** cria o chamado, e n\xE3o decide quando prop\xF4-lo: quem mont
 Pe\xE7a o que for espec\xEDfico do caso: print da tela, a mensagem de erro copiada, n\xFAmero do pedido, nome do relat\xF3rio, link. Antes de confirmar, a pessoa diz se tem material para anexar \u2014 se ela responder que n\xE3o tem, siga sem insistir. O chamado abre do mesmo jeito.`,
     `## Quando a resposta j\xE1 existe
 N\xE3o diga "negado" nem "n\xE3o posso abrir". Mostre o que encontrou, explique em uma frase por que parece resolver o caso, e deixe claro que, se n\xE3o resolver, voc\xEA abre o chamado na sequ\xEAncia. Se a documenta\xE7\xE3o n\xE3o serviu, isso \xE9 problema da documenta\xE7\xE3o \u2014 registre e siga.
+
+Achou uma p\xE1gina que parece responder? **Cite o t\xEDtulo e ponha o link**, no formato \`[T\xEDtulo](/caminho)\` \u2014 o link que a ferramenta te devolve j\xE1 abre a p\xE1gina aqui dentro. Citar a p\xE1gina sem o link obriga a pessoa a procurar de novo o que voc\xEA acabou de encontrar, e \xE9 a\xED que ela desiste e vai para o chat. E n\xE3o pe\xE7a mais contexto antes de mostrar o que j\xE1 achou: se o trecho n\xE3o trouxe o passo a passo, a p\xE1gina inteira pode ter \u2014 mande a pessoa abrir e diga que voc\xEA continua aqui se n\xE3o resolver.
 
 Depois de um bloqueio desses, **n\xE3o anuncie que montou o chamado** enquanto a pessoa n\xE3o tiver usado o bot\xE3o "Isso n\xE3o resolve meu caso". Ela precisa dizer o que faltou na documenta\xE7\xE3o, e \xE9 isso que libera a proposta. Dizer "montei o chamado abaixo" antes disso descreve uma tela que ela n\xE3o est\xE1 vendo. Continue conversando normalmente; aponte o bot\xE3o quando ela quiser seguir.`,
     `## Prioridade e prazo
@@ -2481,7 +2567,9 @@ function montarPromptClassificacao(params) {
 }
 function montarResultadoBuscaParaModelo(paginas) {
   if (paginas.length === 0) return "Nenhuma p\xE1gina relevante encontrada no Confluence.";
-  const itens = paginas.map((p, i) => `${i + 1}. "${p.titulo}" (relev\xE2ncia ${p.score.toFixed(2)}) \u2014 ${p.url}`).join("\n");
+  const itens = paginas.map(
+    (p, i) => `${i + 1}. "${p.titulo}" (relev\xE2ncia ${p.score.toFixed(2)}) \u2014 ${p.id ? urlDeLeituraNoApp(p.id) : p.url}`
+  ).join("\n");
   const trechos = paginas.map((p) => delimitarConteudoNaoConfiavel(`confluence:${p.titulo}`, p.trecho)).join("\n\n");
   return `P\xE1ginas encontradas:
 ${itens}
@@ -4132,90 +4220,6 @@ async function buscarComAmpliacao(cliente, params) {
   return { paginas: segunda, palavras, ampliou: true, consultas: MAX_CONSULTAS_BUSCA };
 }
 
-// src/lib/rules/index.ts
-function avaliarRegra1(paginas, thresholdScore) {
-  if (paginas.length === 0) {
-    return { bloquear: false, motivoTecnico: "nenhuma p\xE1gina relevante encontrada" };
-  }
-  const acimaDoThreshold = paginas.filter((p) => p.score >= thresholdScore).sort((a, b) => b.score - a.score);
-  if (acimaDoThreshold.length === 0) {
-    const melhor = Math.max(...paginas.map((p) => p.score));
-    return {
-      bloquear: false,
-      motivoTecnico: `melhor score ${melhor.toFixed(2)} abaixo do threshold ${thresholdScore}`
-    };
-  }
-  return {
-    bloquear: true,
-    regra: "regra1_confluence",
-    motivoTecnico: `${acimaDoThreshold.length} p\xE1gina(s) com score >= ${thresholdScore}`,
-    evidencia: {
-      paginas: acimaDoThreshold.map((p) => ({
-        id: p.id,
-        titulo: p.titulo,
-        url: p.url,
-        score: p.score
-      }))
-    }
-  };
-}
-function avaliarRegra2(classificados, thresholdRecorrencia) {
-  const ajustes = classificados.filter((c) => c.classe === "ajuste_operacional");
-  if (ajustes.length < thresholdRecorrencia) {
-    return {
-      bloquear: false,
-      motivoTecnico: `${ajustes.length} ajuste(s) operacional(is) em ${classificados.length} ticket(s), abaixo do threshold ${thresholdRecorrencia}`
-    };
-  }
-  return {
-    bloquear: true,
-    regra: "regra2_ajuste_operacional",
-    motivoTecnico: `${ajustes.length} ajuste(s) operacional(is) recorrente(s), threshold ${thresholdRecorrencia}`,
-    evidencia: {
-      ticketsAjusteOperacional: ajustes.map((c) => ({
-        issueKey: c.ticket.issueKey,
-        titulo: c.ticket.titulo
-      })),
-      totalAnalisado: classificados.length
-    }
-  };
-}
-function urlDeLeituraNoApp(idPagina) {
-  return `/?pagina=${encodeURIComponent(idPagina)}`;
-}
-var MENSAGEM_BLOQUEIO_PENDENTE = 'Ainda n\xE3o consigo abrir o chamado: primeiro preciso registrar o que a documenta\xE7\xE3o n\xE3o resolveu no seu caso. Use o bot\xE3o "Isso n\xE3o resolve meu caso" aqui embaixo e me conte em uma frase \u2014 abro o chamado na sequ\xEAncia.';
-function montarMensagemBloqueio(veredito) {
-  if (veredito.regra === "regra1_confluence") {
-    const ev2 = veredito.evidencia;
-    const links = ev2.paginas.slice(0, 3).map((p) => `- [${p.titulo}](${p.id ? urlDeLeituraNoApp(p.id) : p.url})`).join("\n");
-    return [
-      "Achei documenta\xE7\xE3o que parece responder exatamente isso \u2014 vale olhar antes de abrir o chamado, porque a resposta pode estar a um clique daqui:",
-      "",
-      links,
-      "",
-      // ⚠️ A copy aponta o BOTÃO, não a caixa de mensagem. A versão anterior dizia
-      // "me diga o que ficou de fora" e convidava a digitar no chat — o caminho que
-      // não registra o override. Duas portas, uma só registrada, e a copy indicando
-      // justamente a outra: o motivo de a taxa de deflexão parecer melhor do que era.
-      'Se essas p\xE1ginas n\xE3o resolvem o **seu** caso, use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo. Vou pedir uma frase sobre o que faltou \u2014 \xE9 ela que manda a documenta\xE7\xE3o para a fila de melhoria \u2014 e sigo com o chamado na sequ\xEAncia.'
-    ].join("\n");
-  }
-  const ev = veredito.evidencia;
-  const lista2 = ev.ticketsAjusteOperacional.slice(0, 5).map((t) => `- ${t.issueKey} \u2014 ${t.titulo}`).join("\n");
-  return [
-    `Esse problema j\xE1 apareceu ${ev.ticketsAjusteOperacional.length} vezes, e nas vezes anteriores foi resolvido com um ajuste manual em vez de corre\xE7\xE3o da causa raiz:`,
-    "",
-    lista2,
-    "",
-    "Abrir de novo provavelmente traria o mesmo ajuste tempor\xE1rio. Faz mais sentido tratar a causa \u2014 posso registrar isso como um chamado de causa raiz, com o hist\xF3rico anexado.",
-    "",
-    'Se o seu caso \xE9 diferente dos anteriores, use o bot\xE3o "Isso n\xE3o resolve meu caso" logo abaixo e me conte o que muda \u2014 abro o chamado na sequ\xEAncia.'
-  ].join("\n");
-}
-function regra2Disponivel(exemplos) {
-  return exemplos.length > 0;
-}
-
 // src/lib/agent/tools.ts
 function hashConteudo(texto3) {
   let h1 = 2166136261;
@@ -5319,8 +5323,10 @@ function anexosParaExibir(issueKey, doChamado, prova, enviadosPeloApp = []) {
   const jaListado = (a) => meus.some((m) => mesmoArquivo(m, a));
   if (doChamado === null) return { itens: meus, indisponivel: true };
   if (doChamado.length === 0) return { itens: meus, indisponivel: false };
+  const desconhecidos = doChamado.filter((a) => !jaListado(a));
+  if (desconhecidos.length === 0) return { itens: meus, indisponivel: false };
   if (!prova.disponivel) return { itens: meus, indisponivel: true };
-  const publicos = doChamado.filter((a) => !jaListado(a)).filter((a) => prova.anexos.some((p) => mesmoArquivo(a, p)));
+  const publicos = desconhecidos.filter((a) => prova.anexos.some((p) => mesmoArquivo(a, p)));
   return {
     itens: [
       ...meus,
@@ -6098,6 +6104,23 @@ function validarPreferencia(corpo) {
   return { canal, destino: bruto.toLowerCase() };
 }
 
+// src/lib/tickets/comentario-de-anexo.ts
+var MARCADOR = /\[\^([^\]]+)\]/g;
+var TAMANHO = /_\([^)]*\)_/g;
+function arquivosReferenciados(corpo) {
+  return [...corpo.matchAll(MARCADOR)].map((m) => (m[1] ?? "").trim()).filter((n) => n.length > 0);
+}
+function ehComentarioSoDeAnexoNosso(corpo, arquivosNossos) {
+  const citados = arquivosReferenciados(corpo);
+  if (citados.length === 0) return false;
+  const residuo = corpo.replace(MARCADOR, "").replace(TAMANHO, "").trim();
+  if (residuo.length > 0) return false;
+  return citados.every((nome) => arquivosNossos.has(nome));
+}
+function conjuntoDeArquivosNossos(enviados) {
+  return new Set(enviados.map((a) => a.nomeArquivo));
+}
+
 // src/lib/notificacoes/mensagens.ts
 var ROTULO_PRIORIDADE = {
   critica: "cr\xEDtica",
@@ -6181,15 +6204,15 @@ function avaliarSla(dados) {
     horasDoPrazo
   };
 }
-function primeiraRespostaDoTime(comentarios, ehDoSolicitante) {
-  const doTime = comentarios.filter((c) => !ehDoSolicitante(c.corpo)).map((c) => c.criadoEm).filter((c) => Number.isFinite(Date.parse(c))).sort();
+function primeiraRespostaDoTime(comentarios, ehDoSolicitante, ehRuidoDeAnexo = () => false) {
+  const doTime = comentarios.filter((c) => !ehDoSolicitante(c.corpo) && !ehRuidoDeAnexo(c.corpo)).map((c) => c.criadoEm).filter((c) => Number.isFinite(Date.parse(c))).sort();
   return doTime[0] ?? null;
 }
 
 // src/lib/notificacoes/servico.ts
 var MAX_TENTATIVAS_ENVIO = 5;
 var ServicoNotificacoes = class {
-  constructor(notificacoes, alertasSla, avaliacoesSla, acoes, preferencias, vinculos, atlassian, canalPor, auditoria, novoId, agora) {
+  constructor(notificacoes, alertasSla, avaliacoesSla, acoes, preferencias, vinculos, atlassian, canalPor, auditoria, novoId, agora, anexosEnviados) {
     this.notificacoes = notificacoes;
     this.alertasSla = alertasSla;
     this.avaliacoesSla = avaliacoesSla;
@@ -6201,6 +6224,7 @@ var ServicoNotificacoes = class {
     this.auditoria = auditoria;
     this.novoId = novoId;
     this.agora = agora;
+    this.anexosEnviados = anexosEnviados;
   }
   /**
    * Enfileira um aviso, aplicando as três travas na ordem certa.
@@ -6369,7 +6393,20 @@ var ServicoNotificacoes = class {
       return { estado: "indisponivel", alertou: false };
     }
     if (!chamado.prioridade) return { estado: "sem_prioridade", alertou: false };
-    const primeiraResposta = primeiraRespostaDoTime(comentarios, ehComentarioDoSolicitante);
+    let arquivosNossos = /* @__PURE__ */ new Set();
+    try {
+      const enviados = await this.anexosEnviados?.listarDoSolicitante(
+        vinculo.issueKey,
+        vinculo.solicitanteEmail
+      );
+      if (enviados) arquivosNossos = conjuntoDeArquivosNossos(enviados);
+    } catch {
+    }
+    const primeiraResposta = primeiraRespostaDoTime(
+      comentarios,
+      ehComentarioDoSolicitante,
+      (corpo) => ehComentarioSoDeAnexoNosso(corpo, arquivosNossos)
+    );
     const avaliacao = avaliarSla({
       criadoEm: chamado.criadoEm,
       prioridade: chamado.prioridade,
@@ -6686,7 +6723,10 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     canalPor,
     auditoria,
     novoId,
-    agora
+    agora,
+    // `D-56` — o SLA precisa saber quais arquivos do chamado saíram daqui, senão o
+    // comentário que o JSM cria para carregá-los conta como resposta do time.
+    anexosEnviados
   );
   return {
     db: env.DB,

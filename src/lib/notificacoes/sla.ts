@@ -107,9 +107,19 @@ export function avaliarSla(dados: {
 export function primeiraRespostaDoTime(
   comentarios: readonly { corpo: string; criadoEm: string }[],
   ehDoSolicitante: (corpo: string) => boolean,
+  /**
+   * `D-56` — o comentário que o JSM cria sozinho para carregar um anexo **nosso**.
+   *
+   * Ele não tem o prefixo de `D-13` (não passou por `prefixarAutoria`), então caía direto
+   * no `!ehDoSolicitante` e satisfazia o SLA: todo chamado com anexo nascia "respondido".
+   * O default é `() => false` para que quem monta esta função à mão continue com o
+   * comportamento anterior — e para que a decisão de o que é ruído more em
+   * `tickets/comentario-de-anexo.ts`, não aqui.
+   */
+  ehRuidoDeAnexo: (corpo: string) => boolean = () => false,
 ): string | null {
   const doTime = comentarios
-    .filter((c) => !ehDoSolicitante(c.corpo))
+    .filter((c) => !ehDoSolicitante(c.corpo) && !ehRuidoDeAnexo(c.corpo))
     .map((c) => c.criadoEm)
     .filter((c) => Number.isFinite(Date.parse(c)))
     .sort()

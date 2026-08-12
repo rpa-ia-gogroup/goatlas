@@ -396,6 +396,9 @@ export async function montarContexto(
     auditoria,
     novoId,
     agora,
+    // `D-56` — o SLA precisa saber quais arquivos do chamado saíram daqui, senão o
+    // comentário que o JSM cria para carregá-los conta como resposta do time.
+    anexosEnviados,
   )
 
   return {

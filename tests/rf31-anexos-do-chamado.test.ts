@@ -267,7 +267,9 @@ describe('T-084 — degradação: "não sei" nunca vira "não tem" (`RNF-18`)', 
     fake.estado.falhas.listarAnexosDoChamado = 'indisponivel'
 
     const d = await detalhe(issueKey)
-    // A dúvida continua sendo dita — mas ela é sobre o anexo do **time** (`D-51`).
+    // ⚠️ **Atualizado por `D-56`.** A lista de anexos caiu, então não se sabe o que o time
+    // pôs lá: `doChamado === null` mantém a dúvida. O que mudou é o caso do teste abaixo —
+    // lista que **respondeu** e só trouxe arquivo nosso não deixa nada por provar.
     expect(d.anexosIndisponiveis).toBe(true)
     // ⚠️ E o print que a pessoa mandou **continua na tela**: ele não depende da Atlassian
     // para ser conhecido, e sumir com ele numa queda é o defeito que `D-51` conserta.
@@ -288,14 +290,15 @@ describe('T-084 — degradação: "não sei" nunca vira "não tem" (`RNF-18`)', 
 
     const d = await detalhe(issueKey)
     expect(d.comentariosIndisponiveis).toBe(true)
-    // Sem prova, não se afirma nada **sobre o anexo do time** — e o que NÃO pode
-    // acontecer é uma lista vazia silenciosa, que a pessoa leria como "meu print sumiu".
-    // Era exatamente o que acontecia: hoje o print dela vem da nossa própria linha.
-    expect(d.anexosIndisponiveis).toBe(true)
     expect(d.anexos.map((a: { nomeArquivo: string }) => a.nomeArquivo)).toEqual(['print.png'])
+    // ⚠️ **Atualizado por `D-56`.** A lista de anexos respondeu e trouxe **só** o arquivo
+    // que nós enviamos: não há anexo de time nenhum para a prova cobrir, então não há
+    // dúvida a declarar. A queda dos comentários continua dita — em
+    // `comentariosIndisponiveis`, que é sobre a conversa.
+    expect(d.anexosIndisponiveis).toBe(false)
   })
 
-  it('expansão de anexo ausente na resposta do JSM não vira "chamado sem anexos"', async () => {
+  it('expansão de anexo ausente não vira dúvida quando o único arquivo é o NOSSO', async () => {
     const issueKey = await abrirChamado()
     await anexar(issueKey, 'print.png')
     const fake = ctx.atlassian as ClienteAtlassianFake
@@ -304,8 +307,29 @@ describe('T-084 — degradação: "não sei" nunca vira "não tem" (`RNF-18`)', 
     fake.estado.expansaoDeAnexoIndisponivel = true
 
     const d = await detalhe(issueKey)
+    expect(d.anexos.map((a: { nomeArquivo: string }) => a.nomeArquivo)).toEqual(['print.png'])
+    // 🚨 **`D-56`, medido na staging em 12/08/2026:** nesta instalação a expansão volta
+    // sempre vazia, então `prova.disponivel` é sempre `false` — e a tela dizia "pode haver
+    // arquivo do time que não consegui confirmar" em **todo** chamado, para sempre. Aviso
+    // que nunca desliga ninguém lê, e este mandava desconfiar de uma lista completa.
+    expect(d.anexosIndisponiveis).toBe(false)
+  })
+
+  it('🚨 mas com arquivo do TIME sem prova, a dúvida continua sendo dita', async () => {
+    const issueKey = await abrirChamado()
+    await anexar(issueKey, 'print.png')
+    const fake = ctx.atlassian as ClienteAtlassianFake
+    // Um arquivo que NÃO passou por nós: agora existe algo que só a prova poderia cobrir.
+    fake.estado.anexosDeChamado.set(issueKey, [
+      ...(fake.estado.anexosDeChamado.get(issueKey) ?? []),
+      { nome: 'do-time.pdf', tipo: 'application/pdf', tamanho: 99 },
+    ])
+    fake.estado.expansaoDeAnexoIndisponivel = true
+
+    const d = await detalhe(issueKey)
+    // Sem a prova, `do-time.pdf` não entra na lista — mas a ausência dele é **declarada**,
+    // porque "não tem anexo do time" e "não deu para saber" são frases opostas.
     expect(d.anexosIndisponiveis).toBe(true)
-    // O que o app enviou não passa por essa expansão — ver `D-51`.
     expect(d.anexos.map((a: { nomeArquivo: string }) => a.nomeArquivo)).toEqual(['print.png'])
   })
 

@@ -21,6 +21,10 @@
 
 import type { ClienteAtlassian, Prioridade } from '../atlassian/tipos'
 import { ehComentarioDoSolicitante } from '../atlassian/comentarios'
+import {
+  conjuntoDeArquivosNossos,
+  ehComentarioSoDeAnexoNosso,
+} from '../tickets/comentario-de-anexo'
 import type { Auditoria } from '../audit'
 import type { RepositorioVinculos } from '../tickets/vinculos'
 import { RepositorioAcoesProprias } from './acoes'
@@ -69,6 +73,20 @@ export class ServicoNotificacoes {
     private readonly auditoria: Auditoria,
     private readonly novoId: () => string,
     private readonly agora: () => string,
+    /**
+     * `D-56` — os arquivos que **o app** pôs no chamado, para o SLA não contar o
+     * comentário que o JSM cria para carregá-los como resposta do time.
+     *
+     * Opcional pelo mesmo motivo de `anexosEnviados` em `ServicoChamados`: quem monta o
+     * serviço à mão (testes, caminhos antigos) não passa a exigir um repositório que não
+     * usa — e sem ele o comportamento é o de antes.
+     */
+    private readonly anexosEnviados?: {
+      listarDoSolicitante(
+        issueKey: string,
+        email: string,
+      ): Promise<readonly { nomeArquivo: string }[]>
+    },
   ) {}
 
   /**
@@ -296,7 +314,27 @@ export class ServicoNotificacoes {
     // um SLA de 24h para algo que talvez fosse crítico.
     if (!chamado.prioridade) return { estado: 'sem_prioridade', alertou: false }
 
-    const primeiraResposta = primeiraRespostaDoTime(comentarios, ehComentarioDoSolicitante)
+    // `D-56` — sem isto, o comentário que o JSM cria para carregar o anexo (sem o prefixo
+    // de `D-13`, porque não passou por `prefixarAutoria`) contava como resposta do time, e
+    // **todo** chamado com anexo nascia com o SLA satisfeito. Falha de leitura aqui não
+    // pode derrubar a avaliação: conjunto vazio devolve o comportamento anterior, que é
+    // super-contar resposta — e o alerta a mais é o lado seguro do erro.
+    let arquivosNossos: ReadonlySet<string> = new Set()
+    try {
+      const enviados = await this.anexosEnviados?.listarDoSolicitante(
+        vinculo.issueKey,
+        vinculo.solicitanteEmail,
+      )
+      if (enviados) arquivosNossos = conjuntoDeArquivosNossos(enviados)
+    } catch {
+      // Silêncio deliberado — ver acima.
+    }
+
+    const primeiraResposta = primeiraRespostaDoTime(
+      comentarios,
+      ehComentarioDoSolicitante,
+      (corpo) => ehComentarioSoDeAnexoNosso(corpo, arquivosNossos),
+    )
     const avaliacao = avaliarSla({
       criadoEm: chamado.criadoEm,
       prioridade: chamado.prioridade,
