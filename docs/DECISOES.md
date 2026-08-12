@@ -2411,6 +2411,160 @@ continua sendo decisão a tomar, com a ressalva de `D-36`: o **rótulo** de prio
 código com teste — e os rótulos reais do site da Gocase têm de sair do `validValues` que esta
 rota agora mostra, nunca da suposição.
 
+---
+
+### D-46 · A tela para de afirmar o que não sabe — pendência composta, recibo com saída, erro que não promete fila
+
+**Data:** 12/08/2026 · **Medido por:** bateria manual dirigindo o app publicado
+· **Contexto:** `RF-17`, `RF-24`, `RF-27`, `RF-61`, `RF-62`, `RN-11`, `RNF-17`, `RNF-18`,
+`RNF-28`, `RNF-30`, `D-04`, `D-38`, `D-39`
+
+Quatro defeitos de superfície, uma família só: **a tela afirmava coisas que ela não tinha
+como saber**. Nenhum deles quebrava nada, e por isso os quatro atravessaram 1051 testes
+verdes — o app respondia certo em todos; só dizia outra coisa.
+
+---
+
+**1 · A legenda do botão travado afirmava exclusividade.**
+
+No formulário, com título, descrição e os obrigatórios do tipo **todos vazios**, o botão
+desabilitado dizia:
+
+> *"Responda acima se você tem algo para anexar. **É a única coisa que falta**."*
+
+E faltavam quatro. Quem segurava o envio a partir dali era o `required` do navegador — que
+funciona, mas só **depois** de a frase já ter mentido; e o botão **habilitava** assim que a
+evidência era respondida, com o resto ainda em branco.
+
+🚨 **A causa não é a redação — é a forma.** A frase era uma **constante**
+(`AVISO_DECLARACAO_PENDENTE`), e "é a única coisa que falta" é uma afirmação sobre o **resto
+da tela**, que uma constante não tem como ver. Consertar o texto no lugar deixaria o mesmo
+defeito à espera do próximo campo.
+
+A saída é `src/app/pendencias.ts`: um módulo que **conta** o que falta e **compõe** a frase.
+`Falta preencher: Título e O que está acontecendo.` · `Falta responder se você tem algo para
+anexar.` · `Falta responder se você tem algo para anexar e preencher: Recorrência.`
+
+⚠️ **E o mesmo módulo serve as DUAS telas.** O recibo da conversa já checava os obrigatórios
+(`D-38`) e a declaração, mas em dois `if` encadeados: com as duas pendências abertas ele
+mostrava só a do anexo — a mesma frase, a mesma mentira, um andar acima. Duas condições para
+o mesmo fato divergem em silêncio; é o raciocínio de `config/diagnostico.ts` (`D-25`) e de
+`comentario-exibicao.ts` (`D-43`), aplicado à copy.
+
+⚠️ **"Falta", nunca "Faltam"**: o verbo rege o infinitivo, então a frase não muda com a
+quantidade — e a concordância deixa de ser a armadilha que ninguém testa com três campos. E
+o **campo de anexo continua fora** da lista de obrigatórios, como no servidor: incluí-lo
+faria `RN-11` virar "anexe um arquivo".
+
+---
+
+**2 · Depois do recibo não havia caminho de volta.**
+
+Aberto o chamado, a tela mostra o recibo. Clicar a aba **"Abrir direto"** — que já é a aba
+ativa — não faz nada, porque **é a mesma tela**; só recarregar a página devolvia o
+formulário. Quem abre um chamado e precisa abrir o segundo, que é a sequência normal de quem
+junta pendências, conclui que o app travou. O mesmo beco existia na conversa.
+
+O conserto é um botão no recibo: **"Abrir outro chamado"**, ao lado de "Ver meus chamados".
+
+🚨 **E recomeçar é REMONTAR, não `setState`.** A tela tem uma casca fina (`TelaConversa`,
+`TelaFormulario`) que só guarda um contador de sessão e renderiza o corpo com `key={sessao}`.
+Um `reiniciar()` com nove `setState` funcionaria hoje e apagaria alguém amanhã: esquecer
+`setBloqueado(false)` traria a caixa de override para cima de uma conversa nova, e esquecer a
+**chave de idempotência** faria o "segundo chamado" cair na **mesma submissão** do primeiro
+(`RF-24`) — a pessoa receberia de volta o chamado que já tinha, com recibo e tudo. Remontando,
+o estado inicial é o único que existe: inclusive o `useRef(crypto.randomUUID())` da chave e a
+lista de envios dentro de `PerguntaDeAnexo`, que aponta para a chave **antiga** e mostraria
+arquivos que não vão para o chamado novo.
+
+⚠️ **Fazer a aba re-clicada reiniciar a tela foi considerado e recusado.** É o gesto que o
+relato descreve, mas a implementação (trocar a `key` a cada clique de aba) destruiria uma
+**conversa em andamento** de quem clicasse "Falar com o agente" no meio dela — inclusive o
+bloqueio pendente e o botão de override que `D-21` existe para manter de pé. O botão no
+recibo resolve o problema real, e resolve onde a pessoa está olhando.
+
+---
+
+**3 · O `input[type=file]` aparecia cru.**
+
+Na criação, o controle nativo do navegador ("Escolher arquivo | Nenhum arquivo escolhido")
+dentro de uma tela que o resto do app desenha — e em boa parte das instalações **em inglês**,
+o que atropela a regra 4 justamente onde a pessoa vai mandar a evidência do chamado.
+
+O padrão adotado é o clássico: o `input` **continua sendo o input** — é ele que recebe foco,
+teclado e o `change` — e sai da tela por `clip`, a mesma técnica de `.sr-apenas`. Quem aparece
+é o `label`, que já era o nome acessível do campo e agora também é o alvo do clique.
+
+⚠️ **`clip`, nunca `display: none`**: escondido de verdade, o campo sai da ordem de tabulação
+e a pergunta fica inalcançável pelo teclado. ⚠️ **E o anel de foco é reemitido no `label`**
+(`.entrada-arquivo:focus-visible + .rotulo-arquivo`): o `:focus-visible` global de
+`tokens.css` desenharia num elemento de 1px, invisível — quem navega por teclado chegaria ao
+controle sem ver onde está.
+
+Nada se perde com a saída do texto nativo: nome e estado de cada arquivo já estão na lista
+abaixo, com símbolo **e** palavra (`RNF-28`), que é mais do que o controle dizia.
+
+**Fora do escopo:** o `input[type=file]` do **detalhe do chamado** ficou como estava — aquela
+região está sendo mexida em paralelo (`RF-31`, listar anexos), e duas branches no mesmo trecho
+custam mais do que o defeito.
+
+---
+
+**4 · A mensagem de erro prometia o que não cumpria.**
+
+> *"Algo deu errado do nosso lado. **Sua solicitação não foi perdida** — tente novamente em
+> instantes."*
+
+Medido: pela conversa, `POST /api/conversas/:id/confirmar` → **500**, submissão marcada
+`falha`, `transitorio: false`. Ou seja, **foi** perdida, e "tente novamente em instantes" não
+reprocessava nada. Pelo formulário a mesma frase aparecia num caso em que a submissão ficava
+`pendente` — aí ela estava certa.
+
+🚨 **O app já sabia a diferença; só a tela não sabia.** `indisponivel`/`rate_limit`/`timeout`
+são transitórios e deixam a submissão `pendente` (e nesse caso a rota responde **201**, com a
+frase própria de `respostaCriacao`, que é a única verdadeira). Só `rejeitado` é definitivo, e
+aí a submissão vira `falha` e **nunca** é reprocessada (`RNF-17`).
+
+- `ERROS.interno()` **perdeu a promessa**. Ela é genérica — vale até para falha de boot no
+  `worker.ts` — e nenhuma afirmação sobre o destino do que a pessoa enviou seria verdadeira
+  nas duas pontas.
+- `ERROS.criacaoNaoConcluida(via)` é nova, com código próprio, e diz o que é verdade: **não
+  ficou na fila**. Quem decide se é ela é `falhaDefinitivaDeCriacao`, exportada de
+  `tickets/servico.ts` — ao lado do código que **produz** a condição, não reescrita na camada
+  HTTP, pelo mesmo motivo do item 1. ⚠️ E ela é chamada **só** nas duas rotas de criação: um
+  `ErroAtlassian` definitivo vindo de `comentar` significa outra coisa, e a frase de chamado
+  perdido estaria errada lá.
+- ⚠️ **A copy difere entre as duas superfícies de propósito.** A chave de idempotência do
+  formulário vive na montagem da tela e a da conversa é derivada dela (`conversa:<id>`), então
+  a saída é diferente: recomeçar o formulário × começar uma conversa nova. Dizer "tente de
+  novo" sem dizer *de onde* seria a segunda frase falsa no lugar da primeira. O botão
+  **"Começar de novo"** aparece na tela junto do aviso, e só nesse código — nos erros
+  corrigíveis (`D-38`, `D-39`, `RN-11`) recomeçar jogaria fora tudo o que a pessoa escreveu
+  para resolver algo que ela conserta ali mesmo.
+
+🚨 **E havia uma versão pior da mesma mentira, disfarçada de recibo.** Reenviar depois da
+falha definitiva caía na submissão morta, `issueKey` era `null`, e `abrir()` a classificava
+como duplo clique: a rota respondia **201** com *"Recebemos sua solicitação e estamos abrindo
+o chamado. Nada se perdeu"*. Agora submissão em `falha` na entrada é recusa auditada.
+⚠️ **A idempotência não foi enfraquecida**: `RF-24` existe para não criar **dois** chamados, e
+ali não existe nenhum — o que se recusa é afirmar que existe um a caminho. O duplo clique
+bem-sucedido continua devolvendo o mesmo `issueKey`, com uma só chamada a `criarChamado`, e há
+teste.
+
+---
+
+**Custo aceito.** O botão de abrir passa a ficar desabilitado até os obrigatórios estarem
+preenchidos, então a validação nativa do navegador — que **rola até o campo vazio** — deixa de
+disparar nesses casos. A frase nomeia os campos, mas não leva até eles. É o comportamento que
+o recibo da conversa já tinha desde `D-38`, e a coerência entre as duas telas vale mais do que
+o salto; se um dia incomodar, o conserto é focar o primeiro campo pendente, não devolver o
+botão habilitado.
+
+**A causa dos 500 do dia NÃO é assunto desta decisão** — era o campo de seleção indo como
+string, e ela caiu em `D-39`. O que se conserta aqui é o que a pessoa lê **quando isso
+acontecer de novo**.
+
+---
 
 ### D-47 · O board se autocertificava — auditoria requisito→código, e o que ela achou
 

@@ -39,6 +39,8 @@ function render(proposta: Proposta = PROPOSTA): string {
       conversaId: 'c1',
       propostaInicial: proposta,
       aoCriar: () => {},
+      // `D-46` — a saída da falha definitiva. Não participa da copy do recibo em si.
+      aoRecomecar: () => {},
     }),
   )
 }

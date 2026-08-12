@@ -24,6 +24,8 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { SqliteLocal } from '@/lib/db/sqlite-local'
 import { migrar } from '@/lib/db/schema'
 import { Config } from '@/lib/config'
@@ -306,6 +308,33 @@ describe('T-084 — degradação: "não sei" nunca vira "não tem" (`RNF-18`)', 
 
     const r = await chamar(req(urlDoAnexoNoApp(issueKey, 'print.png'), { email: ANA }))
     expect(r.status).toBe(503)
+  })
+})
+
+/**
+ * O par estrutural do teste de `D-46` — lá a superfície é a **criação**, aqui é o
+ * **detalhe**. As duas telas têm um `input[type=file]`, e o tratamento tem de ser o
+ * mesmo: sem isto, o campo do detalhe volta ao controle nativo (ou, pior, alguém o
+ * esconde com `display:none` e a pessoa que usa teclado perde o anexo) sem nada
+ * reprovar — foi exatamente assim que a criação chegou vestida e o detalhe não.
+ */
+describe('T-084 — todo campo de arquivo do app é vestido do mesmo jeito (`D-46`)', () => {
+  const fonte = readFileSync(join(process.cwd(), 'src/app/telas.tsx'), 'utf8')
+
+  it('nenhum `type="file"` fica sem a classe que o mantém alcançável pelo teclado', () => {
+    const ocorrencias = [...fonte.matchAll(/type="file"/g)]
+    expect(ocorrencias.length).toBeGreaterThan(0)
+    for (const m of ocorrencias) {
+      const redor = fonte.slice(Math.max(0, m.index! - 400), m.index! + 400)
+      expect(redor).toContain('entrada-arquivo')
+      // `label` vestido de botão, apontando para o campo — quem aparece na tela.
+      expect(redor).toContain('rotulo-arquivo')
+    }
+  })
+
+  it('o campo não é escondido de verdade — `display:none`/`hidden` o tiram da tabulação', () => {
+    expect(fonte).not.toMatch(/type="file"[\s\S]{0,300}\bhidden\b/)
+    expect(fonte).not.toMatch(/type="file"[\s\S]{0,300}display:\s*none/)
   })
 })
 

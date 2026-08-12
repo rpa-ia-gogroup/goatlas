@@ -1480,6 +1480,46 @@
   border-color: var(--go-blue);
   border-style: solid;
 }
+
+/* O seletor de arquivo da CRIAÇÃO, vestido pelo app — `D-46`.
+   O `input` continua existindo e continua sendo focável: sai da tela por `clip`, a mesma
+   técnica de `.sr-apenas`, **nunca** por `display: none` (que o tiraria da ordem de
+   tabulação e deixaria a pergunta sem caminho pelo teclado). Quem aparece é o `label`,
+   que já era o nome acessível do campo.
+   ⚠️ O anel de foco tem de ser REEMITIDO aqui: o `:focus-visible` global de `tokens.css`
+   desenharia num elemento de 1px, invisível. Sem esta regra, quem navega por teclado
+   chega ao controle e não vê onde está. */
+.escolher-arquivo {
+  display: flex;
+}
+.entrada-arquivo {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.rotulo-arquivo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+}
+.entrada-arquivo:focus-visible + .rotulo-arquivo {
+  outline: 3px solid var(--go-blue);
+  outline-offset: 2px;
+}
+/* O campo do DETALHE (`RF-34`) desabilita durante o envio — o da criação nunca desabilita.
+   Sem esta regra o `label` continuaria com cara de botão vivo enquanto o clique não faz
+   nada: estado que só o cursor denuncia é estado invisível. */
+.entrada-arquivo:disabled + .rotulo-arquivo {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .lista-anexos {
   margin: 0;
   padding-left: var(--space-5);

@@ -344,8 +344,12 @@ created: "2026-08-03"
       comentários é **tentada**: 4xx repete sem ela, para `RF-32` (P0) não cair junto.
       ⚠️ **O fake devolve TAMBÉM o anexo interno**, de propósito — dublê que filtrasse
       deixaria o teste de `RN-05` passar por construção (família de `D-38`/`D-43`).
-      30 testes novos (`tests/rf31-anexos-do-chamado.test.ts` e o cliente real), 8 de
-      burla e de degradação.
+      32 testes novos (`tests/rf31-anexos-do-chamado.test.ts` e o cliente real), 8 de
+      burla e de degradação. ⚠️ **O campo de arquivo do detalhe recebeu o tratamento de
+      `D-46`** — que nasceu na tela de criação e deixou esta de fora de propósito: o
+      `input` sai por `clip`, o `label` vira o botão e o anel de foco é reemitido nele.
+      O par estrutural do teste de lá está aqui, para a segunda superfície não regredir
+      sozinha.
 
 ## Phase 6 — Frontend, mobile e fechamento
 

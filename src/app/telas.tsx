@@ -28,6 +28,7 @@ import {
   camposPreenchidosPeloApp,
   resolverCamposDoSolicitante,
 } from '@/lib/tickets/campos-do-solicitante'
+import { CODIGO_CRIACAO_NAO_CONCLUIDA } from '@/lib/http/respostas'
 import {
   Aviso,
   Selo,
@@ -37,12 +38,58 @@ import {
   TrilhaVerificacao,
   Vazio,
 } from './componentes'
+import { PerguntaDeAnexo, ResultadoDoAnexo, type Declaracao } from './anexo'
 import {
-  AVISO_DECLARACAO_PENDENTE,
-  PerguntaDeAnexo,
-  ResultadoDoAnexo,
-  type Declaracao,
-} from './anexo'
+  faltaAlgumaCoisa,
+  mensagemDePendencias,
+  pendenciasParaAbrir,
+} from './pendencias'
+
+/* ======================= falha de criação (D-46) ======================= */
+
+/**
+ * O que a tela sabe sobre uma criação que deu errado — `D-46`.
+ *
+ * `naoSeraReprocessada` não é heurística nem leitura da frase: vem do **código** da
+ * resposta, que o servidor só emite depois de a submissão ter sido marcada `falha` e,
+ * portanto, ficado fora do reprocessamento do outbox (`RNF-17`). É o que autoriza a tela
+ * a oferecer o recomeço — e a **não** oferecê-lo nos erros corrigíveis (campo obrigatório
+ * faltando, opção fora da lista, declaração pendente), onde recomeçar jogaria fora tudo o
+ * que a pessoa escreveu para resolver algo que ela conserta ali mesmo.
+ */
+interface Falha {
+  readonly mensagem: string
+  readonly naoSeraReprocessada: boolean
+}
+
+function falhaDeCriacao(e: unknown, padrao: string): Falha {
+  if (!(e instanceof ErroApi)) return { mensagem: padrao, naoSeraReprocessada: false }
+  return {
+    mensagem: e.message,
+    naoSeraReprocessada: e.codigo === CODIGO_CRIACAO_NAO_CONCLUIDA,
+  }
+}
+
+/**
+ * A saída da falha definitiva, ao lado da frase que a explica.
+ *
+ * ⚠️ A mensagem do servidor **termina** dizendo "pelo botão abaixo", então o botão é parte
+ * da frase: renderizar um sem o outro deixa uma instrução apontando para o nada.
+ */
+function AvisoDeFalha({ falha, aoRecomecar }: { falha: Falha; aoRecomecar: () => void }) {
+  return (
+    <>
+      <Aviso atencao>{falha.mensagem}</Aviso>
+      {falha.naoSeraReprocessada && (
+        <div className="acoes">
+          <button type="button" className="botao botao-contorno" onClick={aoRecomecar}>
+            Começar de novo
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
 
 /* ======================= conversa com o agente ========================= */
 
@@ -57,12 +104,41 @@ interface Fala {
   readonly texto: string
 }
 
-export function TelaConversa({
+/**
+ * Recomeçar é REMONTAR, nunca uma sequência de `setX(inicial)` — `D-46`.
+ *
+ * Depois do recibo ("Chamado aberto · GN-6898") não havia caminho de volta: clicar a aba
+ * que já estava ativa não faz nada (é a mesma tela), e só recarregar a página devolvia o
+ * formulário. Quem precisa abrir o **segundo** chamado conclui que o app travou.
+ *
+ * A saída é um botão no recibo — e o que ele faz é trocar a `key` da tela inteira. Um
+ * `reiniciar()` com nove `setState` funcionaria hoje e apagaria alguém amanhã: bastaria
+ * esquecer `setBloqueado(false)` para a caixa de override reaparecer sobre uma conversa
+ * nova, ou esquecer a chave de idempotência para o "segundo chamado" cair na **mesma**
+ * submissão do primeiro (`RF-24`) e a pessoa receber de volta o chamado que já tinha.
+ * Remontando, o estado inicial é o único estado que existe — inclusive o
+ * `useRef(crypto.randomUUID())` da chave e a lista de envios dentro de `PerguntaDeAnexo`,
+ * que aponta para a chave antiga e mostraria arquivos que não vão para o chamado novo.
+ */
+export function TelaConversa(props: { eu: Identidade; aoAbrirChamado: () => void }) {
+  const [sessao, setSessao] = useState(0)
+  return (
+    <ConversaEmCurso
+      key={sessao}
+      {...props}
+      aoRecomecar={() => setSessao((s) => s + 1)}
+    />
+  )
+}
+
+function ConversaEmCurso({
   eu,
   aoAbrirChamado,
+  aoRecomecar,
 }: {
   eu: Identidade
   aoAbrirChamado: () => void
+  aoRecomecar: () => void
 }) {
   const [conversaId, setConversaId] = useState<string | null>(null)
   const [falas, setFalas] = useState<Fala[]>([
@@ -150,7 +226,14 @@ export function TelaConversa({
   }
 
   if (criado) {
-    return <ChamadoAberto resultado={criado} via="conversa" aoVerChamados={aoAbrirChamado} />
+    return (
+      <ChamadoAberto
+        resultado={criado}
+        via="conversa"
+        aoVerChamados={aoAbrirChamado}
+        aoRecomecar={aoRecomecar}
+      />
+    )
   }
 
   return (
@@ -189,6 +272,7 @@ export function TelaConversa({
           conversaId={conversaId}
           propostaInicial={proposta}
           aoCriar={setCriado}
+          aoRecomecar={aoRecomecar}
         />
       )}
 
@@ -372,15 +456,18 @@ export function ReciboConfirmacao({
   conversaId,
   propostaInicial,
   aoCriar,
+  aoRecomecar,
 }: {
   eu: Identidade
   conversaId: string
   propostaInicial: Proposta
   aoCriar: (r: ResultadoCriacao) => void
+  /** `D-46` — a saída quando a criação falhou e NÃO vai ser reprocessada. */
+  aoRecomecar: () => void
 }) {
   const [prioridade, setPrioridade] = useState<Prioridade>(propostaInicial.prioridade)
   const [salvando, setSalvando] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
+  const [erro, setErro] = useState<Falha | null>(null)
   const p = prioridadePor(prioridade)
 
   // RF-61/RF-62 (T-418) — a pergunta só existe se o tipo aceitar anexo. `false` enquanto
@@ -423,12 +510,16 @@ export function ReciboConfirmacao({
     }
   }, [propostaInicial.tipoChamadoId, eu])
 
-  const faltaDeclarar = aceitaAnexo && declarou === null
   // A mesma regra do servidor (`obrigatoriosFaltando`), na tela — camada 1 das duas. O
   // servidor recusa de qualquer jeito; isto evita a pessoa descobrir só depois de clicar.
-  const obrigatoriosVazios = (campos ?? []).filter(
-    (c) => c.obrigatorio && c.tipo !== 'anexo' && (valoresCampos[c.fieldId] ?? '').trim() === '',
-  )
+  // `D-46` — e quem compõe a frase é `pendencias.ts`, o mesmo módulo do formulário: aqui
+  // também dava para faltar campo E declaração ao mesmo tempo, e a tela só contava uma.
+  const pendencias = pendenciasParaAbrir({
+    campos: campos ?? [],
+    valores: valoresCampos,
+    faltaDeclararAnexo: aceitaAnexo && declarou === null,
+  })
+  const falta = faltaAlgumaCoisa(pendencias)
 
   async function confirmar() {
     setSalvando(true)
@@ -445,7 +536,7 @@ export function ReciboConfirmacao({
         ),
       )
     } catch (e) {
-      setErro(e instanceof ErroApi ? e.message : 'Não conseguimos abrir o chamado agora.')
+      setErro(falhaDeCriacao(e, 'Não conseguimos abrir o chamado agora.'))
     } finally {
       setSalvando(false)
     }
@@ -555,51 +646,54 @@ export function ReciboConfirmacao({
         />
       )}
 
-      {erro && <Aviso atencao>{erro}</Aviso>}
+      {erro && <AvisoDeFalha falha={erro} aoRecomecar={aoRecomecar} />}
 
       <div className="acoes">
         <button
           type="button"
           className="botao botao-primario"
           onClick={confirmar}
-          disabled={salvando || faltaDeclarar || obrigatoriosVazios.length > 0}
-          // ⚠️ O botão desabilitado precisa DIZER o que falta. Botão morto sem
-          // explicação é indistinguível de app quebrado — e aqui a saída está a um
-          // clique de distância, logo acima.
-          aria-describedby={
-            faltaDeclarar
-              ? 'falta-declarar-recibo'
-              : obrigatoriosVazios.length > 0
-                ? 'falta-obrigatorio-recibo'
-                : undefined
-          }
+          disabled={salvando || falta}
+          // ⚠️ O botão desabilitado precisa DIZER o que falta — TUDO o que falta. Botão
+          // morto sem explicação é indistinguível de app quebrado, e explicação que conta
+          // só a primeira pendência é pior: a pessoa resolve aquela e o botão continua
+          // morto (`D-46`).
+          aria-describedby={falta ? 'falta-abrir-recibo' : undefined}
         >
           {salvando ? 'Abrindo…' : 'Abrir chamado'}
         </button>
       </div>
-      {faltaDeclarar && (
-        <p className="dica" id="falta-declarar-recibo">
-          {AVISO_DECLARACAO_PENDENTE}
-        </p>
-      )}
-      {!faltaDeclarar && obrigatoriosVazios.length > 0 && (
-        <p className="dica" id="falta-obrigatorio-recibo">
-          O Jira exige {obrigatoriosVazios.length === 1 ? 'este campo' : 'estes campos'} para
-          este tipo de chamado: {obrigatoriosVazios.map((c) => c.rotulo).join(', ')}.
+      {falta && (
+        <p className="dica" id="falta-abrir-recibo">
+          {mensagemDePendencias(pendencias)}
         </p>
       )}
     </section>
   )
 }
 
-function ChamadoAberto({
+/**
+ * O recibo do chamado aberto — e o caminho de volta, que faltava (`D-46`).
+ *
+ * ⚠️ **Duas ações, e a segunda não é conveniência.** O recibo era terminal: clicar a aba
+ * "Abrir direto" (que já estava ativa) não faz nada, porque é a mesma tela, e só
+ * recarregar a página devolvia o formulário. Quem abre um chamado e precisa abrir o
+ * segundo — a sequência normal de quem junta pendências — conclui que o app travou.
+ *
+ * A ordem é a do próximo passo mais provável: acompanhar o que acabou de abrir vem antes
+ * de abrir outro, e por isso "Ver meus chamados" fica em contorno e "Abrir outro chamado"
+ * em discreto. Nenhum dos dois é destrutivo, então nenhum precisa de confirmação.
+ */
+export function ChamadoAberto({
   resultado,
   via,
   aoVerChamados,
+  aoRecomecar,
 }: {
   resultado: ResultadoCriacao
   via: 'conversa' | 'formulario'
   aoVerChamados: () => void
+  aoRecomecar: () => void
 }) {
   const p = prioridadePor(resultado.prioridade)
   // Pelo formulário as verificações não FALHARAM — elas não foram executadas
@@ -638,6 +732,9 @@ function ChamadoAberto({
         <div className="acoes">
           <button type="button" className="botao botao-contorno" onClick={aoVerChamados}>
             Ver meus chamados
+          </button>
+          <button type="button" className="botao botao-discreto" onClick={aoRecomecar}>
+            Abrir outro chamado
           </button>
         </div>
       </section>
@@ -1037,17 +1134,30 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
         />
 
         <form className="zona-anexo" onSubmit={anexar}>
-          <label htmlFor="anexo-chamado">Anexar print, planilha ou documento</label>
-          <input
-            id="anexo-chamado"
-            type="file"
-            multiple
-            onChange={(e) => setArquivos(Array.from(e.target.files ?? []))}
-            disabled={anexando}
-          />
-          <span className="dica">
-            Até 3 arquivos por envio, de no máximo 8 MB cada. Quem trabalha o chamado vê
-            os anexos junto com a sua descrição.
+          {/* `D-46` aplicado à segunda superfície: o `input[type=file]` sai da tela por
+              `clip` — **nunca** `display: none`, que o tiraria da ordem de tabulação — e
+              quem aparece é o `label`, que já era o nome acessível do campo. O anel de
+              foco é reemitido nele por `:focus-visible +` (`estilos.css`).
+              ⚠️ O texto que descrevia o que anexar desceu para a `dica`, apontada por
+              `aria-describedby`: com o rótulo virando botão, ele precisa dizer a **ação**
+              ("Escolher arquivo"), e o resto é descrição, não nome. */}
+          <div className="escolher-arquivo">
+            <input
+              id="anexo-chamado"
+              className="entrada-arquivo"
+              type="file"
+              multiple
+              aria-describedby="dica-anexo-chamado"
+              onChange={(e) => setArquivos(Array.from(e.target.files ?? []))}
+              disabled={anexando}
+            />
+            <label htmlFor="anexo-chamado" className="botao botao-contorno rotulo-arquivo">
+              Escolher arquivo
+            </label>
+          </div>
+          <span className="dica" id="dica-anexo-chamado">
+            Print, planilha ou documento — até 3 arquivos por envio, de no máximo 8 MB
+            cada. Quem trabalha o chamado vê os anexos junto com a sua descrição.
           </span>
           {arquivos.length > 0 && (
             <ul className="lista-anexos">
@@ -1263,12 +1373,25 @@ function ComentarioDoChamado({ comentario }: { comentario: ComentarioPublico }) 
  * de chamados da empresa. A copy é honesta sobre a diferença: aqui não há
  * verificação, e o chamado nasce marcado como não verificado.
  */
-export function TelaFormulario({
+export function TelaFormulario(props: { eu: Identidade; aoAbrirChamado: () => void }) {
+  // `D-46` — mesma casca da conversa, e pela mesma razão: recomeçar é remontar. Aqui a
+  // remontagem é o que garante a chave de idempotência NOVA (o `useRef` abaixo), sem a
+  // qual o "segundo chamado" cairia na submissão do primeiro (`RF-24`) e a pessoa
+  // receberia de volta o chamado que já tinha.
+  const [sessao, setSessao] = useState(0)
+  return (
+    <FormularioEmCurso key={sessao} {...props} aoRecomecar={() => setSessao((s) => s + 1)} />
+  )
+}
+
+function FormularioEmCurso({
   eu,
   aoAbrirChamado,
+  aoRecomecar,
 }: {
   eu: Identidade
   aoAbrirChamado: () => void
+  aoRecomecar: () => void
 }) {
   const [tipos, setTipos] = useState<TipoChamado[] | null>(null)
   const [titulo, setTitulo] = useState('')
@@ -1276,7 +1399,7 @@ export function TelaFormulario({
   const [tipoChamadoId, setTipo] = useState('')
   const [prioridade, setPrioridade] = useState<Prioridade>('normal')
   const [enviando, setEnviando] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
+  const [erro, setErro] = useState<Falha | null>(null)
   const [resultado, setResultado] = useState<ResultadoCriacao | null>(null)
   // Chave estável por montagem: duplo clique ou reenvio caem na MESMA submissão
   // (RF-24). Gerar por clique perderia a proteção justamente no duplo clique.
@@ -1337,7 +1460,21 @@ export function TelaFormulario({
       .catch(() => setCampos([]))
   }, [tipoChamadoId, eu])
 
-  const faltaDeclarar = aceitaAnexo && declarou === null
+  // 🚨 `D-46` — a mesma composição do recibo da conversa, e aqui ela **inclui os campos
+  // fixos**. A frase antiga era uma constante que afirmava "É a única coisa que falta", e
+  // com título, descrição e os obrigatórios do tipo todos vazios ela era simplesmente
+  // falsa: faltavam quatro coisas. Quem segurava o envio era o `required` do navegador —
+  // que funciona, mas só depois de a tela já ter mentido.
+  const pendencias = pendenciasParaAbrir({
+    fixos: [
+      { rotulo: 'Título', valor: titulo },
+      { rotulo: 'O que está acontecendo', valor: descricao },
+    ],
+    campos: campos ?? [],
+    valores: valoresCampos,
+    faltaDeclararAnexo: aceitaAnexo && declarou === null,
+  })
+  const falta = faltaAlgumaCoisa(pendencias)
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
@@ -1356,14 +1493,21 @@ export function TelaFormulario({
         }),
       )
     } catch (err) {
-      setErro(err instanceof ErroApi ? err.message : 'Não conseguimos abrir o chamado agora.')
+      setErro(falhaDeCriacao(err, 'Não conseguimos abrir o chamado agora.'))
     } finally {
       setEnviando(false)
     }
   }
 
   if (resultado)
-    return <ChamadoAberto resultado={resultado} via="formulario" aoVerChamados={aoAbrirChamado} />
+    return (
+      <ChamadoAberto
+        resultado={resultado}
+        via="formulario"
+        aoVerChamados={aoAbrirChamado}
+        aoRecomecar={aoRecomecar}
+      />
+    )
 
   if (tipos && tipos.length === 0) {
     return (
@@ -1482,21 +1626,21 @@ export function TelaFormulario({
         />
       )}
 
-      {erro && <Aviso atencao>{erro}</Aviso>}
+      {erro && <AvisoDeFalha falha={erro} aoRecomecar={aoRecomecar} />}
 
       <div className="acoes">
         <button
           type="submit"
           className="botao botao-primario"
-          disabled={enviando || faltaDeclarar}
-          aria-describedby={faltaDeclarar ? 'falta-declarar-form' : undefined}
+          disabled={enviando || falta}
+          aria-describedby={falta ? 'falta-abrir-form' : undefined}
         >
           {enviando ? 'Abrindo…' : 'Abrir chamado'}
         </button>
       </div>
-      {faltaDeclarar && (
-        <p className="dica" id="falta-declarar-form">
-          {AVISO_DECLARACAO_PENDENTE}
+      {falta && (
+        <p className="dica" id="falta-abrir-form">
+          {mensagemDePendencias(pendencias)}
         </p>
       )}
     </form>
