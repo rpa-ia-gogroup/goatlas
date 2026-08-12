@@ -140,7 +140,11 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   por clipe, **soltar** ou **colar** (`useAnexoNaConversa`). ⚠️ Colar é o caminho que mais
   importa (print nasce no clipboard) e só intercepta quando há arquivo. ⚠️ **Caixa tracejada
   permanente foi recusada**: certa no godocs, onde subir arquivo é a tarefa; aqui a tarefa é
-  conversar.
+  conversar. 🚨 **E o clipe cria a conversa se ela não existir** (`D-59b`): antes ele sumia
+  até a primeira mensagem, escondendo o caso mais natural — colar o print antes de escrever.
+  A promessa de `garantirConversa` é memoizada num `ref`, **não** o id no estado: dois
+  disparos concorrentes criariam duas conversas, e o anexo da segunda subiria com `200` para
+  uma conversa que nunca vira chamado.
 - **A declaração de anexo trava RESPONDER, nunca ANEXAR** (`RN-11`). Quem diz "tenho",
   desiste e volta para "não tenho" abre o chamado. E a copy da opção negativa é "não tenho
   material para anexar" — **nunca "pular"**, que diria que anexar era o dever e faria a

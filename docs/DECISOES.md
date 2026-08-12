@@ -3507,6 +3507,22 @@ porque quem solta (a área da conversa) e quem cola (a caixa de mensagem) não s
 componente do clipe. Um `ref` disparando o input escondido daria o mesmo resultado por um
 caminho que ninguém entende ao ler.
 
+#### `D-59b` — "sempre presente" não estava cumprido
+
+Medido no app publicado logo depois do deploy: **o clipe não aparecia antes da primeira
+mensagem**, porque a tela o escondia enquanto `conversaId` fosse `null`. E o caso escondido
+era o mais natural de todos — abrir o app com o print já no clipboard e colar antes de
+escrever qualquer coisa.
+
+A conversa agora nasce **sob demanda** também pelo anexo, pelo mesmo `garantirConversa` que
+o envio de mensagem usa. 🚨 **A promessa é memoizada num `ref`, não o id no estado:**
+`setConversaId` não atualiza a variável da closure, então dois disparos concorrentes —
+soltar dois arquivos, ou colar um print e mandar a mensagem no mesmo instante — criariam
+**duas** conversas. A segunda ficaria invisível, e o anexo dela também: arquivo subindo com
+`200` para uma conversa que nunca vira chamado. Mesma classe de corrida que `RF-24` resolve
+na criação, um nível antes. E a falha **não** fica memoizada, senão um erro transitório
+condenaria a tela a nunca mais criar conversa.
+
 **Deploy:** direto em prod, **pulando a staging** — dispensa explícita do mantenedor para
 esta mudança. A regra 10 continua valendo para as próximas.
 

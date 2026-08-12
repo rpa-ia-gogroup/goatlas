@@ -170,18 +170,48 @@ function ConversaEmCurso({
   // `D-59` — só o **realce** do arrasto. O upload em si é do hook abaixo.
   const [arrastando, setArrastando] = useState(false)
   const fim = useRef<HTMLDivElement>(null)
+  /** `D-59b` — ver `garantirConversa`. Guarda a PROMESSA, não o id. */
+  const conversaEmVoo = useRef<Promise<string> | null>(null)
 
   // `D-59` — o anexo passa a existir DURANTE a conversa, não só no cartão. Fica aqui, e
   // não dentro do compositor, porque as três formas de entregar o arquivo (clipe, soltar,
   // colar) nascem em lugares diferentes da tela e precisam da mesma função.
   const anexo = useAnexoNaConversa({
-    conversaId: conversaId ?? '',
+    garantirConversa,
     maximo: MAX_ANEXOS_POR_CHAMADO,
   })
 
   useEffect(() => {
     fim.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [falas, proposta, criado])
+
+  /**
+   * O id da conversa, criando-a se ainda não existir — `D-59b`.
+   *
+   * 🚨 **A promessa é memoizada num `ref`, não só o id no estado.** `setConversaId` não
+   * atualiza a variável desta closure, então dois disparos concorrentes — soltar dois
+   * arquivos, ou colar um print e mandar a mensagem no mesmo instante — criariam **duas**
+   * conversas. A segunda ficaria invisível, e o anexo dela também: o arquivo subiria com
+   * `200` para uma conversa que nunca vira chamado. É a mesma classe de corrida que
+   * `RF-24` resolve na criação, aqui um nível antes.
+   */
+  async function garantirConversa(): Promise<string> {
+    if (conversaId) return conversaId
+    if (!conversaEmVoo.current) {
+      conversaEmVoo.current = api
+        .iniciarConversa()
+        .then((r) => {
+          setConversaId(r.id)
+          return r.id
+        })
+        .catch((e) => {
+          // Falha não fica memoizada: a próxima tentativa tem de poder criar de verdade.
+          conversaEmVoo.current = null
+          throw e
+        })
+    }
+    return conversaEmVoo.current
+  }
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
@@ -194,11 +224,9 @@ function ConversaEmCurso({
     setRascunho('')
 
     try {
-      let id = conversaId
-      if (!id) {
-        id = (await api.iniciarConversa()).id
-        setConversaId(id)
-      }
+      // `D-59b` — o MESMO caminho do anexo. Duas criações independentes fariam a conversa
+      // do texto e a do arquivo divergirem, e o anexo iria para a que ninguém vê.
+      const id = await garantirConversa()
       const r = await api.enviarMensagem(id, texto)
       setConfluence(r.verificacoes.confluence)
       setHistorico(r.verificacoes.historico)
@@ -274,20 +302,15 @@ function ConversaEmCurso({
       <div
         className={arrastando ? 'conversa conversa-soltando' : 'conversa'}
         onDragEnter={(e) => {
-          if (conversaId) {
-            e.preventDefault()
-            setArrastando(true)
-          }
+          e.preventDefault()
+          setArrastando(true)
         }}
         onDragOver={(e) => {
-          if (conversaId) {
-            e.preventDefault()
-            setArrastando(true)
-          }
+          e.preventDefault()
+          setArrastando(true)
         }}
         onDragLeave={() => setArrastando(false)}
         onDrop={(e) => {
-          if (!conversaId) return
           e.preventDefault()
           setArrastando(false)
           const arquivos = Array.from(e.dataTransfer.files ?? [])
@@ -338,10 +361,8 @@ function ConversaEmCurso({
         aoEnviar={enviar}
         enviando={enviando}
         justificando={justificando}
-        anexo={conversaId ? anexo.elemento : null}
-        aoColarArquivos={(arquivos) => {
-          if (conversaId) void anexo.enviar(arquivos)
-        }}
+        anexo={anexo.elemento}
+        aoColarArquivos={(arquivos) => void anexo.enviar(arquivos)}
       />
     </div>
   )

@@ -286,10 +286,23 @@ export function ResultadoDoAnexo({
  * _Requirements: RF-61, RF-63, RN-11, RNF-02, RNF-28_
  */
 export function useAnexoNaConversa({
-  conversaId,
+  garantirConversa,
   maximo,
 }: {
-  conversaId: string
+  /**
+   * 🚨 **Resolve o id, e CRIA a conversa se ela ainda não existir.**
+   *
+   * O clipe recebia `conversaId: string` e a tela o escondia enquanto fosse `null` — ou
+   * seja, ele **não aparecia antes da primeira mensagem**, exatamente contra o pedido
+   * ("um campo sempre presente"). E o caso escondido era o mais natural de todos: abrir o
+   * app com o print já no clipboard e colar antes de escrever qualquer coisa.
+   *
+   * A conversa nasce sob demanda (`api.iniciarConversa`), do mesmo jeito que nasce ao
+   * enviar a primeira mensagem — e a promessa é **memoizada por quem chama**, senão dois
+   * arquivos soltos juntos criariam duas conversas e o segundo anexo iria para uma que
+   * ninguém vê.
+   */
+  garantirConversa: () => Promise<string>
   maximo: number
 }): { readonly enviar: (arquivos: readonly File[]) => Promise<void>; readonly elemento: ReactElement } {
   const [envios, setEnvios] = useState<readonly Envio[]>([])
@@ -302,6 +315,25 @@ export function useAnexoNaConversa({
     // O teto é do servidor também (`SC-08`); aqui ele existe para a recusa não custar
     // uma ida de rede — e a mensagem dele continua sendo a que vale.
     const cabem = arquivos.slice(0, Math.max(0, maximo - enviados))
+    if (cabem.length === 0) return
+
+    let conversaId: string
+    try {
+      conversaId = await garantirConversa()
+    } catch {
+      // Sem conversa não há onde pendurar o arquivo. A falha é por arquivo, com a mesma
+      // forma das outras: nada some calado.
+      setEnvios((atuais) => [
+        ...atuais.filter((e) => !cabem.some((a) => a.name === e.nome)),
+        ...cabem.map((a) => ({
+          nome: a.name,
+          estado: 'falhou' as const,
+          motivo: 'Não consegui iniciar a conversa para anexar. Tente de novo.',
+        })),
+      ])
+      return
+    }
+
     for (const arquivo of cabem) {
       setEnvios((atuais) => [
         ...atuais.filter((e) => e.nome !== arquivo.name),
@@ -334,7 +366,7 @@ export function useAnexoNaConversa({
             de foco é reemitido no `label`, que já é o nome acessível. */}
         <input
           ref={entrada}
-          id={`anexo-conversa-${conversaId}`}
+          id="anexo-conversa"
           className="entrada-arquivo"
           type="file"
           multiple
@@ -346,7 +378,7 @@ export function useAnexoNaConversa({
         />
         <label
           className="rotulo-arquivo rotulo-clipe"
-          htmlFor={`anexo-conversa-${conversaId}`}
+          htmlFor="anexo-conversa"
           aria-disabled={cheio || undefined}
         >
           {/* Símbolo **e** palavra: o clipe sozinho é ícone sem nome acessível. */}
