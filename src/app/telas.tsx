@@ -555,12 +555,18 @@ export function ReciboConfirmacao({
         <dt>Descrição</dt>
         <dd>{propostaInicial.descricao}</dd>
 
-        {propostaInicial.area && (
-          <>
-            <dt>Área</dt>
-            <dd>{propostaInicial.area}</dd>
-          </>
-        )}
+        {/* `D-52` — a área **sempre** aparece, inclusive quando não foi identificada.
+            Escondê-la quando é nula tirava da tela justamente o caso em que a pessoa
+            precisaria corrigir, e deixava `RF-18` incompleto sem nada indicando. O
+            valor mostrado aqui é o que vai para o vínculo: uma fonte só. */}
+        <dt>Área</dt>
+        <dd>
+          {propostaInicial.area || (
+            <span className="dica">
+              não identificada — você pode corrigir depois de abrir o chamado
+            </span>
+          )}
+        </dd>
 
         <dt>Prioridade</dt>
         <dd>

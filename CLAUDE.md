@@ -625,6 +625,16 @@ destes reabre um vazamento que já foi fechado.
   `notificacoes/sla.ts` calcula o compromisso de `RN-08`, e `D-20` diz que duas fontes de
   verdade sobre o mesmo prazo é pior que uma — quem puser este valor na tela tem de dizer de
   quem ele é. Os nomes reais dos SLAs do `GN` **não foram medidos**.
+- 🚨 **Existe UMA área, e é a que a pessoa vê no cartão** (`D-52`, `tickets/area-da-proposta.ts`).
+  Havia duas: `proposta.area`, **extraída pela IA** e exibida em `RF-18`, e `vinculo.area`, de
+  `resolverArea`, que era a gravada — corrigir a do cartão respondia **200** e o valor era
+  descartado na criação, sem erro (achado por `D-47`). Agora a IA **não decide área**
+  (`definirProposta` grava `null`), `garantirAreaNaProposta` resolve **uma vez** e persiste, e
+  a criação usa **esse mesmo valor** em vez de resolver de novo — duas leituras da mesma fonte
+  podem divergir (TTL da cache, pessoa que mudou de time), e aí "o que eu vi é o que foi
+  gravado" deixa de ser verdade. ⚠️ A área aparece no cartão **inclusive quando é nula**:
+  escondê-la tirava da tela justamente o caso em que a pessoa precisaria agir. A correção
+  depois da criação (`T-305`) continua existindo e **funciona** — medido no `GN-6902`.
 - 🚨 **A área do solicitante é GUARDADA, nunca enviada** (`D-37`, `teamguide/area.ts`). O
   campo `Setor Gocase` do Jira é multi-checkbox com **15 opções fixas**, e a área real da
   primeira pessoa medida (`RPA`) **não está entre elas** — mandar valor fora da lista dá

@@ -64,7 +64,12 @@ e é o primeiro item a revisitar se um dia o godocs rotacionar.
 - [x] **T-515** — `TG_API_TOKEN` lido só em `contexto.ts`, e coberto por
       `rnf01-vazamento-credenciais` no mesmo dia em que passou a existir.
       _Requirements: RNF-01_
-- [~] **T-516** — `resolverArea` nas **duas** rotas de criação. _Requirements: RF-19, FR-7_
+- [x] **T-516** — `resolverArea` nas **duas** rotas de criação. _Requirements: RF-19, FR-7_
+      ✅ **Fechada em 12/08/2026 por `D-52`:** a divergência entre as duas áreas acabou — a
+      IA não decide mais área, `garantirAreaNaProposta` resolve uma vez e persiste, e a
+      criação usa o valor do cartão em vez de resolver de novo. O campo que fingia saiu.
+      Falta ainda o teste do vínculo com área **pela conversa** ponta a ponta, que só a
+      staging fecha (a fonte organizacional só voltou a conectar em `D-50`).
       🚨 **Rebaixada pela auditoria de 12/08 (`D-47`): existem DUAS áreas, e a que a pessoa
       vê não é a que é gravada.** `resolverArea` roda nas duas rotas, como a tarefa diz
       (`src/lib/http/rotas.ts:383` na conversa e `:513` no formulário), e o vínculo recebe o

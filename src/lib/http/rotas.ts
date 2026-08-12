@@ -26,7 +26,7 @@ import {
   type CampoRequestType,
   type Prioridade,
 } from '../atlassian/tipos'
-import type { PropostaChamado } from '../agent/estado'
+import type { Conversa, PropostaChamado } from '../agent/estado'
 import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
 import { buscarComAmpliacao } from '../confluence/busca'
 import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
@@ -47,6 +47,7 @@ import { validarPreferencia } from '../notificacoes/preferencias'
 import { verificarCron } from './cron-auth'
 import { areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { resolverArea } from '../teamguide/area'
+import { garantirAreaNaProposta } from '../tickets/area-da-proposta'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
@@ -242,7 +243,10 @@ async function rotear(
         historico: estadoVerificacao(depois?.historicoVerificado, depois?.historicoFalhou),
       },
       podeConfirmar: Boolean(depois?.proposta),
-      proposta: depois?.proposta ?? null,
+      // `D-52` — a área exibida no cartão é a que vai ao vínculo. Resolvida **uma vez**,
+      // quando a proposta passa a existir; nas mensagens seguintes o campo já está lá e
+      // nada é reconsultado.
+      proposta: depois ? await areaNaProposta(ctx, eu.email, depois) : null,
       tetoCustoAtingido: r.tetoCustoAtingido,
     })
   }
@@ -276,7 +280,10 @@ async function rotear(
       await ctx.orquestrador.montarPropostaAgora(liberada, ctx.valores)
       proposta = (await ctx.conversas.obterDoSolicitante(conversa.id, eu.email))?.proposta ?? null
     }
-    return json({ ok: true, bloqueiosSobrepostos: sobrepostos, proposta })
+    const comArea = liberada
+      ? await areaNaProposta(ctx, eu.email, { ...liberada, proposta })
+      : proposta
+    return json({ ok: true, bloqueiosSobrepostos: sobrepostos, proposta: comArea })
   }
 
   // RF-16 / RF-18 — a proposta é montada/editada antes de confirmar.
@@ -396,12 +403,23 @@ async function rotear(
       conversaId: conversa.id,
     })
 
-    const areaDoSolicitante = await resolverArea({
-      email: eu.email,
-      teamguide: ctx.teamguide,
-      areasPorEmail: ctx.valores.areas_por_email,
-      auditoria: ctx.auditoria,
-    })
+    // 🚨 **A área do vínculo é a que estava no cartão** (`D-52`). Resolver de novo aqui
+    // funcionaria — e produziria, de vez em quando, um valor **diferente** do que a
+    // pessoa acabou de ver e confirmar: a cache da fonte tem TTL, e alguém pode mudar de
+    // time entre a conversa e o clique. "O que eu vi é o que foi gravado" só é verdade
+    // se for o mesmo valor, não duas leituras da mesma fonte.
+    //
+    // O `??` cobre a proposta anterior ao `D-52` (área nula porque ninguém a resolveu) e
+    // a fonte que estava fora do ar quando o cartão apareceu: aí vale tentar de novo, e
+    // `resolverArea` continua fail-open (`RNF-18`, `D-37`).
+    const areaDoSolicitante =
+      atual?.proposta?.area ??
+      (await resolverArea({
+        email: eu.email,
+        teamguide: ctx.teamguide,
+        areasPorEmail: ctx.valores.areas_por_email,
+        auditoria: ctx.auditoria,
+      }))
 
     // `D-46` — falha DEFINITIVA vira a frase que diz a verdade, em vez do 500 genérico
     // que prometia reprocessamento. Ver `falhaDefinitivaDeCriacao` e `criacaoNaoConcluida`.
@@ -2108,6 +2126,29 @@ function decodificar(bruto: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * A área da proposta, resolvida **uma vez** e persistida — `D-52`, `RF-19`.
+ *
+ * ⚠️ O resultado é a proposta que a tela recebe. Enquanto o cartão mostrava
+ * `proposta.area` (extraída pela IA) e o vínculo gravava `resolverArea`, corrigir a área
+ * ali era um campo que fingia: aceito com 200, descartado na criação. Uma fonte só, e é
+ * este valor que `abrirPorConversa` grava.
+ */
+async function areaNaProposta(
+  ctx: Contexto,
+  email: string,
+  conversa: Conversa,
+): Promise<PropostaChamado | null> {
+  return garantirAreaNaProposta(conversa, ctx.conversas, () =>
+    resolverArea({
+      email,
+      teamguide: ctx.teamguide,
+      areasPorEmail: ctx.valores.areas_por_email,
+      auditoria: ctx.auditoria,
+    }),
+  )
 }
 
 function estadoVerificacao(

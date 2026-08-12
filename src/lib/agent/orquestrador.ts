@@ -353,7 +353,12 @@ export class Orquestrador {
           descricao: r.proposta.descricao,
           tipoChamadoId: r.proposta.tipoChamadoId,
           prioridade: r.proposta.prioridade,
-          area: r.proposta.area,
+          // ⚠️ **A IA não decide área** (`D-52`). O extrator ainda pode devolver uma —
+          // ela vem do texto da conversa —, e usá-la produzia a divergência que a
+          // auditoria de `D-47` achou: o cartão mostrava a área adivinhada e o vínculo
+          // gravava a de `resolverArea`, sem nada na tela indicando. Quem preenche este
+          // campo agora é `garantirAreaNaProposta`, com a fonte organizacional.
+          area: null,
           componente: null,
         })
       }

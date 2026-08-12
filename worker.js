@@ -4716,7 +4716,12 @@ var Orquestrador = class {
           descricao: r.proposta.descricao,
           tipoChamadoId: r.proposta.tipoChamadoId,
           prioridade: r.proposta.prioridade,
-          area: r.proposta.area,
+          // ⚠️ **A IA não decide área** (`D-52`). O extrator ainda pode devolver uma —
+          // ela vem do texto da conversa —, e usá-la produzia a divergência que a
+          // auditoria de `D-47` achou: o cartão mostrava a área adivinhada e o vínculo
+          // gravava a de `resolverArea`, sem nada na tela indicando. Quem preenche este
+          // campo agora é `garantirAreaNaProposta`, com a fonte organizacional.
+          area: null,
           componente: null
         });
       }
@@ -8372,6 +8377,18 @@ async function resolverArea(p) {
   return doMapa;
 }
 
+// src/lib/tickets/area-da-proposta.ts
+async function garantirAreaNaProposta(conversa, conversas, resolver) {
+  const proposta = conversa.proposta;
+  if (!proposta) return null;
+  if (proposta.area !== null && proposta.area !== "") return proposta;
+  const area = await resolver();
+  if (area === null) return proposta;
+  const atualizada = { ...proposta, area };
+  await conversas.definirProposta(conversa.id, atualizada);
+  return atualizada;
+}
+
 // src/lib/retencao.ts
 var PISO_AUDITORIA_DIAS = 180;
 function limite(agoraMs, dias) {
@@ -8901,7 +8918,10 @@ async function rotear(req, ctx, eu, caminho, url) {
         historico: estadoVerificacao(depois?.historicoVerificado, depois?.historicoFalhou)
       },
       podeConfirmar: Boolean(depois?.proposta),
-      proposta: depois?.proposta ?? null,
+      // `D-52` — a área exibida no cartão é a que vai ao vínculo. Resolvida **uma vez**,
+      // quando a proposta passa a existir; nas mensagens seguintes o campo já está lá e
+      // nada é reconsultado.
+      proposta: depois ? await areaNaProposta(ctx, eu.email, depois) : null,
       tetoCustoAtingido: r.tetoCustoAtingido
     });
   }
@@ -8930,7 +8950,8 @@ async function rotear(req, ctx, eu, caminho, url) {
       await ctx.orquestrador.montarPropostaAgora(liberada, ctx.valores);
       proposta2 = (await ctx.conversas.obterDoSolicitante(conversa.id, eu.email))?.proposta ?? null;
     }
-    return json({ ok: true, bloqueiosSobrepostos: sobrepostos, proposta: proposta2 });
+    const comArea = liberada ? await areaNaProposta(ctx, eu.email, { ...liberada, proposta: proposta2 }) : proposta2;
+    return json({ ok: true, bloqueiosSobrepostos: sobrepostos, proposta: comArea });
   }
   const proposta = caminho.match(/^\/api\/conversas\/([^/]+)\/proposta$/);
   if (proposta && req.method === "PUT") {
@@ -9010,7 +9031,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       via: "conversa",
       conversaId: conversa.id
     });
-    const areaDoSolicitante = await resolverArea({
+    const areaDoSolicitante = atual?.proposta?.area ?? await resolverArea({
       email: eu.email,
       teamguide: ctx.teamguide,
       areasPorEmail: ctx.valores.areas_por_email,
@@ -10131,6 +10152,18 @@ function decodificar(bruto) {
   } catch {
     return null;
   }
+}
+async function areaNaProposta(ctx, email, conversa) {
+  return garantirAreaNaProposta(
+    conversa,
+    ctx.conversas,
+    () => resolverArea({
+      email,
+      teamguide: ctx.teamguide,
+      areasPorEmail: ctx.valores.areas_por_email,
+      auditoria: ctx.auditoria
+    })
+  );
 }
 function estadoVerificacao(verificado, falhou) {
   if (falhou) return "falhou";
