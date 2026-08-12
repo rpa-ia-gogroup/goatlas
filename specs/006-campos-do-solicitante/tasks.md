@@ -109,6 +109,41 @@ tipos **70, 89, 91, 92, 94 e 95** do `GN`.
       Só isso separa "a forma está certa" de "a forma parece certa" — é a mesma classe de
       verificação de `T-425`. _Requirements: RF-27, D-24_
 
+## Fase 5 — a fonte organizacional nunca respondeu em produção (`D-40`, 12/08/2026)
+
+Duas criações medidas na staging (12:08 e 12:21) registraram a **mesma** linha:
+`area_indisponivel {"motivo":"erro_de_rede","caiuNoMapa":false}`. Os chamados abriram —
+`RNF-18` e `D-37` cumpridos —, mas nenhuma área foi gravada. ⚠️ A Fase 3 inteira foi validada
+contra o **fake** e contra `fetchImpl` injetado; o caminho real nunca tinha saído do Worker.
+
+**A observabilidade vale sozinha, e vem antes da causa.** `erro_de_rede` cobria três causas
+com consertos opostos, então nenhuma medição posterior conseguiria separá-las.
+
+- [x] **T-526** — Testes **antes**: timeout classificado pelo **sinal** e não por `e.name` ·
+      `conexao` × `corpo` × `promessa` · `classe` nunca carrega a mensagem (caso com e-mail e
+      token dentro dela) · `motivo` autoexplicativo **não** ganha `fase`/`classe`.
+      _Requirements: RF-19, RF-58, RNF-01, RNF-30_
+- [x] **T-527** — `FalhaTeamGuide` (`fase`, `classe`) em `teamguide/contrato.ts`;
+      `ErroTeamGuide` tipado em `http.ts` no lugar do teste `/^[a-z0-9_]+$/` sobre `e.message`,
+      que promovia mensagem de terceiro a rótulo. `fase`/`classe` entram no **detalhe** de
+      `area_indisponivel` — **não** viram uma terceira ação de auditoria.
+      _Requirements: RF-19, RF-58, RNF-01, RNF-30_
+- [x] **T-528** — Sonda da fonte em `/api/health`, pelo **mesmo** `baseCacheada`, e **fora** do
+      `ok` agregado (a área é fail-open). Medir esta camada deixa de custar um chamado numa
+      fila real. _Requirements: RF-59, RNF-18_
+- [x] **T-529** — `D-40` em `docs/DECISOES.md`, `CLAUDE.md` (padrões + estado do projeto) e
+      este arquivo. _Requirements: RNF-27_
+- [ ] **T-530** — **Medição que fecha a causa:** `GET /api/health` na staging, logado, campo
+      `dependencias.teamguide.detalhe`. A tabela "o que aparecer → o que fazer" está no `D-40`.
+      ⚠️ Sem ela **não** há como escolher entre "o Worker não alcança o host" e "a resposta não
+      termina em 8 s": as duas produziam o mesmo rótulo, e é essa indistinção que a Fase 5
+      desfaz. _Requirements: RF-19, RF-59, D-24_
+- [ ] **T-531** — **Só depois de T-530**, e só se ela apontar `corpo`: paginar
+      `/employees/refs` (`page`/`size`) e montar o mapa em passadas, respeitando o teto de
+      subrequisições e mantendo a cache guardando **só sucesso**. ⚠️ Não adiantar: paginar
+      agora seria mudança de comportamento sobre hipótese não provada, e alteraria o próprio
+      caminho que T-530 mede. _Requirements: RF-19, RNF-36_
+
 ## Fora desta spec
 
 - Enviar `Setor Gocase` ao Jira — depende de o campo ser publicado num formulário de portal.

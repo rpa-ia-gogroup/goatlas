@@ -1944,6 +1944,120 @@ não sobre "abriu chamado". Mesma família de `D-38` e de `linhasComoObjetos`.
 
 ---
 
+### D-40 · `erro_de_rede` era o fim da linha — a falha passa a dizer ONDE quebrou
+
+**Data:** 12/08/2026 · **Medido por:** duas criações na staging (`appId 3936ca2d`) ·
+**Contexto:** `RF-19`, `RF-58`, `RF-59`, `RNF-01`, `RNF-18`, `RNF-30`, `D-37`
+
+**A medição.** Toda criação de chamado na staging registra o mesmo, e só isto:
+
+```
+12:08 · 12:21   area_indisponivel  falha  recurso=teamguide
+                {"motivo":"erro_de_rede","caiuNoMapa":false}
+```
+
+Os chamados abriram — o fail-open de `D-37` funciona —, mas `vinculos.area` fica `null` e a
+tela oferece "Corrigir a minha área". ⚠️ **Este caminho nunca rodou fora do fake:** até
+11/08 a TeamGuide só tinha sido chamada por `curl`, de fora do Worker. Mesma família de
+`linhasComoObjetos` e do `D-38` — o dublê não tem como divergir do contrato documentado.
+
+**O que o rótulo escondia.** `motivoDe` devolvia `erro_de_rede` para *qualquer* erro cuja
+mensagem não casasse `/^[a-z0-9_]+$/`. Um rótulo cobrindo três causas que pedem consertos
+**opostos**:
+
+| Causa real | O conserto |
+|---|---|
+| O Worker não alcança `api.teamguide.app` | rede/plataforma — nada no nosso código |
+| A resposta veio e se desfez no meio (grande/lenta demais para a janela de 8 s) | paginar `/employees/refs` e montar o mapa em passadas |
+| A promessa cacheada era de **outra** requisição | a cache guarda valor, não promessa |
+
+**A decisão.** `FalhaTeamGuide` ganha dois campos, ambos rótulos curtos em `snake_case`:
+
+- **`fase`** — `conexao` (o `fetch` não devolveu `Response`) · `corpo` (a `Response` veio e a
+  leitura/desserialização é que falhou) · `promessa` (a falha **não veio da nossa chamada**).
+- **`classe`** — construtor + `name` + `cause.code`, deduplicados e saneados
+  (`DOMException`+`AbortError` → `domexception_aborterror`; `TypeError`+`ECONNREFUSED` →
+  `typeerror_econnrefused`).
+
+⚠️ **Os dois só aparecem quando `motivo` não se explica sozinho.** `http_401` e
+`formato_inesperado` já dizem tudo; espalhar `fase` por toda falha encheria a auditoria de
+ruído e faria o sinal parar de saltar aos olhos.
+
+🚨 **E continuam sendo DUAS ações de auditoria.** `fase`/`classe` detalham *por que* a fonte
+caiu, **dentro** de `area_indisponivel`. Uma terceira ação diria que existe um terceiro
+trabalho a fazer, e não existe: é o mesmo plantão, com uma pista a mais. A separação que
+importa continua sendo `area_indisponivel` (fonte fora do ar) × `area_nao_encontrada`
+(cadastro faltando).
+
+**🚨 O timeout é decidido pelo SINAL, não pelo nome do erro — e é a metade que mais importa.**
+O código perguntava `e.name === 'AbortError'`. Isso é confiável quando o aborto acontece
+**antes** da resposta; quando os cabeçalhos já chegaram e o corpo está sendo lido, abortar
+derruba a conexão no meio da leitura, e o que sobe é o erro genérico de rede do runtime —
+não `AbortError`. Consequência: **o nosso próprio timeout se apresentava como
+`erro_de_rede`**, ou seja, a hipótese mais provável (resposta grande demais para 8 s) era
+exatamente a única que o registro nunca poderia acusar. Quem sabe a resposta é
+`controle.signal.aborted`: se o nosso relógio disparou, foi timeout, não importa a classe
+que o runtime escolheu lançar.
+
+**`classe` é rótulo por construção, nunca mensagem** (`RNF-01`, `RNF-30`). `name` e
+`cause.code` também são valores vindos de fora; o charset fechado (`[a-z0-9_]`) mais o teto
+de 24 caracteres por pedaço é o que faz "isto não é uma frase" ser garantia estrutural em vez
+de promessa. No mesmo movimento **sai** o teste `/^[a-z0-9_]+$/` sobre `e.message`, que tinha
+o defeito oposto: promovia mensagem de terceiro a rótulo sempre que ela fosse uma palavra
+minúscula. Agora rótulo é o que **nós** escrevemos (`ErroTeamGuide`), e o resto é genérico.
+
+**A sonda em `/api/health`, e por que fora do agregado.** A fonte organizacional entra em
+`RF-59` porque, até aqui, a **única** evidência de que a leitura falhava era uma linha de
+auditoria produzida por alguém abrindo um chamado **numa fila real** — o mesmo custo que já
+deixou `GN-6894` para o time de tech apagar. A sonda usa o **mesmo** `baseCacheada` e a
+**mesma** cache: sonda que exercita outro caminho responde sobre o caminho que ninguém usa.
+🚨 **Mas ela fica FORA do `ok` agregado.** A área é fail-open por desenho (`D-37`,
+`RNF-18`): com a fonte no chão os chamados continuam abrindo, então um 503 ali diria "o app
+caiu" sobre um app inteiro de pé — e ensinaria o time a ignorar o health check, que é o custo
+que nenhum alarme falso paga.
+
+**O que foi eliminado sem medir, e como:**
+
+- **Redirect (`3xx` para outro host).** Um redirect resolve para um status HTTP, que
+  produziria `http_<status>` — nunca `erro_de_rede`. E o `curl` do mesmo caminho voltou
+  **401 direto**, não `3xx`.
+- **A chamada sair de `ctx.waitUntil` / de um contexto já encerrado.** `resolverArea` é
+  `await`ado **inline**, dentro da expressão de argumento de `abrirPorConversa` e de
+  `abrirPorFormulario`, nas duas rotas de criação — antes da `Response`, não depois. Não há
+  fire-and-forget neste caminho.
+- **Estouro de memória (128 MB).** `/employees/refs` são ~440 pessoas com dois campos úteis;
+  é da ordem de dezenas de KB. O que `unpaged=true` pode custar é **tempo**, não memória — e
+  tempo é o que a fase `corpo` mede.
+
+**O que fica em aberto, de propósito.** Entre "o Worker não alcança o host" e "a resposta não
+termina em 8 s" não dá para escolher lendo código: as duas produzem `erro_de_rede` hoje, e é
+justamente essa indistinção que esta decisão desfaz. **Não paginei nem mexi no timeout** — as
+duas seriam mudança de comportamento sobre hipótese não provada, e alterar o código no mesmo
+movimento em que se instala o instrumento estraga a medição (se o sintoma sumir, ninguém sabe
+qual das duas coisas o resolveu). É a lição registrada do header assinado do cron, que
+consumiu 10 tentativas de adivinhação.
+
+**A medição que fecha o resto** — `GET /api/health` na staging, logado, campo
+`dependencias.teamguide.detalhe`:
+
+| O que aparecer | O que significa | O que fazer |
+|---|---|---|
+| `ok` | resolvido sozinho / era transitório | nada |
+| `timeout · corpo · …` | 8 s não bastam para a base inteira | paginar `/employees/refs` (`page`/`size`), respeitando o teto de subrequisições |
+| `timeout · conexao · …` | o host não responde a tempo | rede/plataforma; considerar teto maior |
+| `erro_de_rede · conexao · typeerror_*` | o Worker não alcança o host | egress/TLS da plataforma — não é código nosso |
+| `erro_de_rede · corpo · syntaxerror` | a resposta chega truncada | paginar |
+| `erro_de_rede · promessa · …` | I/O entre contextos de requisição | a cache passa a guardar **valor**, como `cachesAtlassianDoIsolate` |
+| `http_401` | o token não vale para este host | credencial (⚠️ é o **mesmo** token do godocs) |
+
+**A cache desta camada é a única que guarda PROMESSA.** As três de `novasCachesAtlassian`
+guardam valor (`CacheTtl<unknown>`). Aqui a promessa dá dedupe de leitura em voo — e é também
+a única coisa no arquivo que atravessa o limite de uma requisição, que é exatamente o que a
+plataforma proíbe para I/O. Não "consertei" isso agora pela razão do parágrafo acima; a fase
+`promessa` existe para a hipótese **aparecer no registro** em vez de continuar suposta.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
