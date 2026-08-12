@@ -46,6 +46,7 @@ import {
   type TicketHistorico,
   type TipoChamado,
 } from './tipos'
+import type { CampoDoSchema } from './schema-diagnostico'
 
 /** Mensagem única, em linguagem de negócio — ela chega ao usuário (RNF-30). */
 export const MENSAGEM_SOMENTE_LEITURA =
@@ -124,6 +125,16 @@ export class ClienteAtlassianSomenteLeitura implements ClienteAtlassian {
 
   obterCamposDoTipo(sd: string, rt: string): Promise<readonly CampoRequestType[]> {
     return this.real.obterCamposDoTipo(sd, rt)
+  }
+
+  /**
+   * ⚠️ Leitura, e tem de continuar passando **justamente aqui**: a pergunta que este
+   * método responde ("o request type expõe prioridade?") só se responde contra a
+   * Atlassian real, e o app real está em somente leitura (`D-24`). Um diagnóstico que a
+   * trava recusa é um diagnóstico que nunca roda.
+   */
+  obterSchemaDoTipo(sd: string, rt: string): Promise<readonly CampoDoSchema[]> {
+    return this.real.obterSchemaDoTipo(sd, rt)
   }
 
   obterChamado(issueKey: string): Promise<Chamado> {
