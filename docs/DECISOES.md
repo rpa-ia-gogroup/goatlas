@@ -1944,6 +1944,96 @@ não sobre "abriu chamado". Mesma família de `D-38` e de `linhasComoObjetos`.
 
 ---
 
+### D-40 · O autor do comentário é REPORTADO, nunca afirmado — e "Você" vem do predicado do SLA
+
+**Data:** 12/08/2026 · **Medido por:** teste na staging (`appId 3936ca2d`), chamado `GN-6897`
+· **Contexto:** `RF-31`, `RF-32`, `RF-33`, `RF-46`, `RN-05`, `D-01`, `D-13`, `D-38`
+
+**A medição.** Na aba "Meus chamados" → `GN-6897`, o comentário que a **própria pessoa**
+acabou de escrever aparecia assim:
+
+```
+JOÃO VICTOR TAVARES ESTEVES                                  ← linha de autor
+**Kaique Breno** (kaique.breno@gocase.com) via goatlas:      ← prefixo do D-13
+Comentário de TESTE da bateria E2E …
+```
+
+Duas afirmações de autoria contraditórias, sobre o mesmo texto, a dois centímetros uma da
+outra. E a leitura natural é a pior possível: *alguém escreveu em meu nome*.
+
+**A causa.** Sob proxy total (`D-01`) todo comentário que o app escreve sai da **conta de
+serviço**, e o JSM devolve o `displayName` dela. A tela imprimia esse nome como autor. Hoje a
+conta que gerou o `ATATT` é **pessoal do João** (pendência já registrada em `Q1`), então o
+nome impresso é o de um colaborador de verdade — o que transforma um defeito de rótulo numa
+acusação. ⚠️ **Trocar a conta de serviço não conserta:** com uma conta dedicada a tela
+passaria a assinar o comentário da pessoa como "goatlas bot", que continua não sendo quem
+escreveu.
+
+**A decisão, em três partes.**
+
+**1 · Quem classifica é `ehComentarioDoSolicitante` — o predicado que já existia.** É o mesmo
+que `notificacoes/sla.ts` usa para decidir se **houve** primeira resposta do time (`RF-46`).
+Escrever na tela uma segunda condição — comparar nome, comparar e-mail — criaria duas regras
+para o mesmo fato, e elas divergiriam **em silêncio**: a tela diria "Você" sobre o que o SLA
+conta como resposta do time, ou o contrário, e nenhum teste cairia. Mesmo raciocínio de
+`config/diagnostico.ts` (`D-25`): o console **relata** o estado, não o recalcula.
+
+A tradução mora em `tickets/comentario-exibicao.ts`, é **pura** e é o **único** caminho de
+"corpo cru da Atlassian" para "o que a tela mostra". Um teste estrutural varre `src/app/`
+atrás do literal `via goatlas` e dos nomes das três funções do par — a tela remontar a regra
+passa a ser suíte vermelha, não revisão atenta.
+
+⚠️ **"O solicitante" é quem está lendo, e isso é propriedade, não coincidência.**
+`UNIQUE (vinculos.issue_key)` dá **um** vínculo por chamado, e colisão com outro solicitante é
+recusa definitiva e auditada. Logo o único caminho para um comentário prefixado existir neste
+chamado passou pela pessoa que a rota já isolou por e-mail (`RF-30`). É isso que autoriza
+"Você" sem comparação nenhuma.
+
+**2 · O prefixo do `D-13` sai do corpo exibido.** Ele existe para ser lido no **Jira nativo**,
+onde o time trabalha e onde não há linha de autor nossa. Dentro do goatlas a linha de autor já
+diz de quem é, então ele vira repetição — e repetição em **Markdown cru**
+(`**Nome** (email) via goatlas:`, com os asteriscos à vista), porque `TextoDoAgente` não
+interpreta negrito. Quem remove é `removerPrefixoAutoria`, a mesma função que `RF-48` usa: um
+`replace` novo aqui divergiria do de lá no dia em que o formato mudar — e a spec 001 §10 diz
+que ele **pode** mudar.
+
+**3 · O nome da conta continua na tela, enunciado como REGISTRO.** Comentário sem prefixo
+recebe o rótulo **"Resposta do time"** e, uma linha abaixo, em tipo de legenda,
+**"Conta que registrou: …"**.
+
+🚨 **A formulação é a decisão.** Se alguém do time responder **pelo portal com a mesma conta
+de serviço**, o app não tem como distinguir — e não pode afirmar que foi outra pessoa.
+"Conta que registrou" é verdade nos dois casos; "escrito por" é verdade só num. E **apagar** o
+nome — a saída que resolveria o caso da conta de serviço — estragaria o caso comum, o agente
+que respondeu de verdade com a conta dele: a pessoa deixaria de saber quem está cuidando do
+chamado dela. Fica, mas fica dizendo o que é.
+
+**A a11y não é adorno aqui.** "É seu comentário" é dito por **três** sinais e nenhum é só cor:
+o rótulo em palavras (`Você`), o lado da coluna e a bolha — o mesmo vocabulário que a tela de
+conversa com o agente já ensina (`.fala-usuario`). Tirar a cor da bolha deixa a distinção
+inteira de pé.
+
+🚨 **O `ClienteAtlassianFake` escondia a divergência, e ela não é pequena.** `comentar`
+guardava o texto **sem** prefixo e com o **nome do autor real** — produção grava exatamente o
+oposto nas duas pontas. Nenhum teste da suíte via a forma que a staging mostrou, porque no
+dublê o nome estava certo e o prefixo nem existia. Corrigido junto (`NOME_CONTA_DE_SERVICO_FAKE`,
+e `prefixarAutoria` aplicado no fake), e a prova de que era ponto cego: a correção do dublê não
+quebrou **nenhum** teste existente — ninguém afirmava nada sobre aquilo. Mesma família de
+`linhasComoObjetos`, de `D-38` e de `D-39`.
+
+**Custo aceito.** Um comentário do time que **cole o prefixo à mão** no Jira seria rotulado
+"Você". Não se resolve comparando o e-mail dentro do prefixo com o do leitor: seria a segunda
+regra que a parte 1 existe para não ter, pelo ganho de barrar um colega que digitou
+`**Fulano** (x@y) via goatlas:` de propósito. O estrago é confusão, não vazamento — o texto
+já era público e já era do chamado dela (`RF-32`/`RN-05` seguem intactos: a classificação roda
+**depois** do filtro por `public`, e há teste com um interno prefixado que não chega à tela).
+
+**Não resolvido nesta decisão:** o detalhe do chamado continua **sem listar os anexos
+existentes** — a pessoa anexa na criação (`RF-63`) e depois não vê o próprio arquivo. Levantado
+junto, proposto no PR, **fora do escopo deste conserto**.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

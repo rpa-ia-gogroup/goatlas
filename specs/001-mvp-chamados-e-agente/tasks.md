@@ -210,6 +210,24 @@ created: "2026-08-03"
       estava aberta); faltava a rota passar `eu.nome`, não só `eu.email` — sem
       isso o prefixo saía com o e-mail duplicado. 1 teste novo em
       `tests/rotas.test.ts` confirmando o nome real chegando ao cliente Atlassian.
+- [x] **T-083** A tela do chamado diz de quem é cada comentário — sem inventar
+      identidade que o app não tem. _Requirements: RF-31, RF-32, RF-33, RN-05, RNF-30_
+      → **Resolvida (D-40, 12/08/2026), a partir de defeito medido na staging
+      (`GN-6897`):** o comentário que a própria pessoa escreveu aparecia assinado
+      pela **conta de serviço** — hoje a conta pessoal de um colega — com o prefixo
+      de `D-13` logo abaixo dizendo outro nome. Quem classifica passou a ser
+      `ehComentarioDoSolicitante`, o **mesmo** predicado do SLA de `RF-46`, numa
+      função pura (`tickets/comentario-exibicao.ts`) que é o único caminho de "corpo
+      cru" para "o que a tela mostra" — comparação nova de nome ou e-mail na tela
+      seria uma segunda regra divergindo em silêncio da do servidor. A tela diz
+      "Você" ou "Resposta do time" e nomeia a conta como **registro**
+      (`Conta que registrou: …`), nunca como autoria: quem responde pelo portal com
+      a conta de serviço não é distinguível, e o app não afirma o que não sabe. O
+      prefixo sai do corpo exibido (`removerPrefixoAutoria`, o par de `RF-48`).
+      ⚠️ **O `ClienteAtlassianFake` escondia a divergência** — guardava o texto sem
+      prefixo e com o nome do autor real, o oposto de produção nas duas pontas;
+      corrigi-lo não quebrou nenhum teste existente, que é a medida do ponto cego.
+      8 testes novos em `tests/rf33-autoria-na-tela.test.ts`, um deles estrutural.
 
 ## Phase 6 — Frontend, mobile e fechamento
 
