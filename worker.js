@@ -4766,6 +4766,9 @@ var RepositorioVinculos = class {
 };
 
 // src/lib/tickets/servico.ts
+function falhaDefinitivaDeCriacao(erro2) {
+  return erro2 instanceof ErroAtlassian && !erro2.detalhe.transitorio;
+}
 var ServicoChamados = class {
   constructor(atlassian, outbox, vinculos, auditoria, novoId) {
     this.atlassian = atlassian;
@@ -4846,6 +4849,19 @@ var ServicoChamados = class {
       payload: dados.payload
     });
     if (!nova) {
+      if (submissao.estado === "falha") {
+        await this.auditoria.registrar({
+          atorEmail: dados.solicitanteEmail,
+          acao: "chamado_criado",
+          recurso: `submissao:${submissao.id}`,
+          resultado: "negado",
+          detalhe: { motivo: "submissao_anterior_em_falha_definitiva" }
+        });
+        throw new ErroAtlassian("submiss\xE3o anterior falhou de forma definitiva", {
+          transitorio: false,
+          recurso: `submissao:${submissao.id}`
+        });
+      }
       return {
         issueKey: submissao.issueKey,
         estado: submissao.issueKey ? "criado" : "pendente",
@@ -6150,6 +6166,7 @@ function json(dados, status = 200) {
     }
   });
 }
+var CODIGO_CRIACAO_NAO_CONCLUIDA = "criacao_nao_concluida";
 function erro(mensagem, codigo, status) {
   return json({ erro: mensagem, codigo }, status);
 }
@@ -6193,9 +6210,46 @@ var ERROS = {
     "criacao_nao_autorizada",
     409
   ),
+  /**
+   * ⚠️ **Esta frase NÃO promete reprocessamento** — e a versão anterior prometia
+   * (`D-46`). Ela dizia *"Sua solicitação não foi perdida — tente novamente em
+   * instantes"*, e essa promessa só o **outbox** pode cumprir: ela é verdadeira quando a
+   * submissão fica `pendente`, e nesse caso a rota responde **201** com
+   * `estado: 'pendente'` e a frase própria de `respostaCriacao`. Por aqui passa
+   * justamente o contrário — o erro que ninguém enfileirou.
+   *
+   * Medido na staging em 12/08/2026: `POST /api/conversas/:id/confirmar` → **500** com
+   * esta frase, submissão marcada `falha` e `transitorio: false`. Ou seja, a solicitação
+   * **tinha** se perdido, e "tente novamente em instantes" não reprocessava nada
+   * (`RNF-17`).
+   *
+   * Genérica de propósito: este é o erro de **qualquer** rota, inclusive falha de boot no
+   * `worker.ts`, e nenhuma afirmação sobre o destino do que a pessoa enviou seria
+   * verdadeira nas duas pontas. Quem sabe o destino é quem criou a condição — daí
+   * `criacaoNaoConcluida` existir separada.
+   */
   interno: () => erro(
-    "Algo deu errado do nosso lado. Sua solicita\xE7\xE3o n\xE3o foi perdida \u2014 tente novamente em instantes.",
+    "Algo deu errado do nosso lado. Tente de novo em instantes \u2014 se continuar, fale com o time de tech.",
     "erro_interno",
+    500
+  ),
+  /**
+   * A criação falhou de forma **definitiva**: a submissão está `falha`, o cron **não** a
+   * reprocessa, e nenhum chamado vai nascer dela (`RNF-17`, `D-46`).
+   *
+   * ⚠️ **A saída é diferente nas duas superfícies, então a frase também é.** A chave de
+   * idempotência do formulário vive na montagem da tela e a da conversa é derivada da
+   * conversa (`conversa:<id>`) — reenviar o mesmo formulário sem recomeçar, ou confirmar
+   * de novo a mesma conversa, cai na **mesma** submissão morta e recebe este mesmo erro.
+   * Mandar "tente de novo" sem dizer *de onde* seria a segunda frase falsa no lugar da
+   * primeira.
+   *
+   * ⚠️ Nada do corpo da resposta da Atlassian entra aqui (`RNF-01`, `RNF-30`) — o motivo
+   * técnico já está na auditoria, que é onde ele serve para alguma coisa.
+   */
+  criacaoNaoConcluida: (via) => erro(
+    "N\xE3o conseguimos abrir o chamado, e ele n\xE3o ficou na fila para ser aberto depois. " + (via === "formulario" ? "Comece de novo pelo bot\xE3o abaixo \u2014 se acontecer outra vez, fale com o time de tech." : "Comece uma conversa nova pelo bot\xE3o abaixo \u2014 se acontecer outra vez, fale com o time de tech."),
+    CODIGO_CRIACAO_NAO_CONCLUIDA,
     500
   )
 };
@@ -8375,29 +8429,36 @@ async function rotear(req, ctx, eu, caminho, url) {
       via: "conversa",
       conversaId: conversa.id
     });
-    const r = await ctx.chamados.abrirPorConversa(
-      atual,
-      serviceDeskId,
-      chaveDaConversa,
-      await resolverArea({
-        email: eu.email,
-        teamguide: ctx.teamguide,
-        areasPorEmail: ctx.valores.areas_por_email,
-        auditoria: ctx.auditoria
-      }),
-      declaracao.declarouAnexo,
-      // RF-21 / `D-36` — os MESMOS campos que o formulário preenche, resolvidos com o
-      // `schema` que `RF-62` já leu logo acima. Sem isto, um chamado de um tipo que exige
-      // nome e e-mail nasceria vazio quando aberto pela conversa, e só por lá.
-      //
-      // ⚠️ A conversa não tem formulário dinâmico, então aqui não há valor do cliente para
-      // vencer o do login (`FR-3`) — o que chega é sempre a identidade da sessão.
-      //
-      // ⚠️ Traduzido para o formato do Jira **aqui**, e não no cliente (`D-39`): é este
-      // objeto que o outbox persiste, então o reprocessamento de `RNF-17` reenvia o mesmo
-      // corpo sem reler o schema.
-      paraValoresDoJira(schema, camposDaConversa)
-    );
+    const areaDoSolicitante = await resolverArea({
+      email: eu.email,
+      teamguide: ctx.teamguide,
+      areasPorEmail: ctx.valores.areas_por_email,
+      auditoria: ctx.auditoria
+    });
+    let r;
+    try {
+      r = await ctx.chamados.abrirPorConversa(
+        atual,
+        serviceDeskId,
+        chaveDaConversa,
+        areaDoSolicitante,
+        declaracao.declarouAnexo,
+        // RF-21 / `D-36` — os MESMOS campos que o formulário preenche, resolvidos com o
+        // `schema` que `RF-62` já leu logo acima. Sem isto, um chamado de um tipo que exige
+        // nome e e-mail nasceria vazio quando aberto pela conversa, e só por lá.
+        //
+        // ⚠️ A conversa não tem formulário dinâmico, então aqui não há valor do cliente para
+        // vencer o do login (`FR-3`) — o que chega é sempre a identidade da sessão.
+        //
+        // ⚠️ Traduzido para o formato do Jira **aqui**, e não no cliente (`D-39`): é este
+        // objeto que o outbox persiste, então o reprocessamento de `RNF-17` reenvia o mesmo
+        // corpo sem reler o schema.
+        paraValoresDoJira(schema, camposDaConversa)
+      );
+    } catch (e) {
+      if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida("conversa");
+      throw e;
+    }
     if (r.estado === "criado") await ctx.conversas.definirEstado(conversa.id, "criado");
     const anexo = await materializarAnexosDoChamado(ctx, {
       chaveIdempotencia: chaveDaConversa,
@@ -8462,25 +8523,32 @@ async function rotear(req, ctx, eu, caminho, url) {
       return ERROS.dadosInvalidos(mensagemOpcoesDesconhecidas(opcoesRuins));
     }
     const camposParaOJira = paraValoresDoJira(schema, camposComSolicitante);
-    const r = await ctx.chamados.abrirPorFormulario({
-      solicitanteEmail: eu.email,
-      chaveIdempotencia: chave,
-      area: await resolverArea({
-        email: eu.email,
-        teamguide: ctx.teamguide,
-        areasPorEmail: ctx.valores.areas_por_email,
-        auditoria: ctx.auditoria
-      }),
-      declarouAnexo: declaracao.declarouAnexo,
-      payload: {
-        titulo: validada.proposta.titulo,
-        descricao: validada.proposta.descricao,
-        tipoChamadoId: validada.proposta.tipoChamadoId,
-        serviceDeskId,
-        prioridade: validada.proposta.prioridade,
-        ...camposParaOJira ? { camposDinamicos: camposParaOJira } : {}
-      }
+    const area = await resolverArea({
+      email: eu.email,
+      teamguide: ctx.teamguide,
+      areasPorEmail: ctx.valores.areas_por_email,
+      auditoria: ctx.auditoria
     });
+    let r;
+    try {
+      r = await ctx.chamados.abrirPorFormulario({
+        solicitanteEmail: eu.email,
+        chaveIdempotencia: chave,
+        area,
+        declarouAnexo: declaracao.declarouAnexo,
+        payload: {
+          titulo: validada.proposta.titulo,
+          descricao: validada.proposta.descricao,
+          tipoChamadoId: validada.proposta.tipoChamadoId,
+          serviceDeskId,
+          prioridade: validada.proposta.prioridade,
+          ...camposParaOJira ? { camposDinamicos: camposParaOJira } : {}
+        }
+      });
+    } catch (e) {
+      if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida("formulario");
+      throw e;
+    }
     const anexo = await materializarAnexosDoChamado(ctx, {
       chaveIdempotencia: chave,
       solicitanteEmail: eu.email,

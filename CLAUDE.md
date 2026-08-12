@@ -133,6 +133,39 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   desiste e volta para "não tenho" abre o chamado. E a copy da opção negativa é "não tenho
   material para anexar" — **nunca "pular"**, que diria que anexar era o dever e faria a
   resposta honesta virar a que ninguém escolhe.
+- 🚨 **A frase do botão travado é COMPOSTA, nunca constante** (`app/pendencias.ts`, `D-46`).
+  Ela dizia *"É a única coisa que falta"* — afirmação sobre o **resto da tela**, que uma
+  constante não vê: no formulário, com título, descrição e os obrigatórios do tipo todos
+  vazios, faltavam quatro. Um módulo só serve as duas telas, porque o recibo da conversa tinha
+  a mesma indistinção em dois `if` encadeados (mostrava só a pendência do anexo). ⚠️ **"Falta",
+  nunca "Faltam"** — o verbo rege o infinitivo, e a concordância deixa de ser a armadilha que
+  ninguém testa com três campos. E o campo de **anexo** fica fora dos obrigatórios, senão
+  `RN-11` vira "anexe um arquivo".
+- 🚨 **Recomeçar é REMONTAR (`key`), nunca uma sequência de `setState`** (`D-46`). O recibo
+  ("Chamado aberto · GN-…") era terminal: clicar a aba já ativa não faz nada — é a mesma tela
+  — e só recarregar a página abria o segundo chamado. O botão **"Abrir outro chamado"** troca
+  a `key` da tela inteira. Um `reiniciar()` com nove `setState` funciona hoje e apaga alguém
+  amanhã: esquecer a **chave de idempotência** faz o segundo chamado cair na submissão do
+  primeiro (`RF-24`) e devolve o chamado que a pessoa já tinha; esquecer `setBloqueado` traz a
+  caixa de override para cima de uma conversa nova. ⚠️ **Fazer a aba re-clicada reiniciar foi
+  recusado**: destruiria conversa em andamento, com o bloqueio pendente que `D-21` mantém.
+- 🚨 **"Sua solicitação não foi perdida" só vale quando a submissão ficou PENDENTE** (`D-46`).
+  A frase estava em `ERROS.interno()`, que é o erro de **qualquer** rota — e na falha
+  definitiva (`rejeitado` → `falha`, nunca reprocessada) ela afirmava o oposto da verdade. Quem
+  fica na fila responde **201** com a frase de `respostaCriacao`; quem não fica recebe
+  `criacaoNaoConcluida`, com código próprio e a saída certa **por superfície** (a chave do
+  formulário vive na montagem da tela; a da conversa é `conversa:<id>`). O predicado é
+  `falhaDefinitivaDeCriacao`, em `tickets/servico.ts`, e **só as duas rotas de criação o
+  chamam** — definitivo vindo de `comentar` significa outra coisa. ⚠️ E **submissão em `falha`
+  na entrada não é duplo clique**: era o pior caso, um **201** dizendo "estamos abrindo o
+  chamado, nada se perdeu" para um chamado que ninguém abriria. `RF-24` continua intacto —
+  ele existe para não criar **dois**, e ali não existe nenhum.
+- ⚠️ **O `input[type=file]` da criação é vestido pelo app, mas continua sendo o input**
+  (`estilos.css`, `.entrada-arquivo`, `D-46`). Ele sai da tela por `clip` — **nunca**
+  `display:none`, que o tiraria da ordem de tabulação e deixaria a pergunta inalcançável pelo
+  teclado — e quem aparece é o `label`, que já era o nome acessível. O anel de foco é
+  **reemitido** no `label` (`:focus-visible + .rotulo-arquivo`): o global de `tokens.css`
+  desenharia num elemento de 1px, invisível.
 - **N8N está descartado.** Não propor voltar a ele.
 - **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
   olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe
@@ -1085,7 +1118,7 @@ na staging — a tabela de leitura está no `D-40`. ⚠️ Nada foi paginado nem
 mexido de propósito: mudar o comportamento no mesmo movimento em que se instala o instrumento
 estraga a medição.
 
-**1073 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1093 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **Teste verde não é cobertura** (`D-47`, 12/08): a auditoria requisito→código mexeu em
 **dezessete** tarefas cujo board divergia do que o código faz, com a suíte inteira verde —
 porque nenhum achado é comportamento *errado*, é comportamento **ausente**, e teste ausente

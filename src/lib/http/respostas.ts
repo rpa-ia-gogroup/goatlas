@@ -24,6 +24,16 @@ export interface CorpoErro {
   readonly codigo: string
 }
 
+/**
+ * O código que diz à tela "este chamado não vai nascer" — `D-46`.
+ *
+ * ⚠️ **Um produtor só**, como a chave de idempotência (`tickets/chave-idempotencia.ts`).
+ * A tela precisa distinguir esta falha das outras para oferecer o recomeço, e uma string
+ * literal repetida em `telas.tsx` divergiria em silêncio no dia em que o código mudasse:
+ * o botão de saída simplesmente deixaria de aparecer, sem erro nenhum e sem teste caindo.
+ */
+export const CODIGO_CRIACAO_NAO_CONCLUIDA = 'criacao_nao_concluida'
+
 export function erro(mensagem: string, codigo: string, status: number): Response {
   return json({ erro: mensagem, codigo } satisfies CorpoErro, status)
 }
@@ -78,10 +88,51 @@ export const ERROS = {
       'criacao_nao_autorizada',
       409,
     ),
+  /**
+   * ⚠️ **Esta frase NÃO promete reprocessamento** — e a versão anterior prometia
+   * (`D-46`). Ela dizia *"Sua solicitação não foi perdida — tente novamente em
+   * instantes"*, e essa promessa só o **outbox** pode cumprir: ela é verdadeira quando a
+   * submissão fica `pendente`, e nesse caso a rota responde **201** com
+   * `estado: 'pendente'` e a frase própria de `respostaCriacao`. Por aqui passa
+   * justamente o contrário — o erro que ninguém enfileirou.
+   *
+   * Medido na staging em 12/08/2026: `POST /api/conversas/:id/confirmar` → **500** com
+   * esta frase, submissão marcada `falha` e `transitorio: false`. Ou seja, a solicitação
+   * **tinha** se perdido, e "tente novamente em instantes" não reprocessava nada
+   * (`RNF-17`).
+   *
+   * Genérica de propósito: este é o erro de **qualquer** rota, inclusive falha de boot no
+   * `worker.ts`, e nenhuma afirmação sobre o destino do que a pessoa enviou seria
+   * verdadeira nas duas pontas. Quem sabe o destino é quem criou a condição — daí
+   * `criacaoNaoConcluida` existir separada.
+   */
   interno: () =>
     erro(
-      'Algo deu errado do nosso lado. Sua solicitação não foi perdida — tente novamente em instantes.',
+      'Algo deu errado do nosso lado. Tente de novo em instantes — se continuar, fale com o time de tech.',
       'erro_interno',
+      500,
+    ),
+  /**
+   * A criação falhou de forma **definitiva**: a submissão está `falha`, o cron **não** a
+   * reprocessa, e nenhum chamado vai nascer dela (`RNF-17`, `D-46`).
+   *
+   * ⚠️ **A saída é diferente nas duas superfícies, então a frase também é.** A chave de
+   * idempotência do formulário vive na montagem da tela e a da conversa é derivada da
+   * conversa (`conversa:<id>`) — reenviar o mesmo formulário sem recomeçar, ou confirmar
+   * de novo a mesma conversa, cai na **mesma** submissão morta e recebe este mesmo erro.
+   * Mandar "tente de novo" sem dizer *de onde* seria a segunda frase falsa no lugar da
+   * primeira.
+   *
+   * ⚠️ Nada do corpo da resposta da Atlassian entra aqui (`RNF-01`, `RNF-30`) — o motivo
+   * técnico já está na auditoria, que é onde ele serve para alguma coisa.
+   */
+  criacaoNaoConcluida: (via: 'conversa' | 'formulario') =>
+    erro(
+      'Não conseguimos abrir o chamado, e ele não ficou na fila para ser aberto depois. ' +
+        (via === 'formulario'
+          ? 'Comece de novo pelo botão abaixo — se acontecer outra vez, fale com o time de tech.'
+          : 'Comece uma conversa nova pelo botão abaixo — se acontecer outra vez, fale com o time de tech.'),
+      CODIGO_CRIACAO_NAO_CONCLUIDA,
       500,
     ),
 } as const

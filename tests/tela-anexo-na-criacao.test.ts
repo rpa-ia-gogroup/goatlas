@@ -21,13 +21,8 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
-import {
-  AVISO_DECLARACAO_PENDENTE,
-  PerguntaDeAnexo,
-  ResultadoDoAnexo,
-  ROTULOS_ENVIO,
-  type Declaracao,
-} from '@/app/anexo'
+import { PerguntaDeAnexo, ResultadoDoAnexo, ROTULOS_ENVIO, type Declaracao } from '@/app/anexo'
+import { mensagemDePendencias, pendenciasParaAbrir } from '@/app/pendencias'
 import type { ResultadoAnexo } from '@/app/api'
 
 function pergunta(declarou: Declaracao): string {
@@ -95,8 +90,13 @@ describe('SC-03 / RN-11 — a trava é responder, não anexar', () => {
   })
 
   it('a mensagem do botão travado nomeia o que falta, e só isso', () => {
-    expect(AVISO_DECLARACAO_PENDENTE).toMatch(/responda/i)
-    expect(AVISO_DECLARACAO_PENDENTE).not.toMatch(/erro|inválid|obrigat/i)
+    // ⚠️ `D-46` — a frase deixou de ser constante. Ela afirmava "É a única coisa que
+    // falta", e essa afirmação depende do resto da tela, que uma constante não vê.
+    const frase = mensagemDePendencias(
+      pendenciasParaAbrir({ campos: [], valores: {}, faltaDeclararAnexo: true }),
+    )
+    expect(frase).toMatch(/responder/i)
+    expect(frase).not.toMatch(/erro|inválid|obrigat/i)
   })
 })
 

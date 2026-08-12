@@ -28,6 +28,23 @@ export interface ResultadoCriacao {
   readonly verificadoRegras: boolean
 }
 
+/**
+ * "Esta criação falhou e **não** ficou na fila de reprocessamento" — `D-46`.
+ *
+ * É o único predicado que autoriza a tela a dizer que o chamado não vai nascer. Mora
+ * aqui, ao lado do código que **produz** a condição (`registrarTentativaFalha` com
+ * `transitorio: false`, e a submissão já em `falha` na entrada), pelo mesmo motivo de
+ * `config/diagnostico.ts` (`D-25`): condição reescrita na camada HTTP viraria uma segunda
+ * regra, e ela divergiria em silêncio no dia em que a classificação mudar — a tela
+ * voltaria a prometer reprocessamento sem nenhum teste cair.
+ *
+ * ⚠️ **Só a criação chama isto.** Um `ErroAtlassian` definitivo vindo de `comentar` ou de
+ * `transicionar` significa outra coisa, e a frase de chamado perdido estaria errada lá.
+ */
+export function falhaDefinitivaDeCriacao(erro: unknown): boolean {
+  return erro instanceof ErroAtlassian && !erro.detalhe.transitorio
+}
+
 export interface DadosAbertura {
   readonly solicitanteEmail: string
   readonly chaveIdempotencia: string
@@ -162,6 +179,32 @@ export class ServicoChamados {
     })
 
     if (!nova) {
+      // 🚨 **Submissão em `falha` NÃO é duplo clique** — `D-46`.
+      //
+      // `falha` é o estado de quem falhou de forma **definitiva**: o cron não a
+      // reprocessa (`RNF-17`) e nenhum chamado vai nascer dela. Devolvê-la pela linha
+      // abaixo produzia `estado: 'pendente'` (porque `issueKey` é `null`) e a rota
+      // respondia **201** com *"Recebemos sua solicitação e estamos abrindo o chamado.
+      // Nada se perdeu"* — a versão mais cara da mentira do `D-46`, porque vinha
+      // disfarçada de recibo. Quem clicasse "Abrir chamado" de novo depois do erro lia
+      // que estava tudo bem.
+      //
+      // ⚠️ E **a idempotência não é enfraquecida**: `RF-24` existe para não criar DOIS
+      // chamados, e aqui não existe nenhum. O que se recusa é afirmar que existe um a
+      // caminho.
+      if (submissao.estado === 'falha') {
+        await this.auditoria.registrar({
+          atorEmail: dados.solicitanteEmail,
+          acao: 'chamado_criado',
+          recurso: `submissao:${submissao.id}`,
+          resultado: 'negado',
+          detalhe: { motivo: 'submissao_anterior_em_falha_definitiva' },
+        })
+        throw new ErroAtlassian('submissão anterior falhou de forma definitiva', {
+          transitorio: false,
+          recurso: `submissao:${submissao.id}`,
+        })
+      }
       // RF-24: duplo clique. Devolve o que já existe, sem criar segundo chamado.
       return {
         issueKey: submissao.issueKey,
