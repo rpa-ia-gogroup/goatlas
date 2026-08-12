@@ -1,6 +1,31 @@
 // src/lib/atlassian/comentarios.ts
-function montarQueryComentarios() {
-  return "?public=true&internal=false";
+function montarQueryComentarios(comAnexos = false) {
+  return `?public=true&internal=false${comAnexos ? "&expand=attachment" : ""}`;
+}
+function anexoDaApi(bruto) {
+  if (!bruto || typeof bruto !== "object") return null;
+  const a = bruto;
+  const nomeArquivo = typeof a.filename === "string" ? a.filename : "";
+  if (nomeArquivo === "") return null;
+  const tamanho = typeof a.size === "number" && Number.isFinite(a.size) ? a.size : null;
+  return {
+    nomeArquivo,
+    tipoDeclarado: typeof a.mimeType === "string" && a.mimeType !== "" ? a.mimeType : null,
+    tamanhoBytes: tamanho,
+    criadoEm: typeof a.created?.iso8601 === "string" ? a.created.iso8601 : null
+  };
+}
+function anexosDoComentario(bruto) {
+  if (Array.isArray(bruto)) {
+    return bruto.map(anexoDaApi).filter((a) => a !== null);
+  }
+  if (bruto && typeof bruto === "object") {
+    const valores = bruto.values;
+    if (Array.isArray(valores)) {
+      return valores.map(anexoDaApi).filter((a) => a !== null);
+    }
+  }
+  return null;
 }
 function filtrarPublicos(itens) {
   const saida = [];
@@ -12,7 +37,10 @@ function filtrarPublicos(itens) {
       id: String(c.id ?? ""),
       corpo: typeof c.body === "string" ? c.body : "",
       autorNome: typeof c.author?.displayName === "string" ? c.author.displayName : "Desconhecido",
-      criadoEm: typeof c.created?.iso8601 === "string" ? c.created.iso8601 : ""
+      criadoEm: typeof c.created?.iso8601 === "string" ? c.created.iso8601 : "",
+      // ⚠️ `null` quando a expansão não veio — ver `anexosDoComentario`. É este `null`
+      // que vira "não conseguimos confirmar os anexos" em vez de "não há anexos".
+      anexos: anexosDoComentario(c.attachment)
     });
   }
   return saida;
@@ -282,6 +310,7 @@ function novasCachesAtlassian(agoraMs = () => Date.now()) {
     corpo: new CacheTtl(agoraMs, 30)
   };
 }
+var MAX_ANEXOS_LISTADOS = 50;
 var ROTULO_PRIORIDADE = Object.freeze({
   critica: "Highest",
   alta: "High",
@@ -551,12 +580,100 @@ var ClienteAtlassianHttp = class {
       slaPrimeiraResposta: null
     };
   }
-  /** RF-32 / RN-05 — as duas camadas. Ver `comentarios.ts` para o porquê. */
+  /**
+   * RF-32 / RN-05 — as duas camadas. Ver `comentarios.ts` para o porquê.
+   *
+   * A expansão `attachment` (`RF-31`, `D-45`) é **tentada**, não exigida: ela é a prova de
+   * publicidade dos anexos, e ninguém verificou contra a Atlassian real se este endpoint a
+   * aceita. Um `expand` recusado com 4xx derrubaria a conversa inteira do chamado — P0
+   * funcionando hoje — para servir a um requisito diferente. Por isso a recusa
+   * **definitiva** faz uma segunda tentativa sem a expansão, e o resultado sai com
+   * `anexos: null`, que a camada de cima traduz em "não conseguimos confirmar os anexos".
+   *
+   * ⚠️ Falha **transitória** (503/429) não faz retentativa aqui: quem lida com isso é o
+   * backoff do transporte, e insistir com outra query esconderia uma queda como se fosse
+   * incompatibilidade de contrato.
+   */
   async listarComentariosPublicos(issueKey) {
+    const url = (comAnexos) => `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/comment${montarQueryComentarios(comAnexos)}`;
+    try {
+      const dados = await this.transporte.requisitar(url(true));
+      return filtrarPublicos(dados?.values ?? []);
+    } catch (erro2) {
+      if (!(erro2 instanceof ErroAtlassian) || erro2.detalhe.transitorio) throw erro2;
+      const dados = await this.transporte.requisitar(url(false));
+      return filtrarPublicos(dados?.values ?? []);
+    }
+  }
+  /**
+   * `RF-31` — a testemunha de que o anexo existe. Ver `tickets/anexos-do-chamado.ts`
+   * para por que ela **não** é a lista que a pessoa vê.
+   *
+   * O teto de itens é o mesmo raciocínio do resto: lista sem limite é a Atlassian
+   * decidindo quanta memória o Worker usa.
+   */
+  async listarAnexosDoChamado(issueKey) {
     const dados = await this.transporte.requisitar(
-      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/comment${montarQueryComentarios()}`
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/attachment?start=0&limit=${MAX_ANEXOS_LISTADOS}`
     );
-    return filtrarPublicos(dados?.values ?? []);
+    return (dados?.values ?? []).map(anexoDaApi).filter((a) => a !== null);
+  }
+  /**
+   * `RF-31`/`RNF-02` — bytes de um anexo do chamado, pelo mesmo desenho de `obterAnexo`
+   * (Confluence):
+   *
+   * 1. **O nome é casado contra a lista daquele chamado.** Não existe baixar por caminho:
+   *    o caminho vem da URL, e um caminho montado à mão alcançaria anexo de outro chamado.
+   * 2. **O link de conteúdo só é aceito no próprio site.** Ele vem da Atlassian; absoluto
+   *    para outro host, faria o app buscar **com a credencial** onde a resposta mandasse.
+   */
+  async obterAnexoDoChamado(issueKey, nomeArquivo) {
+    if (!issueKey || !nomeArquivo) return { estado: "nao_encontrado" };
+    const dados = await this.transporte.requisitar(
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/attachment?start=0&limit=${MAX_ANEXOS_LISTADOS}`
+    );
+    const achado = (dados?.values ?? []).find((a) => String(a.filename ?? "") === nomeArquivo);
+    if (!achado) return { estado: "nao_encontrado" };
+    const tamanho = Number(achado.size ?? 0);
+    if (Number.isFinite(tamanho) && tamanho > MAX_ANEXO_BYTES) {
+      return { estado: "grande_demais", tamanhoBytes: tamanho };
+    }
+    const caminho = this.caminhoDeConteudo(achado._links);
+    if (caminho === null) return { estado: "nao_encontrado" };
+    const baixado = await this.transporte.requisitarBinario(caminho, MAX_ANEXO_BYTES);
+    if (baixado.estado === "grande_demais") return baixado;
+    return {
+      estado: "ok",
+      anexo: {
+        nomeArquivo,
+        tipoDeclarado: baixado.tipoDeclarado ?? (typeof achado.mimeType === "string" ? achado.mimeType : null),
+        bytes: baixado.bytes
+      }
+    };
+  }
+  /**
+   * `_links.content` → caminho **relativo à base**, ou `null`.
+   *
+   * O JSM devolve URL absoluta aqui (ao contrário da v2 do Confluence, que devolve
+   * caminho). Aceitar a absoluta como veio faria o transporte concatenar base + URL e
+   * produzir lixo; aceitar host diferente seria pedir bytes, com a credencial, ao lugar
+   * que a resposta escolhesse. Então: mesmo host que a base, ou nada.
+   */
+  caminhoDeConteudo(links) {
+    if (!links || typeof links !== "object") return null;
+    const bruto = links.content;
+    if (typeof bruto !== "string" || bruto === "") return null;
+    if (bruto.startsWith("/") && !bruto.startsWith("//")) return bruto;
+    let alvo;
+    let base;
+    try {
+      alvo = new URL(bruto);
+      base = new URL(this.opcoes.baseUrl);
+    } catch {
+      return null;
+    }
+    if (alvo.origin !== base.origin) return null;
+    return `${alvo.pathname}${alvo.search}`;
   }
   async comentar(issueKey, corpo, autorEmail, autorNome) {
     await this.transporte.requisitar(
@@ -977,6 +1094,7 @@ var ClienteAtlassianFake = class {
       relogio: inicial.relogio ?? (() => (/* @__PURE__ */ new Date(0)).toISOString()),
       transicoes: inicial.transicoes ?? /* @__PURE__ */ new Map(),
       anexosDeChamado: inicial.anexosDeChamado ?? /* @__PURE__ */ new Map(),
+      expansaoDeAnexoIndisponivel: inicial.expansaoDeAnexoIndisponivel ?? false,
       temporariosInvalidos: inicial.temporariosInvalidos ?? /* @__PURE__ */ new Set(),
       falhas: {
         criarChamado: "nenhum",
@@ -988,6 +1106,8 @@ var ClienteAtlassianFake = class {
         obterSchemaDoTipo: "nenhum",
         paginaRestrita: "nenhum",
         obterAnexo: "nenhum",
+        listarAnexosDoChamado: "nenhum",
+        obterAnexoDoChamado: "nenhum",
         buscarAtualizados: "nenhum",
         anexarArquivo: "nenhum",
         subirAnexoTemporario: "nenhum",
@@ -1097,7 +1217,53 @@ var ClienteAtlassianFake = class {
     this.chamadas.push({ operacao: "listarComentariosPublicos", params: issueKey });
     this.checar(this.estado.falhas.listarComentarios, "listarComentariosPublicos");
     const todos = this.estado.comentarios.get(issueKey) ?? [];
-    return todos.filter((c) => c.publico).map(({ id, corpo, autorNome, criadoEm }) => ({ id, corpo, autorNome, criadoEm }));
+    return todos.filter((c) => c.publico).map(({ id, corpo, autorNome, criadoEm, anexos }) => ({
+      id,
+      corpo,
+      autorNome,
+      criadoEm,
+      // 🚨 `null` = a expansão não veio, e é o oposto de `[]`. Ver `D-45`: é este valor
+      // que impede o app de afirmar "não há anexos" sobre um chamado que tem.
+      anexos: this.estado.expansaoDeAnexoIndisponivel ? null : (anexos ?? []).map((a) => ({
+        nomeArquivo: a.nome,
+        tipoDeclarado: a.tipo,
+        tamanhoBytes: a.tamanho,
+        criadoEm
+      }))
+    }));
+  }
+  /**
+   * `RF-31` — devolve **tudo**, inclusive o interno, como a Atlassian faz para um agente.
+   *
+   * ⚠️ Isto é fidelidade, não descuido: se o dublê filtrasse aqui, o teste de `RN-05`
+   * passaria porque o fake é gentil, e o vazamento só apareceria na staging. A trava mora
+   * acima, em `tickets/anexos-do-chamado.ts`.
+   */
+  async listarAnexosDoChamado(issueKey) {
+    this.chamadas.push({ operacao: "listarAnexosDoChamado", params: issueKey });
+    this.checar(this.estado.falhas.listarAnexosDoChamado, "listarAnexosDoChamado");
+    return (this.estado.anexosDeChamado.get(issueKey) ?? []).map((a) => ({
+      nomeArquivo: a.nome,
+      tipoDeclarado: a.tipo,
+      tamanhoBytes: a.tamanho,
+      criadoEm: (/* @__PURE__ */ new Date(0)).toISOString()
+    }));
+  }
+  async obterAnexoDoChamado(issueKey, nomeArquivo) {
+    this.chamadas.push({ operacao: "obterAnexoDoChamado", params: { issueKey, nomeArquivo } });
+    this.checar(this.estado.falhas.obterAnexoDoChamado, "obterAnexoDoChamado");
+    const achado = (this.estado.anexosDeChamado.get(issueKey) ?? []).find(
+      (a) => a.nome === nomeArquivo
+    );
+    if (!achado) return { estado: "nao_encontrado" };
+    const bytes = achado.bytes ?? new ArrayBuffer(achado.tamanho);
+    if (bytes.byteLength > this.estado.limiteAnexoBytes) {
+      return { estado: "grande_demais", tamanhoBytes: bytes.byteLength };
+    }
+    return {
+      estado: "ok",
+      anexo: { nomeArquivo: achado.nome, tipoDeclarado: achado.tipo, bytes }
+    };
   }
   /** Só para teste: devolve TUDO, inclusive interno — para provar que não vazou. */
   comentariosBrutos(issueKey) {
@@ -1264,10 +1430,39 @@ var ClienteAtlassianFake = class {
       params: { serviceDeskId, issueKey, nome: arquivo.nome, tipo: arquivo.tipo }
     });
     this.checar(this.estado.falhas.anexarArquivo, "anexarArquivo");
-    const atuais = this.estado.anexosDeChamado.get(issueKey) ?? [];
-    this.estado.anexosDeChamado.set(issueKey, [
-      ...atuais,
+    this.registrarAnexosNoChamado(issueKey, [
       { nome: arquivo.nome, tipo: arquivo.tipo, tamanho: arquivo.bytes.byteLength }
+    ]);
+  }
+  /**
+   * Guarda o anexo **e** o comentário público que o carrega — como o JSM faz.
+   *
+   * ⚠️ O segundo passo (`POST .../attachment` com `public: true`) responde com um
+   * `comment`: no JSM o anexo público **é** carregado por um comentário público. É essa
+   * ligação que dá ao app a prova de publicidade de `RF-31` (`D-45`), e um dublê que
+   * guardasse só o arquivo faria a lista da pessoa aparecer sempre como "não conseguimos
+   * confirmar" — teste vermelho por infidelidade do dublê, não por defeito do código.
+   *
+   * Anexo com `publico: false` (o do time, em comentário interno) fica **sem** comentário
+   * de propósito: é assim que o teste de burla encena o que `RN-05` proíbe.
+   */
+  registrarAnexosNoChamado(issueKey, novos) {
+    const atuais = this.estado.anexosDeChamado.get(issueKey) ?? [];
+    this.estado.anexosDeChamado.set(issueKey, [...atuais, ...novos]);
+    const publicos = novos.filter((a) => a.publico !== false);
+    if (publicos.length === 0) return;
+    const comentarios = this.estado.comentarios.get(issueKey) ?? [];
+    this.estado.comentarios.set(issueKey, [
+      ...comentarios,
+      {
+        id: `c${comentarios.length + 1}`,
+        // Corpo vazio: no JSM o comentário de anexo sem `additionalComment` é isso mesmo.
+        corpo: "",
+        autorNome: NOME_CONTA_DE_SERVICO_FAKE,
+        criadoEm: (/* @__PURE__ */ new Date(0)).toISOString(),
+        publico: true,
+        anexos: publicos.map(({ nome, tipo, tamanho }) => ({ nome, tipo, tamanho }))
+      }
     ]);
   }
   async subirAnexoTemporario(serviceDeskId, arquivo) {
@@ -1296,12 +1491,11 @@ var ClienteAtlassianFake = class {
         recurso: "materializarAnexosTemporarios"
       });
     }
-    const atuais = this.estado.anexosDeChamado.get(issueKey) ?? [];
     const novos = ids.map((id) => {
       const t = this.temporarios.get(id);
       return { nome: t?.nome ?? id, tipo: t?.tipo ?? "application/octet-stream", tamanho: t?.tamanho ?? 0 };
     });
-    this.estado.anexosDeChamado.set(issueKey, [...atuais, ...novos]);
+    this.registrarAnexosNoChamado(issueKey, novos);
   }
   async listarTransicoes(issueKey) {
     this.chamadas.push({ operacao: "listarTransicoes", params: issueKey });
@@ -1404,6 +1598,12 @@ var ClienteAtlassianSomenteLeitura = class {
   }
   listarComentariosPublicos(issueKey) {
     return this.real.listarComentariosPublicos(issueKey);
+  }
+  listarAnexosDoChamado(issueKey) {
+    return this.real.listarAnexosDoChamado(issueKey);
+  }
+  obterAnexoDoChamado(issueKey, nomeArquivo) {
+    return this.real.obterAnexoDoChamado(issueKey, nomeArquivo);
   }
   buscarConfluence(params) {
     return this.real.buscarConfluence(params);
@@ -4765,6 +4965,40 @@ var RepositorioVinculos = class {
   }
 };
 
+// src/lib/tickets/anexos-do-chamado.ts
+function urlDoAnexoNoApp(issueKey, nomeArquivo) {
+  return `/api/chamados/${encodeURIComponent(issueKey)}/anexos/${encodeURIComponent(nomeArquivo)}`;
+}
+function provaDePublicidade(comentarios) {
+  const anexos = [];
+  let disponivel = true;
+  for (const c of comentarios) {
+    if (c.anexos === null) {
+      disponivel = false;
+      continue;
+    }
+    anexos.push(...c.anexos);
+  }
+  return { disponivel, anexos };
+}
+function mesmoArquivo(a, b) {
+  if (a.nomeArquivo !== b.nomeArquivo) return false;
+  if (a.tamanhoBytes === null || b.tamanhoBytes === null) return true;
+  return a.tamanhoBytes === b.tamanhoBytes;
+}
+function anexosParaExibir(issueKey, doChamado, prova) {
+  if (doChamado === null) return { itens: [], indisponivel: true };
+  if (doChamado.length === 0) return { itens: [], indisponivel: false };
+  if (!prova.disponivel) return { itens: [], indisponivel: true };
+  const publicos = doChamado.filter((a) => prova.anexos.some((p) => mesmoArquivo(a, p)));
+  return {
+    itens: publicos.map((a) => ({ ...a, url: urlDoAnexoNoApp(issueKey, a.nomeArquivo) })),
+    // Existe anexo, a prova funcionou e nenhum casou: isso é um chamado cujos anexos são
+    // todos internos — resposta legítima, e "nenhum anexo seu por aqui" é verdade.
+    indisponivel: false
+  };
+}
+
 // src/lib/tickets/servico.ts
 function falhaDefinitivaDeCriacao(erro2) {
   return erro2 instanceof ErroAtlassian && !erro2.detalhe.transitorio;
@@ -5076,6 +5310,29 @@ var ServicoChamados = class {
     const vinculo = await this.vinculos.obterDoSolicitante(issueKey, solicitanteEmail);
     if (!vinculo) return null;
     return this.atlassian.listarComentariosPublicos(issueKey);
+  }
+  /**
+   * Anexos que a pessoa pode ver — `RF-31`, `RN-05`, `D-45`.
+   *
+   * Duas fontes cruzadas (ver `tickets/anexos-do-chamado.ts`): a lista do chamado prova
+   * que o anexo **existe**, os comentários públicos provam que ele é **público**. O
+   * isolamento por vínculo vem antes das duas — sem e-mail no `WHERE`, nada é lido.
+   *
+   * ⚠️ **Falha de qualquer uma das fontes vira `indisponivel`, nunca lista vazia**
+   * (`RNF-18`, `RNF-19`): "este chamado não tem anexos" durante uma queda faz a pessoa
+   * mandar o arquivo de novo, e é a mesma frase errada de `comentariosIndisponiveis`.
+   */
+  async listarAnexosDoSolicitante(issueKey, solicitanteEmail, comentarios) {
+    const vinculo = await this.vinculos.obterDoSolicitante(issueKey, solicitanteEmail);
+    if (!vinculo) return null;
+    let doChamado = null;
+    try {
+      doChamado = await this.atlassian.listarAnexosDoChamado(issueKey);
+    } catch {
+      doChamado = null;
+    }
+    const prova = comentarios === null ? { disponivel: false, anexos: [] } : provaDePublicidade(comentarios);
+    return anexosParaExibir(issueKey, doChamado, prova);
   }
 };
 
@@ -8695,6 +8952,11 @@ async function rotear(req, ctx, eu, caminho, url) {
     } catch {
       comentariosIndisponiveis = true;
     }
+    const anexos = await ctx.chamados.listarAnexosDoSolicitante(
+      detalhe[1],
+      eu.email,
+      comentariosIndisponiveis ? null : comentarios
+    );
     return json({
       chamado: r.chamado,
       via: r.vinculo.via,
@@ -8705,11 +8967,16 @@ async function rotear(req, ctx, eu, caminho, url) {
       // `D-13`. Devolver o cru daqui obrigaria a tela a remontar a regra, e duas
       // regras para o mesmo fato divergem em silêncio.
       comentarios: paraExibicao(comentarios ?? []),
+      // `RF-31` — o que a pessoa anexou, para ela poder ver de novo. Cada item traz a URL
+      // **deste app** (`RNF-02`): o navegador nunca fala com a Atlassian.
+      anexos: anexos?.itens ?? [],
       // `RNF-19` — a tela precisa distinguir "não há resposta ainda" de "não consegui
       // buscar as respostas". Sem estes campos, uma queda do Jira apareceria como um
-      // chamado sem histórico, o que é uma informação falsa.
+      // chamado sem histórico, o que é uma informação falsa. O mesmo vale, palavra por
+      // palavra, para os anexos.
       degradado: r.degradado,
-      comentariosIndisponiveis
+      comentariosIndisponiveis,
+      anexosIndisponiveis: anexos?.indisponivel ?? true
     });
   }
   const comentar = caminho.match(/^\/api\/chamados\/([^/]+)\/comentarios$/);
@@ -8875,6 +9142,68 @@ async function rotear(req, ctx, eu, caminho, url) {
       detalhe: { quantidade: enviados.length }
     });
     return json({ ok: true, enviados }, 201);
+  }
+  const baixarAnexo = caminho.match(/^\/api\/chamados\/([^/]+)\/anexos\/(.+)$/);
+  if (baixarAnexo && req.method === "GET") {
+    const issueKey = decodificar(baixarAnexo[1]);
+    const nome = decodificar(baixarAnexo[2]);
+    const negar = async (motivo, resposta) => {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "anexo_servido",
+        recurso: issueKey ?? "",
+        resultado: motivo === "indisponivel" ? "falha" : "negado",
+        // O NOME do arquivo não vai para a auditoria: ele é conteúdo do chamado de
+        // alguém, e o admin lê esta tabela (mesmo raciocínio do destino em `RF-45`).
+        detalhe: { motivo }
+      });
+      return resposta;
+    };
+    if (issueKey === null || nome === null) return await negar("id_invalido", ERROS.naoEncontrado());
+    let comentarios;
+    try {
+      comentarios = await ctx.chamados.listarComentariosDoSolicitante(issueKey, eu.email);
+    } catch {
+      return await negar("indisponivel", ERROS.conteudoIndisponivel());
+    }
+    if (comentarios === null) return await negar("sem_vinculo", ERROS.chamadoNaoSeu());
+    const anexos = await ctx.chamados.listarAnexosDoSolicitante(issueKey, eu.email, comentarios);
+    if (anexos === null) return await negar("sem_vinculo", ERROS.chamadoNaoSeu());
+    if (anexos.indisponivel) return await negar("indisponivel", ERROS.conteudoIndisponivel());
+    if (!anexos.itens.some((a) => a.nomeArquivo === nome)) {
+      return await negar("anexo_nao_autorizado", ERROS.naoEncontrado());
+    }
+    let resultado;
+    try {
+      resultado = await ctx.atlassian.obterAnexoDoChamado(issueKey, nome);
+    } catch {
+      return await negar("indisponivel", ERROS.conteudoIndisponivel());
+    }
+    if (resultado.estado === "nao_encontrado") {
+      return await negar("anexo_nao_encontrado", ERROS.naoEncontrado());
+    }
+    if (resultado.estado === "grande_demais") {
+      return await negar("anexo_grande_demais", ERROS.anexoGrandeDemais());
+    }
+    const entrega = decidirEntrega(resultado.anexo.tipoDeclarado);
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "anexo_servido",
+      recurso: issueKey,
+      resultado: "sucesso",
+      detalhe: { tipoServido: entrega.contentType, disposicao: entrega.disposicao }
+    });
+    return new Response(resultado.anexo.bytes, {
+      status: 200,
+      headers: {
+        ...CABECALHOS_ANEXO,
+        "Content-Type": entrega.contentType,
+        "Content-Disposition": cabecalhoContentDisposition(
+          resultado.anexo.nomeArquivo,
+          entrega.disposicao
+        )
+      }
+    });
   }
   const transicoes = caminho.match(/^\/api\/chamados\/([^/]+)\/transicoes$/);
   if (transicoes) {

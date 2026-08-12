@@ -22,11 +22,18 @@
  * Estas funções são puras de propósito — dá para testá-las sem HTTP.
  */
 
-import type { ComentarioPublico } from './tipos'
+import type { AnexoDoChamado, ComentarioPublico } from './tipos'
 
-/** Monta a query string dos comentários. Os DOIS parâmetros, sempre explícitos. */
-export function montarQueryComentarios(): string {
-  return '?public=true&internal=false'
+/**
+ * Monta a query string dos comentários. Os DOIS parâmetros, sempre explícitos.
+ *
+ * `comAnexos` acrescenta a expansão que `RF-31` usa como **prova de publicidade** do
+ * anexo (`D-45`). Ela é opcional no parâmetro porque é opcional no comportamento: se a
+ * Atlassian recusar a expansão, o cliente repete a chamada sem ela — comentário é `RF-32`,
+ * P0, e não pode cair junto com um enfeite de outro requisito.
+ */
+export function montarQueryComentarios(comAnexos = false): string {
+  return `?public=true&internal=false${comAnexos ? '&expand=attachment' : ''}`
 }
 
 interface ComentarioApi {
@@ -35,6 +42,56 @@ interface ComentarioApi {
   readonly body?: unknown
   readonly created?: { readonly iso8601?: unknown }
   readonly author?: { readonly displayName?: unknown }
+  readonly attachment?: unknown
+}
+
+/** Um anexo como o JSM o descreve, dentro da expansão de um comentário ou da lista. */
+interface AnexoApi {
+  readonly filename?: unknown
+  readonly mimeType?: unknown
+  readonly size?: unknown
+  readonly created?: { readonly iso8601?: unknown }
+}
+
+/**
+ * Traduz o objeto de anexo do JSM. Campo ausente vira `null`, nunca `0` nem `''`:
+ * "não sei o tamanho" e "o arquivo tem zero byte" são afirmações diferentes, e a
+ * segunda é falsa.
+ */
+export function anexoDaApi(bruto: unknown): AnexoDoChamado | null {
+  if (!bruto || typeof bruto !== 'object') return null
+  const a = bruto as AnexoApi
+  const nomeArquivo = typeof a.filename === 'string' ? a.filename : ''
+  if (nomeArquivo === '') return null
+  const tamanho = typeof a.size === 'number' && Number.isFinite(a.size) ? a.size : null
+  return {
+    nomeArquivo,
+    tipoDeclarado: typeof a.mimeType === 'string' && a.mimeType !== '' ? a.mimeType : null,
+    tamanhoBytes: tamanho,
+    criadoEm: typeof a.created?.iso8601 === 'string' ? a.created.iso8601 : null,
+  }
+}
+
+/**
+ * A expansão `attachment` de UM comentário — `null` quando ela não veio.
+ *
+ * 🚨 **Ausência do campo ≠ lista vazia**, e a distinção é o requisito inteiro: sem a
+ * expansão não há como provar que um anexo é público, e tratar isso como "nenhum anexo"
+ * é o app afirmando o contrário do que sabe. A Atlassian devolve a expansão como um
+ * *bean* paginado (`{values: []}`); aceitar também o array cru é tolerância a formato,
+ * não palpite — as duas formas trazem a mesma informação.
+ */
+function anexosDoComentario(bruto: unknown): readonly AnexoDoChamado[] | null {
+  if (Array.isArray(bruto)) {
+    return bruto.map(anexoDaApi).filter((a): a is AnexoDoChamado => a !== null)
+  }
+  if (bruto && typeof bruto === 'object') {
+    const valores = (bruto as { values?: unknown }).values
+    if (Array.isArray(valores)) {
+      return valores.map(anexoDaApi).filter((a): a is AnexoDoChamado => a !== null)
+    }
+  }
+  return null
 }
 
 /**
@@ -55,6 +112,9 @@ export function filtrarPublicos(itens: readonly unknown[]): readonly ComentarioP
       corpo: typeof c.body === 'string' ? c.body : '',
       autorNome: typeof c.author?.displayName === 'string' ? c.author.displayName : 'Desconhecido',
       criadoEm: typeof c.created?.iso8601 === 'string' ? c.created.iso8601 : '',
+      // ⚠️ `null` quando a expansão não veio — ver `anexosDoComentario`. É este `null`
+      // que vira "não conseguimos confirmar os anexos" em vez de "não há anexos".
+      anexos: anexosDoComentario(c.attachment),
     })
   }
   return saida
