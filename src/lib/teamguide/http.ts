@@ -37,6 +37,21 @@
  * `promessa` de `D-40` existe para essa hipótese aparecer no registro em vez de ser
  * suposta.
  *
+ * ## 🚨 A chamada nem saía do Worker: `fetch` guardado sem `bind` (`D-50`)
+ *
+ * O default sem `bind` guardava o `fetch` **global** numa propriedade, e
+ * `this.fetchImpl(...)` o chama com o **cliente** como receptor. O runtime dos Workers confere
+ * o receptor e recusa com `TypeError: Illegal invocation` **antes de abrir conexão** — o que
+ * a staging registrou como `erro_de_rede · conexao · typeerror`, sempre, com a credencial
+ * certa e o host no ar. No Node dos testes o `fetch` não confere o receptor, então **1181
+ * testes verdes conviviam com um cliente que nunca fez uma requisição em produção**.
+ *
+ * ⚠️ Não é bug novo: `atlassian/http.ts`, `atlassian/organizacao.ts`, `ia/cliente.ts` e
+ * `notificacoes/canais.ts` levaram `fetch.bind(globalThis)` em 07/08/2026, pelo mesmo
+ * sintoma. Este cliente nasceu depois (`D-37`) e repetiu a linha errada, porque a correção
+ * vivia **só num comentário de código**. Por isso agora há teste estrutural: nenhum arquivo
+ * de `src/` pode guardar `fetch` sem amarrar o `this`.
+ *
  * ## Diagnóstico: quem responde "foi o nosso timeout?" é o SINAL, não o nome do erro
  *
  * 🚨 A classificação antiga perguntava `e.name === 'AbortError'` — e ela **não é confiável
@@ -92,11 +107,21 @@ export class ClienteTeamGuideHttp implements ClienteTeamGuide {
   private readonly cache: CacheDaBase
   private readonly agora: () => number
   private readonly fetchImpl: typeof fetch
+  private readonly credencial: Credencial
 
-  constructor(private readonly opcoes: OpcoesTeamGuide) {
+  // ⚠️ O `token` **não** fica guardado cru: o que sobrevive ao construtor é a `Credencial`
+  // já aparada e verificada. Um segundo lugar lendo `opcoes.token` reabriria o caminho que
+  // manda o valor bruto para dentro do cabeçalho.
+  constructor(opcoes: OpcoesTeamGuide) {
     this.cache = opcoes.cache ?? novaCacheTeamGuide()
     this.agora = opcoes.agoraMs ?? (() => Date.now())
-    this.fetchImpl = opcoes.fetchImpl ?? fetch
+    // 🚨 **`fetch` PRECISA vir com `this` amarrado ao global** — ver o cabeçalho do arquivo
+    // (`D-50`). Sem o `bind`, `this.fetchImpl(...)` chama o `fetch` global com o **cliente**
+    // como receptor, e o runtime dos Workers recusa com `Illegal invocation` antes de abrir
+    // conexão. Os outros quatro clientes HTTP do app já faziam isto desde 07/08/2026; este
+    // nasceu depois e sem a linha. `tests/rf19-area-teamguide.test.ts` encena o receptor.
+    this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis)
+    this.credencial = prepararCredencial(opcoes.token)
   }
 
   async areaDe(email: string): Promise<ResultadoArea> {
@@ -126,11 +151,16 @@ export class ClienteTeamGuideHttp implements ClienteTeamGuide {
    * abertura de chamado mediria.
    */
   async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {
+    // ⚠️ A higiene da credencial acompanha o resultado **nos dois lados**. Se ela só
+    // aparecesse na falha, o caso mais provável — o valor tinha uma quebra de linha, o
+    // `.trim()` resolveu — sumiria do registro exatamente quando passasse a funcionar, e
+    // ninguém saberia que o secret continua sujo lá no console do GoDeploy.
+    const nota = this.credencial.saneada ? 'credencial_saneada' : null
     try {
       await this.baseCacheada()
-      return { ok: true, detalhe: 'ok' }
+      return { ok: true, detalhe: ['ok', nota].filter((p) => !!p).join(' · ') }
     } catch (e) {
-      return { ok: false, detalhe: rotuloDaFalha(falhaDe(e)) }
+      return { ok: false, detalhe: [rotuloDaFalha(falhaDe(e)), nota].filter((p) => !!p).join(' · ') }
     }
   }
 
@@ -150,13 +180,24 @@ export class ClienteTeamGuideHttp implements ClienteTeamGuide {
   }
 
   private async carregarBase(): Promise<ReadonlyMap<string, string>> {
+    // 🚨 **Antes de qualquer ida de rede** — `D-50`. Um valor que não cabe num cabeçalho
+    // HTTP faz o `fetch` lançar `TypeError` **sem abrir conexão**, e isso é indistinguível
+    // de "o Worker não alcança o host": as duas coisas produziam
+    // `erro_de_rede · conexao · typeerror`. Recusar aqui é o que separa as duas hipóteses.
+    if (this.credencial.invalida) {
+      throw new ErroTeamGuide({
+        motivo: 'credencial_malformada',
+        classe: this.credencial.invalida,
+      })
+    }
+
     const controle = new AbortController()
     const timer = setTimeout(() => controle.abort(), TIMEOUT_MS)
     try {
       let r: Response
       try {
         r = await this.fetchImpl(`${BASE}/employees/refs?unpaged=true&page=0`, {
-          headers: { Authorization: `Bearer ${this.opcoes.token}`, Accept: 'application/json' },
+          headers: { Authorization: `Bearer ${this.credencial.valor}`, Accept: 'application/json' },
           signal: controle.signal,
         })
       } catch (e) {
@@ -182,6 +223,45 @@ export class ClienteTeamGuideHttp implements ClienteTeamGuide {
       clearTimeout(timer)
     }
   }
+}
+
+/**
+ * O token pronto para ir num cabeçalho, e o que precisou ser feito com ele — `D-50`.
+ *
+ * ⚠️ Nada aqui carrega o valor, nem pedaço dele, nem o tamanho (`RNF-01`). O que sai são
+ * dois rótulos: *precisou de saneamento* e *o que sobrou de inválido*.
+ */
+interface Credencial {
+  readonly valor: string
+  /** `true` quando o valor bruto tinha espaço ou quebra de linha nas pontas. */
+  readonly saneada: boolean
+  /** Rótulo do que impede o valor de ir num cabeçalho, ou `null` se ele está pronto. */
+  readonly invalida: string | null
+}
+
+/**
+ * Saneia nas **pontas** e verifica o resto.
+ *
+ * O secret é colado à mão no console do GoDeploy, e um `\n` no fim é invisível em qualquer
+ * inspeção — mas basta para o runtime recusar o cabeçalho. Aparar as pontas é higiene de
+ * fronteira, não adivinhação: token nenhum tem espaço em branco na borda de propósito.
+ * ⚠️ O que **não** dá para consertar (controle no meio, caractere fora do ASCII imprimível)
+ * é recusado com nome próprio — coagir ali seria inventar uma credencial.
+ */
+function prepararCredencial(bruto: string): Credencial {
+  const cru = bruto ?? ''
+  const valor = cru.trim()
+  return { valor, saneada: valor !== cru, invalida: problemaEmCabecalho(valor) }
+}
+
+function problemaEmCabecalho(valor: string): string | null {
+  if (!valor) return 'vazia'
+  for (const caractere of valor) {
+    const ponto = caractere.codePointAt(0)!
+    if (ponto < 0x20 || ponto === 0x7f) return 'caractere_de_controle'
+    if (ponto > 0x7e) return 'caractere_nao_ascii'
+  }
+  return null
 }
 
 /** E-mail (minúsculo) → time folha. Função pura: **não lança**, para não virar `promessa`. */

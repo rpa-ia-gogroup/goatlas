@@ -155,10 +155,11 @@ com consertos opostos, então nenhuma medição posterior conseguiria separá-la
 - [x] **T-529** — `D-40` em `docs/DECISOES.md`, `CLAUDE.md` (padrões + estado do projeto) e
       este arquivo. _Requirements: RNF-27_
 - [ ] **T-530** — **Medição que fecha a causa:** `GET /api/health` na staging, logado, campo
-      `dependencias.teamguide.detalhe`. A tabela "o que aparecer → o que fazer" está no `D-40`.
-      ⚠️ Sem ela **não** há como escolher entre "o Worker não alcança o host" e "a resposta não
-      termina em 8 s": as duas produziam o mesmo rótulo, e é essa indistinção que a Fase 5
-      desfaz. _Requirements: RF-19, RF-59, D-24_
+      `dependencias.teamguide.detalhe`. ⚠️ **A tabela válida é a do `D-50`, não a do `D-40`** —
+      aquela mandava ler `erro_de_rede · conexao · typeerror` como egress da plataforma, e era
+      justamente a linha errada (ver Fase 7). Esperado agora: **`ok`** · `ok ·
+      credencial_saneada` (funciona, mas o secret precisa ser recolado) · `http_401` (a conexão
+      sai; o token é que não vale). _Requirements: RF-19, RF-59, D-24_
 - [ ] **T-531** — **Só depois de T-530**, e só se ela apontar `corpo`: paginar
       `/employees/refs` (`page`/`size`) e montar o mapa em passadas, respeitando o teto de
       subrequisições e mantendo a cache guardando **só sucesso**. ⚠️ Não adiantar: paginar
@@ -203,6 +204,32 @@ Causa: `camposAdicionais` descarta `priority` (certo para a tela de `RF-27`, ceg
       `T-099`/`T-100` na spec 001 e este arquivo. _Requirements: RNF-27_
 - [ ] **T-525** (ampliada) — a verificação de go-live, agora com os tipos **71 e 70**. Ver
       acima.
+
+## Fase 7 — a chamada nem saía do Worker (`D-50`, 12/08/2026)
+
+🚨 **A causa da Fase 5 era código nosso, e a tabela de leitura do `D-40` apontava para o lado
+errado.** `fetch` guardado numa propriedade **sem `bind`** é chamado com o cliente como
+receptor; o runtime dos Workers recusa com `Illegal invocation` **antes de abrir conexão** —
+`erro_de_rede · conexao · typeerror`, sempre, com credencial certa e host no ar. **Segunda
+ocorrência do mesmo bug no repositório** (a primeira, em 07/08/2026, corrigiu quatro clientes
+e ficou registrada só num comentário de código).
+
+O que desfez a conclusão anterior não foi outra hipótese: foi um **contraexemplo**. O godocs
+faz a mesma chamada, no mesmo GoDeploy, contra o mesmo host, com o mesmo token — e funciona.
+
+- [x] **T-537** — Testes **antes**: `fetch` global que recusa receptor diferente do global
+      (encena o Worker; o cliente sem `bind` **falha**) · varredura de `src/` proibindo
+      `fetch` guardado sem `bind` · credencial com quebra de linha na ponta (aparada, e o
+      health denuncia) · controle no meio (recusa **antes** da rede) · a recusa não carrega o
+      token. _Requirements: RF-19, RF-58, RF-59, RNF-01, RNF-04_
+- [x] **T-538** — `fetch.bind(globalThis)` em `teamguide/http.ts` e `Credencial` aparada e
+      verificada na fronteira, com `credencial_malformada` + `classe` e `credencial_saneada`
+      no `/api/health` **inclusive no sucesso**. ⚠️ `Accept`, timeout e ausência de retry
+      ficam como estão: consertar por acumulação não diz qual era o problema.
+      _Requirements: RF-19, RF-59, RNF-01, RNF-18, RNF-30_
+- [x] **T-539** — `D-50` em `docs/DECISOES.md` (com a correção **dentro** do `D-40`, não no
+      lugar dele), `CLAUDE.md` (padrões + estado do projeto) e este arquivo.
+      _Requirements: RNF-27_
 
 ## Fora desta spec
 

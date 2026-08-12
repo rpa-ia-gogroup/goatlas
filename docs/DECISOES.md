@@ -1949,6 +1949,24 @@ não sobre "abriu chamado". Mesma família de `D-38` e de `linhasComoObjetos`.
 **Data:** 12/08/2026 · **Medido por:** duas criações na staging (`appId 3936ca2d`) ·
 **Contexto:** `RF-19`, `RF-58`, `RF-59`, `RNF-01`, `RNF-18`, `RNF-30`, `D-37`
 
+> 🚨 **CORRIGIDO POR `D-50` (mesmo dia).** O instrumento desta decisão está certo e é o que
+> tornou a causa achável — mas **uma linha da tabela de leitura estava errada**, e ela era
+> justamente a linha que o app produzia: `erro_de_rede · conexao · typeerror` **não** era
+> "egress/TLS da plataforma". Era `fetch` guardado numa propriedade **sem `bind`**, recusado
+> pelo runtime dos Workers com `Illegal invocation` antes de abrir conexão — código nosso, e
+> a segunda ocorrência do mesmo bug no repositório.
+>
+> **Por que a leitura era plausível e mesmo assim errada:** ela foi escrita por eliminação,
+> sem contraexemplo. Eliminaram-se redirect, `waitUntil` e memória (abaixo, tudo válido), e
+> sobrou "não alcança o host" — a explicação natural para uma falha de rede que acontece
+> *antes* da resposta, *sempre*, com a credencial certa. O que faltava não era mais uma
+> hipótese: era **um sistema comparável que funcionasse**. O godocs roda a mesma chamada, no
+> mesmo GoDeploy, contra o mesmo host, com o mesmo token — e resolve área todo dia. Com esse
+> fato na mesa, "a plataforma não deixa" deixa de ser possível e a pergunta vira *o que o
+> nosso código faz de diferente*. ⚠️ A lição não é "não conclua": é **atribuir causa a um
+> terceiro exige contraprova de que o terceiro falha para todo mundo**, e não só a ausência
+> de outra explicação.
+
 **A medição.** Toda criação de chamado na staging registra o mesmo, e só isto:
 
 ```
@@ -2045,7 +2063,7 @@ consumiu 10 tentativas de adivinhação.
 | `ok` | resolvido sozinho / era transitório | nada |
 | `timeout · corpo · …` | 8 s não bastam para a base inteira | paginar `/employees/refs` (`page`/`size`), respeitando o teto de subrequisições |
 | `timeout · conexao · …` | o host não responde a tempo | rede/plataforma; considerar teto maior |
-| `erro_de_rede · conexao · typeerror_*` | o Worker não alcança o host | egress/TLS da plataforma — não é código nosso |
+| `erro_de_rede · conexao · typeerror_*` | ~~o Worker não alcança o host~~ | ~~egress/TLS da plataforma — não é código nosso~~ 🚨 **ERRADO, ver `D-50`** |
 | `erro_de_rede · corpo · syntaxerror` | a resposta chega truncada | paginar |
 | `erro_de_rede · promessa · …` | I/O entre contextos de requisição | a cache passa a guardar **valor**, como `cachesAtlassianDoIsolate` |
 | `http_401` | o token não vale para este host | credencial (⚠️ é o **mesmo** token do godocs) |
@@ -2830,6 +2848,92 @@ ainda", nunca `0%` (T-095), e a barra da calibragem sem bloqueio nenhum fica **l
 vez de vazia — barra vazia leria como "0% insistiram" quando o que houve foi "nada medido".
 O estado é anunciado por `aria-label` e repetido em texto: nunca só por cor nem só por
 comprimento (regra 9).
+
+---
+
+### D-50 · A chamada nem saía do Worker — `fetch` guardado sem `bind`, pela segunda vez
+
+**Data:** 12/08/2026 · **Provado por:** o godocs em produção + o padrão dos outros quatro
+clientes HTTP do próprio repo · **Contexto:** `RF-19`, `RF-59`, `RNF-01`, `RNF-04`, `D-37`,
+`D-40`
+
+**A causa.** `src/lib/teamguide/http.ts` guardava o `fetch` **global** numa propriedade sem
+amarrar o receptor — `opcoes.fetchImpl ?? fetch` — e o chamava como `this.fetchImpl(...)`. O
+runtime dos Workers confere o receptor de `fetch` e recusa com **`TypeError: Illegal
+invocation`**, *antes de abrir conexão*. É exatamente a assinatura que a staging registrou,
+em toda leitura, sempre igual:
+
+```
+/api/health → teamguide: { ok: false, detalhe: "erro_de_rede · conexao · typeerror" }
+auditoria   → area_indisponivel {"motivo":"erro_de_rede","fase":"conexao","classe":"typeerror"}
+```
+
+**Por que a suíte inteira não via.** No Node o `fetch` (undici) **não** confere o receptor.
+Mesma família de `linhasComoObjetos`, `D-38`, `D-39`, `D-43` e `D-47`: o ambiente de teste
+implementa o contrato de um jeito, a plataforma de outro, e o teste verde é sobre o ambiente.
+Aqui em grau máximo — **1181 testes verdes sobre um cliente que nunca fez uma requisição em
+produção**.
+
+🚨 **E é a SEGUNDA vez.** `atlassian/http.ts`, `atlassian/organizacao.ts`, `ia/cliente.ts` e
+`notificacoes/canais.ts` ganharam `fetch.bind(globalThis)` em **07/08/2026**, pelo mesmo
+sintoma ("643 testes verdes conviviam com um cliente que não conseguia fazer uma única
+requisição"). A correção ficou registrada **só num comentário de código**, dentro do arquivo
+corrigido — não no `CLAUDE.md`, não em decisão, não em teste. O cliente seguinte nasceu
+depois disso (`D-37`) e repetiu a linha. **Comentário no arquivo certo não alcança o arquivo
+que ainda não existe:** por isso a trava agora é uma varredura de `src/` em
+`tests/rf19-area-teamguide.test.ts`, no mesmo espírito de `ScC-4` e de
+`rnf01-vazamento-credenciais`.
+
+**O que derrubou "egress da plataforma"** (a leitura registrada no `D-40`): **o godocs roda a
+mesma chamada, no mesmo GoDeploy, contra o mesmo host, com o mesmo token — e funciona.** O
+`worker.js` dele traz `api.teamguide.app` e `Bearer` dentro do bundle do Worker, com
+`process.env` populado a partir de `env` no `fetch` do módulo. Logo o egress existe, e a
+diferença entre os dois estava no **nosso** lado. Comparando as duas chamadas linha a linha:
+
+| | godocs (funciona) | goatlas (falhava) | Veredito |
+|---|---|---|---|
+| Receptor do `fetch` | chamada direta ao global | propriedade **sem `bind`** | 🚨 **a causa** |
+| `Accept: application/json` | ausente | presente | inócuo — cabeçalho não impede a conexão, e a fase medida foi `conexao` |
+| `AbortController` (8 s) | ausente | presente | **excluído pela própria medição**: aborto produziria `motivo: timeout` (`D-40` decide pelo sinal), e o registrado foi `erro_de_rede` |
+| Retry 3× | presente | ausente | qualidade, não causa: as três tentativas falhariam igual |
+| URL | idêntica | idêntica | — |
+
+⚠️ **Nada disso foi "consertado junto".** O `Accept`, o timeout e a ausência de retry ficam
+como estão: mudar quatro coisas e ver funcionar não diz qual era o problema, e é a lição já
+paga no header assinado do cron.
+
+**A segunda causa possível, que produzia a MESMA assinatura — e por isso virou diagnóstico.**
+O `TG_API_TOKEN` é colado à mão no console do GoDeploy. Um `\n` no fim é invisível em
+qualquer inspeção e faz o `fetch` lançar `TypeError` **sem abrir conexão**, ou seja
+`erro_de_rede · conexao · typeerror` — indistinguível do bug do receptor. Enquanto as duas
+fossem a mesma linha no registro, consertar uma não provaria nada sobre a outra. Agora:
+
+- o valor é **aparado nas pontas** (`trim`) — higiene de fronteira, não adivinhação: token
+  nenhum tem espaço em branco na borda de propósito;
+- o que o `trim` **não** conserta (controle no meio, caractere fora do ASCII imprimível) é
+  **recusado antes de qualquer ida de rede**, com motivo próprio `credencial_malformada` e
+  `classe` dizendo *o quê* — nunca o valor, nem pedaço dele, nem o tamanho (`RNF-01`);
+- quando o `trim` **mudou** alguma coisa, `/api/health` diz `credencial_saneada` **inclusive
+  no sucesso**. Se a pista só aparecesse na falha, ela sumiria exatamente quando passasse a
+  funcionar, e ninguém saberia que o secret continua sujo no console.
+
+**A tabela de leitura, revisada** — `GET /api/health` na staging, `dependencias.teamguide.detalhe`:
+
+| O que aparecer | O que significa | O que fazer |
+|---|---|---|
+| `ok` | ✅ era o `bind`. Área resolvida | nada — fechar `T-530` |
+| `ok · credencial_saneada` | era o `bind` **e** o secret tem espaço/quebra de linha na ponta | funciona, mas **peça ao João para recolar o `TG_API_TOKEN`** sem quebra de linha |
+| `credencial_malformada · caractere_de_controle` | o secret tem uma quebra de linha **no meio** (colado em duas partes) | recolar o secret; nenhuma linha de código a mudar |
+| `credencial_malformada · caractere_nao_ascii` | veio algo que não é o token (aspa tipográfica, texto colado do chat) | recolar o secret |
+| `credencial_malformada · vazia` | o secret existe com valor vazio | recolar o secret |
+| `http_401` | ✅ a conexão sai! O token é que não vale | credencial (⚠️ é o **mesmo** token do godocs — se ele funciona lá, o valor daqui está errado) |
+| `timeout · corpo · …` | a conexão sai; 8 s não bastam para a base inteira | `T-531`: paginar `/employees/refs` |
+| `erro_de_rede · conexao · typeerror` **ainda** | com receptor amarrado e credencial verificada, esta hipótese fica sem candidato conhecido | aí sim voltar à plataforma — e agora com o godocs como contraprova a exibir |
+| `erro_de_rede · promessa · …` | I/O entre contextos de requisição | a cache passa a guardar **valor**, como `cachesAtlassianDoIsolate` |
+
+**O que fica para depois, de propósito.** Retry com backoff (o godocs tem, nós não) é
+qualidade de leitura, não causa desta falha, e entra quando houver medição que o justifique —
+`RNF-18` já garante que a ausência de área não derruba chamado nenhum.
 
 ---
 
