@@ -2771,6 +2771,68 @@ que é honesto.
 
 ---
 
+### D-49 · O painel volta à tela, e o mapa de destinos é a trava contra a terceira vez
+
+**Data:** 12/08/2026 · **Contexto:** `T-233`, `T-310`, `T-312`, `T-234`, `T-311`, `R-04`,
+`RF-55` · **Origem:** o segundo achado de `D-47`
+
+**O defeito.** `governanca/painel.ts` monta dez números a cada abertura do console e a tela
+desenhava **um**. `admin/paineis.tsx:99` consumia `metricas.painel.evidencia` e descartava
+`calibragem`, `sla`, `chamadosPorArea`, `chamadosPorPrioridade`, `canal`, `notificacoes`,
+`telemetriaAtlassian`, `ia` e `deflexaoAparente` — todos lidos do banco, serializados pela
+rota e jogados fora no navegador.
+
+**Por que isto é regressão e não lacuna.** A faixa de calibragem foi entregue em `T-310`,
+está no commit `0023fd4`, e sumiu no rewrite do console (`D-25`, `T-138`). O rastro que
+sobrou é o CSS órfão `.faixa-calibragem`, que a própria folha descreve como *"o único
+desenho de dado desta folha"* — 100 linhas de estilo sem um componente que as use.
+
+🚨 **E o efeito era exatamente o que `T-310` existia para impedir.** O `CLAUDE.md` já
+registrava a regra: *"a calibragem mostra os motivos junto com a barra; o threshold é o
+único campo editável ali, então mostrar 66% de override sozinho empurra para mexer nele"*.
+O estado real era **pior** que o cenário descrito — o threshold da Regra 1 editável no
+console e a taxa de override **em lugar nenhum**. Quem calibrava, calibrava às cegas: `R-04`
+sem o instrumento que o mitiga.
+
+**A correção, e onde cada número foi morar.** A seção é sempre aquela cuja configuração o
+número calibra (`D-25`), nunca uma aba de relatórios — número longe do controle não muda
+decisão:
+
+| Seção | O que voltou | Por quê ali |
+|---|---|---|
+| Interrupções | faixa de calibragem (barra · threshold · motivos · páginas apontadas) e a deflexão aparente com o viés | é onde o threshold é editado (`R-04`, `T-235`/`D-20`) |
+| Chamados | aderência ao SLA, por área, por prioridade, por via, avisos enviados | mede o que aquela seção configura (`T-312`, `D-19`) |
+| Custo da IA | gasto com IA e taxa de 429 | ao lado do teto que os governa (`T-234`, `RF-60`) |
+| Assentos | baseline antes × depois | `T-311`, `O2` |
+
+**A trava, em duas camadas — porque uma delas já falhou.** `PAINEIS_DO_CONSOLE` é
+`Record<keyof ResumoPainel, SecaoDoConsole | null>`: campo novo no painel **sem destino
+declarado não compila**, o mesmo desenho do mapa `FAMILIA` de `config/validar.ts`. Mas
+declarar a casa e não desenhar o painel compila — então `tests/painel-do-console.test.ts`
+renderiza cada seção com um número improvável por painel e procura o número lá dentro.
+⚠️ Verificado por **mutação**, não por fé: trocar `<PainelSla>` e `<PainelCalibragem>` por um
+parágrafo reprova quatro casos.
+
+⚠️ **O teste afirma sobre o painel EXISTIR, nunca sobre o desenho.** Nenhuma asserção sobre
+classe de CSS, ordem ou texto de apoio: teste que copia layout reprova em toda melhoria de
+tela, vira peso morto e é apagado — devolvendo o buraco que ele tapa. O que ele trava é
+"este número chega a alguém", que é a propriedade que se perdeu duas vezes.
+
+**O que NÃO mudou, e é decisão.** `deflexaoResolvidaConhecida` continua sem desenho: é a
+flag que declara `deflexaoAparente` como **proxy**, e o que ela governa — o viés escrito ao
+lado do número — está na tela (`D-20`). Mostrar `false` para alguém não informa nada. E
+`D-25` segue de pé: TTL de cache, rate limit e teto de tickets da Regra 2 continuam sem tela,
+com `tests/tela-admin.test.ts` reprovando quem os devolver — este PR **devolve painel**, não
+reabre campo.
+
+**Taxa sem dado continua `null`.** Aderência ao SLA sem ninguém avaliado lê "sem dados
+ainda", nunca `0%` (T-095), e a barra da calibragem sem bloqueio nenhum fica **listrada** em
+vez de vazia — barra vazia leria como "0% insistiram" quando o que houve foi "nada medido".
+O estado é anunciado por `aria-label` e repetido em texto: nunca só por cor nem só por
+comprimento (regra 9).
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

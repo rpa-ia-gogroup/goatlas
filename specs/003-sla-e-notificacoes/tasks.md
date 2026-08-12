@@ -83,9 +83,22 @@ created: "2026-08-04"
       área e prioridade, aderência ao SLA, aderência de canal (app × manual), buscas
       sem resultado. Os dados **já existem** — isto é superfície, não coleta.
       _Requirements: RF-55_
-- [~] **T-233** [P] Painel de métricas (skill `frontend-design` antes).
+- [x] **T-233** [P] Painel de métricas (skill `frontend-design` antes).
       _Requirements: RF-55, RNF-28_
-      🚨 **Estava `[x]`; a tela mostra 3 das 6 coisas que `RF-55` pede** — e o que falta
+      ✅ **Fechada em 12/08/2026 (`D-49`)** — os dez números que `montarPainel` produz têm
+      casa declarada em `PAINEIS_DO_CONSOLE` e aparecem nela: calibragem e deflexão aparente
+      em **Interrupções**; SLA, área, prioridade, via e avisos em **Chamados**; custo de IA
+      e 429 em **Custo da IA**; baseline em **Assentos**. A **aderência de canal** deixou de
+      ser ambígua: a tela diz "chamados abertos pelo app" e explica que o denominador só o
+      Jira tem — em vez de sugerir uma taxa que ninguém pode calcular.
+      ⚠️ **O buraco de teste que deixou isto acontecer também fechou**, e num arquivo
+      **separado** (`tests/painel-do-console.test.ts`): `tela-admin.test.ts` responde "o
+      campo diz o efeito?" e o novo responde "o painel chega à tela?" — misturá-los faria a
+      segunda pergunta morrer junto com a primeira no próximo rewrite.
+      ---
+      _Diagnóstico original (auditoria de 12/08, `D-47`), preservado porque é o que explica
+      a trava:_
+      🚨 **Estava `[x]`; a tela mostrava 3 das 6 coisas que `RF-55` pede** — e o que faltava
       **existe pronto no servidor** (auditoria de 12/08, `D-47`). `montarPainel`
       (`src/lib/governanca/painel.ts:253`) devolve o objeto completo e
       `GET /api/admin/metricas` o serializa (`src/lib/http/rotas.ts:1511-1528`), mas
@@ -128,6 +141,10 @@ created: "2026-08-04"
       procurá-lo. ⚠️ Como `RNF-15` diz que a taxa de 429 é a **única** telemetria de
       orçamento sob API token, um alerta que não alerta é o ponto cego da credencial única
       (`R-02`).
+      ⚠️ **`D-49` mexeu só em (c) pela metade, e a tarefa segue `[~]` de propósito:** a taxa
+      de 429 e o custo de IA agora **aparecem** na seção Custo da IA, com `acimaDoLimiar`
+      destacando o cartão — mas isso é o console mostrando, não um alerta. Quem não abrir o
+      console continua sem saber. (a) e (b) não foram tocados.
 - [ ] **T-235** Distinguir "defletido e resolveu" de "desistiu e foi pro chat".
       **[BLOQUEADA: decisão de produto]** — sem isso a taxa de deflexão infla e o
       projeto se auto-avalia bem por engano. ⚠️ **Mitigado, não resolvido:** o painel

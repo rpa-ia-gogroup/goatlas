@@ -57,8 +57,15 @@ import {
 import {
   PainelAssentos,
   PainelAuditoria,
+  PainelBaseline,
+  PainelCalibragem,
   PainelLacunas,
   PainelMetricas,
+  PainelNotificacoes,
+  PainelOrcamento,
+  PainelPorArea,
+  PainelSla,
+  PainelVolume,
   Quando,
   type Carga,
 } from './paineis'
@@ -330,8 +337,16 @@ function VisaoGeral({
   )
 }
 
-/** O acompanhamento que pertence a cada seção — nenhuma área genérica de relatórios. */
-function DadosDaSecao({
+/**
+ * O acompanhamento que pertence a cada seção — nenhuma área genérica de relatórios.
+ *
+ * ⚠️ **Exportado por causa do teste, e o teste existe por causa de uma regressão real.**
+ * `tests/painel-do-console.test.ts` renderiza cada seção e procura ali o número que o
+ * servidor calculou: foi assim que a calibragem de `T-310` sumiu no rewrite do console sem
+ * uma asserção vermelha. O mapa `PAINEIS_DO_CONSOLE` diz onde cada número mora; esta função
+ * é o que cumpre o mapa.
+ */
+export function DadosDaSecao({
   secao,
   metricas,
   lacunas,
@@ -366,12 +381,84 @@ function DadosDaSecao({
 }) {
   if (secao.id === 'interrupcao') {
     return (
+      <Quando carga={metricas} carregando="Somando as interrupções…">
+        {(m) => (
+          <div className="pilha">
+            <BlocoDeDado
+              titulo="Está funcionando?"
+              explicacao="Quantos resolveram sem abrir chamado, e quantos insistiram mesmo assim. É com estes números que se mexe nos controles acima — não no achismo."
+            >
+              <PainelMetricas metricas={m} />
+            </BlocoDeDado>
+            {/* ⚠️ A calibragem fica NESTA seção porque é aqui que o threshold é editado
+                (`R-04`). Levá-la para uma aba de relatórios devolveria o problema que ela
+                existe para resolver: o botão fácil visível, e o dado que diz que ele é a
+                resposta errada em outra tela. */}
+            <BlocoDeDado
+              titulo="Antes de mexer no controle acima"
+              explicacao="A barra é a proporção de interrupções em que a pessoa seguiu assim mesmo. Junto dela vem o que ela escreveu e qual página apareceu: subir a certeza interrompe menos gente, mas quem estava certo era quem seguiu."
+            >
+              <PainelCalibragem calibragem={m.painel.calibragem} />
+            </BlocoDeDado>
+          </div>
+        )}
+      </Quando>
+    )
+  }
+
+  if (secao.id === 'chamados') {
+    return (
+      <Quando carga={metricas} carregando="Somando os chamados…">
+        {(m) => (
+          <div className="pilha">
+            <BlocoDeDado
+              titulo="Por onde os chamados entraram"
+              explicacao="Quem passou pelo agente e quem foi direto ao formulário, e com que prioridade os chamados nasceram."
+            >
+              <PainelVolume painel={m.painel} />
+            </BlocoDeDado>
+            <BlocoDeDado
+              titulo="De que áreas eles vieram"
+              explicacao="A área vem da fonte organizacional e fica congelada no chamado. Ela é informação de apoio: chamado sem área abre normalmente."
+            >
+              <PainelPorArea chamadosPorArea={m.painel.chamadosPorArea} />
+            </BlocoDeDado>
+            <BlocoDeDado
+              titulo="Primeira resposta no prazo"
+              explicacao="O prazo é de primeira resposta, não de resolução — chamado respondido em uma hora e resolvido em duas semanas está dentro dele. Avaliado na última rodada automática, não agora."
+            >
+              <PainelSla sla={m.painel.sla} />
+            </BlocoDeDado>
+            <BlocoDeDado
+              titulo="Avisos sobre estes chamados"
+              explicacao="O que o app tentou avisar a quem abriu, quando o chamado andou. Aviso sobre ação da própria pessoa é suprimido de propósito."
+            >
+              <PainelNotificacoes
+                notificacoes={m.painel.notificacoes}
+                canalDefinido={m.canalNotificacaoDefinido}
+              />
+            </BlocoDeDado>
+            {m.piloto.ligado && (
+              <Aviso atencao>
+                O piloto está ligado para <strong>{m.piloto.pessoas}</strong>{' '}
+                {m.piloto.pessoas === 1 ? 'pessoa' : 'pessoas'}. Os números desta seção são
+                dessas pessoas, não da empresa.
+              </Aviso>
+            )}
+          </div>
+        )}
+      </Quando>
+    )
+  }
+
+  if (secao.id === 'custo') {
+    return (
       <BlocoDeDado
-        titulo="Está funcionando?"
-        explicacao="Quantos resolveram sem abrir chamado, e quantos insistiram mesmo assim. É com estes números que se mexe nos controles acima — não no achismo."
+        titulo="Quanto já custou"
+        explicacao="O gasto com IA que o teto acima governa, e o quanto a Atlassian está recusando por excesso de chamadas."
       >
-        <Quando carga={metricas} carregando="Somando as interrupções…">
-          {(m) => <PainelMetricas metricas={m} />}
+        <Quando carga={metricas} carregando="Somando o consumo…">
+          {(m) => <PainelOrcamento painel={m.painel} />}
         </Quando>
       </BlocoDeDado>
     )
@@ -415,6 +502,14 @@ function DadosDaSecao({
             </>
           )}
         </Quando>
+        <BlocoDeDado
+          titulo="Antes do projeto"
+          explicacao="Quantos assentos existiam antes de o goatlas entrar no ar. É a única comparação honesta: o app nasceu depois e não tem como derivar esse retrato sozinho."
+        >
+          <Quando carga={metricas} carregando="Buscando o retrato anterior…">
+            {(m) => <PainelBaseline baseline={m.baselineAssentos} />}
+          </Quando>
+        </BlocoDeDado>
       </div>
     )
   }
