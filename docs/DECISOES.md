@@ -3393,6 +3393,61 @@ requisições em voo**: em série é 1, em paralelo é 2. Mesma afirmação, sem
 ⚠️ Os três continuam **descritos** aqui: cortar da lista é decidir que ninguém está
 esperando por eles, não fingir que a limitação não existe.
 
+### D-58 · A Definição de Pronto fechada, e o teste que a suíte jurava ter
+
+**Data:** 12/08/2026 · **Origem:** `T-097`, `T-021`, `T-093`, `T-096`, `T-321` ·
+**Contexto:** §13 dos requisitos, `RF-17`, `RF-05`, `RNF-27`, `RNF-28`
+
+**9 de 11 itens fechados.** O item do celular foi **removido** por decisão do mantenedor —
+a tela foi verificada em viewport de celular no dev, e aparelho real deixou de ser condição
+de pronto. Os dois que restam **dependem de dado, não de código**.
+
+#### 🚨 O item 5 era uma crença documentada
+
+`RF-17` (confirmação explícita) tem duas camadas e nenhum teste as exercitava. O helper de
+`tests/rf08-ordem-tools.test.ts` tem a opção `confirmar: false` **desde sempre** e nenhum
+caso a usava — enquanto o `CLAUDE.md` **e** a tabela de travas do `tasks.md` afirmavam, os
+dois, que a burla de `RF-17` estava coberta.
+
+É o pior formato de ponto cego deste projeto: não é comportamento errado, é a **crença
+documentada** de que algo está testado. Enquanto durou, `autorizarCriacao` podia ter perdido
+a segunda camada num refactor sem uma asserção vermelha — e o único sinal seria um chamado
+nascendo sem ninguém ter clicado em confirmar. Agora são três casos: as duas burlas e o
+**contraste** que prova que só a confirmação autoriza (sem ele, um `autorizarCriacao` que
+recusasse tudo passaria nas duas primeiras).
+
+#### O que fechou com a medição de hoje
+
+- **Item 1** — `GN-6903`, aberto **pela conversa** na staging, com o cabeçalho de `D-13`, a
+  área resolvida (`RPA`) e a transcrição anexada. O `GN-6894` de 11/08 não fechava: nasceu
+  pelo **formulário**.
+- **Item 12** — o `README.md` abria com *"Planejamento. Nada implementado."* com quatro
+  fases prontas, listava **três** credenciais (a `TG_API_TOKEN` entrou em `D-37`) e mandava a
+  rotação para um `docs/DEPLOY.md` *"(a criar)"* que existe desde `T-006`. ⚠️ O parágrafo de
+  estado saiu de vez: o detalhe vive no `CLAUDE.md`, porque **duas fontes sobre o mesmo fato
+  divergem, e a que ninguém abre todo dia é a que envelhece** — foi exatamente o que
+  aconteceu aqui.
+
+#### Os dois que sobram, e por que não são código
+
+- **Deflexão observada com conteúdo real** — medido hoje, com a busca já corrigida (`D-41`) e
+  a página certa no resultado, a Regra 1 **não bloqueou**: o score não alcança
+  `regra1_threshold_score`. Fecha calibrando o threshold com dado real, que é para o que a
+  faixa de `D-49` existe.
+- **Regra 2 disparando** — sem os exemplos de **Q3** ela se declara indisponível, o fail-safe
+  correto de `RF-14`. É um campo de config.
+
+#### Três tarefas reclassificadas
+
+- **`T-021`** (o edge restringe login ao Workspace?) fecha com a resposta de que **não
+  bloqueia nada**: o app não confia no edge — `RF-01`/`RF-05` revalidam o domínio no
+  servidor. Conta desativada continua sem medição e é inócua por construção.
+- **`T-096`** feito: staging, bateria de 8 caminhos, e só então prod. ⚠️ A config **não**
+  estava igual — prod tinha 2 espaços do Confluence onde `D-29` decidiu 7, o no-op silencioso
+  do banco vencendo o env que o `CLAUDE.md` avisava e ninguém tinha conferido.
+- **`T-321`** (`ScC-4`) **não é engenharia**: afirma sobre percepção de área durante um
+  piloto, e só se mede perguntando a pessoas. Marcá-la sem piloto seria o defeito de `D-47`.
+
 ---
 
 ## Perguntas em aberto

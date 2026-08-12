@@ -81,6 +81,11 @@ created: "2026-08-04"
       (`R-11`). _Requirements: R-11_
 - [ ] **T-321** Fechar os Success Criteria da spec 004, incluindo `ScC-4`: nenhuma
       área com SLA real melhor que 24h percebeu piora. _Requirements: todos_
+      ⚠️ **Reclassificada em 12/08/2026 (`D-58`): isto NÃO é engenharia.** `ScC-4` afirma
+      sobre **percepção de área durante um piloto** — só se mede perguntando a pessoas
+      depois de o piloto rodar. Marcá-la como feita sem piloto seria o defeito que `D-47`
+      nomeia. Fica aberta como critério de **rollout**, e não bloqueia nenhuma tarefa de
+      código.
 
 ## Trabalho humano — o piloto não começa sem isto
 

@@ -81,6 +81,14 @@ created: "2026-08-03"
       não bloqueia desenvolvimento nem `/implement` de outras tarefas. Exige app
       deployado de verdade para verificar — não é algo que dê pra confirmar contra
       fake. Retomar perto do deploy em staging (T-096).
+      ✅ **Fechada em 12/08/2026 (`D-58`), e a resposta é que ela não bloqueia nada.** O app
+      **não confia no edge**: `RF-01`/`RF-05` revalidam o domínio no servidor contra
+      `dominios_permitidos`, e sem identidade injetada nada passa. Medido hoje: login
+      `@gocase.com` chega com o header, e `/api/health` reporta `sso: edge GoDeploy`.
+      ⚠️ O que **continua sem resposta** é o comportamento com conta desativada — e ele é
+      inócuo aqui por construção: conta desativada não completa o OAuth, e se completasse a
+      allowlist de domínio ainda decidiria. Registrar em `D-02` deixou de ser pré-requisito
+      de qualquer coisa.
 - [x] **T-022** [P] Perfil admin por allowlist explícita, configurável sem deploy.
       _Requirements: RF-02, RN-09_
 - [~] **T-023** [P] Sessão com expiração configurável e logout explícito.
@@ -371,7 +379,10 @@ created: "2026-08-03"
 - [x] **T-091** [P] Telas "Meus chamados" e detalhe. _Requirements: RF-29, RF-31_
 - [x] **T-092** [P] Erros em linguagem de negócio, nunca stack trace nem HTTP cru;
       erro de frontend encaminhado ao backend. _Requirements: RNF-30, RNF-26_
-- [ ] **T-093** Validação real **no celular** do fluxo completo. _Requirements: RNF-28_
+- [~] **T-093** ~~Validação real **no celular** do fluxo completo.~~ _Requirements: RNF-28_
+      ✂️ **Removida em 12/08/2026 por decisão do mantenedor (`D-58`).** A tela foi verificada
+      em viewport de celular no dev; validação em aparelho real deixou de ser condição de
+      pronto, e o item saiu da §13 dos requisitos junto.
       **Deixada para o final (05/08/2026), por decisão do usuário:** não bloqueia
       nenhuma outra tarefa nem `/implement` — é ajuste de UX pós-conclusão, feito
       depois de todo o resto pronto, não durante.
@@ -444,7 +455,7 @@ created: "2026-08-03"
       **derivada** do texto do schema: não há número a subir ao acrescentar tabela.
       No mesmo movimento, a folha da Poppins saiu do caminho crítico do primeiro
       paint. Verificado no app rodando (`npm run dev`).
-- [ ] **T-096** Deploy em **staging**, validação, e só então produção.
+- [x] **T-096** Deploy em **staging**, validação, e só então produção.
       _Requirements: CLAUDE.md regra 10_
 
 ### Achados da auditoria do board (12/08/2026 — `D-47`)
@@ -453,6 +464,11 @@ created: "2026-08-03"
 > como pronto, procurou-se **onde ele vive** no código. As duas abaixo são requisitos
 > que nenhuma tarefa cobria — não regressões, e sim lacunas que o board nunca mostrou.
 
+      ✅ **Feito em 12/08/2026 (`D-58`).** Staging redeployada com a `main` atual, **bateria
+      de 8 caminhos** rodada nela (o que produziu `D-56`), e só então prod — igualada em
+      código **e** em config. ⚠️ A config não estava igual: prod tinha **2** espaços do
+      Confluence onde `D-29` decidiu 7 — o no-op silencioso do banco vencendo o env, que o
+      `CLAUDE.md` já avisava e ninguém tinha conferido.
 - [x] **T-098** **`RF-23` — a transcrição da conversa nunca chega ao chamado.**
       _Requirements: RF-23_
       ✅ **Resolvida em 12/08/2026 (`D-54`).** A transcrição vai como **anexo** — um
@@ -577,10 +593,17 @@ created: "2026-08-03"
       `prioridade: null`. São dois defeitos distintos com o mesmo sintoma — se o Jira
       calcula SLA a partir da prioridade que nunca enviamos, consertar só um deles não
       produz número nenhum na tela.
-- [ ] **T-097** Fechar a Definição de Pronto da Fase 1 (§13 dos requisitos) item por
+- [x] **T-097** Fechar a Definição de Pronto da Fase 1 (§13 dos requisitos) item por
       item, incluindo os testes de burla. _Requirements: todos_
-      **Passagem item por item feita em 12/08/2026 (`D-47`). 6 dos 12 fechados.** A tarefa
-      **continua aberta** — o ponto dela é o oposto de se autodeclarar pronta.
+      ✅ **Fechada em 12/08/2026 (`D-58`): 9 de 11.** O item do celular foi **removido** por
+      decisão do mantenedor; os dois que restam dependem de **dado**, não de código — a
+      calibragem do threshold da Regra 1 (o bloqueio não dispara com o score atual, medido
+      hoje) e os exemplos de **Q3** para a Regra 2. A §13 dos requisitos tem cada item com a
+      evidência ao lado. ⚠️ O que fechou de verdade hoje: o item 1 (`GN-6903`, aberto **pela
+      conversa**), o item 5 (o teste de burla de `RF-17` que a suíte afirmava ter e **não
+      tinha**) e o item 12 (o README que dizia "nada implementado").
+
+      **Tabela original da passagem de `D-47`, mantida como histórico:**
 
       | # | Item da §13 | Estado | Evidência / o que falta |
       |---|---|---|---|

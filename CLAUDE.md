@@ -54,11 +54,12 @@ quando alguma é esquecida (ver "Automação do processo").
    desatualizou.
 3. **Regra crítica em código, com teste** — nunca só no system prompt. RF-08
    (ordem das tools) e RF-17 (confirmação) são validados no servidor, e a suíte
-   inclui os testes de **bypass** (tentar burlar pelo prompt). ⚠️ **Com uma exceção
-   medida em 12/08 (`D-47`): o caso de burla de `RF-17` NÃO existe.** As duas camadas
-   de `agent/gate.ts` estão lá, mas nenhum teste exercita
-   `sem_confirmacao_do_usuario` — o helper de `rf08-ordem-tools.test.ts` tem a opção
-   `confirmar: false` e nenhum caso a usa. Item 5 de `T-097`.
+   inclui os testes de **bypass** (tentar burlar pelo prompt). ✅ **A lacuna de `RF-17`
+   foi fechada em `D-58`** (`BURLA 7`/`BURLA 8` + o contraste que prova que só a
+   confirmação autoriza). ⚠️ **Guarde a lição:** por semanas este parágrafo **e** a tabela
+   de travas afirmaram que o caso existia, e o helper tinha `confirmar: false` sem um único
+   caso usando. Crença documentada de que algo está testado é o ponto cego mais caro daqui —
+   pior que teste ausente e admitido.
 4. **Português com acentuação** em todo texto visível ao usuário — UI, erros e
    prompts de IA.
 5. **Quatro credenciais, zero vazamento** — API token Jira/Confluence · API key de
@@ -1318,7 +1319,7 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1260 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1263 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em
