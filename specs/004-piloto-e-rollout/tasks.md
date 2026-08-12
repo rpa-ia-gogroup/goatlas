@@ -34,11 +34,25 @@ created: "2026-08-04"
 
 ## Phase 2 — Calibragem com dado
 
-- [x] **T-310** Leitura de calibragem por regra: threshold atual **ao lado** da taxa
+- [~] **T-310** Leitura de calibragem por regra: threshold atual **ao lado** da taxa
       de override, **e as páginas apontadas nos overrides**. Sem as páginas, a tela
       empurra para o ajuste de threshold por ser o botão mais fácil — quando a
       resposta certa pode ser escrever a página que falta (`RF-13`).
       _Requirements: RF-50, RF-42, R-04_
+      🚨 **Foi entregue e SE PERDEU no rewrite do console** (`D-25`/`T-138`) — achado da
+      auditoria de 12/08 (`D-47`). O servidor continua montando a calibragem
+      (`src/lib/governanca/painel.ts`), mas `src/app/admin/paineis.tsx` consome só
+      `painel.evidencia` (`paineis.tsx:99`): a faixa com threshold + taxa de override + os
+      motivos **não é renderizada por ninguém**. A prova de que existiu é o CSS órfão
+      `.faixa-calibragem` (`src/app/estilos.css:1386`), que o próprio arquivo descreve como
+      "o único desenho de dado desta folha".
+      ⚠️ **É o desenho desta tarefa desfeito exatamente onde importava:** o threshold da
+      Regra 1 segue editável no console **sozinho**, que é a configuração que esta tarefa
+      existia para evitar — mostrar o botão fácil sem o dado que diz que ele é a resposta
+      errada (`R-04`).
+      ⚠️ Nenhum teste caiu porque `tests/tela-admin.test.ts` afirma sobre descritores,
+      rótulos e estados, **nunca sobre quais painéis são renderizados**. Ver `T-233` na spec
+      003, que é a mesma perda vista do outro lado.
 - [x] **T-311** [P] `config.baseline_assentos` + comparação antes × depois. Baseline
       ausente **não** inventa número — a tela diz "sem baseline" em vez de comparar contra
       zero, que mostraria economia de 100%. ⚠️ **O dado depende da Fase 0 (João).**

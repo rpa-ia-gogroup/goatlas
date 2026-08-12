@@ -54,7 +54,11 @@ quando alguma é esquecida (ver "Automação do processo").
    desatualizou.
 3. **Regra crítica em código, com teste** — nunca só no system prompt. RF-08
    (ordem das tools) e RF-17 (confirmação) são validados no servidor, e a suíte
-   inclui os testes de **bypass** (tentar burlar pelo prompt).
+   inclui os testes de **bypass** (tentar burlar pelo prompt). ⚠️ **Com uma exceção
+   medida em 12/08 (`D-47`): o caso de burla de `RF-17` NÃO existe.** As duas camadas
+   de `agent/gate.ts` estão lá, mas nenhum teste exercita
+   `sem_confirmacao_do_usuario` — o helper de `rf08-ordem-tools.test.ts` tem a opção
+   `confirmar: false` e nenhum caso a usa. Item 5 de `T-097`.
 4. **Português com acentuação** em todo texto visível ao usuário — UI, erros e
    prompts de IA.
 5. **Quatro credenciais, zero vazamento** — API token Jira/Confluence · API key de
@@ -375,6 +379,18 @@ destes reabre um vazamento que já foi fechado.
   `SLA_PRIMEIRA_RESPOSTA_HORAS`: repetidas à mão, o agente promete um prazo e o cron cobra
   outro, sem quebrar teste nenhum. ⚠️ Continua sendo **instrução, não trava** — `RF-08`/`RF-17`
   seguem em `agent/gate.ts`, e nenhum valor de config entra no texto (`RNF-30`).
+- 🚨 **Quando o FAKE é a única evidência de um campo que cruza a fronteira, o campo não está
+  verificado** (`D-47`). Quarta ocorrência da mesma família: `D-38` (obrigatório faltando),
+  `D-39` (campo de seleção), `D-43` (autor do comentário) e agora a **prioridade** —
+  `ClienteAtlassianFake` guarda `prioridade` direto do argumento (`fake.ts:356`), então toda
+  leitura de volta devolve o valor certo enquanto o cliente real **nunca o envia**. O teste
+  que vale afirma sobre o corpo entregue ao `fetchImpl`, como `T-521` faz; o que afirma sobre
+  o que o fake devolveu só prova que o fake é consistente consigo mesmo. ⚠️ Próximo da fila
+  sem essa rede: `RF-25` — `attachTemporaryFile` não aparece em `tests/`.
+- ⚠️ **Teste de tela afirma sobre descritores e estados, nunca sobre quais PAINÉIS existem**
+  (`tela-admin.test.ts`, `D-47`). Por isso a faixa de calibragem de `T-310` desapareceu
+  inteira no rewrite do console (`D-25`) sem uma asserção vermelha — e o CSS órfão
+  `.faixa-calibragem` é a única coisa que restou dela. Painel que some não quebra nada.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -509,6 +525,22 @@ destes reabre um vazamento que já foi fechado.
   foi o texto. E **opção fora da lista é recusa antes do efeito**, com o rótulo (`RNF-30`),
   como em `D-37`/`D-38`. Número, data e cascading select continuam indo crus — declarado no
   `D-39`.
+- 🚨 **O leitor de PRODUTO filtra; o leitor de DIAGNÓSTICO não pode filtrar nada** (`D-44`,
+  `atlassian/schema-diagnostico.ts`). `camposAdicionais` descarta `summary`/`description`/
+  `priority` porque o formulário de `RF-27` já os tem fixos — descarte certo, e por isso
+  `GET /api/tipos-chamado/:id/campos` **nunca mostra `priority`, exista ele ou não**. Quem
+  consultou aquela rota para saber se o request type expõe prioridade recebeu a resposta
+  errada com cara de resposta (12/08/2026). O diagnóstico tem caminho próprio
+  (`GET /api/admin/tipos-chamado/schema`), e o teste que põe os dois leitores lado a lado
+  sobre o mesmo corpo bruto existe para reprovar quem os fundir "para não duplicar código".
+  ⚠️ E `tiposNaoLidos` é uma **terceira** lista: "não deu para saber" fora de
+  `tiposSemPrioridade`, como `area_indisponivel` × `area_nao_encontrada`.
+- ⚠️ **A prioridade NUNCA sai do app hoje** — `montarCamposSolicitante` só a envia com
+  `opcoes.campoPrioridadeId` preenchido, e `contexto.ts` não passa esse campo (não há chave
+  em `ConfigValores`). `RF-16` é editável na tela e inerte no Jira. Antes de ligar, `D-36`
+  vale: o **rótulo** (`ROTULO_PRIORIDADE`, `Highest`/`High`/`Medium`) é forma do formulário,
+  mora no código com teste, e os rótulos reais do site saem do `validValues` que o
+  diagnóstico mostra — nunca da suposição.
 - 🚨 **A área do solicitante é GUARDADA, nunca enviada** (`D-37`, `teamguide/area.ts`). O
   campo `Setor Gocase` do Jira é multi-checkbox com **15 opções fixas**, e a área real da
   primeira pessoa medida (`RPA`) **não está entre elas** — mandar valor fora da lista dá
@@ -1045,9 +1077,22 @@ volta pela rota isolada por e-mail: a descrição chegou com o bloco de autoria 
 chave `form:<email>:<chave>`. ⚠️ **É um chamado de teste numa fila real** (`[TESTE goatlas -
 ignorar]`) — alguém do time de tech precisa apagá-lo; o app não tem essa operação.
 ⚠️ **Mandamos `prioridade: "normal"` e o chamado voltou com `prioridade: null` e
-`slaPrimeiraResposta: null`** — ou o tipo 68 não expõe campo de prioridade, ou o mapeamento
-não está sendo aplicado. Se for o segundo, `RF-16` (prioridade editável) não tem efeito no
-Jira. **Não investigado.**
+`slaPrimeiraResposta: null`.** Uma metade já está explicada: **a prioridade nunca sai do
+app**. `montarCamposSolicitante` só a envia se `opcoes.campoPrioridadeId` estiver preenchido,
+e `contexto.ts` **nunca passa esse campo** — não existe chave para ele em `ConfigValores`.
+Logo `RF-16` (prioridade editável) não tem efeito no Jira hoje, independentemente do que o
+request type exponha. A outra metade — *o tipo expõe campo de prioridade?* — é medível desde
+`D-44`: `GET /api/admin/tipos-chamado/schema` (ver `docs/DEPLOY.md`). ⚠️ **Não a responda por
+`GET /api/tipos-chamado/:id/campos`**: aquela rota descarta `priority` por construção, e a
+resposta é "não tem" nos dois mundos.
+🚨 **E o `slaPrimeiraResposta: null` é um TERCEIRO defeito, não consequência dos outros dois**
+(`D-47`, `T-100`): `obterChamado` monta a URL **com** `expand=…sla…` (`cliente.ts:516`) e
+devolve `slaPrimeiraResposta: null` **fixo** (`cliente.ts:539`) — a resposta é pedida, paga e
+descartada. Vale também para o caminho degradado (`tickets/servico.ts:411`), e **nem o fake
+preenche** (`fake.ts:359`), então o campo nunca teve valor em teste nenhum. É por isso que
+`RF-29` (SLA na lista) e `RF-31` (histórico de SLA no detalhe) não aparecem em tela: o dado
+nunca é lido. ⚠️ Se o Jira deriva o SLA da prioridade que não mandamos, consertar só um dos
+dois não produz número na tela.
 
 ⚠️ **A allowlist de tipos foi ampliada em 11/08** para os **15** tipos do `GN`
 (`68,70,71,89,90,91,92,93,94,95,96,108,134,143,144`), em prod e staging. O **`69`
@@ -1073,7 +1118,14 @@ na staging — a tabela de leitura está no `D-40`. ⚠️ Nada foi paginado nem
 mexido de propósito: mudar o comportamento no mesmo movimento em que se instala o instrumento
 estraga a medição.
 
-**1071 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1093 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+⚠️ **Teste verde não é cobertura** (`D-47`, 12/08): a auditoria requisito→código mexeu em
+**dezessete** tarefas cujo board divergia do que o código faz, com a suíte inteira verde —
+porque nenhum achado é comportamento *errado*, é comportamento **ausente**, e teste ausente
+não falha. O formato dominante é *servidor pronto, tela ausente* e *metade de uma frase com
+"e"*. Os três que mudam o que se sabe do produto: a prioridade que não sai do app (`T-099`),
+o SLA que nunca é lido (`T-100`) e a faixa de calibragem que o rewrite do console descartou
+(`T-233`/`T-310`). A lista por tarefa está nos `tasks.md`.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`
