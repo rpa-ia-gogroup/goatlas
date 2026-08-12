@@ -2356,6 +2356,151 @@ no detalhe de `GN-6898`. `anexosIndisponiveis: true` com o arquivo lá dentro é
 
 ---
 
+### D-44 · O instrumento de medida não pode ter o cego do objeto medido
+
+**Data:** 12/08/2026 · **Contexto:** `RF-16`, `RF-27`, `RF-28`, `RNF-01`, `RNF-30`, `D-36`,
+`ScC-4`
+
+**A pergunta que não tinha como ser respondida.** `GN-6894` e `GN-6897` foram criados com
+`prioridade: "normal"` e voltaram com `prioridade: null`. Duas explicações possíveis, com
+trabalhos opostos: ou os request types do `GN` **não expõem** campo de prioridade, ou expõem
+e o nosso código não o preenche. A rota consultada para decidir foi
+`GET /api/tipos-chamado/:id/campos` — e ela **não pode** responder isso.
+
+**Por quê.** `camposAdicionais` (`atlassian/cliente.ts`) serve o formulário de `RF-27`, e por
+isso descarta `summary`, `description` e `priority`: os três já têm input fixo (`D-04`), e
+mostrá-los de novo seria campo em dobro na tela. O descarte está certo. A consequência é que
+aquela rota **nunca** mostra `priority` — exista ele ou não —, então "consultei e não tem
+prioridade" é uma frase que ela produz nos dois mundos. Foi tirada uma conclusão dali, e ela
+era inválida por construção, não por desatenção de quem leu.
+
+⚠️ É a mesma família de `D-38` e `linhasComoObjetos`, com o alvo deslocado: lá o **dublê**
+escondia a divergência; aqui é o **instrumento de diagnóstico** que herdou o cego do caminho
+de produto que ele deveria medir.
+
+**A decisão.** O diagnóstico ganha caminho próprio — `atlassian/schema-diagnostico.ts` +
+`GET /api/admin/tipos-chamado/schema` —, e o critério que o separa é este: *o leitor de
+produto pode filtrar; o leitor de diagnóstico não pode filtrar nada*. Fundir os dois "para
+não duplicar código" reabre exatamente este furo, e o teste que coloca os dois lado a lado
+sobre o mesmo corpo bruto existe para reprovar essa fusão.
+
+**Três coisas que parecem detalhe e são a decisão:**
+
+- **Normalizado campo a campo, nunca o JSON cru.** Repassar `requestTypeFields` inteiro seria
+  mais curto e faria a resposta carregar qualquer campo que a Atlassian acrescente, sem
+  ninguém decidir — é assim que um oráculo cresce. A lista de campos devolvidos é fechada.
+- **Quem responde "tem prioridade?" é `jiraSchema.system`, nunca o id do campo.** Mesma regra
+  de `ScC-4` e mesmo motivo de `D-36`: id de campo não significa nada fora do request type,
+  e comparar contra um literal daria "não tem" em silêncio em qualquer outra instalação.
+- **Tipo não lido fica FORA das duas listas de conclusão.** `tiposNaoLidos` é uma terceira
+  lista, ao lado de `tiposComPrioridade` e `tiposSemPrioridade`, porque "não deu para saber"
+  e "não tem" pedem trabalhos opostos — a mesma distinção de `area_indisponivel` ×
+  `area_nao_encontrada` e de `buscaConfigurada`. E a falha é **por tipo**: um id de outro
+  service desk dentro da allowlist (situação real, ver `listarTiposChamado`) não pode derrubar
+  a leitura dos outros catorze.
+
+**Os limites são os das rotas vizinhas, não menores.** Admin · só a allowlist de `RF-28`
+(`?tipo=` só sabe **estreitar**, como `?espaco=` em `D-30`) · só o `service_desk_id` da
+config, nunca da query. Nenhuma credencial e nenhum corpo de erro da Atlassian na resposta
+(`RNF-01`, `RNF-30`): este JSON é lido — e provavelmente colado em algum lugar — por quem
+está diagnosticando.
+
+**O que a resposta ainda NÃO decide.** Se `priority` aparecer, ligar `campoPrioridadeId`
+continua sendo decisão a tomar, com a ressalva de `D-36`: o **rótulo** de prioridade
+(`ROTULO_PRIORIDADE`, hoje `Highest`/`High`/`Medium`) é forma do formulário do Jira e mora no
+código com teste — e os rótulos reais do site da Gocase têm de sair do `validValues` que esta
+rota agora mostra, nunca da suposição.
+
+
+### D-47 · O board se autocertificava — auditoria requisito→código, e o que ela achou
+
+**Data:** 12/08/2026 · **Método:** varredura dos 63 `RF` de `docs/REQUISITOS.md` contra
+`src/`, exigindo `arquivo:linha` para cada cláusula · **Contexto:** `T-081`, `T-097`,
+`RF-15`, `RF-23`, `RF-29`, `RF-31`, `RF-55`, e a família `D-38`/`D-39`/`D-43`
+
+**O que disparou.** `T-081` estava `[x]` e a palavra **anexos** de `RF-31` nunca tinha sido
+implementada — nem cliente, nem rota, nem tela. Uma linha marcada cedo demais escondeu um
+**P0** por semanas, e **não havia como perceber lendo o board**: a tarefa citava o requisito,
+o requisito existia, a suíte estava verde. A pergunta que sobrou não é "quem errou", é
+*quantas outras*.
+
+**O método, e por que ele acha o que revisão não acha.** Para cada `RF` dado como pronto,
+procurar **onde ele vive** — a função, a rota, o teste — e recusar o veredito "pronto" sem
+`arquivo:linha`. Duas regras fizeram o trabalho:
+
+1. **Ler o texto inteiro do requisito, nunca o título.** Requisito com "e" é dois requisitos.
+   `RF-31` pede seis coisas; `RF-21` pede campo customizado **e** request participant;
+   `RF-03` pede expiração configurável **e** logout; `RF-60` pede medir **e** alertar em
+   limiar **configurável**. Em todos, a primeira metade estava feita — e é a primeira metade
+   que o título anuncia.
+2. **Perguntar pelas duas pontas.** Servidor pronto com tela ausente é o formato de falha
+   mais comum aqui, e é invisível para quem lê o `tasks.md` ou o JSON da rota.
+
+**O resultado: 17 tarefas mexidas, e um padrão.** Uma subia (`T-063`, que executou de verdade
+em `GN-6894` e seguia `[BLOQUEADA: Q1]`), quatorze desciam para `[~]`, três nasceram.
+Detalhe tarefa a tarefa nos `tasks.md`; aqui ficam os três achados que mudam o que se sabe do
+produto:
+
+- 🚨 **A prioridade nunca chega ao Jira** (`T-099`). `campoPrioridadeId` é declarado
+  (`atlassian/cliente.ts:92`) e lido (`:474`), e **nada no repo o define**. `RF-15` e `RF-16`
+  são **P0** e estão implementados até a borda — a IA classifica, a tela mostra, a pessoa
+  edita, o SLA local usa — e o time de tech não vê nada disso na fila, que é o ponto dos
+  dois. Isto fecha a pergunta que o `CLAUDE.md` registrava como "**não investigado**" sobre o
+  `prioridade: null` do `GN-6894`, e é complementar a `D-44`: aquele decidiu *como medir* se o
+  request type expõe o campo; este diz que, expondo ou não, hoje **nenhum** o receberia.
+- 🚨 **A calibragem foi entregue e se perdeu no rewrite do console** (`T-233`/`T-310`). O
+  servidor monta o painel inteiro; `admin/paineis.tsx` consome **só** `painel.evidencia`.
+  Aderência ao SLA, chamados por área e por prioridade e a faixa de calibragem não são
+  renderizados por ninguém — e a prova de que existiram é o CSS órfão `.faixa-calibragem`.
+  ⚠️ O efeito é preciso: o threshold da Regra 1 continua editável **sozinho**, sem a taxa de
+  override e sem os motivos ao lado, que é exatamente a tela que `T-310` existia para não
+  produzir (`R-04`).
+- 🚨 **`RF-23` nunca teve tarefa em spec nenhuma** (`T-098`). A transcrição é persistida e
+  **nada dela chega ao chamado** — a descrição leva o resumo do modelo. A `spec.md` de 001 o
+  adiou junto de `RF-19` e `RF-25`; os outros dois foram retomados depois, ele não. E a
+  retenção apaga `conversas`/`mensagens` enquanto `vinculos` nunca é expurgado (`D-17`): o
+  **ponteiro sobrevive à transcrição**.
+
+**A decisão: o coverage check muda de direção.** O gate de cada `tasks.md` afirmava "todo
+RF/RN no escopo aparece em ao menos uma tarefa" e **estava `[x]` sendo falso** — porque o que
+se conferia na prática era o inverso, *toda tarefa referencia um requisito*. As duas não são a
+mesma pergunta:
+
+| Direção | Custo de conferir | O que esconde |
+|---|---|---|
+| tarefa → requisito | trivial (está escrito na linha) | nada — e por isso sempre passa |
+| **requisito → tarefa** | varrer a faixa de IDs | **requisito inteiro sem dono** (`RF-23`) |
+
+Só a segunda encontra o que não foi escrito, e ela é a que ninguém faz porque exige sair do
+documento. Fica valendo: **coverage check é conferido na direção requisito → tarefa**, e a
+linha de 001 volta a `[x]` quando `T-098` fechar.
+
+**E `[x]` passa a significar o texto inteiro.** Meia cláusula entregue é `[~]` com a metade
+que falta escrita ao lado — que é o que `T-023` e `T-231` já faziam por conta própria, e o que
+`T-081` não fez. O custo de `[~]` é zero; o custo de `[x]` errado foi um P0 invisível por
+semanas.
+
+⚠️ **A suíte não é o gate disto, e não adianta pedir que seja.** Os 1051 testes estavam verdes
+em **todos** estes achados, porque nenhum é comportamento errado — é comportamento **ausente**,
+e teste ausente não falha. Dois casos merecem nome:
+- `tests/tela-admin.test.ts` afirma sobre descritores, rótulos e estados, **nunca sobre quais
+  painéis são renderizados** — um painel pode sumir inteiro sem asserção vermelha (foi o que
+  aconteceu).
+- O `ClienteAtlassianFake` guarda `prioridade` direto do argumento (`fake.ts:356`), então toda
+  leitura de volta devolve a prioridade certa enquanto o cliente real nunca a envia. É a
+  quarta ocorrência da mesma família: `D-38` (obrigatório faltando), `D-39` (campo de seleção),
+  `D-43` (autor do comentário) e agora esta. ⚠️ O padrão já é forte o bastante para virar
+  regra: **quando o fake é a única evidência de um campo que atravessa a fronteira, o campo
+  não está verificado** — o teste que vale afirma sobre o corpo entregue ao `fetchImpl`, como
+  `T-521` faz. `RF-25` (`attachTemporaryFile`) é o próximo da fila, e ainda não tem.
+
+**O que esta decisão NÃO faz.** Nenhum requisito foi implementado nesta passagem, de
+propósito: auditoria que conserta enquanto mede perde a medida, e a lista precisa chegar
+inteira a quem decide a ordem. `RF-31` (anexos) estava sendo implementado em paralelo e foi
+apenas registrado.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

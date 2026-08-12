@@ -66,8 +66,15 @@ created: "2026-08-04"
 - [x] **T-230** Cálculo de prazo por prioridade, **em UTC**, com limiar configurável
       — função pura. ⚠️ Hoje conta **hora corrida**, porque é o que o requisito diz
       literalmente; horário útil seria mudança de requisito. _Requirements: RF-46_
-- [x] **T-231** Cron `POST /api/cron/alertas-sla`, com `alertas_sla` para não repetir
-      o mesmo alerta a cada rodada. ⚠️ **O destino continua sendo decisão de produto** —
+- [~] **T-231** Cron `POST /api/cron/alertas-sla`, com `alertas_sla` para não repetir
+      o mesmo alerta a cada rodada.
+      ⚠️ **Rebaixada de `[x]` pela auditoria de 12/08 (`D-47`):** o cálculo, a dedupe e o
+      retrato estão corretos e testados, mas `RF-46` diz "alerta **interno** … notificando o
+      **time de produto/tech**" e o destinatário é `vinculo.solicitanteEmail`
+      (`src/lib/notificacoes/servico.ts:336`) — vai a quem já sabe do próprio prazo, nunca a
+      quem pode agir. A ressalva já estava escrita abaixo; o que muda é o board deixar de
+      marcar como pronto um requisito cujo **destinatário é a coisa que ele pede**.
+      ⚠️ **O destino continua sendo decisão de produto** (`D-20`) —
       o que está resolvido é *quando* alertar (cálculo puro), *não repetir* (a tabela) e
       *para quem*, no único destino que o app conhece hoje: o **solicitante**. Alertar o
       time de tech ou a liderança é um destinatário a mais na mesma função.
@@ -76,11 +83,51 @@ created: "2026-08-04"
       área e prioridade, aderência ao SLA, aderência de canal (app × manual), buscas
       sem resultado. Os dados **já existem** — isto é superfície, não coleta.
       _Requirements: RF-55_
-- [x] **T-233** [P] Painel de métricas (skill `frontend-design` antes).
+- [~] **T-233** [P] Painel de métricas (skill `frontend-design` antes).
       _Requirements: RF-55, RNF-28_
-- [x] **T-234** [P] Monitorar taxa de 429 da Atlassian e custo/latência da IA com
+      🚨 **Estava `[x]`; a tela mostra 3 das 6 coisas que `RF-55` pede** — e o que falta
+      **existe pronto no servidor** (auditoria de 12/08, `D-47`). `montarPainel`
+      (`src/lib/governanca/painel.ts:253`) devolve o objeto completo e
+      `GET /api/admin/metricas` o serializa (`src/lib/http/rotas.ts:1511-1528`), mas
+      `src/app/admin/paineis.tsx` consome **apenas `painel.evidencia`**
+      (`paineis.tsx:99`). Na tela existem deflexão por regra, taxa de override
+      (`paineis.tsx:55-101`) e buscas sem resultado (`paineis.tsx:215`).
+      **Não chegam a ninguém:** aderência ao SLA (`painel.sla`) · chamados por **área** e
+      por **prioridade** (`chamadosPorArea`/`chamadosPorPrioridade`) · a **calibragem com
+      os motivos de override**.
+      🚨 **A calibragem é REGRESSÃO, não lacuna:** ela foi entregue em `T-310` (spec 004) e
+      se perdeu no rewrite do console (`D-25`, `T-138`). A prova de que existiu está no
+      CSS órfão `.faixa-calibragem` (`src/app/estilos.css:1386`), que o próprio arquivo
+      documenta como "o único desenho de dado desta folha" e que hoje nenhum componente
+      usa. ⚠️ Isso desfaz o desenho de `T-310`/`R-04` **exatamente** onde ele importava: o
+      threshold da Regra 1 continua editável no console **sem** a taxa de override e sem
+      os motivos ao lado — que é a configuração que o `CLAUDE.md` chama de "empurrar para
+      mexer no threshold quando a resposta certa é escrever a página".
+      ⚠️ **Por que nenhum teste caiu:** `tests/tela-admin.test.ts` afirma sobre descritores
+      de campo, rótulos e estados — **nunca sobre quais painéis são renderizados**. Um
+      painel pode desaparecer inteiro sem uma asserção vermelha.
+      ⚠️ **Aderência de canal (app × manual) é caso à parte:** `painel.ts:31-42` declara que
+      só o **numerador** é conhecível (o app não vê o chamado aberto direto no Jira), e a
+      tela mostra conversa × formulário, que mede outra coisa. Isso é honesto no servidor e
+      **ambíguo na tela** — o rótulo precisa dizer qual das duas está sendo mostrada.
+- [~] **T-234** [P] Monitorar taxa de 429 da Atlassian e custo/latência da IA com
       alerta em limiar. Sob API token, medir 429 é a **única** telemetria de
       orçamento que existe (`RNF-15`). _Requirements: RF-60_
+      ⚠️ **Estava `[x]`; a medição existe, o alerta não** (auditoria de 12/08, `D-47`). Os
+      429 são contados (`src/lib/atlassian/http.ts:187,61`) e agregados
+      (`src/lib/governanca/painel.ts:288-300`), e o custo de IA também (`painel.ts:374-379`).
+      Três buracos, todos na segunda metade do requisito:
+      **(a) latência da IA não é medida em lugar nenhum** — não há cronômetro em
+      `src/lib/ia/`, e o requisito pede "custo **e latência**";
+      **(b) o limiar não é configurável** — `LIMIAR_429_PCT = 2` é constante de código
+      (`painel.ts:141`), sem chave em `ConfigValores`, e o requisito diz "alerta em limiar
+      **configurável**";
+      **(c) não há alerta.** `acimaDoLimiar` é um booleano no JSON de
+      `/api/admin/metricas` que **nenhuma tela renderiza** e que não dispara canal, auditoria
+      nem log. Ninguém é avisado de nada — o dado espera que alguém abra o console e saiba
+      procurá-lo. ⚠️ Como `RNF-15` diz que a taxa de 429 é a **única** telemetria de
+      orçamento sob API token, um alerta que não alerta é o ponto cego da credencial única
+      (`R-02`).
 - [ ] **T-235** Distinguir "defletido e resolveu" de "desistiu e foi pro chat".
       **[BLOQUEADA: decisão de produto]** — sem isso a taxa de deflexão infla e o
       projeto se auto-avalia bem por engano. ⚠️ **Mitigado, não resolvido:** o painel
@@ -93,6 +140,17 @@ created: "2026-08-04"
 - [x] **T-240** Anexos: `attachTemporaryFile` → `request/{key}/attachment` (dois
       passos; o primeiro devolve só `temporaryAttachmentIds`).
       _Requirements: RF-25, RF-34_
+      ⚠️ **Continua `[x]` — o fluxo está certo —, com uma ressalva que a auditoria de
+      12/08 (`D-47`) registra: os dois endpoints de `RF-25` nunca foram exercitados contra o
+      cliente HTTP real.** `attachTemporaryFile` não aparece em `tests/`; todos os testes de
+      anexo (`rf61-*`, `rf63-*`, `fase4-piloto-e-restante`) passam pelo
+      `ClienteAtlassianFake`. Ficam sem rede de proteção a URL, o `multipart`, o
+      `X-Atlassian-Token` e o parse de `temporaryAttachments[].temporaryAttachmentId`
+      (`src/lib/atlassian/cliente.ts:991,1017`).
+      🚨 É **exatamente** o formato de `D-38`, `D-39` e `D-43`: o dublê não valida nada, então
+      a forma do corpo só falharia em produção — e aqui falharia carregando o arquivo que é a
+      evidência do chamado de alguém. Um teste contra `fetchImpl` afirmando corpo e URL, como
+      o de `T-521`, fecharia isso sem credencial nenhuma.
 - [x] **T-241** [P] Filtro por status e busca textual na lista. _Requirements: RF-35_
 - [x] **T-242** Marcar resolvido / reabrir — **só** quando o workflow do JSM oferecer
       a transição ao cliente (P2; depende do projeto, não do app).

@@ -28,6 +28,7 @@ import {
   type TicketHistorico,
   type TipoChamado,
 } from './tipos'
+import type { CampoDoSchema } from './schema-diagnostico'
 import { prefixarAutoria } from './comentarios'
 
 /**
@@ -123,6 +124,17 @@ export interface EstadoFake {
   tiposChamado: TipoChamado[]
   /** Schema de campos adicionais por `requestTypeId` (RF-27, T-130). */
   camposPorTipo: Map<string, CampoRequestType[]>
+  /**
+   * Schema BRUTO por `requestTypeId` — o diagnóstico de admin.
+   *
+   * ⚠️ **Mapa separado, e derivá-lo de `camposPorTipo` seria impossível de propósito.**
+   * `CampoRequestType` é o vocabulário do formulário, e `summary`/`description`/
+   * `priority` já foram descartados antes de chegarem lá — então um fake que gerasse o
+   * bruto a partir dele **nunca conseguiria encenar um campo de prioridade**, que é a
+   * única coisa que estes testes precisam encenar. Seria o dublê escondendo a
+   * divergência de novo (`D-38`, `linhasComoObjetos`).
+   */
+  schemaPorTipo: Map<string, CampoDoSchema[]>
   paginas: PaginaConfluence[]
   /**
    * Ids de páginas com restrição de leitura (RF-40). Sob proxy total, QUALQUER
@@ -164,6 +176,8 @@ export interface EstadoFake {
     listarComentarios: ModoFalha
     obterPagina: ModoFalha
     obterCamposDoTipo: ModoFalha
+    /** Falha própria: o diagnóstico cai sem derrubar o formulário, e vice-versa. */
+    obterSchemaDoTipo: ModoFalha
     /**
      * Falha ao consultar restrição. No cliente real ela é engolida e vira
      * "restrita"; aqui ela **lança**, para provar que o gate de exposição também
@@ -262,6 +276,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     this.estado = {
       tiposChamado: inicial.tiposChamado ?? [],
       camposPorTipo: inicial.camposPorTipo ?? new Map(),
+      schemaPorTipo: inicial.schemaPorTipo ?? new Map(),
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? new Set(),
       filtrarPorTermo: inicial.filtrarPorTermo ?? false,
@@ -284,6 +299,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
         listarComentarios: 'nenhum',
         obterPagina: 'nenhum',
         obterCamposDoTipo: 'nenhum',
+        obterSchemaDoTipo: 'nenhum',
         paginaRestrita: 'nenhum',
         obterAnexo: 'nenhum',
         listarAnexosDoChamado: 'nenhum',
@@ -372,6 +388,15 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     this.chamadas.push({ operacao: 'obterCamposDoTipo', params: { serviceDeskId, requestTypeId } })
     this.checar(this.estado.falhas.obterCamposDoTipo, 'obterCamposDoTipo')
     return this.estado.camposPorTipo.get(requestTypeId) ?? []
+  }
+
+  async obterSchemaDoTipo(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<readonly CampoDoSchema[]> {
+    this.chamadas.push({ operacao: 'obterSchemaDoTipo', params: { serviceDeskId, requestTypeId } })
+    this.checar(this.estado.falhas.obterSchemaDoTipo, 'obterSchemaDoTipo')
+    return this.estado.schemaPorTipo.get(requestTypeId) ?? []
   }
 
   async criarChamado(dados: NovoChamado): Promise<ChamadoCriado> {
