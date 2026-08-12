@@ -1705,12 +1705,27 @@ var ClienteTeamGuideFake = class {
     const area = this.areas.get(email.trim().toLowerCase());
     return area ? { estado: "encontrada", area } : { estado: "nao_encontrada" };
   }
+  /**
+   * ⚠️ O dublê **não** encena `fase`/`classe` (`D-40`), e isso é de propósito: elas nascem
+   * de como o runtime quebra, e um roteiro que as inventasse afirmaria sobre um mecanismo
+   * que só existe em `http.ts`. Quem encena classe de falha é a injeção de `fetchImpl` —
+   * era um dublê complacente que escondeu o `D-38`.
+   */
+  async verificarSaude() {
+    return this.falha ? { ok: false, detalhe: this.falha } : { ok: true, detalhe: "ok" };
+  }
 };
+
+// src/lib/teamguide/contrato.ts
+function rotuloDaFalha(f) {
+  return [f.motivo, f.fase, f.classe].filter((p) => !!p).join(" \xB7 ");
+}
 
 // src/lib/teamguide/http.ts
 var BASE = "https://api.teamguide.app";
 var TTL_MS = 10 * 60 * 1e3;
 var TIMEOUT_MS = 8e3;
+var TETO_ROTULO = 24;
 function novaCacheTeamGuide() {
   return { em: 0, promessa: null };
 }
@@ -1731,10 +1746,26 @@ var ClienteTeamGuideHttp = class {
     try {
       base = await this.baseCacheada();
     } catch (e) {
-      return { estado: "indisponivel", motivo: motivoDe(e) };
+      return { estado: "indisponivel", ...falhaDe(e) };
     }
     const area = base.get(alvo);
     return area ? { estado: "encontrada", area } : { estado: "nao_encontrada" };
+  }
+  /**
+   * `RF-59` — a mesma leitura da base, pelo mesmo caminho e com a mesma cache.
+   *
+   * ⚠️ De propósito **não** é uma requisição própria "só para a sonda": uma sonda que
+   * exercita outro caminho responde sobre o caminho que ninguém usa. Sondar aqui é
+   * gratuito quando a base está cacheada e, quando não está, mede exatamente o que a
+   * abertura de chamado mediria.
+   */
+  async verificarSaude() {
+    try {
+      await this.baseCacheada();
+      return { ok: true, detalhe: "ok" };
+    } catch (e) {
+      return { ok: false, detalhe: rotuloDaFalha(falhaDe(e)) };
+    }
   }
   baseCacheada() {
     const vencida = this.agora() - this.cache.em > TTL_MS;
@@ -1752,32 +1783,66 @@ var ClienteTeamGuideHttp = class {
     const controle = new AbortController();
     const timer = setTimeout(() => controle.abort(), TIMEOUT_MS);
     try {
-      const r = await this.fetchImpl(`${BASE}/employees/refs?unpaged=true&page=0`, {
-        headers: { Authorization: `Bearer ${this.opcoes.token}`, Accept: "application/json" },
-        signal: controle.signal
-      });
-      if (!r.ok) throw new Error(`http_${r.status}`);
-      const bruto = await r.json();
-      if (!Array.isArray(bruto)) throw new Error("formato_inesperado");
-      const porEmail = /* @__PURE__ */ new Map();
-      for (const p of bruto) {
-        const email = (p?.contactEmail ?? "").trim().toLowerCase();
-        if (!email || porEmail.has(email)) continue;
-        const time = (p?.teams ?? []).map((t) => (t ?? "").trim()).find((t) => t.length > 0);
-        if (time) porEmail.set(email, time);
+      let r;
+      try {
+        r = await this.fetchImpl(`${BASE}/employees/refs?unpaged=true&page=0`, {
+          headers: { Authorization: `Bearer ${this.opcoes.token}`, Accept: "application/json" },
+          signal: controle.signal
+        });
+      } catch (e) {
+        throw doRuntime(e, "conexao", controle.signal.aborted);
       }
-      return porEmail;
+      if (!r.ok) throw new ErroTeamGuide({ motivo: `http_${r.status}` });
+      let bruto;
+      try {
+        bruto = await r.json();
+      } catch (e) {
+        throw doRuntime(e, "corpo", controle.signal.aborted);
+      }
+      if (!Array.isArray(bruto)) throw new ErroTeamGuide({ motivo: "formato_inesperado" });
+      return indexarPorEmail(bruto);
     } finally {
       clearTimeout(timer);
     }
   }
 };
-function motivoDe(e) {
-  if (e instanceof Error) {
-    if (e.name === "AbortError") return "timeout";
-    return /^[a-z0-9_]+$/.test(e.message) ? e.message : "erro_de_rede";
+function indexarPorEmail(pessoas) {
+  const porEmail = /* @__PURE__ */ new Map();
+  for (const p of pessoas) {
+    const email = (p?.contactEmail ?? "").trim().toLowerCase();
+    if (!email || porEmail.has(email)) continue;
+    const time = (p?.teams ?? []).map((t) => (t ?? "").trim()).find((t) => t.length > 0);
+    if (time) porEmail.set(email, time);
   }
-  return "erro_de_rede";
+  return porEmail;
+}
+var ErroTeamGuide = class extends Error {
+  constructor(falha) {
+    super(falha.motivo);
+    this.falha = falha;
+    this.name = "ErroTeamGuide";
+  }
+};
+function doRuntime(e, fase, abortado) {
+  return new ErroTeamGuide({
+    // 🚨 O SINAL decide, não `e.name`. Ver o cabeçalho do arquivo.
+    motivo: abortado ? "timeout" : "erro_de_rede",
+    fase,
+    classe: classeDe(e)
+  });
+}
+function falhaDe(e) {
+  if (e instanceof ErroTeamGuide) return e.falha;
+  return { motivo: "erro_de_rede", fase: "promessa", classe: classeDe(e) };
+}
+function classeDe(e) {
+  const alvo = e;
+  const partes = [rotular(alvo?.constructor?.name), rotular(alvo?.name), rotular(alvo?.cause?.code)];
+  return partes.filter((p, i) => p.length > 0 && partes.indexOf(p) === i).join("_") || "desconhecida";
+}
+function rotular(bruto) {
+  if (typeof bruto !== "string") return "";
+  return bruto.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, TETO_ROTULO);
 }
 
 // src/lib/ia/tipos.ts
@@ -7538,11 +7603,21 @@ async function resolverArea(p) {
   if (r.estado === "encontrada") return r.area;
   await p.auditoria.registrar({
     atorEmail: p.email,
+    // 🚨 Continuam sendo DUAS ações, e `D-40` não mexeu nisso: `fase`/`classe` detalham
+    // **por que** a fonte caiu, dentro de `area_indisponivel`. Promovê-las a uma terceira
+    // ação diria que existe um terceiro trabalho a fazer — e não existe: é o mesmo
+    // plantão, com uma pista a mais.
     acao: r.estado === "indisponivel" ? "area_indisponivel" : "area_nao_encontrada",
     recurso: "teamguide",
     resultado: r.estado === "indisponivel" ? "falha" : "negado",
     detalhe: {
-      ...r.estado === "indisponivel" ? { motivo: r.motivo } : {},
+      ...r.estado === "indisponivel" ? {
+        motivo: r.motivo,
+        // Ausentes quando `motivo` se explica sozinho (`http_401`, `formato_inesperado`)
+        // — ver `FalhaTeamGuide`. Gravar `null` ali sugeriria que não deu para saber.
+        ...r.fase ? { fase: r.fase } : {},
+        ...r.classe ? { classe: r.classe } : {}
+      } : {},
       // Diz se a pessoa fica sem área ou se o mapa cobriu — é a diferença entre "temos um
       // buraco" e "temos um buraco que a configuração está tapando".
       caiuNoMapa: doMapa !== null
@@ -9313,9 +9388,13 @@ async function tratarWebhook(req, ctx, url) {
   return json({ ok: true }, 202);
 }
 async function tratarHealth(ctx) {
-  const [atlassian, ia] = await Promise.all([
+  const [atlassian, ia, teamguide] = await Promise.all([
     ctx.atlassian.verificarSaude(),
-    ctx.ia.verificarSaude()
+    ctx.ia.verificarSaude(),
+    // `D-40` — a fonte organizacional entra aqui para que medi-la **não custe abrir um
+    // chamado numa fila real**: era essa a única evidência que existia dela.
+    // Fonte não configurada é estado válido (`FR-13`), não avaria.
+    ctx.teamguide?.verificarSaude() ?? Promise.resolve({ ok: true, detalhe: "n\xE3o configurada" })
   ]);
   let banco = { ok: true, detalhe: "ok" };
   try {
@@ -9330,7 +9409,13 @@ async function tratarHealth(ctx) {
       usandoFakes: ctx.usandoFakes,
       modoDemo: ctx.modoDemo,
       somenteLeitura: ctx.somenteLeitura,
-      dependencias: { atlassian, ia, banco, sso: { ok: true, detalhe: "edge GoDeploy" } }
+      dependencias: {
+        atlassian,
+        ia,
+        banco,
+        teamguide,
+        sso: { ok: true, detalhe: "edge GoDeploy" }
+      }
     },
     ok ? 200 : 503
   );
