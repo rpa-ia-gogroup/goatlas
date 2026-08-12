@@ -124,6 +124,11 @@ tipos **70, 89, 91, 92, 94 e 95** do `GN`.
       com a escrita ligada e confirmar `201` **e** o valor de "Recorrência" gravado no Jira.
       Só isso separa "a forma está certa" de "a forma parece certa" — é a mesma classe de
       verificação de `T-425`. _Requirements: RF-27, D-24_
+      ⚠️ **Ampliada por `D-48`: são DOIS tipos, e o 71 vem primeiro.** O **71** exige
+      prioridade e **não tem select nenhum** — ele isola a prioridade de tudo o mais, e foi
+      o que respondeu 400 com o `D-39` já no ar. O **70** exige os dois, e só ele prova que
+      as duas correções convivem. Confirmar, no Jira: `201` · a **prioridade** gravada
+      (esta é a novidade — `GN-6894` voltou com `prioridade: null`) · "Recorrência" gravada.
 
 ## Fase 5 — a fonte organizacional nunca respondeu em produção (`D-40`, 12/08/2026)
 
@@ -160,10 +165,53 @@ com consertos opostos, então nenhuma medição posterior conseguiria separá-la
       agora seria mudança de comportamento sobre hipótese não provada, e alteraria o próprio
       caminho que T-530 mede. _Requirements: RF-19, RNF-36_
 
+## Fase 6 — a PRIORIDADE obrigatória (`D-48`, 12/08/2026)
+
+🚨 **Medido contra o schema real, pela rota de diagnóstico de `D-44`: 11 dos 15 tipos do
+`GN` exigem prioridade, e o app nunca a enviava.** Sem prioridade: 68, 108, 143, 144 — que
+são exatamente os que abriram chamado. Obrigatória: 71, 90, 93 (sem select) e 70, 89, 91,
+92, 94, 95, 96, 134 (com Recorrência). O tipo **71** respondeu `400`/`transitorio: false`
+**já com o `D-39` deployado**: a prioridade obrigatória sozinha basta para matar a criação, e
+400 é definitivo (`RNF-17`) — a submissão vira `falha` e o chamado da pessoa se perde.
+
+Causa: `camposAdicionais` descarta `priority` (certo para a tela de `RF-27`, cego para
+"é obrigatório e não estou mandando"), e `montarCamposSolicitante` dependia de um
+`campoPrioridadeId` que `contexto.ts` nunca passou — caminho morto desde sempre (`T-099`).
+
+- [x] **T-532** — Testes **antes**: `opcaoDePrioridade` (rótulo acha a opção · id sai do
+      `validValues` · acento e caixa · três níveis desce · **nunca sobe** · `Low` lida e
+      nunca escrita) e `prioridadeParaOJira` (sem campo → `{}` · casou → `{id}` · opcional
+      sem correspondência → `{}` · **obrigatório sem correspondência → recusa com o
+      rótulo**). ⚠️ E os de rota afirmam sobre o **corpo entregue ao `fetchImpl`** e sobre o
+      **payload do outbox** — o fake não valida nada (`D-47`).
+      _Requirements: RF-16, RNF-17, RNF-30_
+- [x] **T-533** — `campoDePrioridade` em `atlassian/cliente.ts`, decidindo por
+      `jiraSchema.system` (`ScC-4`), e os **três** leitores do `/field` derivando de um corpo
+      cru cacheado: nenhuma ida de rede a mais (`R-02`). `campoPrioridadeId`,
+      `ROTULO_PRIORIDADE` e `PRIORIDADE_POR_ROTULO` **saem**.
+      _Requirements: RF-16, RNF-13, RNF-25, RNF-36_
+- [x] **T-534** — Vocabulário único de prioridade em `tickets/valores-de-campo.ts`, servindo
+      escrita **e** leitura, com `escrita: false` para `Low`/`Lowest`. Ligado nas **duas**
+      rotas, na ordem *obrigatórios → opções válidas → prioridade → traduzir → persistir*;
+      na conversa, as três recusas antes de `registrarConfirmacao`.
+      _Requirements: RF-16, RF-17, RF-27, RNF-17, RNF-18_
+- [x] **T-535** — `atlassian/sla-do-jsm.ts`: o `?expand=…sla…` que era pedido e descartado
+      passa a ser lido (`T-100`). Identificação pelo **nome**, `null` quando não reconhece.
+      ⚠️ Só o **dado** — a tela é outra tarefa, e quem a fizer lê `D-48` antes (o SLA é o do
+      JSM, não o compromisso de `RN-08`). _Requirements: RF-29, RF-31, RN-08_
+- [x] **T-536** — `D-48` em `docs/DECISOES.md`, `CLAUDE.md` (padrões + estado do projeto),
+      `T-099`/`T-100` na spec 001 e este arquivo. _Requirements: RNF-27_
+- [ ] **T-525** (ampliada) — a verificação de go-live, agora com os tipos **71 e 70**. Ver
+      acima.
+
 ## Fora desta spec
 
 - Enviar `Setor Gocase` ao Jira — depende de o campo ser publicado num formulário de portal.
 - Preencher cargo automaticamente (`spec.md` §2).
-- ⚠️ **Investigar `prioridade: null`** — o `GN-6894` voltou sem prioridade e sem SLA. Ou o
-  tipo 68 não expõe o campo, ou `campoPrioridadeId` não está configurado. Se for o segundo,
-  `RF-16` não tem efeito no Jira. É outro assunto, com outra causa provável.
+- ~~⚠️ **Investigar `prioridade: null`**~~ — ✅ **investigado e corrigido em `D-48`** (Fase 6):
+  era `campoPrioridadeId` nunca configurado, **e** o tipo 68 de fato não expõe o campo. As
+  duas hipóteses estavam certas ao mesmo tempo, e a segunda escondia a primeira — foi por
+  abrir chamado só no 68 que o defeito passou. `slaPrimeiraResposta: null` era um terceiro
+  defeito independente, também fechado.
+- **Mostrar o SLA na tela** (`RF-29`, `RF-31`) — o dado existe desde `T-535`; a superfície
+  não, e ela precisa distinguir o SLA do JSM do compromisso do goatlas (`D-20`).

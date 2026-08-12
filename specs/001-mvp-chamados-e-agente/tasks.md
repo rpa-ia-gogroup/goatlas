@@ -439,8 +439,22 @@ created: "2026-08-03"
       (o padrão de `urlDeLeituraNoApp`, e o público do Jira **tem** assento, ao contrário
       do público do app) × colar o texto na descrição (o mais simples e o que envelhece
       pior: descrição não tem volta e conversa longa afoga o pedido). Ver `D-47`.
-- [ ] **T-099** 🚨 **`campoPrioridadeId` nunca é preenchido — a prioridade não chega ao
+- [x] **T-099** 🚨 **`campoPrioridadeId` nunca é preenchido — a prioridade não chega ao
       Jira.** _Requirements: RF-15, RF-16, RF-18, RN-08_
+      ✅ **Resolvida em 12/08/2026 (`D-48`), e o achado era maior do que esta linha dizia.**
+      A auditoria descreveu o defeito como "a prioridade não aparece na fila do time de
+      tech" — perda de informação. A medição contra o schema real mostrou que ele é
+      **perda de chamado**: **11 dos 15 tipos do `GN` exigem prioridade**, e omitir campo
+      obrigatório responde **400 = definitivo = submissão em `falha`, nunca reprocessada**
+      (`RNF-17`). Os 4 tipos que abriram chamado até hoje são exatamente os 4 sem
+      prioridade. O tipo **71** (exige prioridade, sem select nenhum) devolveu 400 já com o
+      `D-39` no ar — prova de que a prioridade sozinha bastava.
+      **O conserto:** `campoDePrioridade` decide por `jiraSchema.system` (`ScC-4`),
+      `campoPrioridadeId` **saiu**, o valor vai como `{id}` tirado do `validValues` e a
+      tradução roda na **rota**, como `D-39`. Tipo obrigatório sem correspondência é
+      **recusado antes do efeito**, com o rótulo (`RNF-30`).
+      ⚠️ **Falta a medição na staging** (`T-525` da spec 006, agora com dois tipos): só ela
+      separa "a forma está certa" de "a forma parece certa".
       `ClienteAtlassianHttp` só escreve a prioridade quando `opcoes.campoPrioridadeId`
       existe (`src/lib/atlassian/cliente.ts:474-476`), e **nada no repo o define**:
       `contexto.ts:230-241` monta o cliente sem ele, não há chave em `ConfigValores`, não
@@ -471,8 +485,27 @@ created: "2026-08-03"
       sendo decisão a tomar depois de ler o `validValues` real — inclusive os **rótulos**
       (`ROTULO_PRIORIDADE`, hoje `Highest`/`High`/`Medium`), que são forma do formulário do
       Jira e moram no código com teste.
-- [ ] **T-100** 🚨 **O SLA nunca é lido da Atlassian — o `expand` é pedido e jogado fora.**
+- [~] **T-100** 🚨 **O SLA nunca é lido da Atlassian — o `expand` é pedido e jogado fora.**
       _Requirements: RF-29, RF-31, RN-08_
+      ✅ **A METADE do dado está feita (`D-48`, 12/08/2026):** `atlassian/sla-do-jsm.ts` lê o
+      `expand` que já vinha, o cliente para de devolver `null` fixo e o fake deixa de fingir
+      `{prazo: null, cumprido: null}` para todo chamado. O detalhe (`GET /api/chamados/:key`)
+      já devolve `chamado.slaPrimeiraResposta` sem nenhuma mudança de rota — ele sempre
+      serializou o objeto inteiro.
+      ❌ **A TELA continua sem mostrar**, e é o que mantém esta tarefa aberta: o tipo
+      `DetalheChamado.chamado` do front (`src/app/api.ts`) não tem o campo, e a lista
+      (`RF-29`) nem o expõe na resposta. Nada disso foi feito aqui de propósito —
+      `src/app/telas.tsx` estava com dois agentes em cima.
+      ⚠️ **E quem for desenhar precisa ler `D-48` antes:** o valor é o SLA **do JSM**, não o
+      compromisso de `RN-08` que o app calcula e cobra. `D-20` já decidiu que duas fontes de
+      verdade sobre o mesmo prazo é pior que uma — os dois na mesma tela sem dizer de quem é
+      cada um é a pior versão disso.
+      ⚠️ **`null` é resposta legítima e comum:** o SLA é identificado pelo **nome**, e os
+      nomes reais do `GN` não foram medidos. Tela que trate `null` como "carregando" vai
+      girar para sempre.
+      ⚠️ **"Histórico" continua sem modelo.** O que o `expand` traz é um retrato do ciclo
+      atual (mais o último concluído); ciclos pausados/decorridos não existem em modelo
+      nenhum do app, e `RN-08` diz que o que importa é a **primeira resposta**.
       `RF-29` pede SLA na **lista** e `RF-31` pede o **histórico de SLA** no detalhe. Nenhum
       dos dois existe, e a causa é uma só: `obterChamado` monta a URL **com**
       `expand=…sla…` (`src/lib/atlassian/cliente.ts:516`) e devolve

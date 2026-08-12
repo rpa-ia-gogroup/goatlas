@@ -2575,6 +2575,122 @@ apenas registrado.
 
 ---
 
+### D-48 · A prioridade obrigatória — 11 dos 15 tipos do `GN` não abriam chamado
+
+**Data:** 12/08/2026 · **Decide:** Kaique · **Mede:** staging `3936ca2d`, contra a
+Atlassian real
+
+**A medição, pela rota de diagnóstico que `D-44` criou**
+(`GET /api/admin/tipos-chamado/schema`):
+
+| tipo | prioridade | selects obrigatórios |
+|---|---|---|
+| 68, 108, 143, 144 | ausente | — |
+| 71, 90, 93 | **OBRIGATÓRIA** | — |
+| 70, 89, 91, 92, 94, 95, 96, 134 | **OBRIGATÓRIA** | Recorrência |
+
+E o campo, no tipo 70:
+
+```json
+{"fieldId":"priority","name":"Prioridade","required":true,
+ "jiraSchema":{"type":"priority","system":"priority","custom":null,"items":null},
+ "validValues":{"total":5,"opcoes":[
+   {"id":"1","rotulo":"Highest"},{"id":"2","rotulo":"High"},{"id":"3","rotulo":"Medium"},
+   {"id":"4","rotulo":"Low"},{"id":"5","rotulo":"Lowest"}]}}
+```
+
+**As duas medições que fecham a causa.** Os quatro tipos **sem** prioridade são exatamente
+os que abriram chamado (`GN-6897`, `GN-6898`, ambos tipo 68). E o tipo **71** — que exige
+prioridade e **não tem select nenhum** — respondeu `Atlassian respondeu 400`,
+`transitorio: false` **já com o `D-39` deployado**: a prioridade obrigatória **sozinha**
+basta para matar a criação. O `D-39` era necessário e não suficiente.
+
+🚨 400 é **definitivo** neste projeto: a submissão vira `falha` e **nunca** é reprocessada
+(`RNF-17`). São 11 tipos de 15 perdendo o chamado da pessoa — o defeito mais caro achado
+até aqui.
+
+**Por que ninguém via.** `camposAdicionais` descarta `summary`/`description`/`priority`
+porque o formulário fixo de `D-04` já os tem — descarte certo para desenhar a tela, e
+**cego** para *"este campo é obrigatório e não estou mandando"*: `obrigatoriosFaltando`
+(`D-38`) nunca via `priority`, então o app nem recusava antes nem enviava. É a mesma
+cegueira que `D-44` removeu do diagnóstico, um nível abaixo — no caminho que abre chamado.
+E `montarCamposSolicitante` só enviava prioridade com `opcoes.campoPrioridadeId`
+preenchido: chave que `contexto.ts` **nunca** passou e que não existia em `ConfigValores`.
+O caminho estava morto desde sempre (`T-099`).
+
+**A decisão, em cinco partes.**
+
+1. **Quem responde "este tipo tem prioridade?" é o SCHEMA.** `campoDePrioridade`
+   (`atlassian/cliente.ts`) procura `jiraSchema.system === 'priority'` — nunca o `fieldId`,
+   que é a regra de `ScC-4` para anexo e vale aqui pelo mesmo motivo: um
+   `fieldId === 'priority'` funcionaria na Gocase e pararia de funcionar em outro site
+   **sem quebrar nada**, e o sintoma seria a prioridade voltar a não ser enviada, em
+   silêncio. Com isso, **`campoPrioridadeId` sai** — config que ninguém liga não é
+   configuração, é caminho morto, e `D-36` já provou que id de campo global mente.
+
+2. **É um TERCEIRO leitor do mesmo `/field`, e nenhum dos dois existentes servia.** O de
+   produto **descarta** `priority`; o de diagnóstico (`D-44`) **trunca** `validValues` em
+   `MAX_OPCOES_LISTADAS` — certo para uma tela, errado para decidir "esta opção existe?",
+   porque schema truncado produziria recusa falsa com cara de recusa verdadeira. Os três
+   passam a derivar de um **corpo cru cacheado** (`camposBrutosDoTipo`): nenhuma ida de
+   rede a mais (`R-02`, `RNF-36`), e as caches derivadas continuam com **chave própria**,
+   que é o que a advertência de `D-44` protege.
+
+3. 🚨 **Vai `{id}`, e o id sai do `validValues` — nunca de tabela nossa.** A
+   `ROTULO_PRIORIDADE` aposentada mandava `{name: "Highest"}`: um "renomear prioridade" no
+   Jira viraria 400 definitivo. Agora o **rótulo acha a opção** e o **id da opção é o que
+   viaja**; renomear faz o casamento *falhar*, e falhar tem tratamento. É a mesma exceção
+   de `D-39` para `id === rotulo`, reaproveitando `referenciaDaOpcao`.
+
+4. **O vocabulário de prioridade é UM, e serve escrita e leitura**
+   (`tickets/valores-de-campo.ts`). Eram duas tabelas — `ROTULO_PRIORIDADE` para escrever,
+   `PRIORIDADE_POR_ROTULO` para ler — com três rótulos em inglês cada; divergir era questão
+   de tempo, e o sintoma seria mudo dos dois lados. ⚠️ `Low`/`Lowest` são **lidas** como
+   `normal` (nosso vocabulário não tem "baixa", e `null` diria "chamado sem prioridade")
+   e **nunca escritas** como `normal`: um `normal` que virasse `Low` porque `Low` aparece
+   antes de `Medium` numa lista seria rebaixamento silencioso da escolha da pessoa. A
+   distinção é declarada no dado (`escrita: false`), não espalhada em `if`.
+
+5. **Quando nenhuma prioridade nossa casa com o site, a resposta depende de o campo ser
+   obrigatório** — e é aqui que estava a pergunta difícil:
+   - **opcional** → omite e abre o chamado (`RNF-18`, e é o comportamento de hoje);
+   - **obrigatório** → **recusa antes de qualquer efeito**, com o **rótulo** do campo
+     (`RNF-30`) e em português. Omitir um obrigatório é o 400 que esta decisão fecha, e ele
+     apaga o chamado sem deixar nada na tela. ⚠️ Isso **não** contraria `RNF-18` pela mesma
+     razão que `D-38` não contraria: "não bloquear" nunca resultou em chamado aberto neste
+     caminho.
+   - Antes de chegar à recusa há **uma aproximação, e ela só desce**: `crítica` aceita a
+     opção de `alta`, e `alta` a de `normal`. Esquema de três níveis (`High`/`Medium`/`Low`)
+     é comum, e nele "crítica" honestamente é o `High` do site. 🚨 **Nunca sobe** — `normal`
+     virando `High` é a inflação de prioridade que `RF-16` existe para impedir. E `normal`
+     **não** desce para `Low`, pelo item 4.
+
+**Onde a tradução roda: na ROTA, como em `D-39`.** É este objeto que o outbox persiste, e é
+isso que faz o retry de `RNF-17` reenviar o mesmo corpo sem reler schema. A prioridade entra
+**por último** no merge: ela é resolvida no servidor a partir da proposta, e a ordem é a
+segunda camada que impede um `camposDinamicos` do cliente de sobrescrevê-la (a primeira é
+`filtrarPeloSchema`, que só conhece campos adicionais — `priority` nunca está lá).
+
+**No mesmo movimento, o SLA que era pedido e jogado fora** (`T-100`, `D-47`).
+`obterChamado` montava a URL **com** `?expand=…,sla,…` e devolvia `slaPrimeiraResposta:
+null` **fixo** — a resposta vinha, custava a mesma requisição e morria na última linha.
+`atlassian/sla-do-jsm.ts` a lê. 🚨 **E identifica o SLA pelo NOME, devolvendo `null` quando
+não reconhece:** um chamado com um SLA só, que por acaso seja o de **resolução**, mostraria
+um prazo de dias onde a pessoa lê "alguém te responde até" — prazo errado é pior que prazo
+ausente (`D-42`), agravado por a pessoa planejar em cima dele. ⚠️ Os nomes reais do site
+**não foram medidos**; a lista cobre os defaults do JSM em inglês e português. E o módulo se
+chama `sla-do-jsm` porque **não é o nosso**: `notificacoes/sla.ts` calcula o compromisso do
+goatlas (`RN-08`, `R-05`), e `D-20` já decidiu que duas fontes de verdade sobre o mesmo
+prazo é pior que uma — quem mostrar este valor na tela tem de dizer de quem ele é.
+
+**O que só a staging fecha.** Abrir um chamado do tipo **71** (prioridade obrigatória, sem
+select) e do **70** (prioridade + Recorrência) com a escrita ligada, e confirmar `201` **e**
+a prioridade gravada na fila. É `T-525`, agora com um segundo tipo. E o SLA só ganha valor
+quando alguém ler o nome real dos SLAs do `GN` — enquanto não lerem, o campo responde `null`,
+que é honesto.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
