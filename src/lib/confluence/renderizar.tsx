@@ -214,6 +214,20 @@ function Link({
     )
   }
 
+  if (no.destino.tipo === 'anexoDaPagina') {
+    // `T-142` — o MESMO proxy da imagem (`RNF-02`): o navegador nunca fala com a
+    // Atlassian, e quem decide `Content-Type` e inline × download é `decidirEntrega`
+    // (`D-11`), nunca este link. Sem `download`: para PDF a leitura na aba é o caminho
+    // curto, e o servidor força `attachment` no que não é exibível.
+    const url = urlInternaSegura(opcoes.urlDeAnexo(no.destino.nomeArquivo))
+    if (url === null) return filhos
+    return (
+      <a className="doc-link doc-link-anexo" href={url}>
+        {filhos}
+      </a>
+    )
+  }
+
   // Revalidação — camada 2. Nó vindo pronto não é nó confiável.
   const url = urlSegura(no.destino.url)
   if (url === null) return filhos
