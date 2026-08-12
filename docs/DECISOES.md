@@ -2937,6 +2937,74 @@ qualidade de leitura, não causa desta falha, e entra quando houver medição qu
 
 ---
 
+### D-51 · O anexo que o APP enviou não pede prova à Atlassian
+
+**Data:** 12/08/2026 · **Origem:** observação do Kaique sobre o resultado de `D-45` ·
+**Contexto:** `RF-30`, `RF-31`, `RF-34`, `RF-61`, `RF-63`, `RN-05`, `RNF-18`, `D-01`,
+`D-45`, `D-17`
+
+**A medição.** Com `D-45` no ar, `GET /api/chamados/GN-6898` respondeu:
+
+```json
+{ "anexos": [], "anexosIndisponiveis": true }
+```
+
+E aquele chamado **tem** um arquivo — `evidencia-bateria-e2e.txt`, enviado pelo próprio
+app minutos antes, com `anexo.estado: "anexado"` na resposta da criação. A tela dizia
+"não conseguimos confirmar os anexos" sobre o arquivo que nós mesmos tínhamos posto lá.
+
+**Por que `D-45` chegou nisso, e por que ele continua certo.** A lista de
+`GET …/request/{key}/attachment` é filtrada pelo **papel de quem pergunta**, e sob proxy
+total (`D-01`) quem pergunta é sempre a conta de serviço, que é **agente** — logo ela
+inclui anexo de comentário **interno**. Cruzar com os comentários públicos é a única
+forma de provar publicidade *para o que veio do time*. Nada disso mudou.
+
+**O que faltava era uma distinção.** Existem **dois** tipos de anexo no chamado:
+
+| Origem | O que se sabe |
+|---|---|
+| enviado pelo **app** | quem pediu, quando, em qual chamado — nós fizemos a chamada |
+| enviado pelo **time** no Jira | só o que a Atlassian conta, e ela conta demais |
+
+Para o primeiro não há o que perguntar: o arquivo saiu de um upload autenticado daquela
+pessoa (`RF-01`), para um chamado cujo vínculo já é dela (`RF-30`), e **nenhum** deles
+pode ser de comentário interno — comentário interno é escrito por quem tem assento, e
+esse caminho não existe para o solicitante. A prova que `D-45` procura na Atlassian, aqui,
+é a nossa própria linha.
+
+**A decisão.** Uma tabela permanente, `anexos_enviados`, gravada nos **dois** caminhos de
+envio (materialização de `RF-63` e a rota de `RF-34`), lida com o e-mail no `WHERE`. A
+exibição passa a ter três fontes: o que enviamos (entra sempre), a lista da Atlassian
+(prova de existência) e os comentários públicos (prova de publicidade). Cada item diz em
+**palavras** de onde veio — *você enviou* × *do time* —, nunca por cor ou posição.
+
+⚠️ **`anexos_pendentes` não serve, e a diferença não é de nome.** Ela guarda o id
+**temporário** e é expurgada em 12 h (T-415): uma lista montada dela mostraria os anexos
+da pessoa **sumindo sozinhos** meio dia depois — mediria o expurgo, exatamente como o
+indicador de evidência mediria se lesse de lá (T-422).
+
+⚠️ **A retenção segue a regra de `vinculos` (`D-17`), não a de `conversas`.** Expurgar
+este registro apagaria a evidência do chamado enquanto o chamado continua aberto — é o
+acesso da pessoa ao próprio caso, não histórico de conversa.
+
+⚠️ **`anexosIndisponiveis` mudou de significado, e a tela mudou junto.** Antes queria
+dizer "não sei de nada" e justificava esconder a lista inteira; agora fala **só** do que
+veio do time, e a lista da pessoa aparece do lado. Três testes de `T-084` afirmavam
+`anexos: []` durante a queda — o comentário de um deles dizia, literalmente, que o que
+não podia acontecer era *"uma lista vazia silenciosa, que a pessoa leria como meu print
+sumiu"*. Eles travavam o melhor que se conseguia com **uma** fonte; foram atualizados
+para afirmar o comportamento novo, com a dúvida sobre o time preservada.
+
+**O que não mudou:** o download continua pelo proxy do app (`RNF-02`), autorizado por
+vínculo com e-mail, respondendo **404 nunca 403** (`D-12`), e o anexo de comentário
+interno continua fora da lista — há teste de burla afirmando isso.
+
+**Custo aceito:** o registro é nosso, então um arquivo anexado ao chamado **por fora do
+app** (alguém do time subindo pelo Jira) só aparece pelo caminho de `D-45`. É o desenho
+certo: quem não passou por nós não tem a nossa prova.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

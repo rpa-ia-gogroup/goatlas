@@ -299,6 +299,18 @@ destes reabre um vazamento que já foi fechado.
   por um `replace` novo. ⚠️ **O fake escondia isto**: `comentar` guardava o texto sem prefixo e
   com o nome do autor real — o oposto de produção nas duas pontas —, e corrigi-lo não quebrou
   **nenhum** teste existente, que é a medida exata do ponto cego (família de `D-38`/`D-39`).
+- 🚨 **O anexo que o APP enviou não pede prova a ninguém** (`D-51`, `tickets/anexos-enviados.ts`).
+  `D-45` está certo sobre o anexo do **time** e foi aplicado também ao nosso: o `GN-6898`
+  tinha um arquivo enviado pelo app e a tela dizia `anexosIndisponiveis: true` (medido em
+  12/08/2026). São **dois** tipos de anexo — o que passou por nós (upload autenticado daquela
+  pessoa, chamado com vínculo dela, impossível ser de comentário interno) e o que veio do
+  Jira. O primeiro é lido de `anexos_enviados`, tabela **permanente**, e entra na lista
+  sempre; o segundo continua pela interseção de `D-45`. ⚠️ **`anexos_pendentes` não serve**:
+  é expurgada em 12 h, e a lista da pessoa sumiria sozinha meio dia depois (mesma armadilha
+  de T-422). ⚠️ E `anexosIndisponiveis` **mudou de significado** — hoje fala só do time, e por
+  isso deixou de esconder a lista; os três casos de `T-084` que afirmavam `[]` durante a queda
+  foram atualizados, e um deles já dizia no comentário que lista vazia silenciosa era o que
+  não podia acontecer. A origem vai à tela em **palavras** (*você enviou* × *do time*).
 - 🚨 **Quem prova que o anexo do chamado é PÚBLICO não é o endpoint de anexos** (`D-45`,
   `tickets/anexos-do-chamado.ts`). A documentação do JSM diz, sobre
   `GET /request/{key}/attachment`: *"customers will only get a list of public attachments"* —

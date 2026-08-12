@@ -141,6 +141,14 @@ export interface AnexoDoChamado {
   readonly tamanhoBytes: number | null
   readonly criadoEm: string | null
   readonly url: string
+  /**
+   * `RF-31` — de onde veio a certeza de que este arquivo pode aparecer.
+   *
+   * `voce` = o app o enviou a pedido desta pessoa · `time` = veio da Atlassian e passou
+   * pela interseção de `D-45`. A tela **diz** isso em palavras: quem mandou o print
+   * precisa reconhecê-lo, e "o time respondeu com um arquivo" é outra notícia.
+   */
+  readonly origem?: 'voce' | 'time'
 }
 
 export interface TipoChamado {

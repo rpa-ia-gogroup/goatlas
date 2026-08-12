@@ -1275,39 +1275,57 @@ function ArquivosDoChamado({
   itens: readonly AnexoDoChamado[]
   indisponiveis: boolean
 }) {
-  if (indisponiveis) {
+  // ⚠️ **A dúvida deixou de esconder a lista** (`D-51`). Enquanto a única fonte era a
+  // Atlassian, `indisponiveis` significava "não sei de nada" e devolver só a frase era
+  // honesto. Agora o que o app enviou é sabido por outra via — e sumir com o print da
+  // pessoa porque não deu para confirmar o *do time* seria o defeito medido no `GN-6898`
+  // com outra roupa. A dúvida vira nota **ao lado** da lista, e vem antes dela.
+  if (itens.length === 0) {
     return (
       <p className="dica">
-        Não conseguimos confirmar os anexos deste chamado agora. Isso não significa que
-        não há nenhum — tente recarregar em instantes.
+        {indisponiveis
+          ? 'Não conseguimos confirmar os anexos deste chamado agora. Isso não significa que não há nenhum — tente recarregar em instantes.'
+          : 'Nenhum arquivo anexado a este chamado ainda.'}
       </p>
     )
   }
-  if (itens.length === 0) {
-    return <p className="dica">Nenhum arquivo anexado a este chamado ainda.</p>
-  }
   return (
-    <ul className="arquivos-do-chamado">
-      {itens.map((a) => {
-        const detalhes = [extensaoLegivel(a.nomeArquivo), tamanhoLegivel(a.tamanhoBytes)]
-          .filter((p): p is string => p !== null)
-          .join(' · ')
-        return (
-          <li key={a.nomeArquivo}>
-            {/* `download` sugere salvar; quem quiser ver na hora abre pelo navegador. O
-                servidor decide inline × anexo por allowlist de tipo (`D-11`) — o
-                atributo é preferência de uso, nunca a trava. */}
-            <a className="arquivo" href={a.url} download>
-              <span className="arquivo-nome">{a.nomeArquivo}</span>
-              {detalhes && <span className="dica">{detalhes}</span>}
-              <span className="arquivo-seta" aria-hidden="true">
-                ↓
-              </span>
-            </a>
-          </li>
-        )
-      })}
-    </ul>
+    <>
+      {indisponiveis && (
+        <p className="dica">
+          Pode haver arquivos enviados pelo time que não conseguimos confirmar agora. Os
+          seus estão listados abaixo.
+        </p>
+      )}
+      <ul className="arquivos-do-chamado">
+        {itens.map((a) => {
+          const detalhes = [
+            // A origem é dita em **palavras**, nunca só por posição ou cor (regra 9): quem
+            // mandou o arquivo precisa reconhecê-lo, e "o time respondeu com um anexo" é
+            // outra notícia. Ausente = resposta antiga do servidor; aí não se afirma nada.
+            a.origem === 'voce' ? 'você enviou' : a.origem === 'time' ? 'do time' : null,
+            extensaoLegivel(a.nomeArquivo),
+            tamanhoLegivel(a.tamanhoBytes),
+          ]
+            .filter((p): p is string => p !== null)
+            .join(' · ')
+          return (
+            <li key={a.nomeArquivo}>
+              {/* `download` sugere salvar; quem quiser ver na hora abre pelo navegador. O
+                  servidor decide inline × anexo por allowlist de tipo (`D-11`) — o
+                  atributo é preferência de uso, nunca a trava. */}
+              <a className="arquivo" href={a.url} download>
+                <span className="arquivo-nome">{a.nomeArquivo}</span>
+                {detalhes && <span className="dica">{detalhes}</span>}
+                <span className="arquivo-seta" aria-hidden="true">
+                  ↓
+                </span>
+              </a>
+            </li>
+          )
+        })}
+      </ul>
+    </>
   )
 }
 

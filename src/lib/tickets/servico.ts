@@ -78,6 +78,27 @@ export class ServicoChamados {
     private readonly vinculos: RepositorioVinculos,
     private readonly auditoria: Auditoria,
     private readonly novoId: () => string,
+    /**
+     * O registro do que **este app** anexou — `RF-31`.
+     *
+     * Opcional de propósito: é a terceira fonte da exibição, e um contexto que não a
+     * fornece continua com o comportamento de `D-45` (só Atlassian + prova). Sem isso,
+     * todo teste e todo caminho que monta o serviço à mão passaria a exigir um
+     * repositório que não usa.
+     */
+    private readonly anexosEnviados?: {
+      listarDoSolicitante(
+        issueKey: string,
+        email: string,
+      ): Promise<
+        readonly {
+          nomeArquivo: string
+          tamanhoBytes: number | null
+          tipo: string | null
+          criadoEm: string
+        }[]
+      >
+    },
   ) {}
 
   /**
@@ -503,6 +524,20 @@ export class ServicoChamados {
       comentarios === null
         ? { disponivel: false, anexos: [] as readonly AnexoDoChamado[] }
         : provaDePublicidade(comentarios)
-    return anexosParaExibir(issueKey, doChamado, prova)
+
+    // ⚠️ O e-mail vai no `WHERE` lá dentro (`RF-30`), e a leitura **não** entra no
+    // `try/catch` da Atlassian acima: são falhas de naturezas diferentes, e uma queda do
+    // Jira não pode apagar da tela o arquivo que a pessoa mandou por aqui.
+    const meus: readonly AnexoDoChamado[] = this.anexosEnviados
+      ? (await this.anexosEnviados.listarDoSolicitante(issueKey, solicitanteEmail)).map((a) => ({
+          nomeArquivo: a.nomeArquivo,
+          // O tipo que **nós** medimos no upload. Continua não virando `Content-Type` sem
+          // passar por `decidirEntrega` (`D-11`) — o nome do campo é o mesmo por isso.
+          tipoDeclarado: a.tipo,
+          tamanhoBytes: a.tamanhoBytes,
+          criadoEm: a.criadoEm,
+        }))
+      : []
+    return anexosParaExibir(issueKey, doChamado, prova, meus)
   }
 }

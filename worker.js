@@ -3560,7 +3560,36 @@ var TABELAS = [
   `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_chave
      ON anexos_pendentes (chave_idempotencia, solicitante_email)`,
   `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_pessoa
-     ON anexos_pendentes (solicitante_email, criado_em)`
+     ON anexos_pendentes (solicitante_email, criado_em)`,
+  /**
+   * O que **este app** anexou ao chamado, a pedido de uma pessoa identificada — `RF-31`.
+   *
+   * ⚠️ **Não é `anexos_pendentes` com outro nome.** Aquela guarda o id **temporário** e é
+   * expurgada em 12 h (T-415); uma lista montada dela mostraria os anexos da pessoa
+   * sumindo sozinhos meio dia depois. Aqui o dado é o registro de que o arquivo entrou —
+   * e ele vale enquanto o chamado existir.
+   *
+   * 🚨 A razão de existir está medida: em 12/08/2026 o `GN-6898` tinha um arquivo enviado
+   * pelo app e a tela dizia `anexosIndisponiveis: true`, porque a única fonte era a
+   * Atlassian e ela não prova publicidade (`D-45`). Para o que **nós** enviamos não há o
+   * que provar: veio de upload autenticado desta pessoa, para chamado com vínculo dela.
+   *
+   * O `UNIQUE` é a idempotência (nunca `SELECT` antes do `INSERT`): reenviar o mesmo
+   * arquivo não duplica a linha, e o e-mail entra na chave porque a leitura sempre o
+   * exige no `WHERE` (`RF-30`).
+   */
+  `CREATE TABLE IF NOT EXISTS anexos_enviados (
+     issue_key         TEXT NOT NULL,
+     solicitante_email TEXT NOT NULL,
+     nome_arquivo      TEXT NOT NULL,
+     tamanho_bytes     INTEGER,
+     tipo              TEXT,
+     via               TEXT NOT NULL,
+     criado_em         TEXT NOT NULL,
+     PRIMARY KEY (issue_key, solicitante_email, nome_arquivo)
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_anexos_enviados_chamado
+     ON anexos_enviados (issue_key, solicitante_email)`
 ];
 var COLUNAS_ADICIONADAS = [
   // T-304 / RF-19 — a área **no momento da criação** é o dado histórico correto,
@@ -5025,6 +5054,70 @@ var RepositorioAnexosPendentes = class {
   }
 };
 
+// src/lib/tickets/anexos-enviados.ts
+var AnexosEnviados = class {
+  // `agora` devolve ISO, como em `anexos-pendentes.ts` e no resto do projeto — assinatura
+  // diferente para a mesma coisa é o tipo de divergência que só aparece no `tsc`.
+  constructor(db, agora = () => (/* @__PURE__ */ new Date()).toISOString()) {
+    this.db = db;
+    this.agora = agora;
+  }
+  /**
+   * Registra o arquivo que acabou de entrar no chamado.
+   *
+   * ⚠️ **Idempotência vem da constraint, não de um `SELECT` antes do `INSERT`** — é o
+   * padrão do projeto, e aqui o caso de corrida é real: a materialização de `RF-63` e o
+   * envio de `RF-34` podem gravar o mesmo arquivo se a pessoa reenviar. `ON CONFLICT DO
+   * NOTHING` trata a colisão como "já registrei", que é a verdade.
+   *
+   * 🚨 **Nunca lança.** Este registro é para a pessoa ver o próprio arquivo; um erro
+   * aqui não pode derrubar o envio que **já aconteceu** do lado da Atlassian — seria a
+   * mesma inversão que `anexo-na-criacao.ts` evita ao viver fora do `try/catch` que
+   * classifica falha de submissão. O pior caso é a tela não listar um arquivo que está
+   * lá, que é exatamente o estado de hoje.
+   */
+  async registrar(dados) {
+    try {
+      await this.db.exec(
+        `INSERT INTO anexos_enviados
+           (issue_key, solicitante_email, nome_arquivo, tamanho_bytes, tipo, via, criado_em)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (issue_key, solicitante_email, nome_arquivo) DO NOTHING`,
+        [
+          dados.issueKey,
+          dados.solicitanteEmail.trim().toLowerCase(),
+          dados.nomeArquivo,
+          dados.tamanhoBytes ?? null,
+          dados.tipo ?? null,
+          dados.via,
+          this.agora()
+        ]
+      );
+    } catch {
+    }
+  }
+  /** O que **esta pessoa** mandou para **este** chamado. O e-mail está no `WHERE`. */
+  async listarDoSolicitante(issueKey, solicitanteEmail) {
+    const linhas = linhasComoObjetos(
+      await this.db.query(
+        `SELECT issue_key, nome_arquivo, tamanho_bytes, tipo, via, criado_em
+           FROM anexos_enviados
+          WHERE issue_key = ? AND solicitante_email = ?
+          ORDER BY criado_em ASC`,
+        [issueKey, solicitanteEmail.trim().toLowerCase()]
+      )
+    );
+    return linhas.map((l) => ({
+      issueKey: l.issue_key,
+      nomeArquivo: l.nome_arquivo,
+      tamanhoBytes: l.tamanho_bytes === null ? null : Number(l.tamanho_bytes),
+      tipo: l.tipo,
+      via: l.via === "criacao" ? "criacao" : "chamado",
+      criadoEm: l.criado_em
+    }));
+  }
+};
+
 // src/lib/tickets/vinculos.ts
 function daLinha4(l) {
   return {
@@ -5211,13 +5304,26 @@ function mesmoArquivo(a, b) {
   if (a.tamanhoBytes === null || b.tamanhoBytes === null) return true;
   return a.tamanhoBytes === b.tamanhoBytes;
 }
-function anexosParaExibir(issueKey, doChamado, prova) {
-  if (doChamado === null) return { itens: [], indisponivel: true };
-  if (doChamado.length === 0) return { itens: [], indisponivel: false };
-  if (!prova.disponivel) return { itens: [], indisponivel: true };
-  const publicos = doChamado.filter((a) => prova.anexos.some((p) => mesmoArquivo(a, p)));
+function anexosParaExibir(issueKey, doChamado, prova, enviadosPeloApp = []) {
+  const meus = enviadosPeloApp.map((a) => ({
+    ...a,
+    url: urlDoAnexoNoApp(issueKey, a.nomeArquivo),
+    origem: "voce"
+  }));
+  const jaListado = (a) => meus.some((m) => mesmoArquivo(m, a));
+  if (doChamado === null) return { itens: meus, indisponivel: true };
+  if (doChamado.length === 0) return { itens: meus, indisponivel: false };
+  if (!prova.disponivel) return { itens: meus, indisponivel: true };
+  const publicos = doChamado.filter((a) => !jaListado(a)).filter((a) => prova.anexos.some((p) => mesmoArquivo(a, p)));
   return {
-    itens: publicos.map((a) => ({ ...a, url: urlDoAnexoNoApp(issueKey, a.nomeArquivo) })),
+    itens: [
+      ...meus,
+      ...publicos.map((a) => ({
+        ...a,
+        url: urlDoAnexoNoApp(issueKey, a.nomeArquivo),
+        origem: "time"
+      }))
+    ],
     // Existe anexo, a prova funcionou e nenhum casou: isso é um chamado cujos anexos são
     // todos internos — resposta legítima, e "nenhum anexo seu por aqui" é verdade.
     indisponivel: false
@@ -5229,12 +5335,13 @@ function falhaDefinitivaDeCriacao(erro2) {
   return erro2 instanceof ErroAtlassian && !erro2.detalhe.transitorio;
 }
 var ServicoChamados = class {
-  constructor(atlassian, outbox, vinculos, auditoria, novoId) {
+  constructor(atlassian, outbox, vinculos, auditoria, novoId, anexosEnviados) {
     this.atlassian = atlassian;
     this.outbox = outbox;
     this.vinculos = vinculos;
     this.auditoria = auditoria;
     this.novoId = novoId;
+    this.anexosEnviados = anexosEnviados;
   }
   /**
    * Abertura a partir de uma conversa com o agente.
@@ -5557,7 +5664,15 @@ var ServicoChamados = class {
       doChamado = null;
     }
     const prova = comentarios === null ? { disponivel: false, anexos: [] } : provaDePublicidade(comentarios);
-    return anexosParaExibir(issueKey, doChamado, prova);
+    const meus = this.anexosEnviados ? (await this.anexosEnviados.listarDoSolicitante(issueKey, solicitanteEmail)).map((a) => ({
+      nomeArquivo: a.nomeArquivo,
+      // O tipo que **nós** medimos no upload. Continua não virando `Content-Type` sem
+      // passar por `decidirEntrega` (`D-11`) — o nome do campo é o mesmo por isso.
+      tipoDeclarado: a.tipo,
+      tamanhoBytes: a.tamanhoBytes,
+      criadoEm: a.criadoEm
+    })) : [];
+    return anexosParaExibir(issueKey, doChamado, prova, meus);
   }
 };
 
@@ -6506,7 +6621,15 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   const vinculos = new RepositorioVinculos(env.DB, agora);
   const outbox = new Outbox(env.DB, agora);
   const anexosPendentes = new RepositorioAnexosPendentes(env.DB, agora);
-  const chamados = new ServicoChamados(atlassian, outbox, vinculos, auditoria, novoId);
+  const anexosEnviados = new AnexosEnviados(env.DB, agora);
+  const chamados = new ServicoChamados(
+    atlassian,
+    outbox,
+    vinculos,
+    auditoria,
+    novoId,
+    anexosEnviados
+  );
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora);
   const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId);
   const inventarioAssentos = new RepositorioInventario(env.DB, novoId);
@@ -6567,6 +6690,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     vinculos,
     outbox,
     anexosPendentes,
+    anexosEnviados,
     chamados,
     orquestrador,
     organizacao,
@@ -8458,6 +8582,12 @@ async function materializarAnexosDoChamado(deps, dados) {
       await deps.atlassian.materializarAnexosTemporarios(dados.issueKey, [
         pendente.temporaryAttachmentId
       ]);
+      await deps.anexosEnviados?.registrar({
+        issueKey: dados.issueKey,
+        solicitanteEmail: dados.solicitanteEmail,
+        nomeArquivo: pendente.nomeArquivo,
+        via: "criacao"
+      });
       anexados.push(pendente.nomeArquivo);
     } catch {
       falharam.push(pendente.nomeArquivo);
@@ -9318,6 +9448,14 @@ async function rotear(req, ctx, eu, caminho, url) {
           nome: validado.nome,
           tipo: validado.tipo,
           bytes: validado.bytes
+        });
+        await ctx.anexosEnviados.registrar({
+          issueKey,
+          solicitanteEmail: eu.email,
+          nomeArquivo: validado.nome,
+          tamanhoBytes: validado.bytes.byteLength,
+          tipo: validado.tipo,
+          via: "chamado"
         });
         enviados.push(validado.nome);
       } catch {

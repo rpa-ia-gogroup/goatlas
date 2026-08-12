@@ -1017,6 +1017,18 @@ async function rotear(
           tipo: validado.tipo,
           bytes: validado.bytes,
         })
+        // `RF-31` — o que o app anexou fica registrado, para a pessoa ver depois. Vem
+        // **depois** do envio: registrar antes afirmaria um arquivo que pode não ter
+        // entrado. E `registrar` nunca lança (ver `anexos-enviados.ts`), então uma falha
+        // aqui não derruba um envio que já aconteceu do outro lado.
+        await ctx.anexosEnviados.registrar({
+          issueKey,
+          solicitanteEmail: eu.email,
+          nomeArquivo: validado.nome,
+          tamanhoBytes: validado.bytes.byteLength,
+          tipo: validado.tipo,
+          via: 'chamado',
+        })
         enviados.push(validado.nome)
       } catch {
         await ctx.auditoria.registrar({

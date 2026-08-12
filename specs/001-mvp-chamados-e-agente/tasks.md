@@ -351,6 +351,18 @@ created: "2026-08-03"
       O par estrutural do teste de lá está aqui, para a segunda superfície não regredir
       sozinha.
 
+      🚨 **Emendada em 12/08/2026 por `D-51`, com a medição da própria correção:** com
+      `D-45` no ar, o `GN-6898` respondeu `anexos: [], anexosIndisponiveis: true` — e
+      tinha um arquivo, enviado pelo app. O cuidado correto para o anexo do **time**
+      virou silêncio sobre o da própria pessoa. Faltava a distinção entre as duas
+      origens: o que passou por nós tem prova nossa (upload autenticado daquela pessoa,
+      chamado com vínculo dela, impossível ser de comentário interno) e entra na lista
+      **sempre**, vindo de `anexos_enviados` — tabela permanente, gravada na
+      materialização de `RF-63` e na rota de `RF-34`, lida com o e-mail no `WHERE`. O
+      anexo do time continua pela interseção de `D-45`, e o teste de burla que o mantém
+      fora segue verde. ⚠️ `anexosIndisponiveis` passou a falar **só** do time, então
+      deixou de esconder a lista; os três casos de degradação foram atualizados.
+
 ## Phase 6 — Frontend, mobile e fechamento
 
 - [x] **T-090** Tela de conversa com **indicação de progresso** das duas

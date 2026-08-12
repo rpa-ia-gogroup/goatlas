@@ -38,13 +38,25 @@ import type { AnexoDoChamado, ComentarioPublico } from '../atlassian/tipos'
 export interface AnexoExibivel extends AnexoDoChamado {
   /** Sempre uma rota deste app (`RNF-02`) — o navegador nunca fala com a Atlassian. */
   readonly url: string
+  /**
+   * De onde veio a certeza de que este arquivo pode ser mostrado.
+   *
+   * `voce` — o app o enviou a pedido desta pessoa; a prova é a nossa própria linha.
+   * `time` — veio da Atlassian e passou pela interseção de `D-45`.
+   */
+  readonly origem: 'voce' | 'time'
 }
 
 export interface AnexosParaExibir {
   readonly itens: readonly AnexoExibivel[]
   /**
-   * `true` = **não deu para saber**, nunca "não tem". A tela precisa dos dois estados
-   * separados pelo mesmo motivo de `comentariosIndisponiveis`.
+   * `true` = **pode haver anexo do time que não consegui confirmar** — nunca "não tem".
+   * A tela precisa dos dois estados separados pelo mesmo motivo de
+   * `comentariosIndisponiveis`.
+   *
+   * ⚠️ Isto vale só para o que veio da **Atlassian**. O que o app enviou nunca depende
+   * de confirmação, então ele aparece mesmo com esta bandeira de pé — e é por isso que
+   * a bandeira deixou de significar "a lista está vazia porque não sei".
    */
   readonly indisponivel: boolean
 }
@@ -116,16 +128,39 @@ export function anexosParaExibir(
   issueKey: string,
   doChamado: readonly AnexoDoChamado[] | null,
   prova: ProvaDePublicidade,
+  enviadosPeloApp: readonly AnexoDoChamado[] = [],
 ): AnexosParaExibir {
-  // `null` = a testemunha não respondeu (a Atlassian caiu naquela chamada). Sem ela não
-  // se sabe nem se existe anexo: `RNF-18` pede degradar, e degradar aqui é dizer isso.
-  if (doChamado === null) return { itens: [], indisponivel: true }
-  if (doChamado.length === 0) return { itens: [], indisponivel: false }
-  if (!prova.disponivel) return { itens: [], indisponivel: true }
+  // ⚠️ **Os nossos vêm primeiro, e não passam por prova nenhuma.** Cada um saiu de um
+  // upload autenticado desta pessoa para um chamado com vínculo dela; nenhum pode ser de
+  // comentário interno, porque comentário interno é escrito por quem tem assento e este
+  // caminho não existe para o solicitante. Perguntar à Atlassian se o arquivo que **nós**
+  // enviamos é público é o que produzia o silêncio medido no `GN-6898`.
+  const meus: AnexoExibivel[] = enviadosPeloApp.map((a) => ({
+    ...a,
+    url: urlDoAnexoNoApp(issueKey, a.nomeArquivo),
+    origem: 'voce' as const,
+  }))
+  const jaListado = (a: AnexoDoChamado) => meus.some((m) => mesmoArquivo(m, a))
 
-  const publicos = doChamado.filter((a) => prova.anexos.some((p) => mesmoArquivo(a, p)))
+  // `null` = a testemunha não respondeu (a Atlassian caiu naquela chamada). Não se sabe
+  // o que **o time** anexou — mas o que a pessoa mandou continua sabido, e escondê-lo
+  // aqui seria deixar a queda da Atlassian apagar o print dela da tela.
+  if (doChamado === null) return { itens: meus, indisponivel: true }
+  if (doChamado.length === 0) return { itens: meus, indisponivel: false }
+  if (!prova.disponivel) return { itens: meus, indisponivel: true }
+
+  const publicos = doChamado
+    .filter((a) => !jaListado(a))
+    .filter((a) => prova.anexos.some((p) => mesmoArquivo(a, p)))
   return {
-    itens: publicos.map((a) => ({ ...a, url: urlDoAnexoNoApp(issueKey, a.nomeArquivo) })),
+    itens: [
+      ...meus,
+      ...publicos.map((a) => ({
+        ...a,
+        url: urlDoAnexoNoApp(issueKey, a.nomeArquivo),
+        origem: 'time' as const,
+      })),
+    ],
     // Existe anexo, a prova funcionou e nenhum casou: isso é um chamado cujos anexos são
     // todos internos — resposta legítima, e "nenhum anexo seu por aqui" é verdade.
     indisponivel: false,

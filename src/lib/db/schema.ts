@@ -389,6 +389,35 @@ export const TABELAS = [
      ON anexos_pendentes (chave_idempotencia, solicitante_email)`,
   `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_pessoa
      ON anexos_pendentes (solicitante_email, criado_em)`,
+  /**
+   * O que **este app** anexou ao chamado, a pedido de uma pessoa identificada — `RF-31`.
+   *
+   * ⚠️ **Não é `anexos_pendentes` com outro nome.** Aquela guarda o id **temporário** e é
+   * expurgada em 12 h (T-415); uma lista montada dela mostraria os anexos da pessoa
+   * sumindo sozinhos meio dia depois. Aqui o dado é o registro de que o arquivo entrou —
+   * e ele vale enquanto o chamado existir.
+   *
+   * 🚨 A razão de existir está medida: em 12/08/2026 o `GN-6898` tinha um arquivo enviado
+   * pelo app e a tela dizia `anexosIndisponiveis: true`, porque a única fonte era a
+   * Atlassian e ela não prova publicidade (`D-45`). Para o que **nós** enviamos não há o
+   * que provar: veio de upload autenticado desta pessoa, para chamado com vínculo dela.
+   *
+   * O `UNIQUE` é a idempotência (nunca `SELECT` antes do `INSERT`): reenviar o mesmo
+   * arquivo não duplica a linha, e o e-mail entra na chave porque a leitura sempre o
+   * exige no `WHERE` (`RF-30`).
+   */
+  `CREATE TABLE IF NOT EXISTS anexos_enviados (
+     issue_key         TEXT NOT NULL,
+     solicitante_email TEXT NOT NULL,
+     nome_arquivo      TEXT NOT NULL,
+     tamanho_bytes     INTEGER,
+     tipo              TEXT,
+     via               TEXT NOT NULL,
+     criado_em         TEXT NOT NULL,
+     PRIMARY KEY (issue_key, solicitante_email, nome_arquivo)
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_anexos_enviados_chamado
+     ON anexos_enviados (issue_key, solicitante_email)`,
 ] as const
 
 /**
