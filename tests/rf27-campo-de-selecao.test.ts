@@ -178,7 +178,7 @@ describe('criarChamado — o objeto atravessa o cliente sem virar string', () =>
     const cliente = new ClienteAtlassianHttp({
       baseUrl: 'https://gocase.atlassian.net',
       email: 'servico@gocase.com',
-      apiToken: 'ATATTxxx',
+      apiToken: 'token',
       ttlMetadadosSeg: 60,
       ttlConteudoSeg: 60,
       maxTentativas: 1,
