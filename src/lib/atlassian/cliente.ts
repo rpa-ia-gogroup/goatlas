@@ -23,6 +23,11 @@ import { prefixarAutoria, filtrarPublicos, montarQueryComentarios } from './come
 import { CacheTtl, TransporteAtlassian, type OpcoesHttp } from './http'
 import { CONCORRENCIA_ATLASSIAN, mapearComLimite } from '../paralelo'
 import { normalizarSchema, type CampoDoSchema } from './schema-diagnostico'
+import { slaDePrimeiraResposta } from './sla-do-jsm'
+// ⚠️ O vocabulário de prioridade mora em `tickets/` (`D-48`) porque é a **mesma** tabela
+// que a criação usa para escolher a opção. Duas cópias — uma para ler, outra para
+// escrever — foi exatamente o que `D-48` desmontou.
+import { prioridadeDoRotulo } from '../tickets/valores-de-campo'
 import {
   ErroAtlassian,
   MAX_ANEXO_BYTES,
@@ -39,7 +44,6 @@ import {
   type MetadadosPagina,
   type NovoChamado,
   type PaginaConfluence,
-  type Prioridade,
   type ResultadoAnexo,
   type TicketHistorico,
   type TipoChamado,
@@ -89,24 +93,7 @@ export interface OpcoesCliente extends OpcoesHttp {
    * querem (isolamento entre casos) e é o que **não** se quer em produção.
    */
   readonly caches?: CachesAtlassian
-  /** Nome do campo de prioridade no request type, quando houver. */
-  readonly campoPrioridadeId?: string | null
 }
-
-/** Rótulo da prioridade no Jira. Configurável seria melhor; por ora, o mapa explícito. */
-const ROTULO_PRIORIDADE: Readonly<Record<Prioridade, string>> = Object.freeze({
-  critica: 'Highest',
-  alta: 'High',
-  normal: 'Medium',
-})
-
-const PRIORIDADE_POR_ROTULO: Readonly<Record<string, Prioridade>> = Object.freeze({
-  Highest: 'critica',
-  High: 'alta',
-  Medium: 'normal',
-  Low: 'normal',
-  Lowest: 'normal',
-})
 
 /**
  * Escapa valor para dentro de string CQL.
@@ -272,6 +259,64 @@ interface CampoRequestTypeBruto {
  * **[SUPOSIÇÃO — verificável só com credencial (Q1)]** é inferido da doc pública
  * do JSM, não de uma resposta real ainda vista.
  */
+/**
+ * As opções de um campo, como o schema as ofereceu.
+ *
+ * Uma função só porque `camposAdicionais` e `campoDePrioridade` leem o **mesmo**
+ * `validValues`: duas cópias divergiriam no dia em que a Atlassian acrescentasse um
+ * formato, e a divergência apareceria só num dos dois leitores.
+ */
+function opcoesDoBruto(bruto: CampoRequestTypeBruto): { id: string; rotulo: string }[] {
+  return (bruto.validValues ?? []).map((v) => ({
+    id: String(v.id ?? v.value ?? ''),
+    rotulo: String(v.label ?? v.value ?? v.id ?? ''),
+  }))
+}
+
+/**
+ * O campo de **prioridade** do request type — `D-48`, o TERCEIRO leitor do mesmo corpo.
+ *
+ * ## Por que ele não sai de `camposAdicionais`
+ *
+ * Aquele leitor **descarta** `priority` de propósito: o formulário de `RF-27` já tem um
+ * seletor fixo (`D-04`), e desenhá-lo duas vezes seria o bug oposto. Mas o descarte
+ * deixava a criação cega — `obrigatoriosFaltando` nunca via `priority`, então o app nem
+ * recusava nem enviava, e **11 dos 15 tipos do `GN`** (que a exigem) morriam num 400
+ * definitivo. É a mesma cegueira que `D-44` removeu do diagnóstico, agora removida do
+ * caminho que abre chamado.
+ *
+ * ## E por que não sai de `obterSchemaDoTipo`
+ *
+ * O leitor de diagnóstico **trunca** `validValues` em `MAX_OPCOES_LISTADAS` — certo para
+ * uma tela, errado para decidir "esta opção existe?". Um schema truncado produziria
+ * recusa falsa, com a mesma cara de recusa verdadeira. `D-44` já disse o que este arquivo
+ * repete: o microscópio não vira política.
+ *
+ * 🚨 Quem responde é `jiraSchema.system`, **nunca** o `fieldId` — regra de `ScC-4`. Um
+ * `fieldId === 'priority'` funcionaria na Gocase e deixaria de funcionar em outro site
+ * sem quebrar nada: a prioridade voltaria a não ser enviada, em silêncio.
+ */
+export function campoDePrioridade(
+  brutos: readonly CampoRequestTypeBruto[],
+): CampoRequestType | null {
+  for (const bruto of brutos) {
+    if (bruto.jiraSchema?.system !== 'priority') continue
+    const fieldId = String(bruto.fieldId ?? '')
+    // Campo que não se sabe nomear não sustenta envio nenhum — mesma regra de
+    // `normalizarSchema`.
+    if (!fieldId) continue
+    return {
+      fieldId,
+      rotulo: String(bruto.name ?? fieldId),
+      obrigatorio: Boolean(bruto.required),
+      tipo: 'selecao',
+      multiplo: bruto.jiraSchema?.type === 'array',
+      opcoes: opcoesDoBruto(bruto),
+    }
+  }
+  return null
+}
+
 export function camposAdicionais(brutos: readonly CampoRequestTypeBruto[]): CampoRequestType[] {
   const resultado: CampoRequestType[] = []
   for (const bruto of brutos) {
@@ -279,10 +324,7 @@ export function camposAdicionais(brutos: readonly CampoRequestTypeBruto[]): Camp
     const sistema = typeof bruto.jiraSchema?.system === 'string' ? bruto.jiraSchema.system : null
     if (!fieldId || (sistema !== null && CAMPOS_DE_SISTEMA_JA_COBERTOS.has(sistema))) continue
 
-    const opcoes = (bruto.validValues ?? []).map((v) => ({
-      id: String(v.id ?? v.value ?? ''),
-      rotulo: String(v.label ?? v.value ?? v.id ?? ''),
-    }))
+    const opcoes = opcoesDoBruto(bruto)
     const custom = typeof bruto.jiraSchema?.custom === 'string' ? bruto.jiraSchema.custom : ''
     const tipoBruto = typeof bruto.jiraSchema?.type === 'string' ? bruto.jiraSchema.type : ''
     const itens = typeof bruto.jiraSchema?.items === 'string' ? bruto.jiraSchema.items : ''
@@ -432,6 +474,39 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
    * A chave de cache inclui `serviceDeskId` **e** `requestTypeId` — diferente de
    * `listarTiposChamado`, que usa uma chave fixa: aqui há um schema por tipo.
    */
+  /**
+   * O corpo **cru** do `/field`, guardado uma vez por (desk, tipo) — `D-48`.
+   *
+   * Três leitores derivam dele: `camposAdicionais` (formulário), `normalizarSchema`
+   * (diagnóstico, `D-44`) e `campoDePrioridade` (criação). Antes, cada método fazia a
+   * **própria** requisição para o mesmo endpoint; com a criação passando a precisar de
+   * dois deles, isso viraria uma ida de rede a mais por chamado aberto (`R-02`,
+   * `RNF-36`).
+   *
+   * ⚠️ **As caches derivadas continuam com chave própria**, e isso é a advertência de
+   * `D-44`: o que não se pode compartilhar é a **forma** — uma chave só faria o segundo
+   * a chamar receber o resultado do primeiro. Compartilhar o corpo cru é o oposto: uma
+   * forma só, a que a Atlassian mandou.
+   */
+  private async camposBrutosDoTipo(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<CampoRequestTypeBruto[]> {
+    const chave = `camposBrutos:${serviceDeskId}:${requestTypeId}`
+    const cacheado = this.cacheMetadados.obter(chave)
+    if (cacheado) return cacheado as CampoRequestTypeBruto[]
+
+    const dados = (await this.transporte.requisitar(
+      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`,
+    )) as { requestTypeFields?: unknown }
+
+    const brutos = Array.isArray(dados?.requestTypeFields)
+      ? (dados.requestTypeFields as CampoRequestTypeBruto[])
+      : []
+    this.cacheMetadados.definir(chave, brutos, this.opcoes.ttlMetadadosSeg)
+    return brutos
+  }
+
   async obterCamposDoTipo(
     serviceDeskId: string,
     requestTypeId: string,
@@ -440,13 +515,23 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     const cacheado = this.cacheMetadados.obter(chave)
     if (cacheado) return cacheado as CampoRequestType[]
 
-    const dados = (await this.transporte.requisitar(
-      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`,
-    )) as { requestTypeFields?: CampoRequestTypeBruto[] }
-
-    const campos = camposAdicionais(dados?.requestTypeFields ?? [])
+    const campos = camposAdicionais(await this.camposBrutosDoTipo(serviceDeskId, requestTypeId))
     this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg)
     return campos
+  }
+
+  /** `RF-16` / `D-48` — o campo que a criação precisa e que o formulário descarta. */
+  async obterCampoDePrioridade(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<CampoRequestType | null> {
+    const chave = `campoPrioridade:${serviceDeskId}:${requestTypeId}`
+    const cacheado = this.cacheMetadados.obter(chave)
+    if (cacheado !== undefined) return cacheado as CampoRequestType | null
+
+    const campo = campoDePrioridade(await this.camposBrutosDoTipo(serviceDeskId, requestTypeId))
+    this.cacheMetadados.definir(chave, campo, this.opcoes.ttlMetadadosSeg)
+    return campo
   }
 
   /**
@@ -466,11 +551,7 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     const cacheado = this.cacheMetadados.obter(chave)
     if (cacheado) return cacheado as CampoDoSchema[]
 
-    const dados = (await this.transporte.requisitar(
-      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`,
-    )) as { requestTypeFields?: unknown }
-
-    const campos = normalizarSchema(dados?.requestTypeFields)
+    const campos = normalizarSchema(await this.camposBrutosDoTipo(serviceDeskId, requestTypeId))
     this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg)
     return campos
   }
@@ -491,17 +572,20 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
    * diferentes (`customfield_10092`: cargo no 108, sistema do bug no 70). O valor chega
    * aqui já resolvido, dentro de `camposDinamicos` — este cliente continua burro quanto
    * a política, como já é para `RN-06`.
+   *
+   * 🚨 **A prioridade também não se decide aqui** (`D-48`). Havia um
+   * `opcoes.campoPrioridadeId` que ninguém preenchia — o caminho estava morto desde
+   * sempre, e com ele `RF-16` era editável na tela e inerte no Jira. Quem resolve agora é
+   * `tickets/valores-de-campo.ts` na **rota**, contra o `validValues` do request type, e
+   * o valor chega aqui dentro de `camposDinamicos`. É isto que faz o outbox persistir o
+   * corpo pronto e o retry de `RNF-17` reenviá-lo sem reler schema.
    */
   montarCamposSolicitante(dados: NovoChamado): {
     descricao: string
     camposExtra: Record<string, unknown>
   } {
     const cabecalho = `**Solicitante:** ${dados.solicitanteEmail}\n**Aberto via:** goatlas\n**Ref:** ${dados.chaveIdempotencia}\n\n---\n\n`
-    const camposExtra: Record<string, unknown> = {}
-    if (this.opcoes.campoPrioridadeId) {
-      camposExtra[this.opcoes.campoPrioridadeId] = { name: ROTULO_PRIORIDADE[dados.prioridade] }
-    }
-    return { descricao: cabecalho + dados.descricao, camposExtra }
+    return { descricao: cabecalho + dados.descricao, camposExtra: {} }
   }
 
   async criarChamado(dados: NovoChamado): Promise<ChamadoCriado> {
@@ -546,24 +630,31 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
       requestFieldValues?: { fieldId?: unknown; value?: unknown }[]
       currentStatus?: { status?: unknown; statusDate?: { iso8601?: unknown } }
       createdDate?: { iso8601?: unknown }
+      sla?: unknown
     }
 
     const campos = new Map<string, unknown>(
       (dados?.requestFieldValues ?? []).map((f) => [String(f.fieldId ?? ''), f.value]),
     )
-    const rotulo = String(
-      (campos.get('priority') as { name?: unknown } | undefined)?.name ?? '',
-    )
+    // ⚠️ **A leitura usa o MESMO vocabulário da escrita** (`prioridadeDoRotulo`, `D-48`).
+    // Antes eram duas tabelas: `ROTULO_PRIORIDADE` para escrever e `PRIORIDADE_POR_ROTULO`
+    // para ler, com três rótulos em inglês cada uma. Divergir era questão de tempo — e o
+    // sintoma seria mudo dos dois lados (nada enviado · nada mostrado).
+    const rotulo = String((campos.get('priority') as { name?: unknown } | undefined)?.name ?? '')
 
     return {
       issueKey: String(dados?.issueKey ?? issueKey),
       titulo: String(campos.get('summary') ?? ''),
       descricao: String(campos.get('description') ?? ''),
       status: String(dados?.currentStatus?.status ?? 'Desconhecido'),
-      prioridade: PRIORIDADE_POR_ROTULO[rotulo] ?? null,
+      prioridade: prioridadeDoRotulo(rotulo),
       criadoEm: String(dados?.createdDate?.iso8601 ?? ''),
       atualizadoEm: String(dados?.currentStatus?.statusDate?.iso8601 ?? ''),
-      slaPrimeiraResposta: null,
+      // ⚠️ Era `null` **literal** (`D-48`), com o `?expand=…,sla,…` acima pedindo o dado e
+      // a última linha do método descartando-o. `RF-29` não estava por desenhar: estava
+      // sem dado nenhum. 🚨 O que sai daqui é o SLA **do JSM**, não o compromisso de
+      // `RN-08` que `notificacoes/sla.ts` calcula — ver `sla-do-jsm.ts`.
+      slaPrimeiraResposta: slaDePrimeiraResposta(dados?.sla),
     }
   }
 
