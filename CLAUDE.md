@@ -370,6 +370,28 @@ destes reabre um vazamento que já foi fechado.
   do console (`D-25`) e o threshold ficou editável **sem número nenhum ao lado** — pior que
   o cenário que esta linha descreve. Ela vive em `admin/paineis.tsx#FaixaCalibragem`, na
   seção `interrupcao`, e quem garante isso é `tests/painel-do-console.test.ts`.
+- 🚨 **O inventário de assentos é por PESSOA, e "sem registro" nunca vira número** (`D-55`,
+  `governanca/inventario-por-pessoa.ts`). O console mostrava "1 assento parado" e nunca
+  **quem** — `RespostaAssentos.itens` existia desde a `T-124` e nenhum componente o
+  consumia, então a recomendação de `RF-54` nomeava uma pessoa sem haver como conferir os
+  assentos dela. O payload é **uma linha por (pessoa, produto)**; cru, o mesmo colega aparece
+  três vezes. ⚠️ Quem decide "está parado" é **`assentoOcioso`, importado de `custo.ts`** —
+  reescrever a condição faria o resumo dizer "3 parados" e a lista destacar 4. E
+  `diasParado: null` é *sem registro de acesso*, escrito assim: `assentoOcioso` trata
+  ausência como ociosa (certo), mas "parado há 0 dias" seria a tela afirmando uma medição
+  que ninguém fez. ⚠️ **Lista vazia com coleta feita não é "ninguém tem assento"** — sem
+  domínio reivindicado o `users/search` responde 200 vazio (`D-22`).
+- ⚠️ **Revogar assento: a informação é aberta, a ação é fechada** (`D-55`, `RF-57`). A rota
+  tinha dupla confirmação desde a `T-131` e **nenhum componente a chamava**: a parte que
+  protege existia só na camada que ninguém usava. O botão vive **dentro** da pessoa aberta,
+  nunca na linha fechada, e some inteiro quando falta credencial de Org Admin — com a razão
+  escrita, porque console que promete revogar e falha no clique é pior que console que avisa
+  antes. ⚠️ **O confirmar NÃO é desabilitado até o e-mail bater**: quem valida é o servidor,
+  e ele **registra** a confirmação que não confere (`negado`, `confirmacao_nao_confere`) —
+  travar no cliente apagaria esse registro e deixaria a única trava real sem quem a
+  exercite. ⚠️ `LinhaDePessoa` é **exportada por causa do teste** (como `DadosDaSecao`): a
+  suíte roda em `environment: 'node'`, não há clique, e sem isso `RF-52` por produto e
+  `RF-57` inteiro ficariam sem asserção.
 - ⚠️ **Todo número calculado tem uma CASA declarada** (`PAINEIS_DO_CONSOLE`, `D-49`). O mapa
   é `Record<keyof ResumoPainel, SecaoDoConsole | null>`: campo novo no painel sem destino
   **não compila** (mesmo desenho de `FAMILIA` em `config/validar.ts`). E como declarar a casa
@@ -1255,7 +1277,7 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1223 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1239 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste.

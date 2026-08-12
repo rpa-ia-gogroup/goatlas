@@ -367,6 +367,16 @@ created: "2026-08-04"
       nunca **quem**. Sem isso a recomendação de `RF-54` não é conferível contra a pessoa
       que ela nomeia. `endpointsNaoVerificados` e `baseline` também não são renderizados,
       apesar de o `CLAUDE.md` afirmar que a tela mostra a lista de não verificados.
+      ✅ **Fechada em 12/08/2026 (`D-55`).** `governanca/inventario-por-pessoa.ts` agrupa o
+      payload — que é **uma linha por (pessoa, produto)** — em pessoas, reusando
+      `assentoOcioso` de `custo.ts` (condição reescrita divergiria em silêncio do resumo), e
+      `InventarioDeAssentos` desenha: mais parado primeiro, produto e último acesso dentro da
+      pessoa **aberta**. ⚠️ `diasParado: null` é escrito como **"sem registro de acesso"**,
+      nunca "há 0 dias"; e lista vazia com coleta feita **não** vira "ninguém tem assento"
+      (sem domínio reivindicado o `users/search` responde 200 vazio, `D-22`).
+      `endpointsNaoVerificados` passou a aparecer **ao lado da ação**. `baseline` continua
+      vindo de `metricas.baselineAssentos` em `PainelBaseline` — está na tela, por outra
+      fonte.
 - [~] **T-129** [P] `GET /api/admin/auditoria` com filtro por usuário, período e
       ação + exportação (`RF-56`). **Filtro por usuário e a tela já vieram na Fase 1**
       (`D-09`); faltam **período**, **ação** e **exportação**. _Requirements: RF-56_
@@ -416,6 +426,15 @@ created: "2026-08-04"
       por `revogar` em `src/app/**/*.tsx` volta vazio. O requisito diz "revogar acesso a
       produto **pelo console**", e hoje só se revoga por HTTP na mão. A dupla confirmação,
       que é a parte que protege, é justamente a que só existe na camada que ninguém usa.
+      ✅ **A TELA existe desde 12/08/2026 (`D-55`).** O botão vive **dentro** da pessoa
+      aberta do inventário, um por produto, e a confirmação é o e-mail digitado num campo
+      inline — não modal, e a ação mantém o nome do começo ao fim. ⚠️ **O confirmar não é
+      desabilitado até o e-mail bater**: quem valida é o servidor, e ele registra a
+      confirmação que não confere (`negado`); travar no cliente apagaria esse registro.
+      Sem credencial de Org Admin o botão **não é oferecido**, com a razão escrita, e
+      `endpointsNaoVerificados` aparece ao lado. ⚠️ **A tarefa continua `[~]`**: a chamada
+      real segue respondendo **403** enquanto `gocase.com` não for reivindicado (`D-22`) —
+      a tela existir não torna o endpoint verificado.
 - [x] **T-133** O produto atribuído vem de `last-active-dates`, não de `users/search`
       (`D-23`). _Requirements: RF-51, RF-52, RF-53_
       → `registrarColeta` passou a iterar a **união** das duas fontes; iterar só

@@ -3174,6 +3174,71 @@ continua no banco — a metade de `RF-23` que sempre funcionou.
 
 ---
 
+### D-55 · O console dizia quantos assentos param, e nunca quem
+
+**Data:** 12/08/2026 · **Origem:** `T-128`/`T-131`, achados da auditoria de `D-47` ·
+**Contexto:** `RF-51`, `RF-52`, `RF-54`, `RF-57`, `RN-10`, `RNF-18`
+
+`GET /api/admin/assentos` devolve `itens` — o inventário conta a conta, com produto e
+último acesso — desde a `T-124`. **Nada em `src/app/` os consumia:** `PainelAssentos`
+renderizava só agregados por produto, então quem abria o console lia *"1 assento parado"* e
+nunca **quem**. E `RF-57` tinha rota com dupla confirmação e `api.adminRevogarAssento` no
+cliente, com **nenhum componente chamando** — a parte que protege existia só na camada que
+ninguém usava; revogar era possível apenas por HTTP na mão.
+
+⚠️ Sem a lista, a recomendação de `RF-54` **não é conferível**: ela nomeia uma pessoa, e não
+havia como olhar os assentos dessa pessoa antes de agir.
+
+#### As três decisões de desenho
+
+1. **A informação é aberta; a ação é fechada.** A linha mostra a pessoa e há quanto tempo
+   ela não usa nada; os produtos — e o botão que revoga — aparecem só quando alguém **abre**
+   aquela pessoa. Revogar é ação sobre a conta de outro (`RN-10`), e o console é lido muitas
+   vezes mais do que é usado para cortar acesso. Não é modal: a confirmação é um campo
+   inline, e a ação **mantém o nome do começo ao fim** ("Revogar confluence" abre e conclui).
+2. 🚨 **"Sem registro de acesso" nunca vira um número.** `assentoOcioso` trata ausência como
+   ociosa — decisão de `custo.ts`, e certa —, mas escrever *"parado há 0 dias"* seria a tela
+   afirmando uma medição que ninguém fez. Mesma família de `area_indisponivel` ×
+   `area_nao_encontrada`, de `tiposNaoLidos` (`D-44`) e de `comentariosIndisponiveis`.
+3. **Ordenar é parte da resposta.** Mais parado primeiro, e quem **nunca** foi visto vem
+   antes de todos — o mesmo extremo de escala que `assentoOcioso` já assume. Empate desfeito
+   pelo e-mail, para que duas cargas da mesma tela não pareçam telas diferentes (é o motivo
+   de `mapearComLimite` preservar ordem).
+
+⚠️ **Quem decide "está parado" continua sendo `assentoOcioso`**, importado de `custo.ts`.
+Reescrever a condição em `inventario-por-pessoa.ts` criaria duas regras para o mesmo fato, e
+elas divergiriam em silêncio: o resumo diria "3 parados" e a lista destacaria 4. É o
+raciocínio de `config/diagnostico.ts` — o console **relata** o estado, não o recalcula.
+
+#### O que a tela recusa afirmar
+
+**Lista vazia com coleta feita não vira "ninguém tem assento".** Sem domínio reivindicado o
+`users/search` responde **200 com lista vazia** (`D-22`), e a tela diz isso em vez de
+concluir pela API. **Sem credencial de Org Admin o botão não é oferecido**, e a razão fica
+escrita — o comentário da própria rota já dizia que um console que promete revogar e falha
+no clique é pior que um que avisa antes. Pelo mesmo motivo, `endpointsNaoVerificados`
+aparece **ao lado da ação**, não em rodapé.
+
+⚠️ **O botão de confirmar NÃO é desabilitado até o e-mail bater.** Quem valida é o servidor,
+e ele **registra** a confirmação que não confere (`assento_revogado` / `negado`) — pode ser
+engano, e pode ser alguém testando o formulário com o e-mail de outra pessoa. Travar no
+cliente apagaria esse registro e deixaria a única trava real sem ninguém a exercitar.
+
+**A copy do bloco mudou junto**, e isso não é detalhe: ela dizia *"Nenhuma ação aqui mexe na
+Atlassian — a lista é para decidir, não executa"*, o que passaria a ser falso na frase
+seguinte à existência do botão.
+
+⚠️ **`LinhaDePessoa` é exportada por causa do teste**, como `DadosDaSecao`. A suíte roda em
+`environment: 'node'` e não há clique; sem a exportação, a metade de `RF-52` que é *último
+acesso por produto* e a ação inteira de `RF-57` ficariam sem asserção — que é exatamente o
+estado que este PR desfaz.
+
+**O que não mudou:** a revogação continua respondendo **403** na organização real enquanto
+`gocase.com` não for reivindicado (`D-22`) — a tela existir não torna o endpoint verificado,
+e é por isso que o aviso dele veio junto.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
