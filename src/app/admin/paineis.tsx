@@ -25,7 +25,9 @@ import type {
   TermoComLacuna,
 } from '../api'
 import type { SecaoDoConsole } from '@/lib/config/diagnostico'
+import { inventarioPorPessoa, type PessoaComAssentos } from '@/lib/governanca/inventario-por-pessoa'
 import { Aviso, Selo } from '../componentes'
+import { useState } from 'react'
 
 /**
  * ⚠️ **Onde cada número calculado aparece — e a trava contra ele sumir de novo.**
@@ -722,12 +724,25 @@ function ListaDeLacunas({
 
 /* ---------- assentos (RF-51 a RF-54) ------------------------------------ */
 
+/** O que a tela precisa saber fazer quando alguém confirma uma revogação. */
+export type AoRevogar = (dados: {
+  accountId: string
+  produto: string
+  email: string
+  emailConfirmado: string
+}) => Promise<string>
+
 export function PainelAssentos({
   assentos,
   recomendacoes,
+  agoraMs,
+  aoRevogar,
 }: {
   assentos: RespostaAssentos
   recomendacoes: Carga<readonly Recomendacao[]>
+  /** Injetado para o teste poder fixar o "hoje" sem congelar o relógio do mundo. */
+  agoraMs?: number | undefined
+  aoRevogar?: AoRevogar | undefined
 }) {
   if (assentos.coletadoEm === null) {
     return (
@@ -805,6 +820,12 @@ export function PainelAssentos({
         ))}
       </ul>
 
+      <InventarioDeAssentos
+        assentos={assentos}
+        agoraMs={agoraMs ?? Date.parse(assentos.coletadoEm)}
+        aoRevogar={aoRevogar}
+      />
+
       <div className="pilha">
         <div className="chamado-topo">
           <h4 className="titulo-filhos">O que dá para fazer</h4>
@@ -845,6 +866,336 @@ export function PainelAssentos({
       </div>
     </div>
   )
+}
+
+/* ---------- inventário por pessoa (RF-51, RF-52, RF-57) ------------------ */
+
+/**
+ * **Quem** está com assento — a lista que `RF-51` pede e que o console nunca teve.
+ *
+ * A rota devolve `itens` desde a T-124 e nada em `src/app/` os consumia: a tela dizia
+ * "N parados" e jamais **quem**. Sem isto a recomendação de `RF-54` nomeia uma pessoa e não
+ * há como conferir os assentos dela antes de agir (`D-47`, T-128).
+ *
+ * ## Três decisões de desenho
+ *
+ * 1. **A informação é aberta; a ação é fechada.** A linha mostra a pessoa e há quanto tempo
+ *    ela não usa nada. Os produtos — e o botão que revoga — só aparecem quando alguém
+ *    **abre** aquela pessoa. Revogar assento é ação sobre a conta de outro (`RN-10`), e o
+ *    console é lido muito mais vezes do que é usado para cortar acesso.
+ * 2. **"Sem registro de acesso" nunca vira um número.** `assentoOcioso` trata ausência como
+ *    ociosa — decisão de `custo.ts`, e certa —, mas escrever "parado há 0 dias" seria a tela
+ *    afirmando uma medição que ninguém fez. É a distinção de `area_indisponivel` ×
+ *    `area_nao_encontrada`, aplicada a assento.
+ * 3. **O filtro procura, não esconde.** Ele existe porque a org tem 54 contas e ninguém rola
+ *    uma lista atrás de um colega; o total continua escrito ao lado, para que filtrar nunca
+ *    pareça ter mudado o inventário.
+ *
+ * _Requirements: RF-51, RF-52, RF-54, RF-57, RN-10_
+ */
+function InventarioDeAssentos({
+  assentos,
+  agoraMs,
+  aoRevogar,
+}: {
+  assentos: RespostaAssentos
+  agoraMs: number
+  aoRevogar?: AoRevogar | undefined
+}) {
+  const [procura, setProcura] = useState('')
+  const [aberta, setAberta] = useState<string | null>(null)
+
+  const pessoas = inventarioPorPessoa(assentos.itens, assentos.ociosoDesdeDias, agoraMs)
+  const alvo = procura.trim().toLowerCase()
+  const visiveis = alvo
+    ? pessoas.filter(
+        (p) => p.email.toLowerCase().includes(alvo) || p.nome.toLowerCase().includes(alvo),
+      )
+    : pessoas
+
+  if (pessoas.length === 0) {
+    return (
+      <div className="bloco-dado">
+        <h4 className="titulo-filhos">Quem está com assento</h4>
+        {/* Zero linhas com coleta feita é um estado real e já medido: sem domínio
+            reivindicado o `users/search` responde 200 com lista vazia (`D-22`). Dizer
+            "ninguém tem assento" seria a tela concluindo pela API. */}
+        <p className="dica">
+          A última coleta não trouxe nenhuma conta. Isso costuma ser a organização sem
+          domínio reivindicado — a Atlassian responde com sucesso e lista vazia.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bloco-dado">
+      <div className="chamado-topo">
+        <h4 className="titulo-filhos">Quem está com assento</h4>
+        <span className="dica">
+          {pessoas.length} {pessoas.length === 1 ? 'pessoa' : 'pessoas'} · quem está há mais
+          tempo sem usar aparece primeiro
+        </span>
+      </div>
+
+      <div className="campo-console">
+        <label htmlFor="procura-assento">Procurar pessoa</label>
+        <p className="campo-ajuda" id="procura-assento-ajuda">
+          Por nome ou e-mail. Em branco mostra todo mundo.
+        </p>
+        <input
+          id="procura-assento"
+          aria-describedby="procura-assento-ajuda"
+          value={procura}
+          placeholder="pessoa@gocase.com"
+          onChange={(e) => setProcura(e.target.value)}
+        />
+      </div>
+
+      {visiveis.length === 0 ? (
+        <p className="dica">Ninguém com esse nome ou e-mail no inventário.</p>
+      ) : (
+        <ul className="chamados">
+          {visiveis.map((p) => (
+            <LinhaDePessoa
+              key={p.accountId}
+              pessoa={p}
+              aberta={aberta === p.accountId}
+              aoAlternar={() => setAberta(aberta === p.accountId ? null : p.accountId)}
+              ociosoDesdeDias={assentos.ociosoDesdeDias}
+              podeRevogar={aoRevogar !== undefined && assentos.organizacaoConfigurada}
+              aoRevogar={aoRevogar}
+            />
+          ))}
+        </ul>
+      )}
+
+      {!assentos.organizacaoConfigurada && (
+        <p className="dica">
+          Revogar acesso está indisponível: falta a credencial de administração da
+          organização. A lista continua servindo para decidir.
+        </p>
+      )}
+
+      {/* O aviso vive AQUI, ao lado do botão, e não num rodapé de documento: o custo de
+          descobrir no clique é o admin achar que revogou. */}
+      {assentos.endpointsNaoVerificados.length > 0 && (
+        <>
+          <Aviso atencao>
+            Estas chamadas ainda não foram exercitadas contra a Atlassian real. Podem falhar
+            no clique.
+          </Aviso>
+          <ul className="chamados">
+            {assentos.endpointsNaoVerificados.map((e) => (
+              <li key={`${e.metodo} ${e.caminho}`} className="chamado" style={{ cursor: 'default' }}>
+                <span className="chamado-chave">
+                  {e.metodo} {e.caminho}
+                </span>
+                <span className="chamado-titulo">{e.risco}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * ⚠️ **Exportada por causa do teste, e o teste existe por causa deste requisito.**
+ *
+ * Os produtos e o botão de revogar só existem no DOM com a linha **aberta**, e a suíte roda
+ * em `environment: 'node'` — não há clique. Sem esta exportação, a metade de `RF-52` que é
+ * *último acesso por produto* e a ação inteira de `RF-57` ficariam sem asserção nenhuma,
+ * que é exatamente o estado que `D-47` encontrou e que este PR desfaz. Mesmo motivo pelo
+ * qual `DadosDaSecao` é exportada em `admin/index.tsx`.
+ */
+export function LinhaDePessoa({
+  pessoa,
+  aberta,
+  aoAlternar,
+  ociosoDesdeDias,
+  podeRevogar,
+  aoRevogar,
+}: {
+  pessoa: PessoaComAssentos
+  aberta: boolean
+  aoAlternar: () => void
+  ociosoDesdeDias: number
+  podeRevogar: boolean
+  aoRevogar?: AoRevogar | undefined
+}) {
+  return (
+    <li className="chamado" style={{ cursor: 'default' }}>
+      <button
+        type="button"
+        className="detalhe-botao"
+        aria-expanded={aberta}
+        onClick={aoAlternar}
+      >
+        <span className="chamado-topo">
+          <span className="chamado-chave">{pessoa.email}</span>
+          {/* Estado nunca só por cor (regra 9): o selo diz a situação em palavras. */}
+          <Selo variante={pessoa.todosParados ? 'lime' : 'contorno'}>
+            {textoDeParado(pessoa.diasDesdeUltimoAcesso, ociosoDesdeDias)}
+          </Selo>
+        </span>
+        <span className="chamado-titulo">{pessoa.nome}</span>
+        <span className="chamado-meta">
+          <span className="dica">
+            {pessoa.produtos.length}{' '}
+            {pessoa.produtos.length === 1 ? 'produto' : 'produtos'} ·{' '}
+            {aberta ? 'esconder' : 'ver quais'}
+          </span>
+        </span>
+      </button>
+
+      {aberta && (
+        <ul className="assento-produtos">
+          {pessoa.produtos.map((pr) => (
+            <ProdutoDaPessoaLinha
+              key={pr.produto}
+              accountId={pessoa.accountId}
+              email={pessoa.email}
+              produto={pr.produto}
+              rotulo={textoDeAcesso(pr.diasParado)}
+              parado={pr.ocioso}
+              podeRevogar={podeRevogar}
+              aoRevogar={aoRevogar}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+/**
+ * A revogação, com a confirmação **digitada**.
+ *
+ * ⚠️ **O botão de confirmar NÃO é desabilitado até o e-mail bater.** Quem valida é o
+ * servidor, e ele **registra** a confirmação que não confere (`assento_revogado` /
+ * `negado`) — pode ser engano, e pode ser alguém testando o formulário com o e-mail de
+ * outra pessoa. Travar no cliente apagaria esse registro e deixaria a única trava real sem
+ * ninguém a exercitar; e a mensagem que a pessoa lê é a que o servidor escreveu (`RNF-30`).
+ */
+function ProdutoDaPessoaLinha({
+  accountId,
+  email,
+  produto,
+  rotulo,
+  parado,
+  podeRevogar,
+  aoRevogar,
+}: {
+  accountId: string
+  email: string
+  produto: string
+  rotulo: string
+  parado: boolean
+  podeRevogar: boolean
+  aoRevogar?: AoRevogar | undefined
+}) {
+  const [confirmando, setConfirmando] = useState(false)
+  const [digitado, setDigitado] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [resposta, setResposta] = useState<{ ok: boolean; texto: string } | null>(null)
+  const idCampo = `confirmar-${accountId}-${produto}`
+
+  async function confirmar() {
+    if (!aoRevogar) return
+    setEnviando(true)
+    setResposta(null)
+    try {
+      const aviso = await aoRevogar({ accountId, produto, email, emailConfirmado: digitado })
+      setResposta({ ok: true, texto: aviso })
+      setConfirmando(false)
+      setDigitado('')
+    } catch (e) {
+      setResposta({ ok: false, texto: e instanceof Error ? e.message : 'Não deu para revogar.' })
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <li className="assento-produto">
+      <span className="assento-produto-topo">
+        <span className="assento-produto-nome">{produto}</span>
+        <Selo variante={parado ? 'lime' : 'contorno'}>{rotulo}</Selo>
+        {podeRevogar && !confirmando && (
+          <button
+            type="button"
+            className="botao botao-discreto"
+            onClick={() => {
+              setConfirmando(true)
+              setResposta(null)
+            }}
+          >
+            Revogar {produto}
+          </button>
+        )}
+      </span>
+
+      {confirmando && (
+        <div className="campo-console">
+          <label htmlFor={idCampo}>Digite {email} para confirmar</label>
+          <p className="campo-ajuda" id={`${idCampo}-ajuda`}>
+            Isso tira o acesso de {produto} desta pessoa na Atlassian. Digitar o e-mail é o
+            que garante que a linha é a certa.
+          </p>
+          <input
+            id={idCampo}
+            aria-describedby={`${idCampo}-ajuda`}
+            value={digitado}
+            placeholder={email}
+            onChange={(e) => setDigitado(e.target.value)}
+          />
+          <div className="acoes">
+            {/* O nome da ação é o mesmo do começo ao fim: "Revogar" abre, "Revogar" conclui. */}
+            <button
+              type="button"
+              className="botao botao-primario"
+              disabled={enviando || digitado.trim() === ''}
+              onClick={confirmar}
+            >
+              {enviando ? 'Revogando…' : `Revogar ${produto}`}
+            </button>
+            <button
+              type="button"
+              className="botao botao-contorno"
+              disabled={enviando}
+              onClick={() => {
+                setConfirmando(false)
+                setDigitado('')
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {resposta && (
+        <p className="dica" role="status">
+          {resposta.texto}
+        </p>
+      )}
+    </li>
+  )
+}
+
+/** "Parado há N dias" só quando houve medição. Ver `ProdutoDaPessoa.diasParado`. */
+function textoDeParado(dias: number | null, ociosoDesdeDias: number): string {
+  if (dias === null) return 'sem registro de acesso'
+  if (dias >= ociosoDesdeDias) return `parado há ${dias} ${dias === 1 ? 'dia' : 'dias'}`
+  return dias === 0 ? 'usou hoje' : `usou há ${dias} ${dias === 1 ? 'dia' : 'dias'}`
+}
+
+function textoDeAcesso(dias: number | null): string {
+  if (dias === null) return 'sem registro'
+  if (dias === 0) return 'hoje'
+  return `há ${dias} ${dias === 1 ? 'dia' : 'dias'}`
 }
 
 /* ---------- auditoria (RF-56) ------------------------------------------- */

@@ -67,6 +67,7 @@ import {
   PainelSla,
   PainelVolume,
   Quando,
+  type AoRevogar,
   type Carga,
 } from './paineis'
 
@@ -284,6 +285,15 @@ export function TelaAdmin() {
               aoSalvarPrecos={() =>
                 void salvar('custo_mensal_por_produto', mapaDePrecos(precos), 'Preço por produto')
               }
+              // `RF-57` — a única escrita da credencial de Org Admin. Recarrega o
+              // inventário depois: sem isso a linha some da tela só no próximo boot, e o
+              // aviso do servidor (que ela **não** some hoje, porque a coleta é diária)
+              // ficaria contradito pela ausência.
+              aoRevogarAssento={async (dados) => {
+                const r = await api.adminRevogarAssento(dados)
+                await recarregarAssentos()
+                return r.aviso
+              }}
             />
           </div>
         )}
@@ -361,6 +371,7 @@ export function DadosDaSecao({
   aoFiltrarAuditoria,
   aoMudarPreco,
   aoSalvarPrecos,
+  aoRevogarAssento,
 }: {
   secao: DescritorSecao
   metricas: Carga<ResumoMetricas>
@@ -378,6 +389,14 @@ export function DadosDaSecao({
   aoFiltrarAuditoria: () => void
   aoMudarPreco: (produto: string, texto: string) => void
   aoSalvarPrecos: () => void
+  /**
+   * `RF-57` — a única ação do console que escreve na Atlassian.
+   *
+   * Opcional para que `tests/painel-do-console.test.ts` continue renderizando a seção sem
+   * montar um cliente: sem ela a lista aparece e o botão de revogar não, que é o mesmo
+   * estado de uma instalação sem credencial de Org Admin.
+   */
+  aoRevogarAssento?: AoRevogar
 }) {
   if (secao.id === 'interrupcao') {
     return (
@@ -495,9 +514,13 @@ export function DadosDaSecao({
               </Detalhe>
               <BlocoDeDado
                 titulo="Quem está consumindo licença"
-                explicacao="Da última coleta diária. Nenhuma ação aqui mexe na Atlassian — a lista é para decidir, não executa."
+                explicacao="Da última coleta diária. A lista é para decidir; a única ação que toca a Atlassian é revogar um produto, e ela pede o e-mail da pessoa digitado."
               >
-                <PainelAssentos assentos={a} recomendacoes={recomendacoes} />
+                <PainelAssentos
+                  assentos={a}
+                  recomendacoes={recomendacoes}
+                  aoRevogar={aoRevogarAssento}
+                />
               </BlocoDeDado>
             </>
           )}
