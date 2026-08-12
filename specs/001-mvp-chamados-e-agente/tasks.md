@@ -163,8 +163,15 @@ created: "2026-08-03"
 - [x] **T-062** Resumo estruturado antes de confirmar (título, descrição, tipo,
       componente, área, prioridade, SLA) com **prioridade editável**.
       _Requirements: RF-16, RF-18_
-- [ ] **T-063** `criarChamado` via `POST /rest/servicedeskapi/request` com a conta de
-      serviço como reporter. **[BLOQUEADA: Q1]** _Requirements: RF-20_
+- [x] **T-063** `criarChamado` via `POST /rest/servicedeskapi/request` com a conta de
+      serviço como reporter. _Requirements: RF-20_
+      → **Saiu do bloqueio e EXECUTOU contra a Atlassian real** (11/08/2026, `GN-6894`,
+      `HTTP 201`), pela staging com o somente-leitura desligado por ~30 s. O código vive
+      em `src/lib/atlassian/cliente.ts:480` (`criarChamado`), com o `POST` no endpoint
+      exato do requisito em `cliente.ts:499`. Q1 está respondida desde `D-23`.
+      ⚠️ **A linha ficou `[ ] [BLOQUEADA: Q1]` por mais de um dia depois de a chamada ter
+      rodado em produção** — o board subestimava, que é a mesma classe de defeito de
+      `T-081`, na direção oposta. Achado da auditoria de 12/08 (`D-47`).
 - [x] **T-064** Gravar solicitante real no campo customizado "Solicitante" e como
       request participant quando aplicável.
       _Requirements: RF-21, R-03_
@@ -312,6 +319,66 @@ created: "2026-08-03"
       paint. Verificado no app rodando (`npm run dev`).
 - [ ] **T-096** Deploy em **staging**, validação, e só então produção.
       _Requirements: CLAUDE.md regra 10_
+
+### Achados da auditoria do board (12/08/2026 — `D-47`)
+
+> Tarefas abertas por uma varredura requisito→código: para cada `RF` que o board dava
+> como pronto, procurou-se **onde ele vive** no código. As duas abaixo são requisitos
+> que nenhuma tarefa cobria — não regressões, e sim lacunas que o board nunca mostrou.
+
+- [ ] **T-098** **`RF-23` — a transcrição da conversa nunca chega ao chamado.**
+      _Requirements: RF-23_
+      O requisito (P1) pede duas coisas: **persistir** a transcrição **e** anexá-la (ou
+      **linká-la**) ao chamado. A primeira metade existe desde a Fase 1 — as tabelas
+      `conversas`/`mensagens` guardam a conversa inteira, e `submissoes.conversa_id`
+      liga o chamado a ela. **A segunda metade não existe em lugar nenhum.**
+      `ServicoChamados.abrirPorConversa` (`src/lib/tickets/servico.ts:110-119`) monta o
+      payload só com `proposta.titulo`/`proposta.descricao` — o **resumo do modelo**, não
+      o diálogo —, e a descrição que sai em `criarChamado`
+      (`src/lib/atlassian/cliente.ts:474`) leva apenas o cabeçalho de `D-13`. Quem abre o
+      `GN-xxxx` no Jira nativo **não tem caminho de volta para a conversa**, que é
+      literalmente o que o requisito chama de "o contexto que o time de tech mais perde
+      hoje".
+      ⚠️ **Não é regressão: é um requisito que nunca teve tarefa.** `spec.md:62` e
+      `spec.md:282` o listam como "P1 dentro da faixa, sem cenário nesta versão — entram
+      após as travas P0", junto de `RF-19` e `RF-25`. Os outros dois foram implementados
+      depois (`T-303`/`T-304` na spec 004, `T-240` na spec 003); **`RF-23` foi o único dos
+      três que ninguém retomou**, e o *coverage check* deste arquivo continuou afirmando
+      que todo RF da faixa tinha tarefa.
+      ⚠️ **Decidir a FORMA antes de implementar** — anexar a transcrição como arquivo
+      (`RF-25`, e o anexo é caminho já trilhado) × linkar para a leitura dentro do app
+      (o padrão de `urlDeLeituraNoApp`, e o público do Jira **tem** assento, ao contrário
+      do público do app) × colar o texto na descrição (o mais simples e o que envelhece
+      pior: descrição não tem volta e conversa longa afoga o pedido). Ver `D-47`.
+- [ ] **T-099** 🚨 **`campoPrioridadeId` nunca é preenchido — a prioridade não chega ao
+      Jira.** _Requirements: RF-15, RF-16, RF-18, RN-08_
+      `ClienteAtlassianHttp` só escreve a prioridade quando `opcoes.campoPrioridadeId`
+      existe (`src/lib/atlassian/cliente.ts:474-476`), e **nada no repo o define**:
+      `contexto.ts:230-241` monta o cliente sem ele, não há chave em `ConfigValores`, não
+      há env var, e `grep campoPrioridadeId src/` devolve só a declaração
+      (`cliente.ts:92`) e os dois usos dentro do próprio arquivo. Logo o campo
+      `camposExtra` sai **sempre vazio** e o `POST` de criação não carrega prioridade
+      nenhuma.
+      **Consequência nos requisitos:** `RF-15` (priorização automática em 3 níveis) e
+      `RF-16` (prioridade **editável** antes de criar) são P0 e estão implementados até a
+      borda — a IA classifica, a tela mostra, a pessoa edita, o vínculo guarda, o SLA
+      local usa — mas **o time de tech não vê nada disso na fila**, que é o ponto inteiro
+      dos dois. `T-050` e `T-062` estão `[x]` e continuam corretos no que fazem; o que
+      falta é o último centímetro.
+      ⚠️ **Isto explica o `prioridade: null` do `GN-6894`**, que o `CLAUDE.md` registrava
+      como "**não investigado**" com duas hipóteses ("ou o tipo 68 não expõe campo de
+      prioridade, ou o mapeamento não está sendo aplicado"). É a segunda, e não depende do
+      tipo: **nenhum** request type receberia prioridade hoje.
+      ⚠️ **Por que 1051 testes verdes não pegaram:** `ClienteAtlassianFake` guarda
+      `prioridade: dados.prioridade` direto do argumento (`src/lib/atlassian/fake.ts:356`),
+      então toda leitura de volta devolve a prioridade certa. O dublê implementa o
+      contrato *pretendido* e esconde a divergência — **exatamente** a família de `D-38`
+      (obrigatório faltando), `D-39` (campo de seleção) e `D-43` (autor do comentário).
+      Nenhum teste menciona `campoPrioridadeId`.
+      ⚠️ **Não implementar sem medir o schema primeiro** (`D-36`): id de campo não
+      significa nada fora do request type, e há branch de diagnóstico em curso
+      (`diag/schema-de-prioridade`). Se o `GN` expuser prioridade como campo de sistema,
+      o caminho pode não ser um `customfield_` nenhum.
 - [ ] **T-097** Fechar a Definição de Pronto da Fase 1 (§13 dos requisitos) item por
       item, incluindo os testes de burla. _Requirements: todos_
 
@@ -355,7 +422,15 @@ ausente bloqueando a criação para Q1).
 
 ---
 ## Coverage check (gate antes do `/implement`)
-- [x] Todo RF/RN no escopo da spec aparece em ao menos uma tarefa
+- [ ] Todo RF/RN no escopo da spec aparece em ao menos uma tarefa
+      ⚠️ **Este item estava `[x]` e era FALSO** (auditoria de 12/08/2026, `D-47`). O escopo
+      da Fase 1 é `RF-07…RF-26` (§12 dos requisitos e `docs/ROADMAP.md`), e **`RF-23` não
+      tinha tarefa em spec nenhuma** — só duas menções na `spec.md` adiando-o. Corrigido
+      com **T-098**. O item volta a `[x]` quando T-098 fechar.
+      ⚠️ A lição do achado é sobre o *gate*, não sobre a linha: um coverage check
+      **autodeclarado** confere que toda tarefa aponta para um requisito (fácil, e estava
+      certo) e não que todo requisito chegou a uma tarefa (o que exige varrer a faixa de
+      IDs). As duas direções não são a mesma, e a que faltava é a que esconde requisito.
 - [x] Toda tarefa referencia requisito
 - [x] Testes das travas críticas vêm **antes** da implementação (Phase 1 antes de 3–5)
 - [ ] **Nenhuma tarefa `[BLOQUEADA]`** — snapshot em 05/08/2026: T-063 e T-096
