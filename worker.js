@@ -260,12 +260,17 @@ function montarCql(params) {
   const partes = [
     `type = page`,
     `space in (${espacos})`,
-    `text ~ "${escaparCql(params.termo)}"`
+    condicaoDeTexto(params)
   ];
   for (const label of params.labelsBloqueadas) {
     partes.push(`label != "${escaparCql(label)}"`);
   }
   return partes.join(" AND ");
+}
+function condicaoDeTexto(params) {
+  const palavras = params.palavrasAlternativas ?? [];
+  if (palavras.length === 0) return `text ~ "${escaparCql(params.termo)}"`;
+  return `(${palavras.map((p) => `text ~ "${escaparCql(p)}"`).join(" OR ")})`;
 }
 function montarCqlFilhos(params) {
   const espacos = params.espacosPermitidos.map((e) => `"${escaparCql(e)}"`).join(", ");
@@ -334,6 +339,14 @@ function camposAdicionais(brutos) {
     });
   }
   return resultado;
+}
+var EXPAND_BUSCA = "content.space";
+function chaveDoEspaco(r) {
+  const daExpansao = r.content?.space?.key;
+  if (typeof daExpansao === "string" && daExpansao !== "") return daExpansao;
+  const url = r.resultGlobalContainer?.displayUrl;
+  const casado = typeof url === "string" ? /\/spaces\/([^/?#]+)/.exec(url) : null;
+  return casado ? decodeURIComponent(casado[1]) : "";
 }
 var ClienteAtlassianHttp = class {
   constructor(opcoes) {
@@ -505,12 +518,12 @@ var ClienteAtlassianHttp = class {
     const cacheado = this.cacheConteudo.obter(chave);
     if (cacheado) return cacheado;
     const dados = await this.transporte.requisitar(
-      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}`
+      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}&expand=${EXPAND_BUSCA}`
     );
     const candidatas = (dados?.results ?? []).map((r) => ({
       id: String(r.content?.id ?? ""),
       titulo: String(r.content?.title ?? r.title ?? ""),
-      espaco: String(r.content?.space?.key ?? ""),
+      espaco: chaveDoEspaco(r),
       url: `${this.opcoes.baseUrl}/wiki${String(r.url ?? "")}`,
       score: typeof r.score === "number" ? r.score : 0,
       trecho: String(r.excerpt ?? "").replace(/<[^>]*>/g, ""),
@@ -650,12 +663,12 @@ var ClienteAtlassianHttp = class {
     const cacheado = this.cacheConteudo.obter(chave);
     if (cacheado) return cacheado;
     const dados = await this.transporte.requisitar(
-      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}`
+      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}&expand=${EXPAND_BUSCA}`
     );
     const candidatas = (dados?.results ?? []).map((r) => ({
       id: String(r.content?.id ?? ""),
       titulo: String(r.content?.title ?? r.title ?? ""),
-      espaco: String(r.content?.space?.key ?? ""),
+      espaco: chaveDoEspaco(r),
       url: `${this.opcoes.baseUrl}/wiki${String(r.url ?? "")}`,
       score: typeof r.score === "number" ? r.score : 0,
       trecho: "",
@@ -1039,10 +1052,12 @@ var ClienteAtlassianFake = class {
     this.checar(this.estado.falhas.buscarConfluence, "buscarConfluence");
     const permitidos = new Set(params.espacosPermitidos);
     const bloqueadas = new Set(params.labelsBloqueadas);
-    const palavras = this.estado.filtrarPorTermo ? palavrasDe(params.termo) : [];
+    const alternativas = this.estado.filtrarPorTermo ? palavrasDe((params.palavrasAlternativas ?? []).join(" ")) : [];
+    const palavras = this.estado.filtrarPorTermo && alternativas.length === 0 ? palavrasDe(params.termo) : [];
     return this.estado.paginas.filter((p) => {
-      if (palavras.length === 0) return true;
+      if (alternativas.length === 0 && palavras.length === 0) return true;
       const texto2 = normalizar(`${p.titulo} ${p.trecho}`);
+      if (alternativas.length > 0) return alternativas.some((palavra) => texto2.includes(palavra));
       return palavras.every((palavra) => texto2.includes(palavra));
     }).filter((p) => permitidos.has(p.espaco)).filter((p) => !p.labels.some((l) => bloqueadas.has(l))).filter((p) => !this.estado.idsRestritos.has(p.id)).sort((a, b) => b.score - a.score).slice(0, params.limite);
   }
@@ -3365,6 +3380,153 @@ var RegistroConhecimento = class {
   }
 };
 
+// src/lib/confluence/busca.ts
+var MAX_CONSULTAS_BUSCA = 2;
+var MAX_PALAVRAS_AMPLIACAO = 6;
+var PALAVRAS_VAZIAS = /* @__PURE__ */ new Set([
+  "a",
+  "ao",
+  "aos",
+  "as",
+  "o",
+  "os",
+  "um",
+  "uma",
+  "uns",
+  "umas",
+  "de",
+  "do",
+  "da",
+  "dos",
+  "das",
+  "em",
+  "no",
+  "na",
+  "nos",
+  "nas",
+  "num",
+  "numa",
+  "por",
+  "pelo",
+  "pela",
+  "pelos",
+  "pelas",
+  "para",
+  "pra",
+  "com",
+  "sem",
+  "sob",
+  "sobre",
+  "entre",
+  "ate",
+  "apos",
+  "desde",
+  "e",
+  "ou",
+  "mas",
+  "que",
+  "se",
+  "como",
+  "quando",
+  "onde",
+  "qual",
+  "quais",
+  "quem",
+  "porque",
+  "pq",
+  "eu",
+  "me",
+  "meu",
+  "minha",
+  "meus",
+  "minhas",
+  "nosso",
+  "nossa",
+  "voce",
+  "voces",
+  "ele",
+  "ela",
+  "eles",
+  "elas",
+  "isso",
+  "isto",
+  "aquilo",
+  "esse",
+  "essa",
+  "este",
+  "esta",
+  "esses",
+  "essas",
+  "estes",
+  "estas",
+  "ser",
+  "sao",
+  "esta",
+  "estao",
+  "ter",
+  "tem",
+  "foi",
+  "vai",
+  "vou",
+  "ver",
+  "vejo",
+  "saber",
+  "sei",
+  "fazer",
+  "faco",
+  "faz",
+  "preciso",
+  "precisa",
+  "quero",
+  "queria",
+  "gostaria",
+  "consigo",
+  "consegue",
+  "poderia",
+  "pode",
+  "aqui",
+  "ali",
+  "la",
+  "agora",
+  "entao",
+  "tambem",
+  "ainda",
+  "ja",
+  "nao",
+  "sim",
+  "muito",
+  "mais",
+  "menos",
+  "todo",
+  "toda",
+  "todos",
+  "todas"
+]);
+function normalizar2(palavra) {
+  return palavra.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+}
+function palavrasSignificativas(termo) {
+  const vistas = /* @__PURE__ */ new Set();
+  const palavras = [];
+  for (const bruta of termo.split(/[^\p{L}\p{N}_-]+/u)) {
+    const chave = normalizar2(bruta);
+    if (chave.length < 2 || PALAVRAS_VAZIAS.has(chave) || vistas.has(chave)) continue;
+    vistas.add(chave);
+    palavras.push(bruta);
+    if (palavras.length === MAX_PALAVRAS_AMPLIACAO) break;
+  }
+  return palavras;
+}
+async function buscarComAmpliacao(cliente, params) {
+  const palavras = palavrasSignificativas(params.termo);
+  const primeira = await cliente.buscarConfluence(params);
+  if (primeira.length > 0 || palavras.length < 2) {
+    return { paginas: primeira, palavras, ampliou: false, consultas: 1 };
+  }
+  const segunda = await cliente.buscarConfluence({ ...params, palavrasAlternativas: palavras });
+  return { paginas: segunda, palavras, ampliou: true, consultas: MAX_CONSULTAS_BUSCA };
+}
+
 // src/lib/rules/index.ts
 function avaliarRegra1(paginas, thresholdScore) {
   if (paginas.length === 0) {
@@ -3471,22 +3633,31 @@ var ExecutorTools = class {
   /** Regra 1 — a resposta já existe no Confluence (RF-09). */
   async executarBuscaConfluence(atorEmail, topico, config) {
     try {
-      const paginas = await this.atlassian.buscarConfluence({
+      const busca = await buscarComAmpliacao(this.atlassian, {
         termo: topico,
         espacosPermitidos: config.espacos_confluence,
         labelsBloqueadas: config.labels_bloqueadas,
         limite: 5
       });
+      const paginas = busca.paginas;
       const veredito = avaliarRegra1(paginas, config.regra1_threshold_score);
       await this.auditoria.registrar({
         atorEmail,
         acao: "busca_confluence",
         recurso: topico,
         resultado: "sucesso",
-        detalhe: { encontradas: paginas.length, bloqueou: veredito.bloquear }
+        // `recurso` é o que a pessoa (ou o modelo) pediu; `consultado` é o que de
+        // fato foi à Atlassian. Sem os dois lados, ampliação silenciosa faria a
+        // auditoria e o mapa de lacunas contarem histórias diferentes.
+        detalhe: {
+          encontradas: paginas.length,
+          bloqueou: veredito.bloquear,
+          ampliou: busca.ampliou,
+          ...busca.ampliou ? { consultado: busca.palavras.join(" ") } : {}
+        }
       });
       if (paginas.length === 0) {
-        await this.registrarBuscaSemResultado(atorEmail, topico);
+        await this.registrarBuscaSemResultado(atorEmail, topico, busca.palavras);
       }
       return {
         paraModelo: montarResultadoBuscaParaModelo(paginas),
@@ -3627,14 +3798,23 @@ var ExecutorTools = class {
       return { classe: "indeterminado", custoUsd: 0 };
     }
   }
-  /** RF-42 — busca sem resultado útil é backlog de documentação. */
-  async registrarBuscaSemResultado(atorEmail, topico) {
+  /**
+   * RF-42 — busca sem resultado útil é backlog de documentação.
+   *
+   * ⚠️ **Menos o zero que veio de termo sem palavra significativa** (`D-40`). "Como
+   * faço isso?" não deixou de ser documentado: não houve o que procurar. É o
+   * terceiro zero da família de `buscaConfigurada` (zero por configuração) e do
+   * escopo vazio de `D-30` (zero por escopo) — e registrá-lo como lacuna mandaria
+   * alguém escrever uma página para uma frase, não para um assunto.
+   */
+  async registrarBuscaSemResultado(atorEmail, topico, palavras) {
+    const pesquisavel = palavras.length > 0;
     await this.auditoria.registrar({
       atorEmail,
       acao: "busca_confluence",
       recurso: topico,
       resultado: "falha",
-      detalhe: { motivo: "sem_resultado_util", lacunaDocumentacao: true }
+      detalhe: pesquisavel ? { motivo: "sem_resultado_util", lacunaDocumentacao: true } : { motivo: "termo_sem_palavras_significativas", lacunaDocumentacao: false }
     });
   }
 };
@@ -8531,9 +8711,9 @@ async function rotear(req, ctx, eu, caminho, url) {
     const espacoPedido = (url.searchParams.get("espaco") ?? "").trim();
     const espacosDaBusca = espacoPedido === "" ? ctx.valores.espacos_confluence : ctx.valores.espacos_confluence.filter((e) => e === espacoPedido);
     const escopoValido = espacoPedido === "" || espacosDaBusca.length > 0;
-    let paginas;
+    let busca;
     try {
-      paginas = await ctx.atlassian.buscarConfluence({
+      busca = await buscarComAmpliacao(ctx.atlassian, {
         termo,
         espacosPermitidos: espacosDaBusca,
         labelsBloqueadas: ctx.valores.labels_bloqueadas,
@@ -8549,23 +8729,33 @@ async function rotear(req, ctx, eu, caminho, url) {
       });
       return ERROS.conteudoIndisponivel();
     }
+    const paginas = busca.paginas;
+    const termoPesquisavel = busca.palavras.length > 0;
+    const procurouDeVerdade = configurada && escopoValido && termoPesquisavel;
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: "busca_confluence",
       recurso: termo,
       resultado: "sucesso",
-      detalhe: { encontradas: paginas.length, via: "superficie" }
+      // `recurso` é o que a pessoa escreveu; `consultado` é o que foi à Atlassian.
+      // Ampliação invisível faria a auditoria descrever uma busca que não houve.
+      detalhe: {
+        encontradas: paginas.length,
+        via: "superficie",
+        ampliou: busca.ampliou,
+        ...busca.ampliou ? { consultado: busca.palavras.join(" ") } : {}
+      }
     });
-    if (configurada && escopoValido && paginas.length === 0) {
+    if (paginas.length === 0 && configurada && escopoValido) {
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: "busca_confluence",
         recurso: termo,
         resultado: "falha",
-        detalhe: { motivo: "sem_resultado_util", lacunaDocumentacao: true, via: "superficie" }
+        detalhe: procurouDeVerdade ? { motivo: "sem_resultado_util", lacunaDocumentacao: true, via: "superficie" } : { motivo: "termo_sem_palavras_significativas", lacunaDocumentacao: false, via: "superficie" }
       });
     }
-    const buscaId = configurada && escopoValido ? await ctx.conhecimento.registrarBusca({
+    const buscaId = configurada && escopoValido && (termoPesquisavel || paginas.length > 0) ? await ctx.conhecimento.registrarBusca({
       solicitanteEmail: eu.email,
       termo,
       resultados: paginas.length

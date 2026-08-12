@@ -494,6 +494,42 @@ destes reabre um vazamento que já foi fechado.
   config"), não o mecanismo, justamente para continuar reprovando se alguém trocar a
   interseção por substituição. E escopo vazio **não** registra lacuna de `RF-42`: zero por
   escopo ≠ zero por documentação.
+- 🚨 **A frase inteira em `text ~` casa quase nada, e o app dizia "não encontrei"** (`D-40`,
+  `confluence/busca.ts`). Medido na staging em 12/08/2026: o tópico `processo de deploy na
+  Gocase` devolveu **zero** e a palavra `deploy` devolvia **10 páginas** na mesma instalação —
+  o cenário que `D-33` nomeia como o mais caro do projeto, e ainda gravando
+  `lacunaDocumentacao: true` para um termo que ninguém deixou de documentar. `buscarComAmpliacao`
+  faz **no máximo duas** consultas: a frase e, só no zero, as palavras significativas em `OR`
+  (`MAX_CONSULTAS_BUSCA`, `MAX_PALAVRAS_AMPLIACAO`; termo de uma palavra não amplia).
+  ⚠️ **A correção é da CONSULTA de propósito** — o mesmo defeito chega pelo tópico do modelo
+  **e** pela caixa de busca da aba Documentação, onde quem digita é uma pessoa; instrução no
+  prompt não alcança a segunda nem garante a primeira, e falha em silêncio. Por isso o prompt
+  **não** foi tocado. ⚠️ E ampliar **nunca** mexe em `espacosPermitidos`/`labelsBloqueadas`:
+  "achar mais" não pode virar "procurar em mais lugares".
+- 🚨 **O grupo `OR` da busca ampliada é PARENTIZADO, e isso é a allowlist** (`montarCql`). Em
+  CQL o `AND` liga mais forte que o `OR`: `space in ("GT") AND text ~ "a" OR text ~ "b"`
+  significa `(space AND a) OR b` — a segunda palavra buscaria o site **inteiro**, e `RN-06`
+  teria sido contornada pela própria consulta que a aplica, sem erro nenhum e com resultado
+  plausível na tela. Há teste de burla afirmando os parênteses **e** a ausência da forma sem
+  eles.
+- **Zero por TERMO mal formado é o TERCEIRO zero** (`D-40`). Já havia zero por configuração
+  (`buscaConfigurada`) e zero por escopo (`D-30`); "como faço isso?" não tem palavra
+  significativa nenhuma — não houve o que procurar, e isso **não** é lacuna de `RF-42`, nem na
+  auditoria (`termo_sem_palavras_significativas`, `lacunaDocumentacao: false`) nem na tabela
+  `buscas`, que é o que o mapa de T-117 de fato lê. ⚠️ Termo não pesquisável que **mesmo
+  assim** achou página continua em `buscas`: ali o valor é o `houve_clique`, o segundo sinal
+  de `RF-42`. O que não pode entrar é o par (não pesquisável, zero).
+- **Busca que reescreve o termo REGISTRA os dois lados** (`D-40`). `recurso` continua sendo o
+  que a pessoa escreveu — é ele que o mapa agrupa; `detalhe.ampliou` e `detalhe.consultado`
+  dizem o que foi de fato à Atlassian. Ampliação invisível faria a auditoria descrever uma
+  busca que não aconteceu, que é o mapa mentindo de outro jeito.
+- 🚨 **A v1 de search NÃO devolve `content.space` sem `&expand=`** (`D-41`). Todo resultado
+  saía com `espaco: ''` — os 10 itens de `?q=deploy` na staging. Não é furo de exposição (o
+  CQL já restringe por `space in (...)`), é a origem sumindo da tela. ⚠️ **O fallback lê
+  `resultGlobalContainer.displayUrl` (`/spaces/GT`), nunca o `title`** — o título é o **nome**
+  do espaço ("Gestão de Tecnologia") e a allowlist, a árvore e o `?espaco=` são todos por
+  **chave**. Nome onde se espera chave é a mesma classe de bug do `spaceId` numérico da v2:
+  funciona na tela e nega tudo no resto.
 - **`livesearch` é o único bloco dinâmico que virou funcional** (`D-30`), e a razão é que
   ele não é um **resultado** — é uma caixa de busca, e o app já busca. `recently-updated`,
   `listlabels` e `jira` continuam placeholder porque reproduzi-los exige refazer a consulta
@@ -950,7 +986,7 @@ o cliente inteiro fala `servicedeskapi`, então `TASK` é inalcançável, e escr
 sem comentário público/interno, sem SLA). Há também um espaço `IA` no Confluence (2 páginas),
 que é documentação, não fila.
 
-**1005 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1031 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`

@@ -334,7 +334,7 @@ interface ResultadoBruto {
  *
  * 🚨 Sem ela, `content` volta **sem** `space`, e todo resultado saía com
  * `espaco: ''` — medido na staging em 12/08/2026, os 10 itens de `?q=deploy`
- * (`D-40`). Não era furo de exposição (o CQL já restringe por `space in (...)` e
+ * (`D-41`). Não era furo de exposição (o CQL já restringe por `space in (...)` e
  * `RN-06` segue avaliada por página), era a origem sumindo da tela de resultados e
  * espaço vazio indo para `paginas_lidas`.
  */
