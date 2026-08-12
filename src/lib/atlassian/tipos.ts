@@ -335,6 +335,22 @@ export interface ClienteAtlassian {
     requestTypeId: string,
   ): Promise<readonly CampoDoSchema[]>
 
+  /**
+   * O campo de **prioridade** do request type, quando ele o publica — `RF-16`, `D-48`.
+   *
+   * 🚨 Terceiro leitor do mesmo `/field`, e nenhum dos outros dois serve: o do formulário
+   * **descarta** `priority` (`RF-27` já tem seletor fixo) e o de diagnóstico **trunca**
+   * `validValues`. Sem este, `priority` obrigatório ficava sem ser enviado — **11 dos 15
+   * tipos do `GN`** respondiam 400, que é definitivo, e o chamado se perdia.
+   *
+   * `null` = o tipo não publica prioridade no portal. Não é o mesmo que "não deu para
+   * saber": schema ilegível **lança**, e quem trata é a rota (`RNF-18`).
+   */
+  obterCampoDePrioridade(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<CampoRequestType | null>
+
   criarChamado(dados: NovoChamado): Promise<ChamadoCriado>
 
   obterChamado(issueKey: string): Promise<Chamado>

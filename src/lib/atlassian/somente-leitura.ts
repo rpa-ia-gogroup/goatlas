@@ -138,6 +138,16 @@ export class ClienteAtlassianSomenteLeitura implements ClienteAtlassian {
     return this.real.obterSchemaDoTipo(sd, rt)
   }
 
+  /**
+   * ⚠️ Leitura, e **tem de passar em somente leitura** (`D-48`): é ela que decide se a
+   * criação é recusada antes do efeito. Recusá-la aqui faria o modo devolver "este tipo
+   * não tem prioridade" — a resposta errada, com cara de resposta, no exato ponto em que
+   * `D-44` já mostrou o custo disso.
+   */
+  obterCampoDePrioridade(sd: string, rt: string): Promise<CampoRequestType | null> {
+    return this.real.obterCampoDePrioridade(sd, rt)
+  }
+
   obterChamado(issueKey: string): Promise<Chamado> {
     return this.real.obterChamado(issueKey)
   }

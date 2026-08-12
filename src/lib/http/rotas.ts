@@ -20,7 +20,12 @@ import { ERROS, erro, json, lerJson } from './respostas'
 import { verificarLimite } from './limite'
 import { CONCORRENCIA_ATLASSIAN, mapearComLimite } from '../paralelo'
 import { CriacaoRecusada, MENSAGEM_RECUSA } from '../agent/gate'
-import { ErroAtlassian, SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos'
+import {
+  ErroAtlassian,
+  SLA_PRIMEIRA_RESPOSTA_HORAS,
+  type CampoRequestType,
+  type Prioridade,
+} from '../atlassian/tipos'
 import type { PropostaChamado } from '../agent/estado'
 import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
 import { buscarComAmpliacao } from '../confluence/busca'
@@ -53,9 +58,11 @@ import {
   obrigatoriosFaltando,
 } from '../tickets/campos-obrigatorios'
 import {
+  juntarCamposDaCriacao,
   mensagemOpcoesDesconhecidas,
   opcoesDesconhecidas,
   paraValoresDoJira,
+  prioridadeParaOJira,
 } from '../tickets/valores-de-campo'
 import {
   exigeDeclaracaoDeAnexo,
@@ -314,7 +321,7 @@ async function rotear(
     // Como a pessoa pode responder e confirmar de novo (`SC-03`), o caminho recusado
     // não é raro — é o caminho normal de quem ainda não respondeu.
     const corpoConfirmacao = await lerJson<Record<string, unknown>>(req)
-    const schema = await lerSchemaDoTipo(
+    const { schema, prioridade: campoPrioridade } = await lerSchemaDoTipo(
       ctx,
       eu.email,
       serviceDeskId,
@@ -360,6 +367,16 @@ async function rotear(
       return ERROS.dadosInvalidos(mensagemOpcoesDesconhecidas(opcoesRuinsNaConversa))
     }
 
+    // 🚨 `D-48` — a PRIORIDADE, que nunca saía do app. 11 dos 15 tipos do `GN` a exigem, e
+    // sem ela a criação respondia 400 = definitivo = chamado perdido (`RNF-17`). A recusa,
+    // quando nenhuma prioridade nossa casa com as opções do site, vem aqui pela mesma razão
+    // das duas acima: antes de qualquer efeito, e antes de `registrarConfirmacao`.
+    const prioridadeNaConversa = prioridadeParaOJira(
+      campoPrioridade,
+      conversa.proposta.prioridade,
+    )
+    if (!prioridadeNaConversa.ok) return ERROS.dadosInvalidos(prioridadeNaConversa.mensagem)
+
     await ctx.conversas.registrarConfirmacao(conversa.id)
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -378,6 +395,7 @@ async function rotear(
       via: 'conversa',
       conversaId: conversa.id,
     })
+
     const areaDoSolicitante = await resolverArea({
       email: eu.email,
       teamguide: ctx.teamguide,
@@ -405,12 +423,18 @@ async function rotear(
         // ⚠️ Traduzido para o formato do Jira **aqui**, e não no cliente (`D-39`): é este
         // objeto que o outbox persiste, então o reprocessamento de `RNF-17` reenvia o mesmo
         // corpo sem reler o schema.
-        paraValoresDoJira(schema, camposDaConversa),
+        // A prioridade entra por ÚLTIMO (`D-48`): resolvida no servidor a partir da
+        // proposta, ela não pode ser sobrescrita por campo vindo do cliente.
+        juntarCamposDaCriacao(
+          paraValoresDoJira(schema, camposDaConversa),
+          prioridadeNaConversa.campos,
+        ),
       )
     } catch (e) {
       if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida('conversa')
       throw e
     }
+
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
     const anexo = await materializarAnexosDoChamado(ctx, {
       chaveIdempotencia: chaveDaConversa,
@@ -457,7 +481,7 @@ async function rotear(
     // chamado (fail-open no chamado, `RNF-18`): validação que se desliga sob pressão
     // não é validação, mas recusar chamado por causa dela seria a parede que o
     // caminho sem IA existe para não ser.
-    const schema = await lerSchemaDoTipo(
+    const { schema, prioridade: campoPrioridade } = await lerSchemaDoTipo(
       ctx,
       eu.email,
       serviceDeskId,
@@ -514,10 +538,26 @@ async function rotear(
       return ERROS.dadosInvalidos(mensagemOpcoesDesconhecidas(opcoesRuins))
     }
 
-    // 🚨 A tradução para o formato do Jira vem DEPOIS das duas recusas e ANTES de
-    // persistir: campo de seleção precisa ir como objeto (`{id}`), nunca como a string
-    // crua que a tela mandou — era esse o 400 do `D-39`.
-    const camposParaOJira = paraValoresDoJira(schema, camposComSolicitante)
+    // 🚨 `D-48` — a terceira recusa da mesma família, e a que mais custava: a prioridade
+    // é **obrigatória** em 11 dos 15 tipos do `GN` e o app nunca a enviava, então esses
+    // 11 respondiam 400 = definitivo = chamado perdido. Quando nenhuma das nossas três
+    // casa com as opções do site e o campo é obrigatório, recusar aqui é a diferença
+    // entre "corrija e reenvie" e "o chamado sumiu" — a mesma escolha de `D-38`.
+    const prioridadeParaJira = prioridadeParaOJira(campoPrioridade, validada.proposta.prioridade)
+    if (!prioridadeParaJira.ok) return ERROS.dadosInvalidos(prioridadeParaJira.mensagem)
+
+    // 🚨 A tradução para o formato do Jira vem DEPOIS das recusas e ANTES de persistir:
+    // campo de seleção precisa ir como objeto (`{id}`), nunca como a string crua que a
+    // tela mandou — era esse o 400 do `D-39`.
+    //
+    // ⚠️ A prioridade entra **por último** (`D-48`): ela é resolvida no servidor a partir
+    // da proposta, e a ordem é o que impede um `camposDinamicos` do cliente de
+    // sobrescrevê-la. (A primeira camada é `filtrarPeloSchema`, que só conhece os campos
+    // adicionais — `priority` nunca está lá. Duas camadas, como em `agent/gate.ts`.)
+    const camposParaOJira = juntarCamposDaCriacao(
+      paraValoresDoJira(schema, camposComSolicitante),
+      prioridadeParaJira.campos,
+    )
 
     const area = await resolverArea({
       email: eu.email,
@@ -2114,24 +2154,51 @@ function respostaCriacao(
  * aqui: "o tipo não tem campos" e "não deu para saber quais tem" levam a decisões
  * opostas em `exigeDeclaracaoDeAnexo`.
  */
+interface SchemaDeCriacao {
+  readonly schema: SchemaDoTipo
+  /**
+   * O campo de **prioridade** do request type — `D-48`. `null` = o tipo não o publica,
+   * **ou** o schema não pôde ser lido (e aí `schema.conhecido` é `false`, que é onde a
+   * distinção fica registrada).
+   */
+  readonly prioridade: CampoRequestType | null
+}
+
 async function lerSchemaDoTipo(
   ctx: Contexto,
   atorEmail: string,
   serviceDeskId: string,
   tipoChamadoId: string,
-): Promise<SchemaDoTipo> {
+): Promise<SchemaDeCriacao> {
   try {
     const campos = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, tipoChamadoId)
-    return { conhecido: true, campos }
+    // ⚠️ **Segunda leitura, ZERO requisição a mais** (`D-48`): no cliente real as duas
+    // derivam do mesmo corpo cru já cacheado (`camposBrutosDoTipo`). São dois métodos
+    // porque respondem perguntas diferentes — `camposAdicionais` descarta `priority` de
+    // propósito (`D-44`) —, não porque sejam duas idas ao Jira (`R-02`).
+    //
+    // Dentro do mesmo `try` porque é a mesma requisição: se ela cai, as duas respostas
+    // são desconhecidas, e um `prioridade` que sobrevivesse à queda do schema afirmaria
+    // sobre um tipo que o app acabou de dizer não conhecer.
+    const prioridade = await ctx.atlassian.obterCampoDePrioridade(serviceDeskId, tipoChamadoId)
+    return { schema: { conhecido: true, campos }, prioridade }
   } catch {
     await ctx.auditoria.registrar({
       atorEmail,
       acao: 'schema_tipo_indisponivel',
       recurso: tipoChamadoId,
       resultado: 'falha',
-      detalhe: { tipoChamadoId, consequencia: 'declaracao_de_anexo_nao_exigida' },
+      detalhe: {
+        tipoChamadoId,
+        consequencia: 'declaracao_de_anexo_nao_exigida',
+        // `D-48` — a segunda consequência, e ela é maior: sem schema a prioridade não é
+        // enviada, então um tipo que a **exige** vai responder 400. Fail-open é decisão
+        // de `D-27`/`RNF-18` (não virar parede numa queda de leitura), mas quem
+        // investigar um 400 depois precisa achar esta linha.
+        consequenciaPrioridade: 'prioridade_nao_enviada',
+      },
     })
-    return { conhecido: false }
+    return { schema: { conhecido: false }, prioridade: null }
   }
 }
 

@@ -135,6 +135,32 @@ export interface EstadoFake {
    * divergência de novo (`D-38`, `linhasComoObjetos`).
    */
   schemaPorTipo: Map<string, CampoDoSchema[]>
+  /**
+   * O campo de **prioridade** por `requestTypeId` — `D-48`.
+   *
+   * ⚠️ **Terceiro mapa, e pelo mesmo motivo do segundo.** `camposPorTipo` não pode
+   * carregá-lo (`camposAdicionais` descarta `priority` antes de qualquer coisa chegar
+   * lá) e `schemaPorTipo` **trunca** `validValues` no leitor de diagnóstico. Encenar a
+   * prioridade a partir de um dos dois seria encenar contra uma forma que produção não
+   * usa.
+   *
+   * Vazio = o tipo não publica prioridade, que é o caso dos tipos 68/108/143/144 do `GN`.
+   */
+  prioridadePorTipo: Map<string, CampoRequestType>
+  /**
+   * O SLA **do JSM** que os chamados criados por aqui passam a ter — `D-48`.
+   *
+   * 🚨 Default `null`, e não `{ prazo: null, cumprido: null }` como antes: `null` é "não
+   * há SLA de primeira resposta reconhecido", que é a única coisa que o dublê pode
+   * afirmar honestamente — os nomes de SLA do site da Gocase **não foram medidos**
+   * (`sla-do-jsm.ts`). Encenar um prazo aqui faria o teste concordar com uma leitura que
+   * ninguém viu acontecer.
+   *
+   * ⚠️ E ele **não** é derivado de `SLA_PRIMEIRA_RESPOSTA_HORAS`: aquele é o compromisso
+   * do goatlas (`RN-08`), este é o relógio do JSM. Misturá-los dentro do fake é a
+   * confusão que `D-20` proíbe, com a agravante de virar teste verde.
+   */
+  slaDoJsm: Chamado['slaPrimeiraResposta']
   paginas: PaginaConfluence[]
   /**
    * Ids de páginas com restrição de leitura (RF-40). Sob proxy total, QUALQUER
@@ -277,6 +303,8 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       tiposChamado: inicial.tiposChamado ?? [],
       camposPorTipo: inicial.camposPorTipo ?? new Map(),
       schemaPorTipo: inicial.schemaPorTipo ?? new Map(),
+      prioridadePorTipo: inicial.prioridadePorTipo ?? new Map(),
+      slaDoJsm: inicial.slaDoJsm ?? null,
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? new Set(),
       filtrarPorTermo: inicial.filtrarPorTermo ?? false,
@@ -399,6 +427,26 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     return this.estado.schemaPorTipo.get(requestTypeId) ?? []
   }
 
+  /**
+   * `D-48` — o campo de prioridade, encenado por `prioridadePorTipo`.
+   *
+   * ⚠️ **Falha junto com `obterCamposDoTipo`**, e de propósito: no cliente real os dois
+   * derivam do **mesmo** corpo (`camposBrutosDoTipo`), então um fake em que o schema cai
+   * e a prioridade continua respondendo encenaria um estado que produção não tem — e é
+   * exatamente por aí que o dublê escondeu `D-38`, `D-39` e `D-43`.
+   */
+  async obterCampoDePrioridade(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<CampoRequestType | null> {
+    this.chamadas.push({
+      operacao: 'obterCampoDePrioridade',
+      params: { serviceDeskId, requestTypeId },
+    })
+    this.checar(this.estado.falhas.obterCamposDoTipo, 'obterCampoDePrioridade')
+    return this.estado.prioridadePorTipo.get(requestTypeId) ?? null
+  }
+
   async criarChamado(dados: NovoChamado): Promise<ChamadoCriado> {
     this.chamadas.push({ operacao: 'criarChamado', params: dados })
     this.checar(this.estado.falhas.criarChamado, 'criarChamado')
@@ -423,7 +471,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       prioridade: dados.prioridade,
       criadoEm: this.estado.relogio(),
       atualizadoEm: this.estado.relogio(),
-      slaPrimeiraResposta: { prazo: null, cumprido: null },
+      slaPrimeiraResposta: this.estado.slaDoJsm,
     })
     return criado
   }

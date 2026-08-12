@@ -563,12 +563,36 @@ destes reabre um vazamento que já foi fechado.
   sobre o mesmo corpo bruto existe para reprovar quem os fundir "para não duplicar código".
   ⚠️ E `tiposNaoLidos` é uma **terceira** lista: "não deu para saber" fora de
   `tiposSemPrioridade`, como `area_indisponivel` × `area_nao_encontrada`.
-- ⚠️ **A prioridade NUNCA sai do app hoje** — `montarCamposSolicitante` só a envia com
-  `opcoes.campoPrioridadeId` preenchido, e `contexto.ts` não passa esse campo (não há chave
-  em `ConfigValores`). `RF-16` é editável na tela e inerte no Jira. Antes de ligar, `D-36`
-  vale: o **rótulo** (`ROTULO_PRIORIDADE`, `Highest`/`High`/`Medium`) é forma do formulário,
-  mora no código com teste, e os rótulos reais do site saem do `validValues` que o
-  diagnóstico mostra — nunca da suposição.
+- 🚨 **A prioridade é OBRIGATÓRIA em 11 dos 15 tipos do `GN`, e o app não a enviava**
+  (`D-48`, medido em 12/08/2026). Os 4 tipos sem prioridade são exatamente os que abriram
+  chamado; o tipo **71** — que a exige e não tem select nenhum — respondeu **400** já com o
+  `D-39` deployado, o que prova que a prioridade sozinha matava a criação. Quem responde
+  "este tipo tem prioridade?" é `jiraSchema.system === 'priority'` (`campoDePrioridade`),
+  **nunca** o `fieldId` (`ScC-4`) e nunca uma config — `campoPrioridadeId` **caiu**, era
+  caminho morto desde sempre. ⚠️ **O rótulo acha a OPÇÃO; o que viaja é o `id` do
+  `validValues`**: a antiga `ROTULO_PRIORIDADE` mandava `{name}`, e renomear a prioridade no
+  Jira viraria 400 definitivo. Hoje renomear faz o casamento *falhar*, e falhar tem
+  tratamento — omitir (campo opcional) ou **recusar antes do efeito** (obrigatório), com o
+  rótulo e em português, como `D-38`. ⚠️ A aproximação **só desce** (crítica aceita a opção
+  de alta): `normal` virando `High` é a inflação que `RF-16` existe para impedir. E
+  `Low`/`Lowest` são **lidas** como `normal` e **nunca escritas** — a tabela é uma só, com a
+  distinção no dado (`escrita: false`), servindo escrita e leitura para não divergirem.
+- 🚨 **O terceiro leitor do `/field` existe porque os dois primeiros mentem para esta
+  pergunta** (`D-48`). O de produto **descarta** `priority` (`D-44`); o de diagnóstico
+  **trunca** `validValues` em 20 — certo para uma tela, e falso para decidir "esta opção
+  existe?", porque schema truncado produz **recusa falsa com cara de recusa verdadeira**. Os
+  três derivam de um **corpo cru cacheado** (`camposBrutosDoTipo`): nenhuma ida de rede a
+  mais (`R-02`). ⚠️ As caches **derivadas** continuam com chave própria — o que `D-44`
+  proíbe compartilhar é a *forma*, não o corpo.
+- ⚠️ **O SLA do JSM era pedido e jogado fora** (`D-48`, `T-100`). `obterChamado` montava
+  `?expand=…,sla,…` e devolvia `slaPrimeiraResposta: null` **fixo**. Quem lê agora é
+  `atlassian/sla-do-jsm.ts`, e ele **identifica o SLA pelo nome, devolvendo `null` quando não
+  reconhece**: um chamado com um SLA só, que por acaso seja o de **resolução**, mostraria um
+  prazo de dias onde a pessoa lê "alguém te responde até" — prazo errado é pior que prazo
+  ausente (`D-42`). ⚠️ O nome do módulo é literal: **não é o nosso SLA**.
+  `notificacoes/sla.ts` calcula o compromisso de `RN-08`, e `D-20` diz que duas fontes de
+  verdade sobre o mesmo prazo é pior que uma — quem puser este valor na tela tem de dizer de
+  quem ele é. Os nomes reais dos SLAs do `GN` **não foram medidos**.
 - 🚨 **A área do solicitante é GUARDADA, nunca enviada** (`D-37`, `teamguide/area.ts`). O
   campo `Setor Gocase` do Jira é multi-checkbox com **15 opções fixas**, e a área real da
   primeira pessoa medida (`RPA`) **não está entre elas** — mandar valor fora da lista dá
@@ -1105,22 +1129,25 @@ volta pela rota isolada por e-mail: a descrição chegou com o bloco de autoria 
 chave `form:<email>:<chave>`. ⚠️ **É um chamado de teste numa fila real** (`[TESTE goatlas -
 ignorar]`) — alguém do time de tech precisa apagá-lo; o app não tem essa operação.
 ⚠️ **Mandamos `prioridade: "normal"` e o chamado voltou com `prioridade: null` e
-`slaPrimeiraResposta: null`.** Uma metade já está explicada: **a prioridade nunca sai do
-app**. `montarCamposSolicitante` só a envia se `opcoes.campoPrioridadeId` estiver preenchido,
-e `contexto.ts` **nunca passa esse campo** — não existe chave para ele em `ConfigValores`.
-Logo `RF-16` (prioridade editável) não tem efeito no Jira hoje, independentemente do que o
-request type exponha. A outra metade — *o tipo expõe campo de prioridade?* — é medível desde
-`D-44`: `GET /api/admin/tipos-chamado/schema` (ver `docs/DEPLOY.md`). ⚠️ **Não a responda por
-`GET /api/tipos-chamado/:id/campos`**: aquela rota descarta `priority` por construção, e a
-resposta é "não tem" nos dois mundos.
-🚨 **E o `slaPrimeiraResposta: null` é um TERCEIRO defeito, não consequência dos outros dois**
-(`D-47`, `T-100`): `obterChamado` monta a URL **com** `expand=…sla…` (`cliente.ts:516`) e
-devolve `slaPrimeiraResposta: null` **fixo** (`cliente.ts:539`) — a resposta é pedida, paga e
-descartada. Vale também para o caminho degradado (`tickets/servico.ts:411`), e **nem o fake
-preenche** (`fake.ts:359`), então o campo nunca teve valor em teste nenhum. É por isso que
-`RF-29` (SLA na lista) e `RF-31` (histórico de SLA no detalhe) não aparecem em tela: o dado
-nunca é lido. ⚠️ Se o Jira deriva o SLA da prioridade que não mandamos, consertar só um dos
-dois não produz número na tela.
+`slaPrimeiraResposta: null`.** Os dois estão explicados e **corrigidos em código** por
+`D-48`; nenhum dos dois foi medido ainda com a correção no ar.
+
+🚨 **A prioridade obrigatória derrubava 11 dos 15 tipos do `GN`** (`D-48`, medido em
+12/08/2026 pela rota de diagnóstico de `D-44`). Sem prioridade: **68, 108, 143, 144** — que
+são exatamente os que abriram chamado (`GN-6894`, `GN-6897`, `GN-6898`). Com prioridade
+**obrigatória**: **71, 90, 93** (sem select) e **70, 89, 91, 92, 94, 95, 96, 134** (com
+Recorrência) — e o tipo 71 respondeu **400 definitivo já com o `D-39` deployado**, o que
+isola a prioridade como causa suficiente. 400 é definitivo (`RNF-17`): a submissão vira
+`falha` e nunca é reprocessada, ou seja o chamado da pessoa se perdia. Agora a prioridade sai
+como `{id}` tirado do `validValues`, e tipo obrigatório sem correspondência é **recusado
+antes do efeito**. ⚠️ **Falta a medição na staging** — abrir chamado do **71** e do **70**
+com a escrita ligada (`T-525`).
+
+⚠️ **O SLA já é lido** (`D-48`, `T-100`): `obterChamado` pedia `expand=…sla…` e devolvia
+`null` fixo. `atlassian/sla-do-jsm.ts` o lê, e devolve `null` quando não reconhece o **nome**
+do SLA — os nomes reais do `GN` não foram medidos, e afirmar o prazo de resolução como se
+fosse o de primeira resposta seria pior que não afirmar nada. A **tela** continua sem
+mostrá-lo: `RF-29`/`RF-31` seguem abertos pelo lado da superfície, não mais pelo do dado.
 
 ⚠️ **A allowlist de tipos foi ampliada em 11/08** para os **15** tipos do `GN`
 (`68,70,71,89,90,91,92,93,94,95,96,108,134,143,144`), em prod e staging. O **`69`
@@ -1155,7 +1182,7 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1141 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1181 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste.

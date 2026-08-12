@@ -299,6 +299,139 @@ function temCampoDePrioridade(campos) {
   return campos.some((c) => c.jiraSchema.system === "priority");
 }
 
+// src/lib/atlassian/sla-do-jsm.ts
+var NOMES_DE_PRIMEIRA_RESPOSTA = [
+  "first response",
+  "first reply",
+  "primeira resposta",
+  "primeiro retorno"
+];
+function normalizar(texto3) {
+  return texto3.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+function carimbo(ciclo) {
+  const iso = ciclo?.breachTime?.iso8601;
+  return typeof iso === "string" && iso.length > 0 ? iso : null;
+}
+function estourou(ciclo) {
+  return typeof ciclo?.breached === "boolean" ? ciclo.breached : null;
+}
+function ciclosConcluidos(sla) {
+  const bruto = Array.isArray(sla.completedCycles) ? sla.completedCycles : Array.isArray(sla.completedCycle) ? sla.completedCycle : [];
+  return bruto;
+}
+function slaDePrimeiraResposta(bruto) {
+  const valores = bruto?.values;
+  if (!Array.isArray(valores)) return null;
+  const sla = valores.find((v) => {
+    const nome = typeof v?.name === "string" ? normalizar(v.name) : "";
+    return nome !== "" && NOMES_DE_PRIMEIRA_RESPOSTA.some((n) => nome.includes(n));
+  });
+  if (!sla) return null;
+  const concluidos = ciclosConcluidos(sla);
+  const ultimoConcluido = concluidos[concluidos.length - 1];
+  if (ultimoConcluido) {
+    const breached = estourou(ultimoConcluido);
+    return {
+      prazo: carimbo(ultimoConcluido),
+      cumprido: breached === null ? null : !breached
+    };
+  }
+  const emCurso = sla.ongoingCycle;
+  if (!emCurso) return { prazo: null, cumprido: null };
+  return { prazo: carimbo(emCurso), cumprido: estourou(emCurso) === true ? false : null };
+}
+
+// src/lib/tickets/valores-de-campo.ts
+function referenciaDaOpcao(opcao) {
+  return opcao.id === opcao.rotulo ? { value: opcao.id } : { id: opcao.id };
+}
+function ehSelecaoComOpcoes(campo) {
+  return campo.tipo === "selecao" && campo.opcoes.length > 0;
+}
+function opcoesDesconhecidas(schema, valores) {
+  if (!schema.conhecido || !valores) return [];
+  return schema.campos.filter(ehSelecaoComOpcoes).filter((c) => {
+    const valor = (valores[c.fieldId] ?? "").trim();
+    return valor.length > 0 && !c.opcoes.some((o) => o.id === valor);
+  }).map((c) => c.rotulo);
+}
+function mensagemOpcoesDesconhecidas(rotulos) {
+  const lista2 = rotulos.join(", ");
+  return rotulos.length === 1 ? `A op\xE7\xE3o escolhida para "${lista2}" n\xE3o \xE9 uma das oferecidas por este tipo de chamado. Escolha uma das op\xE7\xF5es da lista.` : `As op\xE7\xF5es escolhidas para: ${lista2} n\xE3o est\xE3o entre as oferecidas por este tipo de chamado. Escolha uma das op\xE7\xF5es de cada lista.`;
+}
+function paraValoresDoJira(schema, valores) {
+  if (!valores || Object.keys(valores).length === 0) return null;
+  if (!schema.conhecido) return { ...valores };
+  const porFieldId = new Map(schema.campos.map((c) => [c.fieldId, c]));
+  const saida = {};
+  for (const [fieldId, valor] of Object.entries(valores)) {
+    const campo = porFieldId.get(fieldId);
+    const opcao = campo && ehSelecaoComOpcoes(campo) ? campo.opcoes.find((o) => o.id === valor) : void 0;
+    if (!campo || !opcao) {
+      saida[fieldId] = valor;
+      continue;
+    }
+    const referencia = referenciaDaOpcao(opcao);
+    saida[fieldId] = campo.multiplo ? [referencia] : referencia;
+  }
+  return saida;
+}
+var VOCABULARIO_PRIORIDADE = [
+  {
+    prioridade: "critica",
+    escrita: true,
+    rotulos: ["highest", "critical", "critica", "blocker", "urgent", "urgente", "muito alta"]
+  },
+  { prioridade: "alta", escrita: true, rotulos: ["high", "alta", "major"] },
+  { prioridade: "normal", escrita: true, rotulos: ["medium", "media", "normal", "moderate"] },
+  {
+    prioridade: "normal",
+    escrita: false,
+    rotulos: ["low", "baixa", "lowest", "muito baixa", "minor", "trivial"]
+  }
+];
+function normalizarRotulo(rotulo) {
+  return rotulo.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+function prioridadeDoRotulo(rotulo) {
+  const alvo = normalizarRotulo(rotulo);
+  if (alvo === "") return null;
+  for (const entrada of VOCABULARIO_PRIORIDADE) {
+    if (entrada.rotulos.includes(alvo)) return entrada.prioridade;
+  }
+  return null;
+}
+var APROXIMACAO_PRIORIDADE = Object.freeze({
+  critica: ["critica", "alta", "normal"],
+  alta: ["alta", "normal"],
+  normal: ["normal"]
+});
+function opcaoDePrioridade(opcoes, prioridade) {
+  for (const nivel of APROXIMACAO_PRIORIDADE[prioridade]) {
+    const rotulos = VOCABULARIO_PRIORIDADE.filter(
+      (e) => e.escrita && e.prioridade === nivel
+    ).flatMap((e) => e.rotulos);
+    const achada = opcoes.find((o) => rotulos.includes(normalizarRotulo(o.rotulo)));
+    if (achada) return achada;
+  }
+  return null;
+}
+function mensagemPrioridadeSemCorrespondencia(rotulo) {
+  return `Este tipo de chamado exige o campo "${rotulo}", e nenhuma das prioridades oferecidas aqui (cr\xEDtica, alta, normal) corresponde \xE0s op\xE7\xF5es que o Jira aceita nele. Fale com o time de tech \u2014 nada foi perdido, e o chamado abre assim que isso for ajustado.`;
+}
+function prioridadeParaOJira(campo, prioridade) {
+  if (!campo) return { ok: true, campos: {} };
+  const opcao = opcaoDePrioridade(campo.opcoes, prioridade);
+  if (opcao) return { ok: true, campos: { [campo.fieldId]: referenciaDaOpcao(opcao) } };
+  if (!campo.obrigatorio) return { ok: true, campos: {} };
+  return { ok: false, mensagem: mensagemPrioridadeSemCorrespondencia(campo.rotulo) };
+}
+function juntarCamposDaCriacao(traduzidos, prioridade) {
+  const juntos = { ...traduzidos ?? {}, ...prioridade };
+  return Object.keys(juntos).length > 0 ? juntos : null;
+}
+
 // src/lib/atlassian/cliente.ts
 function novasCachesAtlassian(agoraMs = () => Date.now()) {
   return {
@@ -311,18 +444,6 @@ function novasCachesAtlassian(agoraMs = () => Date.now()) {
   };
 }
 var MAX_ANEXOS_LISTADOS = 50;
-var ROTULO_PRIORIDADE = Object.freeze({
-  critica: "Highest",
-  alta: "High",
-  normal: "Medium"
-});
-var PRIORIDADE_POR_ROTULO = Object.freeze({
-  Highest: "critica",
-  High: "alta",
-  Medium: "normal",
-  Low: "normal",
-  Lowest: "normal"
-});
 function escaparCql(valor) {
   return valor.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
@@ -380,16 +501,35 @@ function montarJqlAtualizados(desde, agoraMs) {
 }
 var CAMPOS_DE_SISTEMA_JA_COBERTOS = /* @__PURE__ */ new Set(["summary", "description", "priority"]);
 var MAX_SERVICE_DESKS = 20;
+function opcoesDoBruto(bruto) {
+  return (bruto.validValues ?? []).map((v) => ({
+    id: String(v.id ?? v.value ?? ""),
+    rotulo: String(v.label ?? v.value ?? v.id ?? "")
+  }));
+}
+function campoDePrioridade(brutos) {
+  for (const bruto of brutos) {
+    if (bruto.jiraSchema?.system !== "priority") continue;
+    const fieldId = String(bruto.fieldId ?? "");
+    if (!fieldId) continue;
+    return {
+      fieldId,
+      rotulo: String(bruto.name ?? fieldId),
+      obrigatorio: Boolean(bruto.required),
+      tipo: "selecao",
+      multiplo: bruto.jiraSchema?.type === "array",
+      opcoes: opcoesDoBruto(bruto)
+    };
+  }
+  return null;
+}
 function camposAdicionais(brutos) {
   const resultado = [];
   for (const bruto of brutos) {
     const fieldId = String(bruto.fieldId ?? "");
     const sistema = typeof bruto.jiraSchema?.system === "string" ? bruto.jiraSchema.system : null;
     if (!fieldId || sistema !== null && CAMPOS_DE_SISTEMA_JA_COBERTOS.has(sistema)) continue;
-    const opcoes = (bruto.validValues ?? []).map((v) => ({
-      id: String(v.id ?? v.value ?? ""),
-      rotulo: String(v.label ?? v.value ?? v.id ?? "")
-    }));
+    const opcoes = opcoesDoBruto(bruto);
     const custom = typeof bruto.jiraSchema?.custom === "string" ? bruto.jiraSchema.custom : "";
     const tipoBruto = typeof bruto.jiraSchema?.type === "string" ? bruto.jiraSchema.type : "";
     const itens = typeof bruto.jiraSchema?.items === "string" ? bruto.jiraSchema.items : "";
@@ -469,16 +609,47 @@ var ClienteAtlassianHttp = class {
    * A chave de cache inclui `serviceDeskId` **e** `requestTypeId` — diferente de
    * `listarTiposChamado`, que usa uma chave fixa: aqui há um schema por tipo.
    */
-  async obterCamposDoTipo(serviceDeskId, requestTypeId) {
-    const chave = `camposDoTipo:${serviceDeskId}:${requestTypeId}`;
+  /**
+   * O corpo **cru** do `/field`, guardado uma vez por (desk, tipo) — `D-48`.
+   *
+   * Três leitores derivam dele: `camposAdicionais` (formulário), `normalizarSchema`
+   * (diagnóstico, `D-44`) e `campoDePrioridade` (criação). Antes, cada método fazia a
+   * **própria** requisição para o mesmo endpoint; com a criação passando a precisar de
+   * dois deles, isso viraria uma ida de rede a mais por chamado aberto (`R-02`,
+   * `RNF-36`).
+   *
+   * ⚠️ **As caches derivadas continuam com chave própria**, e isso é a advertência de
+   * `D-44`: o que não se pode compartilhar é a **forma** — uma chave só faria o segundo
+   * a chamar receber o resultado do primeiro. Compartilhar o corpo cru é o oposto: uma
+   * forma só, a que a Atlassian mandou.
+   */
+  async camposBrutosDoTipo(serviceDeskId, requestTypeId) {
+    const chave = `camposBrutos:${serviceDeskId}:${requestTypeId}`;
     const cacheado = this.cacheMetadados.obter(chave);
     if (cacheado) return cacheado;
     const dados = await this.transporte.requisitar(
       `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`
     );
-    const campos = camposAdicionais(dados?.requestTypeFields ?? []);
+    const brutos = Array.isArray(dados?.requestTypeFields) ? dados.requestTypeFields : [];
+    this.cacheMetadados.definir(chave, brutos, this.opcoes.ttlMetadadosSeg);
+    return brutos;
+  }
+  async obterCamposDoTipo(serviceDeskId, requestTypeId) {
+    const chave = `camposDoTipo:${serviceDeskId}:${requestTypeId}`;
+    const cacheado = this.cacheMetadados.obter(chave);
+    if (cacheado) return cacheado;
+    const campos = camposAdicionais(await this.camposBrutosDoTipo(serviceDeskId, requestTypeId));
     this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg);
     return campos;
+  }
+  /** `RF-16` / `D-48` — o campo que a criação precisa e que o formulário descarta. */
+  async obterCampoDePrioridade(serviceDeskId, requestTypeId) {
+    const chave = `campoPrioridade:${serviceDeskId}:${requestTypeId}`;
+    const cacheado = this.cacheMetadados.obter(chave);
+    if (cacheado !== void 0) return cacheado;
+    const campo = campoDePrioridade(await this.camposBrutosDoTipo(serviceDeskId, requestTypeId));
+    this.cacheMetadados.definir(chave, campo, this.opcoes.ttlMetadadosSeg);
+    return campo;
   }
   /**
    * O mesmo endpoint, sem o filtro nem a tradução — diagnóstico de admin.
@@ -493,10 +664,7 @@ var ClienteAtlassianHttp = class {
     const chave = `schemaDoTipo:${serviceDeskId}:${requestTypeId}`;
     const cacheado = this.cacheMetadados.obter(chave);
     if (cacheado) return cacheado;
-    const dados = await this.transporte.requisitar(
-      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`
-    );
-    const campos = normalizarSchema(dados?.requestTypeFields);
+    const campos = normalizarSchema(await this.camposBrutosDoTipo(serviceDeskId, requestTypeId));
     this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg);
     return campos;
   }
@@ -516,6 +684,13 @@ var ClienteAtlassianHttp = class {
    * diferentes (`customfield_10092`: cargo no 108, sistema do bug no 70). O valor chega
    * aqui já resolvido, dentro de `camposDinamicos` — este cliente continua burro quanto
    * a política, como já é para `RN-06`.
+   *
+   * 🚨 **A prioridade também não se decide aqui** (`D-48`). Havia um
+   * `opcoes.campoPrioridadeId` que ninguém preenchia — o caminho estava morto desde
+   * sempre, e com ele `RF-16` era editável na tela e inerte no Jira. Quem resolve agora é
+   * `tickets/valores-de-campo.ts` na **rota**, contra o `validValues` do request type, e
+   * o valor chega aqui dentro de `camposDinamicos`. É isto que faz o outbox persistir o
+   * corpo pronto e o retry de `RNF-17` reenviá-lo sem reler schema.
    */
   montarCamposSolicitante(dados) {
     const cabecalho = `**Solicitante:** ${dados.solicitanteEmail}
@@ -525,11 +700,7 @@ var ClienteAtlassianHttp = class {
 ---
 
 `;
-    const camposExtra = {};
-    if (this.opcoes.campoPrioridadeId) {
-      camposExtra[this.opcoes.campoPrioridadeId] = { name: ROTULO_PRIORIDADE[dados.prioridade] };
-    }
-    return { descricao: cabecalho + dados.descricao, camposExtra };
+    return { descricao: cabecalho + dados.descricao, camposExtra: {} };
   }
   async criarChamado(dados) {
     const { descricao, camposExtra } = this.montarCamposSolicitante(dados);
@@ -566,18 +737,20 @@ var ClienteAtlassianHttp = class {
     const campos = new Map(
       (dados?.requestFieldValues ?? []).map((f) => [String(f.fieldId ?? ""), f.value])
     );
-    const rotulo = String(
-      campos.get("priority")?.name ?? ""
-    );
+    const rotulo = String(campos.get("priority")?.name ?? "");
     return {
       issueKey: String(dados?.issueKey ?? issueKey),
       titulo: String(campos.get("summary") ?? ""),
       descricao: String(campos.get("description") ?? ""),
       status: String(dados?.currentStatus?.status ?? "Desconhecido"),
-      prioridade: PRIORIDADE_POR_ROTULO[rotulo] ?? null,
+      prioridade: prioridadeDoRotulo(rotulo),
       criadoEm: String(dados?.createdDate?.iso8601 ?? ""),
       atualizadoEm: String(dados?.currentStatus?.statusDate?.iso8601 ?? ""),
-      slaPrimeiraResposta: null
+      // ⚠️ Era `null` **literal** (`D-48`), com o `?expand=…,sla,…` acima pedindo o dado e
+      // a última linha do método descartando-o. `RF-29` não estava por desenhar: estava
+      // sem dado nenhum. 🚨 O que sai daqui é o SLA **do JSM**, não o compromisso de
+      // `RN-08` que `notificacoes/sla.ts` calcula — ver `sla-do-jsm.ts`.
+      slaPrimeiraResposta: slaDePrimeiraResposta(dados?.sla)
     };
   }
   /**
@@ -1060,11 +1233,11 @@ var FALHAS = Object.freeze({
   timeout: { status: 504, transitorio: true },
   rejeitado: { status: 400, transitorio: false }
 });
-function normalizar(texto3) {
+function normalizar2(texto3) {
   return texto3.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 }
 function palavrasDe(termo) {
-  return normalizar(termo).split(/[^a-z0-9]+/).filter((p) => p.length > 0);
+  return normalizar2(termo).split(/[^a-z0-9]+/).filter((p) => p.length > 0);
 }
 var ClienteAtlassianFake = class {
   estado;
@@ -1081,6 +1254,8 @@ var ClienteAtlassianFake = class {
       tiposChamado: inicial.tiposChamado ?? [],
       camposPorTipo: inicial.camposPorTipo ?? /* @__PURE__ */ new Map(),
       schemaPorTipo: inicial.schemaPorTipo ?? /* @__PURE__ */ new Map(),
+      prioridadePorTipo: inicial.prioridadePorTipo ?? /* @__PURE__ */ new Map(),
+      slaDoJsm: inicial.slaDoJsm ?? null,
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? /* @__PURE__ */ new Set(),
       filtrarPorTermo: inicial.filtrarPorTermo ?? false,
@@ -1178,6 +1353,22 @@ var ClienteAtlassianFake = class {
     this.checar(this.estado.falhas.obterSchemaDoTipo, "obterSchemaDoTipo");
     return this.estado.schemaPorTipo.get(requestTypeId) ?? [];
   }
+  /**
+   * `D-48` — o campo de prioridade, encenado por `prioridadePorTipo`.
+   *
+   * ⚠️ **Falha junto com `obterCamposDoTipo`**, e de propósito: no cliente real os dois
+   * derivam do **mesmo** corpo (`camposBrutosDoTipo`), então um fake em que o schema cai
+   * e a prioridade continua respondendo encenaria um estado que produção não tem — e é
+   * exatamente por aí que o dublê escondeu `D-38`, `D-39` e `D-43`.
+   */
+  async obterCampoDePrioridade(serviceDeskId, requestTypeId) {
+    this.chamadas.push({
+      operacao: "obterCampoDePrioridade",
+      params: { serviceDeskId, requestTypeId }
+    });
+    this.checar(this.estado.falhas.obterCamposDoTipo, "obterCampoDePrioridade");
+    return this.estado.prioridadePorTipo.get(requestTypeId) ?? null;
+  }
   async criarChamado(dados) {
     this.chamadas.push({ operacao: "criarChamado", params: dados });
     this.checar(this.estado.falhas.criarChamado, "criarChamado");
@@ -1197,7 +1388,7 @@ var ClienteAtlassianFake = class {
       prioridade: dados.prioridade,
       criadoEm: this.estado.relogio(),
       atualizadoEm: this.estado.relogio(),
-      slaPrimeiraResposta: { prazo: null, cumprido: null }
+      slaPrimeiraResposta: this.estado.slaDoJsm
     });
     return criado;
   }
@@ -1299,7 +1490,7 @@ var ClienteAtlassianFake = class {
     const palavras = this.estado.filtrarPorTermo && alternativas.length === 0 ? palavrasDe(params.termo) : [];
     return this.estado.paginas.filter((p) => {
       if (alternativas.length === 0 && palavras.length === 0) return true;
-      const texto3 = normalizar(`${p.titulo} ${p.trecho}`);
+      const texto3 = normalizar2(`${p.titulo} ${p.trecho}`);
       if (alternativas.length > 0) return alternativas.some((palavra) => texto3.includes(palavra));
       return palavras.every((palavra) => texto3.includes(palavra));
     }).filter((p) => permitidos.has(p.espaco)).filter((p) => !p.labels.some((l) => bloqueadas.has(l))).filter((p) => !this.estado.idsRestritos.has(p.id)).sort((a, b) => b.score - a.score).slice(0, params.limite);
@@ -1592,6 +1783,15 @@ var ClienteAtlassianSomenteLeitura = class {
    */
   obterSchemaDoTipo(sd, rt) {
     return this.real.obterSchemaDoTipo(sd, rt);
+  }
+  /**
+   * ⚠️ Leitura, e **tem de passar em somente leitura** (`D-48`): é ela que decide se a
+   * criação é recusada antes do efeito. Recusá-la aqui faria o modo devolver "este tipo
+   * não tem prioridade" — a resposta errada, com cara de resposta, no exato ponto em que
+   * `D-44` já mostrou o custo disso.
+   */
+  obterCampoDePrioridade(sd, rt) {
+    return this.real.obterCampoDePrioridade(sd, rt);
   }
   obterChamado(issueKey) {
     return this.real.obterChamado(issueKey);
@@ -3853,14 +4053,14 @@ var PALAVRAS_VAZIAS = /* @__PURE__ */ new Set([
   "todos",
   "todas"
 ]);
-function normalizar2(palavra) {
+function normalizar3(palavra) {
   return palavra.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 }
 function palavrasSignificativas(termo) {
   const vistas = /* @__PURE__ */ new Set();
   const palavras = [];
   for (const bruta of termo.split(/[^\p{L}\p{N}_-]+/u)) {
-    const chave = normalizar2(bruta);
+    const chave = normalizar3(bruta);
     if (chave.length < 2 || PALAVRAS_VAZIAS.has(chave) || vistas.has(chave)) continue;
     vistas.add(chave);
     palavras.push(bruta);
@@ -5440,7 +5640,7 @@ var RepositorioNotificacoes = class {
    * mesma coisa. Quem chama trata como "já cuidei disso".
    */
   async registrar(dados) {
-    const carimbo = normalizarCarimbo2(dados.carimboMudanca);
+    const carimbo2 = normalizarCarimbo2(dados.carimboMudanca);
     const agora = this.agora();
     const corpo = dados.mensagem.link ? `${dados.mensagem.corpo}
 
@@ -5456,7 +5656,7 @@ ${dados.mensagem.link}` : dados.mensagem.corpo;
         dados.issueKey,
         dados.destinatarioEmail,
         dados.tipoEvento,
-        carimbo,
+        carimbo2,
         dados.fonte,
         dados.canal,
         dados.destino,
@@ -5468,7 +5668,7 @@ ${dados.mensagem.link}` : dados.mensagem.corpo;
       ]
     );
     if (r.rowsWritten > 0) return { nova: true, existente: null };
-    return { nova: false, existente: await this.obterPorChave(dados.issueKey, dados.tipoEvento, carimbo) };
+    return { nova: false, existente: await this.obterPorChave(dados.issueKey, dados.tipoEvento, carimbo2) };
   }
   async obterPorChave(issueKey, tipoEvento, carimboMudanca) {
     const r = await this.db.query(
@@ -5626,12 +5826,12 @@ var MarcaAguaPolling = class {
     ]);
     return primeiraLinha(r)?.carimbo ?? null;
   }
-  async definir(carimbo, chave = "jira") {
+  async definir(carimbo2, chave = "jira") {
     await this.db.exec(
       `INSERT INTO marca_agua_polling (chave, carimbo, atualizado_em) VALUES (?, ?, ?)
        ON CONFLICT (chave) DO UPDATE SET
          carimbo = excluded.carimbo, atualizado_em = excluded.atualizado_em`,
-      [chave, carimbo, this.agora()]
+      [chave, carimbo2, this.agora()]
     );
   }
 };
@@ -5749,7 +5949,7 @@ function validarPreferencia(corpo) {
 }
 
 // src/lib/notificacoes/mensagens.ts
-var ROTULO_PRIORIDADE2 = {
+var ROTULO_PRIORIDADE = {
   critica: "cr\xEDtica",
   alta: "alta",
   normal: "normal"
@@ -5764,7 +5964,7 @@ function mensagemChamadoCriado(dados) {
     titulo: `Chamado ${dados.issueKey} aberto`,
     corpo: [
       `Seu chamado **${dados.issueKey}** foi aberto: ${dados.titulo}`,
-      `Prioridade: ${ROTULO_PRIORIDADE2[dados.prioridade]}.`,
+      `Prioridade: ${ROTULO_PRIORIDADE[dados.prioridade]}.`,
       // ⚠️ RN-08 — "primeira resposta", nunca "prazo de resolução". E os 24h são
       // PISO GARANTIDO (R-05): muita área responde bem antes.
       `Prazo de **primeira resposta**: at\xE9 ${dados.slaPrimeiraRespostaHoras}h. Esse \xE9 o prazo m\xE1ximo garantido para algu\xE9m te responder \u2014 n\xE3o o prazo de solu\xE7\xE3o, e muita \xE1rea responde bem antes.`
@@ -8158,42 +8358,6 @@ function mensagemObrigatoriosFaltando(rotulos) {
   return rotulos.length === 1 ? `Falta preencher "${lista2}" \u2014 o Jira exige esse campo para este tipo de chamado.` : `Faltam preencher: ${lista2}. O Jira exige esses campos para este tipo de chamado.`;
 }
 
-// src/lib/tickets/valores-de-campo.ts
-function referenciaDaOpcao(opcao) {
-  return opcao.id === opcao.rotulo ? { value: opcao.id } : { id: opcao.id };
-}
-function ehSelecaoComOpcoes(campo) {
-  return campo.tipo === "selecao" && campo.opcoes.length > 0;
-}
-function opcoesDesconhecidas(schema, valores) {
-  if (!schema.conhecido || !valores) return [];
-  return schema.campos.filter(ehSelecaoComOpcoes).filter((c) => {
-    const valor = (valores[c.fieldId] ?? "").trim();
-    return valor.length > 0 && !c.opcoes.some((o) => o.id === valor);
-  }).map((c) => c.rotulo);
-}
-function mensagemOpcoesDesconhecidas(rotulos) {
-  const lista2 = rotulos.join(", ");
-  return rotulos.length === 1 ? `A op\xE7\xE3o escolhida para "${lista2}" n\xE3o \xE9 uma das oferecidas por este tipo de chamado. Escolha uma das op\xE7\xF5es da lista.` : `As op\xE7\xF5es escolhidas para: ${lista2} n\xE3o est\xE3o entre as oferecidas por este tipo de chamado. Escolha uma das op\xE7\xF5es de cada lista.`;
-}
-function paraValoresDoJira(schema, valores) {
-  if (!valores || Object.keys(valores).length === 0) return null;
-  if (!schema.conhecido) return { ...valores };
-  const porFieldId = new Map(schema.campos.map((c) => [c.fieldId, c]));
-  const saida = {};
-  for (const [fieldId, valor] of Object.entries(valores)) {
-    const campo = porFieldId.get(fieldId);
-    const opcao = campo && ehSelecaoComOpcoes(campo) ? campo.opcoes.find((o) => o.id === valor) : void 0;
-    if (!campo || !opcao) {
-      saida[fieldId] = valor;
-      continue;
-    }
-    const referencia = referenciaDaOpcao(opcao);
-    saida[fieldId] = campo.multiplo ? [referencia] : referencia;
-  }
-  return saida;
-}
-
 // src/lib/tickets/declaracao-anexo.ts
 function tipoAceitaAnexo(campos) {
   return campos.some((c) => c.tipo === "anexo");
@@ -8642,7 +8806,7 @@ async function rotear(req, ctx, eu, caminho, url) {
     const piloto = await verificarPiloto(ctx, eu, caminho);
     if (piloto) return piloto;
     const corpoConfirmacao = await lerJson(req);
-    const schema = await lerSchemaDoTipo(
+    const { schema, prioridade: campoPrioridade } = await lerSchemaDoTipo(
       ctx,
       eu.email,
       serviceDeskId,
@@ -8674,6 +8838,11 @@ async function rotear(req, ctx, eu, caminho, url) {
     if (opcoesRuinsNaConversa.length > 0) {
       return ERROS.dadosInvalidos(mensagemOpcoesDesconhecidas(opcoesRuinsNaConversa));
     }
+    const prioridadeNaConversa = prioridadeParaOJira(
+      campoPrioridade,
+      conversa.proposta.prioridade
+    );
+    if (!prioridadeNaConversa.ok) return ERROS.dadosInvalidos(prioridadeNaConversa.mensagem);
     await ctx.conversas.registrarConfirmacao(conversa.id);
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -8710,7 +8879,12 @@ async function rotear(req, ctx, eu, caminho, url) {
         // ⚠️ Traduzido para o formato do Jira **aqui**, e não no cliente (`D-39`): é este
         // objeto que o outbox persiste, então o reprocessamento de `RNF-17` reenvia o mesmo
         // corpo sem reler o schema.
-        paraValoresDoJira(schema, camposDaConversa)
+        // A prioridade entra por ÚLTIMO (`D-48`): resolvida no servidor a partir da
+        // proposta, ela não pode ser sobrescrita por campo vindo do cliente.
+        juntarCamposDaCriacao(
+          paraValoresDoJira(schema, camposDaConversa),
+          prioridadeNaConversa.campos
+        )
       );
     } catch (e) {
       if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida("conversa");
@@ -8746,7 +8920,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       solicitanteEmail: eu.email,
       chaveDoCliente: chaveDoClienteValida(corpo?.chaveIdempotencia) ?? ctx.novoId()
     });
-    const schema = await lerSchemaDoTipo(
+    const { schema, prioridade: campoPrioridade } = await lerSchemaDoTipo(
       ctx,
       eu.email,
       serviceDeskId,
@@ -8779,7 +8953,12 @@ async function rotear(req, ctx, eu, caminho, url) {
     if (opcoesRuins.length > 0) {
       return ERROS.dadosInvalidos(mensagemOpcoesDesconhecidas(opcoesRuins));
     }
-    const camposParaOJira = paraValoresDoJira(schema, camposComSolicitante);
+    const prioridadeParaJira = prioridadeParaOJira(campoPrioridade, validada.proposta.prioridade);
+    if (!prioridadeParaJira.ok) return ERROS.dadosInvalidos(prioridadeParaJira.mensagem);
+    const camposParaOJira = juntarCamposDaCriacao(
+      paraValoresDoJira(schema, camposComSolicitante),
+      prioridadeParaJira.campos
+    );
     const area = await resolverArea({
       email: eu.email,
       teamguide: ctx.teamguide,
@@ -9810,16 +9989,25 @@ function respostaCriacao(r, prioridade, anexo) {
 async function lerSchemaDoTipo(ctx, atorEmail, serviceDeskId, tipoChamadoId) {
   try {
     const campos = await ctx.atlassian.obterCamposDoTipo(serviceDeskId, tipoChamadoId);
-    return { conhecido: true, campos };
+    const prioridade = await ctx.atlassian.obterCampoDePrioridade(serviceDeskId, tipoChamadoId);
+    return { schema: { conhecido: true, campos }, prioridade };
   } catch {
     await ctx.auditoria.registrar({
       atorEmail,
       acao: "schema_tipo_indisponivel",
       recurso: tipoChamadoId,
       resultado: "falha",
-      detalhe: { tipoChamadoId, consequencia: "declaracao_de_anexo_nao_exigida" }
+      detalhe: {
+        tipoChamadoId,
+        consequencia: "declaracao_de_anexo_nao_exigida",
+        // `D-48` — a segunda consequência, e ela é maior: sem schema a prioridade não é
+        // enviada, então um tipo que a **exige** vai responder 400. Fail-open é decisão
+        // de `D-27`/`RNF-18` (não virar parede numa queda de leitura), mas quem
+        // investigar um 400 depois precisa achar esta linha.
+        consequenciaPrioridade: "prioridade_nao_enviada"
+      }
     });
-    return { conhecido: false };
+    return { schema: { conhecido: false }, prioridade: null };
   }
 }
 async function filtrarCamposComSchema(ctx, atorEmail, tipoChamadoId, campos, schema) {
@@ -10116,8 +10304,8 @@ async function tratarCron(req, ctx, env, caminho) {
         break;
       }
       eventos += r.eventos;
-      const carimbo = porChave.get(vinculo.issueKey);
-      if (carimbo) carimboSeguro = carimbo;
+      const carimbo2 = porChave.get(vinculo.issueKey);
+      if (carimbo2) carimboSeguro = carimbo2;
     }
     if (comVinculo.length === 0) await ctx.marcaAguaPolling.definir(ctx.agora());
     else if (carimboSeguro) await ctx.marcaAguaPolling.definir(carimboSeguro);
