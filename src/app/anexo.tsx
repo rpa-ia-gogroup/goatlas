@@ -43,9 +43,6 @@ export type AlvoDoAnexo =
 /** `null` = não respondeu. Nunca há opção pré-marcada (`SC-01`). */
 export type Declaracao = boolean | null
 
-export const AVISO_DECLARACAO_PENDENTE =
-  'Responda acima se você tem algo para anexar. É a única coisa que falta.'
-
 export type EstadoEnvio = 'enviando' | 'enviado' | 'falhou'
 
 interface Envio {
@@ -159,14 +156,36 @@ export function PerguntaDeAnexo({
 
       {declarou === true && (
         <div className="zona-anexo">
-          <label htmlFor="anexo-na-criacao">Escolher arquivo</label>
-          <input
-            ref={entrada}
-            id="anexo-na-criacao"
-            type="file"
-            multiple
-            onChange={(e) => void enviar(Array.from(e.target.files ?? []))}
-          />
+          {/* ⚠️ **O `input[type=file]` cru não é do app** (`D-46`). O navegador desenha
+              ali um botão cinza de sistema com "Nenhum arquivo escolhido" ao lado — em
+              inglês em boa parte das instalações, o que atropela a regra 4 do projeto na
+              única superfície onde a pessoa está prestes a mandar a evidência do chamado.
+
+              O padrão aqui é o clássico: o `input` continua sendo o `input` (é ele que
+              recebe foco, teclado e o `change`), só sai da tela por `clip`; quem aparece
+              é o `label`, que já era o nome acessível do campo e agora também é o alvo do
+              clique. ⚠️ **`clip`, nunca `display: none`** — escondido de verdade, o campo
+              sai da ordem de tabulação e a pergunta fica inalcançável pelo teclado.
+              O anel de foco é reemitido no `label` por `:focus-visible +` (ver
+              `estilos.css`): sem isso, quem navega por teclado perde o único sinal de
+              onde está.
+
+              E não se perde nada com a saída do texto nativo: o que a pessoa precisa
+              saber sobre cada arquivo — nome e estado do envio — já está na lista abaixo,
+              com símbolo e palavra (`RNF-28`), que é mais do que o controle dizia. */}
+          <div className="escolher-arquivo">
+            <input
+              ref={entrada}
+              id="anexo-na-criacao"
+              className="entrada-arquivo"
+              type="file"
+              multiple
+              onChange={(e) => void enviar(Array.from(e.target.files ?? []))}
+            />
+            <label htmlFor="anexo-na-criacao" className="botao botao-contorno rotulo-arquivo">
+              Escolher arquivo
+            </label>
+          </div>
           <span className="dica">
             Você pode abrir o chamado mesmo sem escolher arquivo — a pergunta é que era
             obrigatória.

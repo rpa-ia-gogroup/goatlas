@@ -51,6 +51,7 @@ import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
 import { resolverCamposDoSolicitante } from '../tickets/campos-do-solicitante'
+import { falhaDefinitivaDeCriacao, type ResultadoCriacao } from '../tickets/servico'
 import { paraExibicao } from '../tickets/comentario-exibicao'
 import {
   mensagemObrigatoriosFaltando,
@@ -394,33 +395,46 @@ async function rotear(
       via: 'conversa',
       conversaId: conversa.id,
     })
-    const r = await ctx.chamados.abrirPorConversa(
-      atual!,
-      serviceDeskId,
-      chaveDaConversa,
-      await resolverArea({
-        email: eu.email,
-        teamguide: ctx.teamguide,
-        areasPorEmail: ctx.valores.areas_por_email,
-        auditoria: ctx.auditoria,
-      }),
-      declaracao.declarouAnexo,
-      // RF-21 / `D-36` — os MESMOS campos que o formulário preenche, resolvidos com o
-      // `schema` que `RF-62` já leu logo acima. Sem isto, um chamado de um tipo que exige
-      // nome e e-mail nasceria vazio quando aberto pela conversa, e só por lá.
-      //
-      // ⚠️ A conversa não tem formulário dinâmico, então aqui não há valor do cliente para
-      // vencer o do login (`FR-3`) — o que chega é sempre a identidade da sessão.
-      //
-      // ⚠️ Traduzido para o formato do Jira **aqui**, e não no cliente (`D-39`): é este
-      // objeto que o outbox persiste, então o reprocessamento de `RNF-17` reenvia o mesmo
-      // corpo sem reler o schema. A prioridade entra por último (`D-48`) — ela é resolvida
-      // no servidor a partir da proposta, e não pode ser sobrescrita pelo cliente.
-      juntarCamposDaCriacao(
-        paraValoresDoJira(schema, camposDaConversa),
-        prioridadeNaConversa.campos,
-      ),
-    )
+
+    const areaDoSolicitante = await resolverArea({
+      email: eu.email,
+      teamguide: ctx.teamguide,
+      areasPorEmail: ctx.valores.areas_por_email,
+      auditoria: ctx.auditoria,
+    })
+
+    // `D-46` — falha DEFINITIVA vira a frase que diz a verdade, em vez do 500 genérico
+    // que prometia reprocessamento. Ver `falhaDefinitivaDeCriacao` e `criacaoNaoConcluida`.
+    let r: ResultadoCriacao
+    try {
+      r = await ctx.chamados.abrirPorConversa(
+        atual!,
+        serviceDeskId,
+        chaveDaConversa,
+        areaDoSolicitante,
+        declaracao.declarouAnexo,
+        // RF-21 / `D-36` — os MESMOS campos que o formulário preenche, resolvidos com o
+        // `schema` que `RF-62` já leu logo acima. Sem isto, um chamado de um tipo que exige
+        // nome e e-mail nasceria vazio quando aberto pela conversa, e só por lá.
+        //
+        // ⚠️ A conversa não tem formulário dinâmico, então aqui não há valor do cliente para
+        // vencer o do login (`FR-3`) — o que chega é sempre a identidade da sessão.
+        //
+        // ⚠️ Traduzido para o formato do Jira **aqui**, e não no cliente (`D-39`): é este
+        // objeto que o outbox persiste, então o reprocessamento de `RNF-17` reenvia o mesmo
+        // corpo sem reler o schema.
+        // A prioridade entra por ÚLTIMO (`D-48`): resolvida no servidor a partir da
+        // proposta, ela não pode ser sobrescrita por campo vindo do cliente.
+        juntarCamposDaCriacao(
+          paraValoresDoJira(schema, camposDaConversa),
+          prioridadeNaConversa.campos,
+        ),
+      )
+    } catch (e) {
+      if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida('conversa')
+      throw e
+    }
+
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
     const anexo = await materializarAnexosDoChamado(ctx, {
       chaveIdempotencia: chaveDaConversa,
@@ -545,25 +559,35 @@ async function rotear(
       prioridadeParaJira.campos,
     )
 
-    const r = await ctx.chamados.abrirPorFormulario({
-      solicitanteEmail: eu.email,
-      chaveIdempotencia: chave,
-      area: await resolverArea({
-        email: eu.email,
-        teamguide: ctx.teamguide,
-        areasPorEmail: ctx.valores.areas_por_email,
-        auditoria: ctx.auditoria,
-      }),
-      declarouAnexo: declaracao.declarouAnexo,
-      payload: {
-        titulo: validada.proposta.titulo,
-        descricao: validada.proposta.descricao,
-        tipoChamadoId: validada.proposta.tipoChamadoId,
-        serviceDeskId,
-        prioridade: validada.proposta.prioridade,
-        ...(camposParaOJira ? { camposDinamicos: camposParaOJira } : {}),
-      },
+    const area = await resolverArea({
+      email: eu.email,
+      teamguide: ctx.teamguide,
+      areasPorEmail: ctx.valores.areas_por_email,
+      auditoria: ctx.auditoria,
     })
+
+    // `D-46` — igual à conversa, e de propósito: a divergência silenciosa entre os dois
+    // caminhos de criação é o defeito que a spec 006 §8 nomeia.
+    let r: ResultadoCriacao
+    try {
+      r = await ctx.chamados.abrirPorFormulario({
+        solicitanteEmail: eu.email,
+        chaveIdempotencia: chave,
+        area,
+        declarouAnexo: declaracao.declarouAnexo,
+        payload: {
+          titulo: validada.proposta.titulo,
+          descricao: validada.proposta.descricao,
+          tipoChamadoId: validada.proposta.tipoChamadoId,
+          serviceDeskId,
+          prioridade: validada.proposta.prioridade,
+          ...(camposParaOJira ? { camposDinamicos: camposParaOJira } : {}),
+        },
+      })
+    } catch (e) {
+      if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida('formulario')
+      throw e
+    }
     const anexo = await materializarAnexosDoChamado(ctx, {
       chaveIdempotencia: chave,
       solicitanteEmail: eu.email,

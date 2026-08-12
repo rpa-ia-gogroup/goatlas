@@ -64,7 +64,23 @@ e é o primeiro item a revisitar se um dia o godocs rotacionar.
 - [x] **T-515** — `TG_API_TOKEN` lido só em `contexto.ts`, e coberto por
       `rnf01-vazamento-credenciais` no mesmo dia em que passou a existir.
       _Requirements: RNF-01_
-- [x] **T-516** — `resolverArea` nas **duas** rotas de criação. _Requirements: RF-19, FR-7_
+- [~] **T-516** — `resolverArea` nas **duas** rotas de criação. _Requirements: RF-19, FR-7_
+      🚨 **Rebaixada pela auditoria de 12/08 (`D-47`): existem DUAS áreas, e a que a pessoa
+      vê não é a que é gravada.** `resolverArea` roda nas duas rotas, como a tarefa diz
+      (`src/lib/http/rotas.ts:383` na conversa e `:513` no formulário), e o vínculo recebe o
+      valor certo. Mas o recibo de `RF-18` mostra `proposta.area` — a área **extraída pela
+      IA** (`rotas.ts:2025`, exibida em `src/app/telas.tsx:466`) —, e ela **nunca** chega ao
+      vínculo: quem corrigir a área ali vê `PUT /proposta` aceitar (200) e o valor ser
+      descartado na criação, **sem erro nenhum**.
+      ⚠️ `RF-19` pede "roteamento por área … **com possibilidade de correção manual**". A
+      correção que de fato funciona é a de **depois** da criação
+      (`PUT /api/chamados/:key/area`, `T-305`) — a de antes é um campo que finge.
+      ⚠️ É a família de `urlDeLeituraNoApp`/`entradaDaUrl` e da chave de idempotência: dois
+      lados que parecem falar do mesmo dado e não falam. O conserto é escolher **uma** fonte
+      — ou o recibo passa a mostrar o resultado de `resolverArea`, ou a edição do recibo
+      alimenta a criação — e um teste que gere de um lado e leia do outro.
+      ⚠️ Falta também teste do vínculo com área **pela conversa**: `T-304`/`T-305` só
+      exercitam `POST /api/chamados`.
 - [x] **T-517** — Teste estrutural: `criarChamado` e `NovoChamado` não conhecem "área".
       _Requirements: FR-7 (ScC-4)_
 - [x] **T-518** — Asserção em `tests/latencia.test.ts`, no nível da **fiação**: duas
