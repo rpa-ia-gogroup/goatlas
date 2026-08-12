@@ -20,6 +20,7 @@ import {
   type ComentarioPublico,
 } from '../atlassian/tipos'
 import { anexosParaExibir, provaDePublicidade, type AnexosParaExibir } from './anexos-do-chamado'
+import type { ViaDoAnexo } from './anexos-enviados'
 import type { Auditoria } from '../audit'
 import { CriacaoRecusada, autorizarCriacao } from '../agent/gate'
 import type { Conversa } from '../agent/estado'
@@ -96,6 +97,8 @@ export class ServicoChamados {
           tamanhoBytes: number | null
           tipo: string | null
           criadoEm: string
+          /** `RF-23` — opcional: quem monta o serviço à mão continua sem precisar dele. */
+          via?: ViaDoAnexo
         }[]
       >
     },
@@ -536,6 +539,10 @@ export class ServicoChamados {
           tipoDeclarado: a.tipo,
           tamanhoBytes: a.tamanhoBytes,
           criadoEm: a.criadoEm,
+          // `RF-23` — o que distingue o arquivo da pessoa da transcrição que o app gerou.
+          // Sem ele os dois sairiam como "você enviou", e a tela afirmaria que ela mandou
+          // um arquivo que nunca existiu do lado dela.
+          via: a.via,
         }))
       : []
     return anexosParaExibir(issueKey, doChamado, prova, meus)

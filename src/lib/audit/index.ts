@@ -103,6 +103,17 @@ export type AcaoAuditada =
   | 'alerta_sla'
   /** RF-25/RF-34 (T-240) — anexo enviado pelo solicitante ao próprio chamado. */
   | 'anexo_enviado'
+  /**
+   * `RF-23` (T-098) — a transcrição da conversa anexada ao chamado que ela originou.
+   *
+   * ⚠️ É a **única** evidência de que ela chegou ou não. A anexação é silenciosa na tela
+   * de propósito (`transcricao.ts`): dizer "não consegui anexar a transcrição" num recibo
+   * de chamado recém-aberto ensina a pessoa a duvidar de um chamado que está de pé, e
+   * quem duvida abre o segundo. Sem esta linha, "a transcrição nunca chega" e "a
+   * transcrição não existe" ficariam indistinguíveis — a mesma família de
+   * `schema_tipo_indisponivel` e `area_indisponivel`.
+   */
+  | 'transcricao_anexada'
   /** RF-36 (T-242) — transição pedida pelo solicitante (resolver/reabrir). */
   | 'chamado_transicionado'
   /** RF-45 (T-224) — a pessoa mudou o próprio canal de notificação. */

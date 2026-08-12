@@ -3089,6 +3089,91 @@ o risco de divergir do schema — a armadilha de `D-36` para `campo_solicitante_
 
 ---
 
+### D-54 · A transcrição vai como ANEXO — o link estava morto e a descrição perde chamado
+
+**Data:** 12/08/2026 · **Origem:** `T-098`, achado da auditoria de `D-47` ·
+**Contexto:** `RF-23`, `RF-25`, `RF-30`, `RF-31`, `RNF-01`, `RNF-17`, `RNF-30`
+
+`RF-23` (P1) pede **persistir** a transcrição da conversa **e** anexá-la (ou linká-la) ao
+chamado — "o contexto que o time de tech mais perde hoje", nas palavras do próprio
+requisito. A primeira metade existe desde a Fase 1 (`conversas`/`mensagens`, e
+`submissoes.conversa_id` ligando as duas). **A segunda não existia em lugar nenhum:**
+`abrirPorConversa` monta o payload com `proposta.titulo`/`proposta.descricao`, que é o
+**resumo do modelo**, não o diálogo. Quem abria o `GN-xxxx` no Jira nativo não tinha
+caminho de volta para a conversa.
+
+⚠️ **Não é regressão — é um requisito que nunca teve tarefa.** A `spec.md` o listava como
+"P1 dentro da faixa, sem cenário nesta versão", junto de `RF-19` e `RF-25`; os outros dois
+foram retomados depois, e este ficou. O *coverage check* do `tasks.md` continuou afirmando
+que todo RF da faixa tinha tarefa — a mesma cegueira que `D-47` nomeia.
+
+#### As três formas, e por que sobrou uma
+
+**Linkar para dentro do app está morto por medição, não por gosto.** `RF-30` não tem
+leitura sem e-mail: o filtro está no `WHERE` de `tickets/vinculos.ts`, e
+`obterPorIssueKey(issueKey)` sem e-mail **não existe** de propósito. O agente do time
+abriria o link com o e-mail dele e receberia **404** — e antes disso o edge do GoDeploy
+(`visibility: authenticated`) o mandaria ao OAuth. Fazer o link funcionar exigiria uma
+rota de leitura de conversa **alheia**: desenho novo de segurança, não "linkar".
+
+**Colar na descrição perde chamado.** A descrição viaja no corpo da criação, e criação que
+responde 400 é **definitiva** (`RNF-17`): a submissão vira `falha` e nunca é reprocessada.
+Uma conversa comprida encostando no limite do campo — limite que **não foi medido** contra
+o JSM — apagaria o chamado da pessoa por causa de um extra. É a mesma classe de erro de
+`D-48` (prioridade obrigatória) e de `D-39` (campo de seleção como string), com a
+diferença de que aqui o gatilho é o *tamanho* do que a pessoa escreveu, então falharia
+justamente nas conversas mais ricas. E descrição não tem volta: o pedido ficaria afogado
+sob quarenta linhas de diálogo, para sempre.
+
+**O anexo é o caminho já trilhado** (`RF-61`, `D-26`) e o único cujo pior caso é inócuo.
+`tickets/transcricao.ts` roda **depois** da criação e **fora** do `try/catch` que
+classifica falha de submissão, pela razão exata de `D-26`: dentro dele, um upload recusado
+(4xx = definitivo) apagaria o chamado. Nada na função lança.
+
+#### As quatro decisões que o módulo carrega
+
+1. **Silenciosa na tela, registrada na auditoria.** O anexo da pessoa (`RF-61`) falhando
+   vira mensagem porque é a evidência **dela** e ela precisa reagir. A transcrição é
+   conveniência para o time de tech: dizer *"não consegui anexar a transcrição"* num recibo
+   de chamado recém-aberto ensina a pessoa a duvidar de um chamado que está de pé — e quem
+   duvida abre o segundo (mesmo raciocínio das mensagens de `anexo-na-criacao.ts`). A ação
+   `transcricao_anexada` é a **única** evidência, e existe justamente para separar "a
+   transcrição não chega" de "não há transcrição" — família de `schema_tipo_indisponivel`
+   e `area_indisponivel`.
+2. 🚨 **O prompt do sistema não vai junto.** Ele é função da instalação (`D-33`): carrega a
+   allowlist de espaços, os exemplos da Regra 2 e as horas de SLA configuradas. Copiá-lo
+   para um chamado é pôr configuração interna numa superfície que o requisito não pediu
+   (`RNF-30`).
+3. 🚨 **O conteúdo das tools não vai junto; o registro de que rodaram vai.** O que
+   `search_confluence` devolve é trecho de página do Confluence e o que `check_jira_history`
+   devolve é resumo de chamado de terceiros. Dentro de um arquivo anexado isso **não é
+   reavaliado por ninguém** — `RN-06` decide exposição na leitura, e um `.md` no chamado
+   não volta a passar pelas três condições. O que o time precisa saber é que a verificação
+   **aconteceu** antes de o chamado nascer; o conteúdo a pessoa já leu na conversa.
+4. **A origem na tela é uma TERCEIRA palavra: `goatlas`.** A transcrição não é "você
+   enviou" (a pessoa não mandou arquivo nenhum) nem "do time" (sugere que um agente anexou
+   algo ao chamado dela) — as duas seriam a tela afirmando autoria falsa, que é o defeito
+   de `D-43` na versão arquivo. Ela é gravada em `anexos_enviados` com `via: 'transcricao'`
+   — a tabela **permanente**, não `anexos_pendentes`, que é expurgada em 12 h (`D-51`,
+   armadilha de `T-422`) — e a tela diz *gerado pelo goatlas*.
+
+**Truncamento é denunciado dentro do próprio arquivo.** Teto de 256 KB; passou, o corte vem
+com o aviso escrito ao fim. Corte silencioso é `SC-08` na versão que ninguém veria nunca:
+quem lê no Jira não tem como saber que a transcrição acabou antes da conversa.
+
+⚠️ **O teste que vale é o dos bytes, não o do dublê** (`D-47`). `ClienteAtlassianFake`
+registra só nome e tipo do upload — um teste contra ele passaria com o arquivo **vazio**.
+Por isso `tests/rf23-transcricao.test.ts` usa um espião que guarda o `ArrayBuffer` e
+afirma sobre o texto decodificado, e um caso pela **rota real** prova a fiação: a metade
+que faltava em `RF-23` era exatamente essa.
+
+**O que não mudou:** o formulário mínimo (`D-04`) não anexa nada — não há conversa para
+transcrever, e o caminho sequer chama a função. Criação diferida para a fila (`SC-07b`)
+também não anexa: sem chave não há onde, e aqui **nada se perde**, porque a conversa
+continua no banco — a metade de `RF-23` que sempre funcionou.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

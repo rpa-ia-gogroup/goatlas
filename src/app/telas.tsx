@@ -1330,7 +1330,16 @@ function ArquivosDoChamado({
             // A origem é dita em **palavras**, nunca só por posição ou cor (regra 9): quem
             // mandou o arquivo precisa reconhecê-lo, e "o time respondeu com um anexo" é
             // outra notícia. Ausente = resposta antiga do servidor; aí não se afirma nada.
-            a.origem === 'voce' ? 'você enviou' : a.origem === 'time' ? 'do time' : null,
+            // ⚠️ `goatlas` **não** é uma das duas: a transcrição de `RF-23` não foi
+            // enviada por ninguém, e chamá-la de "você enviou" ou "do time" seria a tela
+            // afirmando autoria falsa — o defeito de `D-43`, na versão arquivo.
+            a.origem === 'voce'
+              ? 'você enviou'
+              : a.origem === 'time'
+                ? 'do time'
+                : a.origem === 'goatlas'
+                  ? 'gerado pelo goatlas'
+                  : null,
             extensaoLegivel(a.nomeArquivo),
             tamanhoLegivel(a.tamanhoBytes),
           ]
