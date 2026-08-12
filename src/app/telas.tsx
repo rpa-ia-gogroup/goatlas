@@ -158,6 +158,8 @@ function ConversaEmCurso({
   // compositor: enquanto a justificativa está aberta, a caixa de mensagem fecha.
   const [justificando, setJustificando] = useState(false)
   const [proposta, setProposta] = useState<Proposta | null>(null)
+  // `D-53` — o nome do assunto acompanha a proposta, mas não faz parte dela.
+  const [tipoNome, setTipoNome] = useState<string | null>(null)
   const [criado, setCriado] = useState<ResultadoCriacao | null>(null)
   const fim = useRef<HTMLDivElement>(null)
 
@@ -190,6 +192,7 @@ function ConversaEmCurso({
       // monta proposta enquanto o bloqueio não for sobreposto (RN-07).
       setBloqueado(r.bloqueioPendente)
       setProposta(r.proposta)
+      setTipoNome(r.tipoNome ?? null)
       setFalas((f) => [...f, { de: 'agente', texto: r.texto }])
     } catch (e) {
       setErro(e instanceof ErroApi ? e.message : 'Não conseguimos enviar sua mensagem. Tente de novo.')
@@ -206,7 +209,10 @@ function ConversaEmCurso({
       setJustificando(false)
       // A proposta vem na resposta do override: a pessoa insistiu, então o próximo
       // passo aparece na hora, sem ela ter de adivinhar que precisa digitar de novo.
-      if (r.proposta) setProposta(r.proposta)
+      if (r.proposta) {
+        setProposta(r.proposta)
+        setTipoNome(r.tipoNome ?? null)
+      }
       setFalas((f) => [
         ...f,
         // A frase da pessoa entra na conversa ANTES da resposta: sem ela, some da
@@ -271,6 +277,7 @@ function ConversaEmCurso({
           eu={eu}
           conversaId={conversaId}
           propostaInicial={proposta}
+          tipoNome={tipoNome}
           aoCriar={setCriado}
           aoRecomecar={aoRecomecar}
         />
@@ -455,12 +462,15 @@ export function ReciboConfirmacao({
   eu,
   conversaId,
   propostaInicial,
+  tipoNome,
   aoCriar,
   aoRecomecar,
 }: {
   eu: Identidade
   conversaId: string
   propostaInicial: Proposta
+  /** `RF-18`/`D-53` — o nome do assunto; `null` quando não deu para identificar. */
+  tipoNome: string | null
   aoCriar: (r: ResultadoCriacao) => void
   /** `D-46` — a saída quando a criação falhou e NÃO vai ser reprocessada. */
   aoRecomecar: () => void
@@ -554,6 +564,17 @@ export function ReciboConfirmacao({
       <dl>
         <dt>Descrição</dt>
         <dd>{propostaInicial.descricao}</dd>
+
+        {/* `RF-18`/`D-53` — o **assunto** decide a fila que recebe o chamado, e confirmar
+            sem vê-lo é confirmar o roteamento no escuro. Nunca o id (`RNF-30`): `68` não
+            informa ninguém. Sem nome, diz-se isso — inventar rótulo a partir do id seria
+            pior, porque pareceria informação. */}
+        <dt>Assunto</dt>
+        <dd>
+          {tipoNome || (
+            <span className="dica">não foi possível identificar o assunto agora</span>
+          )}
+        </dd>
 
         {/* `D-52` — a área **sempre** aparece, inclusive quando não foi identificada.
             Escondê-la quando é nula tirava da tela justamente o caso em que a pessoa

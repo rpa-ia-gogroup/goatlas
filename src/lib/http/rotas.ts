@@ -48,6 +48,7 @@ import { verificarCron } from './cron-auth'
 import { areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { resolverArea } from '../teamguide/area'
 import { garantirAreaNaProposta } from '../tickets/area-da-proposta'
+import { nomeDoTipo } from '../tickets/nome-do-tipo'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
@@ -247,6 +248,12 @@ async function rotear(
       // quando a proposta passa a existir; nas mensagens seguintes o campo já está lá e
       // nada é reconsultado.
       proposta: depois ? await areaNaProposta(ctx, eu.email, depois) : null,
+      // `RF-18`/`D-53` — o **nome** do assunto, nunca o id (`RNF-30`). Fora da proposta
+      // persistida de propósito: é rótulo de exibição, e guardá-lo faria o cartão mostrar
+      // o nome de ontem se alguém renomear o request type no Jira.
+      tipoNome: depois?.proposta
+        ? await nomeDoTipoDaProposta(ctx, depois.proposta.tipoChamadoId)
+        : null,
       tetoCustoAtingido: r.tetoCustoAtingido,
     })
   }
@@ -283,7 +290,12 @@ async function rotear(
     const comArea = liberada
       ? await areaNaProposta(ctx, eu.email, { ...liberada, proposta })
       : proposta
-    return json({ ok: true, bloqueiosSobrepostos: sobrepostos, proposta: comArea })
+    return json({
+      ok: true,
+      bloqueiosSobrepostos: sobrepostos,
+      proposta: comArea,
+      tipoNome: comArea ? await nomeDoTipoDaProposta(ctx, comArea.tipoChamadoId) : null,
+    })
   }
 
   // RF-16 / RF-18 — a proposta é montada/editada antes de confirmar.
@@ -2123,6 +2135,32 @@ function limiteDeBusca(bruto: string | null): number {
 function decodificar(bruto: string): string | null {
   try {
     return decodeURIComponent(bruto)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * O nome do assunto da proposta — `RF-18`, `D-53`.
+ *
+ * ⚠️ Usa a **mesma** lista que `/api/tipos-chamado` oferece: allowlist de `RF-28` mais o
+ * filtro pelo service desk configurado. Uma segunda regra aqui poderia nomear um tipo que
+ * a lista não oferece — e o cartão passaria a anunciar uma fila que a criação recusa.
+ *
+ * Falha de leitura devolve `null` (`RNF-18`): o cartão diz que não identificou o assunto,
+ * e o botão de abrir continua de pé. Derrubar a confirmação porque o **nome** não veio
+ * seria transformar rótulo em trava.
+ */
+async function nomeDoTipoDaProposta(
+  ctx: Contexto,
+  tipoChamadoId: string,
+): Promise<string | null> {
+  try {
+    const permitidos = new Set(ctx.valores.tipos_chamado_permitidos)
+    const desk = ctx.valores.service_desk_id
+    const todos = await ctx.atlassian.listarTiposChamado()
+    const oferecidos = todos.filter((t) => t.serviceDeskId === desk && permitidos.has(t.id))
+    return nomeDoTipo(tipoChamadoId, oferecidos)
   } catch {
     return null
   }

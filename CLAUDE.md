@@ -625,6 +625,16 @@ destes reabre um vazamento que já foi fechado.
   `notificacoes/sla.ts` calcula o compromisso de `RN-08`, e `D-20` diz que duas fontes de
   verdade sobre o mesmo prazo é pior que uma — quem puser este valor na tela tem de dizer de
   quem ele é. Os nomes reais dos SLAs do `GN` **não foram medidos**.
+- **O ASSUNTO aparece no resumo, pelo nome** (`D-53`, `tickets/nome-do-tipo.ts`). `RF-18`
+  pede tipo no cartão e ele faltava — e o tipo decide **qual fila** recebe o chamado, então
+  confirmar sem vê-lo é confirmar o roteamento no escuro. `tipoNome` é resolvido com a
+  **mesma** lista de `/api/tipos-chamado` (allowlist de `RF-28` + service desk configurado):
+  regra própria nomearia um tipo que a lista não oferece, e o cartão anunciaria uma fila que
+  a criação recusa. ⚠️ **Nunca o id** (`RNF-30`), e sem nome a tela **diz** isso — rótulo
+  inventado a partir do id parece informação. Fica **fora** da proposta persistida: guardá-lo
+  mostraria o nome de ontem depois de um `rename` no Jira. ⚠️ **Componente não ganhou campo
+  próprio**: é campo do request type como outro qualquer, já coletado por `RF-27`+`D-39` — um
+  campo especial seria a segunda regra que `D-36` proíbe.
 - 🚨 **Existe UMA área, e é a que a pessoa vê no cartão** (`D-52`, `tickets/area-da-proposta.ts`).
   Havia duas: `proposta.area`, **extraída pela IA** e exibida em `RF-18`, e `vinculo.area`, de
   `resolverArea`, que era a gravada — corrigir a do cartão respondia **200** e o valor era
