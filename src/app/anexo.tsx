@@ -26,7 +26,7 @@
  * detalhe possível de errar.
  */
 
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactElement } from 'react'
 import { api, ErroApi } from './api'
 
 /**
@@ -240,4 +240,135 @@ export function ResultadoDoAnexo({
       <span aria-hidden="true">!</span> {anexo.mensagem}
     </p>
   )
+}
+
+/* ---------- anexo DURANTE a conversa (D-59) ------------------------------ */
+
+/**
+ * O anexo na conversa — sempre disponível, e sem ocupar a tela.
+ *
+ * ## O defeito que este componente conserta
+ *
+ * Relatado por uma pessoa usando o app de verdade: **o agente pediu um print e não havia
+ * onde anexar**. Estava certa — o único controle de anexo vivia dentro do cartão de
+ * confirmação, que só existe depois das duas verificações e da proposta montada. Quem lia
+ * "manda o print" no meio da conversa procurava um clipe e não achava nada.
+ *
+ * E havia uma segunda metade: em **4 dos 15** tipos do `GN` (93, 108, 143, 144) o cartão
+ * condiciona a pergunta a `aceitaAnexo`, então o controle **nunca** aparecia. ⚠️ Pior:
+ * `aceitaAnexo` mede se o **formulário do request type** expõe um campo de anexo, **não**
+ * se o chamado aceita arquivo. O `GN-6903` é do tipo 144 e tem a transcrição de `D-54`
+ * anexada — prova de que anexar funciona ali. O app era mais restritivo que a Atlassian.
+ *
+ * Este controle **não** consulta `aceitaAnexo`, de propósito: o caminho de upload
+ * (`attachTemporaryFile` + materialização) não depende do campo do formulário.
+ *
+ * ## Três formas de entregar o arquivo, uma só de subir
+ *
+ * Clicar no clipe, **soltar** em qualquer lugar da conversa e **colar** (`Ctrl+V`) chamam
+ * a mesma função. Colar é o que mais importa: "print da tela" quase sempre nasce no
+ * clipboard, e obrigar a pessoa a salvar em disco antes é a fricção que faz a evidência
+ * não chegar — que é o problema inteiro que `RF-61` existe para resolver.
+ *
+ * ## O que ele NÃO faz
+ *
+ * Não pergunta nada. A pergunta de `RF-62` continua no cartão, com a copy de `RN-11`, e
+ * este componente não a substitui — ele é o **meio**, ela é a **decisão**. E o agente
+ * deixou de pedir arquivo no prompt (`D-59`): pedir o que a tela não oferece foi
+ * exatamente o defeito.
+ *
+ * ⚠️ **É hook, e o nome diz isso.** Ele devolve `elemento` **e** `enviar`, porque quem
+ * solta o arquivo (a área da conversa) e quem o cola (a caixa de mensagem) não são este
+ * componente — e um `ref` para disparar o input escondido daria o mesmo resultado por um
+ * caminho que ninguém entende ao ler. Chamado de `TelaConversa`, que é quem tem as três
+ * superfícies na mão.
+ *
+ * _Requirements: RF-61, RF-63, RN-11, RNF-02, RNF-28_
+ */
+export function useAnexoNaConversa({
+  conversaId,
+  maximo,
+}: {
+  conversaId: string
+  maximo: number
+}): { readonly enviar: (arquivos: readonly File[]) => Promise<void>; readonly elemento: ReactElement } {
+  const [envios, setEnvios] = useState<readonly Envio[]>([])
+  const entrada = useRef<HTMLInputElement>(null)
+
+  const enviados = envios.filter((e) => e.estado !== 'falhou').length
+  const cheio = enviados >= maximo
+
+  async function enviar(arquivos: readonly File[]) {
+    // O teto é do servidor também (`SC-08`); aqui ele existe para a recusa não custar
+    // uma ida de rede — e a mensagem dele continua sendo a que vale.
+    const cabem = arquivos.slice(0, Math.max(0, maximo - enviados))
+    for (const arquivo of cabem) {
+      setEnvios((atuais) => [
+        ...atuais.filter((e) => e.nome !== arquivo.name),
+        { nome: arquivo.name, estado: 'enviando' },
+      ])
+      try {
+        await api.anexarAntesDoChamado({ via: 'conversa', conversaId }, arquivo)
+        setEnvios((atuais) =>
+          atuais.map((e) => (e.nome === arquivo.name ? { nome: e.nome, estado: 'enviado' } : e)),
+        )
+      } catch (erro) {
+        const motivo =
+          erro instanceof ErroApi ? erro.message : 'Não consegui enviar agora. Tente de novo.'
+        setEnvios((atuais) =>
+          atuais.map((e) =>
+            e.nome === arquivo.name ? { nome: e.nome, estado: 'falhou', motivo } : e,
+          ),
+        )
+      }
+    }
+    if (entrada.current) entrada.current.value = ''
+  }
+
+  return {
+    enviar,
+    elemento: (
+      <div className="anexo-conversa">
+        {/* ⚠️ O input sai da tela por `clip`, **nunca** `display:none` — que o tiraria da
+            ordem de tabulação e deixaria o anexo inalcançável pelo teclado (`D-46`). O anel
+            de foco é reemitido no `label`, que já é o nome acessível. */}
+        <input
+          ref={entrada}
+          id={`anexo-conversa-${conversaId}`}
+          className="entrada-arquivo"
+          type="file"
+          multiple
+          disabled={cheio}
+          onChange={(e) => {
+            const arquivos = Array.from(e.target.files ?? [])
+            if (arquivos.length > 0) void enviar(arquivos)
+          }}
+        />
+        <label
+          className="rotulo-arquivo rotulo-clipe"
+          htmlFor={`anexo-conversa-${conversaId}`}
+          aria-disabled={cheio || undefined}
+        >
+          {/* Símbolo **e** palavra: o clipe sozinho é ícone sem nome acessível. */}
+          <span aria-hidden="true">📎</span>
+          {cheio ? `Máximo de ${maximo} arquivos` : 'Anexar arquivo'}
+        </label>
+
+        {envios.length > 0 && (
+          <ul className="anexo-conversa-lista">
+            {envios.map((e) => (
+              <li key={e.nome} className={`envio envio-${e.estado}`}>
+                <span className="envio-estado">
+                  <span aria-hidden="true">{ROTULOS_ENVIO[e.estado].simbolo}</span>{' '}
+                  {ROTULOS_ENVIO[e.estado].palavra}
+                </span>
+                <span className="envio-nome">{e.nome}</span>
+                {e.motivo && <span className="dica">{e.motivo}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    ),
+  }
 }

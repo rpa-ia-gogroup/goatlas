@@ -130,6 +130,17 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   aqui seria não abrir chamado durante uma queda de leitura de schema — a parede que
   `RNF-18` proíbe. O evento vai para a auditoria (`schema_tipo_indisponivel`) para ninguém
   confundir "o tipo não aceita anexo" com "não deu para saber".
+- 🚨 **O agente NÃO pede arquivo, e o clipe vive na conversa** (`D-59`). Relato real: *"o
+  bot pediu um anexo e não tinha campo pra inserir"*. O controle existia só no cartão de
+  confirmação — depois das duas verificações — e ainda condicionado a `aceitaAnexo`, que
+  esconde o anexo em **4 dos 15** tipos do `GN` (93, 108, 143, 144). ⚠️ **`aceitaAnexo` mede
+  a coisa errada:** ele diz se o *formulário do request type* expõe campo de anexo, não se o
+  chamado aceita arquivo — o `GN-6903` é do tipo 144 e tem a transcrição de `D-54` anexada.
+  O prompt agora pede o específico **em texto** e proíbe pedir print/arquivo; o anexo entra
+  por clipe, **soltar** ou **colar** (`useAnexoNaConversa`). ⚠️ Colar é o caminho que mais
+  importa (print nasce no clipboard) e só intercepta quando há arquivo. ⚠️ **Caixa tracejada
+  permanente foi recusada**: certa no godocs, onde subir arquivo é a tarefa; aqui a tarefa é
+  conversar.
 - **A declaração de anexo trava RESPONDER, nunca ANEXAR** (`RN-11`). Quem diz "tenho",
   desiste e volta para "não tenho" abre o chamado. E a copy da opção negativa é "não tenho
   material para anexar" — **nunca "pular"**, que diria que anexar era o dever e faria a
@@ -1319,7 +1330,7 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1263 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1267 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em
