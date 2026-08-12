@@ -347,7 +347,7 @@ created: "2026-08-04"
       organização Atlassian), e injeção de fórmula em CSV aberto no Excel/Sheets é
       uma classe de vulnerabilidade real, não hipotética, para um campo que é
       literalmente o nome de alguém.
-- [x] **T-128** Console de assentos: inventário, custo, ocioso, recomendações — com
+- [~] **T-128** Console de assentos: inventário, custo, ocioso, recomendações — com
       as limitações do dado visíveis. Skill `frontend-design` antes. ⚠️ A aba de admin
       **já existe** desde a Fase 1 (`D-09`, edição de config + auditoria); isto
       acrescenta a seção de assentos a ela, não cria tela nova.
@@ -357,6 +357,16 @@ created: "2026-08-04"
       `<Aviso atencao>` (não em rodapé), lista por produto e recomendações
       reaproveitando os padrões já existentes (`Selo`, `.chamados`/`.chamado`).
       Verificado em `npm run dev` com dados seedados no plugin de dev.
+      ⚠️ **Rebaixada de `[x]` pela auditoria de 12/08 (`D-47`): custo, ocioso e
+      recomendações estão na tela (`RF-53`/`RF-54` atendidos), o INVENTÁRIO não.**
+      `RespostaAssentos.itens` (`src/lib/http/rotas.ts:1574-1579`) não é consumido em
+      lugar nenhum de `src/app/` — `PainelAssentos` (`src/app/admin/paineis.tsx:295`)
+      renderiza só agregados por produto. Logo `RF-51` ("inventário de usuários com
+      produtos atribuídos") e a metade de `RF-52` que é **último acesso por produto**
+      existem no payload e **não têm superfície**: quem abre o console vê "N ociosos",
+      nunca **quem**. Sem isso a recomendação de `RF-54` não é conferível contra a pessoa
+      que ela nomeia. `endpointsNaoVerificados` e `baseline` também não são renderizados,
+      apesar de o `CLAUDE.md` afirmar que a tela mostra a lista de não verificados.
 - [~] **T-129** [P] `GET /api/admin/auditoria` com filtro por usuário, período e
       ação + exportação (`RF-56`). **Filtro por usuário e a tela já vieram na Fase 1**
       (`D-09`); faltam **período**, **ação** e **exportação**. _Requirements: RF-56_
@@ -389,7 +399,7 @@ created: "2026-08-04"
       campo de tipo `anexo` **sai** da lista que esta tarefa renderiza (T-406c):
       quem desenha o seletor de arquivo é `RF-61`, e sem o filtro a tela mostraria
       uma caixa de texto chamada "Anexo" ao lado do seletor de verdade.
-- [x] **T-131** `RF-57` (P2): revogar produto pelo console, **dupla confirmação** e
+- [~] **T-131** `RF-57` (P2): revogar produto pelo console, **dupla confirmação** e
       auditoria. Única escrita da credencial de Org Admin.
       _Requirements: RF-57, RN-10_
       → `revogarProduto` **não engole erro**: um `catch` aqui devolveria "revogado"
@@ -399,6 +409,13 @@ created: "2026-08-04"
       contrato: **nenhuma** chave de API opera sobre conta **não gerenciada**, e a org
       não reivindicou domínio — então a escrita responde 403 hoje
       independentemente de credencial. Destravar é reivindicar `gocase.com`.
+      ⚠️ **Rebaixada de `[x]` pela auditoria de 12/08 (`D-47`): não existe TELA.** A rota
+      tem dupla confirmação (e-mail digitado) e audita os três desfechos
+      (`src/lib/http/rotas.ts:1603-1663`), e o cliente do front expõe
+      `adminRevogarAssento` (`src/app/api.ts`) — mas **nenhum componente o chama**: grep
+      por `revogar` em `src/app/**/*.tsx` volta vazio. O requisito diz "revogar acesso a
+      produto **pelo console**", e hoje só se revoga por HTTP na mão. A dupla confirmação,
+      que é a parte que protege, é justamente a que só existe na camada que ninguém usa.
 - [x] **T-133** O produto atribuído vem de `last-active-dates`, não de `users/search`
       (`D-23`). _Requirements: RF-51, RF-52, RF-53_
       → `registrarColeta` passou a iterar a **união** das duas fontes; iterar só
@@ -443,6 +460,27 @@ created: "2026-08-04"
       `assentos/recomendacoes`) sem identidade, com não-admin e com admin.
       3 de 4 critérios sem ressalva; ScC-2 depende de Q8 para o número, não
       para o comportamento.
+
+### Achado da auditoria do board (12/08/2026 — `D-47`)
+
+- [ ] **T-142** **`RF-39` — link para anexo que não é imagem some sem aviso.**
+      _Requirements: RF-39, RF-43_
+      `RF-39` pede fidelidade em "títulos, listas, tabelas, código, imagens **e anexos
+      servidos pelo proxy**". Os cinco primeiros estão cobertos e testados. O sexto vale
+      só para **imagem**: `ri:attachment` é reconhecido dentro de `ac:image`
+      (`src/lib/confluence/sanitizar.ts:1071-1080`), mas `converterAcLink`
+      (`sanitizar.ts:1089-1117`) trata apenas `ri:page` e `ri:url` — e `DestinoLink`
+      (`sanitizar.ts:45-51`) **não tem variante de anexo**. Um link para PDF ou planilha
+      anexada à página cai no `return corpo` da linha 1116 e vira **texto puro, sem link
+      e sem nada na tela dizendo que havia um arquivo ali**.
+      ⚠️ **É degradação silenciosa — exatamente o que `RF-43` proíbe para macro**, na
+      mesma tela e pelo mesmo motivo: quem lê decide com informação faltando sem saber
+      que falta, e conclui que a documentação não serve. Procedimento com o anexo do
+      passo a passo é o caso típico.
+      ✅ **O proxy já está pronto e serviria esses arquivos sem mudança nenhuma**
+      (`src/lib/http/rotas.ts:1390-1452`, com a allowlist de tipo de `D-11` e o
+      `Content-Type` afirmado). Falta só o **nó** e o link que apontem para ele — e o
+      teto de `RN-06` já é aplicado no proxy, então não há gate novo a escrever.
 
 ---
 ## Coverage check

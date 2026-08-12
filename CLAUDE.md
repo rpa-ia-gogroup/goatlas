@@ -54,7 +54,11 @@ quando alguma é esquecida (ver "Automação do processo").
    desatualizou.
 3. **Regra crítica em código, com teste** — nunca só no system prompt. RF-08
    (ordem das tools) e RF-17 (confirmação) são validados no servidor, e a suíte
-   inclui os testes de **bypass** (tentar burlar pelo prompt).
+   inclui os testes de **bypass** (tentar burlar pelo prompt). ⚠️ **Com uma exceção
+   medida em 12/08 (`D-47`): o caso de burla de `RF-17` NÃO existe.** As duas camadas
+   de `agent/gate.ts` estão lá, mas nenhum teste exercita
+   `sem_confirmacao_do_usuario` — o helper de `rf08-ordem-tools.test.ts` tem a opção
+   `confirmar: false` e nenhum caso a usa. Item 5 de `T-097`.
 4. **Português com acentuação** em todo texto visível ao usuário — UI, erros e
    prompts de IA.
 5. **Quatro credenciais, zero vazamento** — API token Jira/Confluence · API key de
@@ -342,6 +346,18 @@ destes reabre um vazamento que já foi fechado.
   `SLA_PRIMEIRA_RESPOSTA_HORAS`: repetidas à mão, o agente promete um prazo e o cron cobra
   outro, sem quebrar teste nenhum. ⚠️ Continua sendo **instrução, não trava** — `RF-08`/`RF-17`
   seguem em `agent/gate.ts`, e nenhum valor de config entra no texto (`RNF-30`).
+- 🚨 **Quando o FAKE é a única evidência de um campo que cruza a fronteira, o campo não está
+  verificado** (`D-47`). Quarta ocorrência da mesma família: `D-38` (obrigatório faltando),
+  `D-39` (campo de seleção), `D-43` (autor do comentário) e agora a **prioridade** —
+  `ClienteAtlassianFake` guarda `prioridade` direto do argumento (`fake.ts:356`), então toda
+  leitura de volta devolve o valor certo enquanto o cliente real **nunca o envia**. O teste
+  que vale afirma sobre o corpo entregue ao `fetchImpl`, como `T-521` faz; o que afirma sobre
+  o que o fake devolveu só prova que o fake é consistente consigo mesmo. ⚠️ Próximo da fila
+  sem essa rede: `RF-25` — `attachTemporaryFile` não aparece em `tests/`.
+- ⚠️ **Teste de tela afirma sobre descritores e estados, nunca sobre quais PAINÉIS existem**
+  (`tela-admin.test.ts`, `D-47`). Por isso a faixa de calibragem de `T-310` desapareceu
+  inteira no rewrite do console (`D-25`) sem uma asserção vermelha — e o CSS órfão
+  `.faixa-calibragem` é a única coisa que restou dela. Painel que some não quebra nada.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -1036,6 +1052,14 @@ request type exponha. A outra metade — *o tipo expõe campo de prioridade?* �
 `D-44`: `GET /api/admin/tipos-chamado/schema` (ver `docs/DEPLOY.md`). ⚠️ **Não a responda por
 `GET /api/tipos-chamado/:id/campos`**: aquela rota descarta `priority` por construção, e a
 resposta é "não tem" nos dois mundos.
+🚨 **E o `slaPrimeiraResposta: null` é um TERCEIRO defeito, não consequência dos outros dois**
+(`D-47`, `T-100`): `obterChamado` monta a URL **com** `expand=…sla…` (`cliente.ts:516`) e
+devolve `slaPrimeiraResposta: null` **fixo** (`cliente.ts:539`) — a resposta é pedida, paga e
+descartada. Vale também para o caminho degradado (`tickets/servico.ts:411`), e **nem o fake
+preenche** (`fake.ts:359`), então o campo nunca teve valor em teste nenhum. É por isso que
+`RF-29` (SLA na lista) e `RF-31` (histórico de SLA no detalhe) não aparecem em tela: o dado
+nunca é lido. ⚠️ Se o Jira deriva o SLA da prioridade que não mandamos, consertar só um dos
+dois não produz número na tela.
 
 ⚠️ **A allowlist de tipos foi ampliada em 11/08** para os **15** tipos do `GN`
 (`68,70,71,89,90,91,92,93,94,95,96,108,134,143,144`), em prod e staging. O **`69`
@@ -1062,6 +1086,13 @@ mexido de propósito: mudar o comportamento no mesmo movimento em que se instala
 estraga a medição.
 
 **1073 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+⚠️ **Teste verde não é cobertura** (`D-47`, 12/08): a auditoria requisito→código mexeu em
+**dezessete** tarefas cujo board divergia do que o código faz, com a suíte inteira verde —
+porque nenhum achado é comportamento *errado*, é comportamento **ausente**, e teste ausente
+não falha. O formato dominante é *servidor pronto, tela ausente* e *metade de uma frase com
+"e"*. Os três que mudam o que se sabe do produto: a prioridade que não sai do app (`T-099`),
+o SLA que nunca é lido (`T-100`) e a faixa de calibragem que o rewrite do console descartou
+(`T-233`/`T-310`). A lista por tarefa está nos `tasks.md`.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`
