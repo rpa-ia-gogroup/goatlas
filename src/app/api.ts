@@ -116,6 +116,8 @@ export interface DetalheChamado {
   readonly verificadoRegras: boolean
   readonly area: string | null
   readonly comentarios: readonly ComentarioPublico[]
+  /** `RF-31` — os arquivos que a pessoa pode ver, com o link **deste app** (`RNF-02`). */
+  readonly anexos: readonly AnexoDoChamado[]
   /**
    * `true` = a Atlassian não respondeu e o que está na tela veio do que NÓS gravamos
    * (`RNF-19`). O chamado existe; o estado dele é que não pôde ser lido.
@@ -123,6 +125,22 @@ export interface DetalheChamado {
   readonly degradado: boolean
   /** `true` = não deu para buscar as respostas. Diferente de "não há respostas ainda". */
   readonly comentariosIndisponiveis: boolean
+  /**
+   * `true` = **não deu para saber** quais anexos existem, nunca "não há anexos".
+   *
+   * A tela precisa das duas frases separadas pelo mesmo motivo de
+   * `comentariosIndisponiveis`: quem lê "este chamado não tem anexos" sobre o próprio
+   * print manda tudo de novo.
+   */
+  readonly anexosIndisponiveis: boolean
+}
+
+export interface AnexoDoChamado {
+  readonly nomeArquivo: string
+  readonly tipoDeclarado: string | null
+  readonly tamanhoBytes: number | null
+  readonly criadoEm: string | null
+  readonly url: string
 }
 
 export interface TipoChamado {
