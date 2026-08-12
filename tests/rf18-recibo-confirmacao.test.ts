@@ -55,10 +55,17 @@ describe('RF-18 — o recibo mostra o que vai virar chamado', () => {
     expect(saida).toContain('Growth')
   })
 
-  it('sem área, a linha não aparece vazia', () => {
+  it('sem área, a linha aparece dizendo que ela não foi identificada (`D-52`)', () => {
     const saida = render({ ...PROPOSTA, area: null })
-    expect(saida).not.toContain('ÁREA')
-    expect(saida).not.toContain('<dt>Área</dt>')
+    // ⚠️ Este caso afirmava o contrário — que a linha **sumia**. Fazia sentido enquanto a
+    // área do cartão era a extraída pela IA e não ia para lugar nenhum: linha vazia é
+    // ruído. Com uma fonte só (`D-52`), esconder a área justamente quando ela é
+    // desconhecida tira da tela o único caso em que a pessoa precisaria agir, e deixa
+    // `RF-18` (que lista área entre os campos do resumo) incompleto sem nada indicando.
+    // O que continua proibido é a linha **vazia**: ela diz o que houve, e o que fazer.
+    expect(saida).toContain('Área')
+    expect(saida).toContain('não identificada')
+    expect(saida).toContain('corrigir depois de abrir o chamado')
   })
 
   it('RN-08 — o prazo se declara de primeira resposta, nunca de solução', () => {

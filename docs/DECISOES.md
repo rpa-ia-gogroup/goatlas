@@ -3005,6 +3005,55 @@ certo: quem não passou por nós não tem a nossa prova.
 
 ---
 
+### D-52 · Existiam DUAS áreas, e a que a pessoa via era a que não valia
+
+**Data:** 12/08/2026 · **Origem:** auditoria de `D-47` (T-516) · **Contexto:** `RF-18`,
+`RF-19`, `RNF-18`, `D-37`, `D-47`
+
+**O defeito.** Duas áreas, com o mesmo nome e destinos diferentes:
+
+| Área | Origem | Onde aparecia | Destino |
+|---|---|---|---|
+| `proposta.area` | **extraída pela IA** do texto da conversa | cartão de confirmação (`RF-18`) | descartada na criação |
+| `vinculo.area` | `resolverArea` — TeamGuide, mapa de config como fallback | nenhum lugar antes de criar | gravada |
+
+Corrigir a área no cartão era aceito com **200** e o valor sumia na criação, **sem erro
+nenhum**. É a família de `urlDeLeituraNoApp`/`entradaDaUrl` e da chave de idempotência:
+dois lados que parecem falar do mesmo dado e não falam — e o sintoma é sempre silencioso,
+porque cada lado funciona sozinho.
+
+**A decisão: uma fonte, resolvida uma vez.**
+
+1. **A IA deixa de opinar sobre área.** `definirProposta` grava `area: null`. Adivinhar a
+   área a partir do texto de quem pede ajuda é o tipo de palpite plausível na tela e
+   errado no dado — e `D-37` já registra que área errada é pior que área nenhuma (a
+   primeira pessoa medida tinha `RPA`, que sequer existe entre as 15 opções do campo do
+   Jira).
+2. **`garantirAreaNaProposta` resolve e persiste**, no primeiro momento em que a proposta
+   existe. ⚠️ **Não resolve de novo se já houver área** — a conversa continua depois de o
+   cartão aparecer, e uma ida de rede (mais uma linha de auditoria) por mensagem trocada
+   seria o custo de resolver sempre.
+3. 🚨 **A criação usa `proposta.area`, não uma segunda resolução.** Resolver de novo
+   funcionaria — e produziria, de vez em quando, valor **diferente** do que a pessoa
+   acabou de confirmar: a cache da fonte tem TTL e alguém pode mudar de time no meio. *"O
+   que eu vi é o que foi gravado"* só é verdade se for o **mesmo valor**, não duas
+   leituras da mesma fonte. O `??` cobre proposta anterior a esta decisão e fonte que
+   estava fora do ar quando o cartão apareceu.
+4. **A área sempre aparece no cartão**, inclusive nula: *"não identificada — você pode
+   corrigir depois de abrir o chamado"*. Escondê-la quando é desconhecida tirava da tela
+   exatamente o caso em que a pessoa precisaria agir.
+
+⚠️ **Um teste de `RF-18` afirmava o oposto** (*"sem área, a linha não aparece vazia"*) e
+estava certo no mundo anterior, onde aquela área não ia a lugar nenhum e a linha era
+ruído. Foi atualizado com o motivo. O que continua proibido é a linha **vazia**.
+
+**O que não mudou:** `resolverArea` continua fail-open (`RNF-18`, `D-37`), a área continua
+**guardada e nunca enviada ao Jira**, e a correção depois da criação
+(`PUT /api/chamados/:key/area`, `T-305`) — que **funciona**, medido na staging com o
+`GN-6902` — segue existindo. O que deixou de existir é o campo que fingia.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
