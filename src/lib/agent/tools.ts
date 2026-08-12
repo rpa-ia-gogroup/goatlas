@@ -80,7 +80,7 @@ export class ExecutorTools {
   ): Promise<ResultadoTool> {
     try {
       /**
-       * ⚠️ `buscarComAmpliacao`, nunca `buscarConfluence` direto (`D-40`). O tópico
+       * ⚠️ `buscarComAmpliacao`, nunca `buscarConfluence` direto (`D-41`). O tópico
        * que o modelo extrai é uma **frase** ("processo de deploy na Gocase"), e
        * frase inteira em `text ~` casa quase nada — o agente então afirmava que
        * não havia documentação sobre algo documentado, que é o cenário mais caro
@@ -295,7 +295,7 @@ export class ExecutorTools {
   /**
    * RF-42 — busca sem resultado útil é backlog de documentação.
    *
-   * ⚠️ **Menos o zero que veio de termo sem palavra significativa** (`D-40`). "Como
+   * ⚠️ **Menos o zero que veio de termo sem palavra significativa** (`D-41`). "Como
    * faço isso?" não deixou de ser documentado: não houve o que procurar. É o
    * terceiro zero da família de `buscaConfigurada` (zero por configuração) e do
    * escopo vazio de `D-30` (zero por escopo) — e registrá-lo como lacuna mandaria

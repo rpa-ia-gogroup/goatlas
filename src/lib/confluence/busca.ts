@@ -1,5 +1,5 @@
 /**
- * Ampliação da busca — `D-40`. `RF-37`, `RF-09`, `RF-42`.
+ * Ampliação da busca — `D-41`. `RF-37`, `RF-09`, `RF-42`.
  *
  * ## O defeito que este módulo fecha
  *

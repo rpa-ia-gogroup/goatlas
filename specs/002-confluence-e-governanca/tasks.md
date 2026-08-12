@@ -239,7 +239,7 @@ created: "2026-08-04"
         ser bug visível na revisão.
       - Aparece na **aba de admin** que já existia (`D-09`), acima da auditoria.
 - [x] **T-119** A busca amplia quando a frase inteira não casa nada, e o resultado
-      volta com o espaço de origem (`D-40`, `D-41`). _Requirements: RF-37, RF-09,
+      volta com o espaço de origem (`D-41`, `D-42`). _Requirements: RF-37, RF-09,
       RF-42, RN-06, RNF-07_
       - **Medido na staging em 12/08/2026**, e é o cenário que `D-33` nomeia como o mais
         caro: o tópico `processo de deploy na Gocase` devolveu **zero**, o agente
@@ -263,7 +263,7 @@ created: "2026-08-04"
         escopo).
       - **A auditoria mostra os dois lados:** `recurso` = o que a pessoa escreveu;
         `detalhe.ampliou`/`detalhe.consultado` = o que foi à Atlassian.
-      - **`espaco: ""` em todo resultado** (`D-41`): a v1 de search não expande
+      - **`espaco: ""` em todo resultado** (`D-42`): a v1 de search não expande
         `content.space` sem `&expand=`. O fallback lê `displayUrl` (`/spaces/GT`),
         **nunca** o `title`, que é o *nome* do espaço — nome onde se espera chave é a
         mesma classe de bug do `spaceId` numérico da v2.

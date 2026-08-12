@@ -1,5 +1,5 @@
 /**
- * **`D-41`** — todo resultado da busca voltava com `espaco: ""`.
+ * **`D-42`** — todo resultado da busca voltava com `espaco: ""`.
  *
  * Medido na staging em 12/08/2026: `GET /api/confluence/busca?q=deploy` devolveu
  * os 10 itens com `"espaco": ""`. A origem é o endpoint **v1** de search, que

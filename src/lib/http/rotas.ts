@@ -1104,7 +1104,7 @@ async function rotear(
     // distinção de `buscaConfigurada`: zero por escopo ≠ zero por documentação.
     const escopoValido = espacoPedido === '' || espacosDaBusca.length > 0
 
-    // ⚠️ `buscarComAmpliacao` (`D-40`): quem digita aqui é uma pessoa, e pessoa
+    // ⚠️ `buscarComAmpliacao` (`D-41`): quem digita aqui é uma pessoa, e pessoa
     // digita frase. `text ~ "<frase inteira>"` casa quase nada — a caixa de busca
     // tinha o mesmo defeito do tópico do agente, e é por isso que a correção mora
     // na consulta, e não numa instrução ao modelo que esta tela não lê.
@@ -1130,7 +1130,7 @@ async function rotear(
     }
 
     const paginas = busca.paginas
-    // ⚠️ O TERCEIRO zero (`D-40`): termo sem nenhuma palavra significativa ("como
+    // ⚠️ O TERCEIRO zero (`D-41`): termo sem nenhuma palavra significativa ("como
     // faço isso?"). Ele não é lacuna de documentação — não houve o que procurar —
     // e é a mesma família de `buscaConfigurada` (zero por config) e do escopo
     // vazio de `D-30` (zero por escopo).

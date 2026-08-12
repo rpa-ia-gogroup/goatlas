@@ -1944,7 +1944,7 @@ não sobre "abriu chamado". Mesma família de `D-38` e de `linhasComoObjetos`.
 
 ---
 
-### D-40 · A frase inteira não casa nada — a busca amplia na CONSULTA, não no prompt
+### D-41 · A frase inteira não casa nada — a busca amplia na CONSULTA, não no prompt
 
 **Data:** 12/08/2026 · **Medido por:** uso real na staging (`appId 3936ca2d`) ·
 **Contexto:** `RF-37`, `RF-09`, `RF-42`, `RN-06`, `RNF-07`, `R-02`, `D-33`, `D-30`
@@ -2044,7 +2044,7 @@ feito às cegas: se a taxa de override subir, o número a mexer é
 
 ---
 
-### D-41 · `espaco: ""` em todo resultado — a v1 de search não expande `content.space`
+### D-42 · `espaco: ""` em todo resultado — a v1 de search não expande `content.space`
 
 **Data:** 12/08/2026 · **Medido por:** `GET /api/confluence/busca?q=deploy` na staging ·
 **Contexto:** `RF-37`, `RF-41`, `RN-06`

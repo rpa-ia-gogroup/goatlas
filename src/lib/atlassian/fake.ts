@@ -403,7 +403,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     const permitidos = new Set(params.espacosPermitidos)
     const bloqueadas = new Set(params.labelsBloqueadas)
     /**
-     * A segunda tentativa de `D-40` casa QUALQUER palavra; a frase inteira casa
+     * A segunda tentativa de `D-41` casa QUALQUER palavra; a frase inteira casa
      * todas. O dublê precisa da distinção: sem ela a ampliação devolveria o mesmo
      * zero da frase e o teste da correção passaria por acidente, como em `D-38`.
      */

@@ -3801,7 +3801,7 @@ var ExecutorTools = class {
   /**
    * RF-42 — busca sem resultado útil é backlog de documentação.
    *
-   * ⚠️ **Menos o zero que veio de termo sem palavra significativa** (`D-40`). "Como
+   * ⚠️ **Menos o zero que veio de termo sem palavra significativa** (`D-41`). "Como
    * faço isso?" não deixou de ser documentado: não houve o que procurar. É o
    * terceiro zero da família de `buscaConfigurada` (zero por configuração) e do
    * escopo vazio de `D-30` (zero por escopo) — e registrá-lo como lacuna mandaria

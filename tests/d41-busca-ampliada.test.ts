@@ -1,5 +1,5 @@
 /**
- * **`D-40`** — a frase inteira não casa nada, e o app afirmava que não havia
+ * **`D-41`** — a frase inteira não casa nada, e o app afirmava que não havia
  * documentação. `RF-37`, `RF-09`, `RF-42`, `RN-06`.
  *
  * ## O defeito, medido na staging em 12/08/2026

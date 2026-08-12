@@ -236,7 +236,7 @@ export interface TicketHistorico {
 export interface BuscaConfluenceParams {
   readonly termo: string
   /**
-   * Palavras da **segunda tentativa** (`D-40`). Quando presente e não vazia, a
+   * Palavras da **segunda tentativa** (`D-41`). Quando presente e não vazia, a
    * consulta casa QUALQUER uma delas em vez da frase inteira de `termo` — que
    * continua sendo o que a pessoa escreveu, e é ele que a auditoria registra.
    *
