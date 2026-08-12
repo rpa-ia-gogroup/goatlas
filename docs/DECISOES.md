@@ -1944,7 +1944,7 @@ não sobre "abriu chamado". Mesma família de `D-38` e de `linhasComoObjetos`.
 
 ---
 
-### D-40 · O autor do comentário é REPORTADO, nunca afirmado — e "Você" vem do predicado do SLA
+### D-43 · O autor do comentário é REPORTADO, nunca afirmado — e "Você" vem do predicado do SLA
 
 **Data:** 12/08/2026 · **Medido por:** teste na staging (`appId 3936ca2d`), chamado `GN-6897`
 · **Contexto:** `RF-31`, `RF-32`, `RF-33`, `RF-46`, `RN-05`, `D-01`, `D-13`, `D-38`

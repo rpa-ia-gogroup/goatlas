@@ -30,7 +30,7 @@ import {
 import { prefixarAutoria } from './comentarios'
 
 /**
- * O `displayName` que o JSM devolveria para a conta de serviço (`D-01`, `D-40`).
+ * O `displayName` que o JSM devolveria para a conta de serviço (`D-01`, `D-43`).
  *
  * ⚠️ Em produção este é o nome de uma **pessoa real** — a conta que gerou o `ATATT`.
  * O nome fictício aqui existe para o teste não depender de quem é essa pessoa hoje,
@@ -402,7 +402,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       ...atuais,
       {
         // 🚨 O dublê grava o comentário como ele VOLTA da Atlassian, não como
-        // chegou aqui (`D-40`). O cliente real prefixa a autoria (`D-13`) e o JSM
+        // chegou aqui (`D-43`). O cliente real prefixa a autoria (`D-13`) e o JSM
         // devolve o `displayName` da **conta de serviço** — sob `D-01` é sempre ela.
         // Guardar o texto cru com o nome do autor real era o dublê escondendo a
         // divergência, mesma família de `linhasComoObjetos` e do `D-38`: nenhum teste

@@ -82,14 +82,14 @@ export interface TransicaoDisponivel {
 
 export interface ComentarioPublico {
   readonly id: string
-  /** Já **sem** o prefixo de autoria do `D-13` — quem o remove é o servidor (`D-40`). */
+  /** Já **sem** o prefixo de autoria do `D-13` — quem o remove é o servidor (`D-43`). */
   readonly corpo: string
   /**
    * O nome da CONTA que registrou o comentário no Jira.
    *
    * ⚠️ **Não é uma afirmação de autoria.** Sob proxy total (`D-01`) esta pode ser a
    * conta de serviço, que hoje é a conta pessoal de um colaborador — foi exatamente
-   * o que a tela imprimia como autor do comentário da própria pessoa (`D-40`).
+   * o que a tela imprimia como autor do comentário da própria pessoa (`D-43`).
    */
   readonly autorNome: string
   readonly criadoEm: string

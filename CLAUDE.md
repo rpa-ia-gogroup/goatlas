@@ -249,7 +249,7 @@ destes reabre um vazamento que já foi fechado.
   andamento" três vezes porque o agente ajustou o resumo três vezes. Daí a coluna
   `vinculos.ultimo_status_notificado`.
 - 🚨 **A TELA também não detecta autoria pelo AUTOR** (`tickets/comentario-exibicao.ts`,
-  `D-40`). Mesmo motivo do item abaixo, na superfície que a pessoa lê: o comentário que ela
+  `D-43`). Mesmo motivo do item abaixo, na superfície que a pessoa lê: o comentário que ela
   acabou de escrever aparecia assinado pela **conta de serviço** — hoje a conta pessoal de um
   colega — com o prefixo de `D-13` logo abaixo dizendo outro nome (medido na staging em
   12/08/2026, `GN-6897`), e a leitura natural é *alguém escreveu em meu nome*. Quem classifica

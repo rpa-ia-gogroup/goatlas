@@ -1,5 +1,5 @@
 /**
- * T-083 — de quem é este comentário, na tela do chamado (`D-40`).
+ * T-083 — de quem é este comentário, na tela do chamado (`D-43`).
  *
  * O defeito medido na staging em 12/08/2026 (`GN-6897`): o comentário que a pessoa
  * acabou de escrever aparecia com o nome da **conta de serviço** como autor — hoje a
@@ -165,7 +165,7 @@ describe('T-083 — de ponta a ponta pela rota de detalhe', () => {
   it('resposta do time vem com `doSolicitante: false`, mesmo saindo da conta de serviço', async () => {
     const issueKey = await abrirChamado()
     const fake = ctx.atlassian as ClienteAtlassianFake
-    // O pior caso do `D-40`: alguém do time responde pelo portal com a MESMA conta.
+    // O pior caso do `D-43`: alguém do time responde pelo portal com a MESMA conta.
     // Sem prefixo, o app não tem como afirmar quem escreveu — e não afirma.
     fake.simularMudancaDoTime(issueKey, {
       comentarioPublico: {

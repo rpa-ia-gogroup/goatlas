@@ -212,7 +212,7 @@ created: "2026-08-03"
       `tests/rotas.test.ts` confirmando o nome real chegando ao cliente Atlassian.
 - [x] **T-083** A tela do chamado diz de quem é cada comentário — sem inventar
       identidade que o app não tem. _Requirements: RF-31, RF-32, RF-33, RN-05, RNF-30_
-      → **Resolvida (D-40, 12/08/2026), a partir de defeito medido na staging
+      → **Resolvida (D-43, 12/08/2026), a partir de defeito medido na staging
       (`GN-6897`):** o comentário que a própria pessoa escreveu aparecia assinado
       pela **conta de serviço** — hoje a conta pessoal de um colega — com o prefixo
       de `D-13` logo abaixo dizendo outro nome. Quem classifica passou a ser

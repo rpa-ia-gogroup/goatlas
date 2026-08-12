@@ -1028,7 +1028,7 @@ var ClienteAtlassianFake = class {
       ...atuais,
       {
         // 🚨 O dublê grava o comentário como ele VOLTA da Atlassian, não como
-        // chegou aqui (`D-40`). O cliente real prefixa a autoria (`D-13`) e o JSM
+        // chegou aqui (`D-43`). O cliente real prefixa a autoria (`D-13`) e o JSM
         // devolve o `displayName` da **conta de serviço** — sob `D-01` é sempre ela.
         // Guardar o texto cru com o nome do autor real era o dublê escondendo a
         // divergência, mesma família de `linhasComoObjetos` e do `D-38`: nenhum teste
@@ -8300,7 +8300,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       verificadoRegras: r.vinculo.verificadoRegras,
       area: r.vinculo.area,
       // ⚠️ `paraExibicao` é a ÚNICA tradução de "corpo cru" para "o que a tela mostra"
-      // (`D-40`): ela classifica pelo mesmo predicado do SLA e tira o prefixo de
+      // (`D-43`): ela classifica pelo mesmo predicado do SLA e tira o prefixo de
       // `D-13`. Devolver o cru daqui obrigaria a tela a remontar a regra, e duas
       // regras para o mesmo fato divergem em silêncio.
       comentarios: paraExibicao(comentarios ?? []),

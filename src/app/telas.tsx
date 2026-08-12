@@ -1110,7 +1110,7 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
 }
 
 /**
- * Um comentário na conversa do chamado — `D-40`.
+ * Um comentário na conversa do chamado — `D-43`.
  *
  * ## O que esta tela pode afirmar, e o que não pode
  *
