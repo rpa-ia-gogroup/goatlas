@@ -341,6 +341,31 @@ destes reabre um vazamento que já foi fechado.
   **tentada, nunca exigida**: recusa 4xx repete a chamada sem ela e devolve `anexos: null` —
   `RF-32` é P0 e não pode cair por causa de um `expand` que ninguém verificou. Falha 5xx
   **não** repete: seria esconder queda como se fosse contrato.
+- 🚨 **O JSM cria um COMENTÁRIO PÚBLICO para carregar cada anexo, e ele satisfazia o SLA**
+  (`D-56`, `tickets/comentario-de-anexo.ts`). Corpo medido na staging:
+  `[^conversa-GN-6903.md] _(4 kB)_` — sem o prefixo de `D-13`, porque não passou por
+  `prefixarAutoria`, então `primeiraRespostaDoTime` o contava como **resposta do time**:
+  todo chamado com anexo nascia com o SLA de primeira resposta já satisfeito, a aderência de
+  `RF-55` ia a ~100% e o alerta de `RF-46` nunca disparava. ⚠️ **É mais velho que `D-54`** —
+  vem de `RF-61`; o `D-54` só o tornou universal (toda conversa gera arquivo). O contraste
+  que isolou: `GN-6906` com anexo nasceu com 1 comentário, `GN-6904` sem anexo com 0.
+  ⚠️ **A prova é o NOME, nunca o formato**: reconhecer "corpo só com marcador" falharia em
+  silêncio numa mudança de texto da Atlassian **e** descartaria o anexo do **time**, que é
+  resposta de verdade. São duas condições — corpo sem texto **e** todos os arquivos em
+  `anexos_enviados` (nunca `anexos_pendentes`, expurgada em 12 h).
+- ⚠️ **`anexosIndisponiveis` pergunta "sobrou algo a provar?", não "a prova funcionou?"**
+  (`D-56`). A expansão `attachment` volta vazia nesta instalação, então `prova.disponivel`
+  era sempre `false` e a tela avisava sobre anexo do time **em todo chamado, para sempre** —
+  aviso que nunca desliga ninguém lê. Chamado cujo único anexo é o nosso não tem nada de
+  desconhecido. ⚠️ Com arquivo do time sem prova a dúvida **continua** sendo dita, e há teste
+  afirmando isso: a flag ficou honesta, não morreu.
+- ⚠️ **O modelo recebe a URL INTERNA da página, nunca a do `atlassian.net`** (`D-56`,
+  `montarResultadoBuscaParaModelo`). O público do app não tem assento: linkar o site
+  mandaria a pessoa a uma tela de login — é o que `T-118` corrigiu na mensagem de bloqueio e
+  que aqui seguia cru. Usa `urlDeLeituraNoApp`, a **mesma** função de
+  `montarMensagemBloqueio`. ⚠️ O prompt passou a mandar **citar a página com o link**, e isso
+  não contradiz `D-41` ("o prompt não foi tocado"): lá o defeito era a **consulta**, aqui é
+  como apresentar um resultado que já veio.
 - ⚠️ **Ação própria não se detecta pelo AUTOR** (`notificacoes/acoes.ts`, `RF-48`). Sob
   proxy total todo comentário sai da conta de serviço: o da pessoa e o do agente do time
   têm o mesmo autor. O que distingue é o app ter registrado a ação **no momento em que a
@@ -1277,7 +1302,7 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1239 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1251 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste.
@@ -1409,8 +1434,8 @@ espaço `TECH` que circulava **nunca existiu**.
 
 | O que | Quem | Por que não dá para adiantar |
 |---|---|---|
-| Escolher o canal (**Q11**) | João | É um campo de config (`D-19`). Enquanto for `null`, o aviso é registrado e suprimido, e o console mostra quantos |
-| Lista do piloto (**Q13**) | João | Campo de config. Vazio = piloto desligado (`D-16`) |
+| ~~Escolher o canal (**Q11**)~~ | — | ✅ **FECHADA em `D-56`: `nenhum`** — e `nenhum` não é "sem aviso": a aba Avisos lista inclusive as `suprimidas`. Chat vaza (`RF-30`); e-mail exige secret |
+| ~~Lista do piloto (**Q13**)~~ | — | ✅ **FECHADA em `D-56`: piloto desligado.** Ligar é um campo, sem deploy |
 | `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY`, `GODEPLOY_CRON_KEY`, `GOATLAS_WEBHOOK_SEGREDO` | João | Secrets. Cada ausência silencia uma parte, todas fail-closed — ver `docs/DEPLOY.md` |
 | Registrar o webhook no Jira | time de tech | Opcional: o polling notifica sozinho, com atraso de uma janela de cron |
 | Baseline de assentos (Fase 0) | João | Sem ele a tela diz "sem baseline" em vez de comparar contra zero |

@@ -3239,6 +3239,97 @@ e é por isso que o aviso dele veio junto.
 
 ---
 
+### D-56 · O que a bateria na staging encontrou — e Q11/Q13 fechadas
+
+**Data:** 12/08/2026 · **Origem:** bateria de 8 caminhos na staging (`3936ca2d`, redeployada
+com a `main` de `D-50`…`D-55`) · **Contexto:** `RF-31`, `RF-42`, `RF-46`, `RF-55`, `RN-08`,
+`RNF-18`, Q11, Q13
+
+#### O que a bateria confirmou (cinco medições pendentes, todas positivas)
+
+| Pendência | Medido |
+|---|---|
+| `D-50` — `fetch` sem `bind` | `dependencias.teamguide` = `ok`, sem `credencial_saneada` |
+| `D-52`/`D-37` — área do solicitante | **`RPA`**, gravada no vínculo. Nunca funcionara no app publicado |
+| `D-48`/`T-525` — prioridade obrigatória | `GN-6904` (tipo **71**) e `GN-6905` (tipo **70**): `201`, e a prioridade faz **round-trip**. Em 11/08 o `GN-6894` voltava `null` |
+| `D-41`/`D-42` — busca | `"processo de deploy na Gocase"` devolvia **0**, devolve **10**; `espaco` preenchido |
+| `D-54`/`D-51` — anexos | `conversa-GN-6903.md` (origem `goatlas`) e `log-de-teste.txt` (origem `você enviou`) |
+
+⚠️ A staging estava na **version 7**, anterior ao `D-50` — medir antes do redeploy teria
+respondido sobre código de cinco decisões atrás.
+
+#### 🚨 O achado: todo chamado com anexo nascia com o SLA já satisfeito
+
+Ao materializar um anexo, o JSM **cria um comentário público** cujo corpo é só o marcador
+do arquivo — `[^conversa-GN-6903.md] _(4 kB)_`. Ele não passa por `prefixarAutoria`, logo
+não tem o prefixo de `D-13`, logo `primeiraRespostaDoTime` o contava como **resposta do
+time**. Consequência: aderência de `RF-55` a ~100% e o alerta de `RF-46` nunca disparando —
+para o solicitante, que `D-20` escolheu como único destinatário.
+
+O contraste isola a causa: `GN-6906` (com anexo) nasceu com **1** comentário; `GN-6904` (sem
+anexo) com **0**.
+
+⚠️ **É mais velho que `D-54`** — chega por `RF-61` desde que aquilo existe; `D-54` só o
+tornou universal, porque agora toda conversa gera arquivo. E é o risco que o próprio `D-54`
+enunciou ao recusar a opção "comentário público": ele entrou pela porta do anexo.
+
+**A prova é o NOME, não o formato** (`tickets/comentario-de-anexo.ts`). Reconhecer "corpo
+que só tem marcador" resolveria e falharia em silêncio no dia em que a Atlassian mudasse o
+texto — e descartaria também o anexo **do time**, que é resposta de verdade: um agente que
+responde mandando o print resolveu o chamado, e dizer que ninguém respondeu faria o alerta
+cobrar quem agiu. São **duas** condições: corpo sem texto **e** todos os arquivos citados em
+`anexos_enviados` — a tabela permanente que só o app escreve (`D-51`). Mesmo raciocínio de
+`RF-48`: ação própria não se detecta pelo autor, e sim pelo que o app registrou ter feito.
+⚠️ **`anexos_enviados`, nunca `anexos_pendentes`**: a segunda é expurgada em 12 h, e o bug
+reapareceria sozinho meio dia depois.
+
+#### `anexosIndisponiveis` era permanentemente `true`
+
+A expansão `attachment` dos comentários volta **vazia** nesta instalação, então
+`prova.disponivel` é sempre `false` e a tela dizia *"pode haver arquivo do time que não
+consegui confirmar"* em **todo** chamado, para sempre. Aviso que nunca desliga ninguém lê, e
+este mandava a pessoa desconfiar de uma lista completa.
+
+A pergunta certa não é *"a prova funcionou?"* e sim *"sobrou algo que ela precisaria
+provar?"*. Chamado cujo único anexo é o que **nós** enviamos não tem nada de desconhecido —
+`anexos_enviados` já é prova melhor que a interseção. ⚠️ Com arquivo do time sem prova, a
+dúvida **continua** sendo dita, e há teste afirmando isso: a flag não morreu, ficou honesta.
+
+#### A deflexão não acontecia — e o conserto não era o prompt sozinho
+
+Com a página *"Conventional Deploys | Como entregar para master"* no resultado, a Regra 1
+**não bloqueou** e o agente disse que a achou **sem linkar**. Duas causas somadas:
+
+1. `montarResultadoBuscaParaModelo` entregava ao modelo a URL do **`atlassian.net`** — o
+   público deste app **não tem assento**, então linkar mandaria a pessoa para uma tela de
+   login. É o que `T-118` já corrigira na mensagem de bloqueio e que aqui seguia cru. Agora
+   o modelo recebe `urlDeLeituraNoApp(id)`, a **mesma** função de `montarMensagemBloqueio` —
+   um segundo formatador divergiria em silêncio (o par `urlDeLeituraNoApp`/`entradaDaUrl`).
+2. Nada no prompt mandava citar a página **com** o link, nem impedia o agente de pedir mais
+   contexto antes de mostrar o que já achou.
+
+⚠️ Isto **não** contradiz `D-41` ("o prompt não foi tocado"): lá o defeito era a **consulta**
+e instrução não alcançaria a caixa de busca da aba Documentação. Aqui o que se decide é como
+**apresentar** um resultado que já veio, que é território de instrução. A Regra 1 continuar
+não bloqueando com `regra1_threshold_score = 0.75` é dado de calibragem, não bug — e é
+exatamente o que a faixa de `D-49` existe para mostrar.
+
+#### Q11 e Q13 — respondidas, não adiadas
+
+**Q11 = `nenhum`.** E `nenhum` **não** é "sem aviso": `listarDoDestinatario` não filtra por
+estado, então a aba Avisos lista inclusive as `suprimidas` — a notificação in-app é um canal
+real, e é o que está no ar. Chat por espaço permanece proibido (`RF-30`: vazaria o chamado de
+alguém numa sala); e-mail exige provedor HTTP + chave, que é secret e não decisão.
+
+**Q13 = piloto desligado** (`emails_piloto` vazio, `D-16` = libera todo mundo). O gate existe
+e é testado; ligá-lo é um campo de config, sem deploy, no dia em que se quiser rollout
+restrito.
+
+As duas confirmam `D-20` e saem da lista de bloqueio. O que **não** dá para decidir sem
+alguém é a chave do provedor de e-mail e os nomes de quem entraria num piloto.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
@@ -3256,6 +3347,6 @@ implementado antes da resposta.
 | Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | ✅ **Respondida em `D-23`**: 73 assentos (5 JSM · 35 Jira · 33 Confluence), e a curva do JSM é **escalonada** — faixa 1–100 medida em USD 9,05 e 6,70. 🚨 **E isso quebra o `custo.ts`**, que multiplica contagem × custo fixo: o preço por assento **sobe** quando se corta, então a economia projetada está **superestimada** — justo o número que recomenda rebaixar. Vira **T-134**. O **valor** se preenche no console desde `D-25`, sem deploy; a **curva** por faixa entra em `curva_preco_por_produto`, e sem ela a economia sai marcada como teto |
 | Q9 | Como comunicar o SLA de 24h às áreas que hoje têm retorno em 2h30 sem soar como piora? | João + Produto | Não bloqueia código; bloqueia **rollout** (R-05) |
 | Q10 | O time de tech está ciente de que o reporter dos chamados vai mudar? | João | Não bloqueia código; bloqueia **rollout** (R-03) |
-| Q11 | Google Chat, e-mail ou ambos na v1 de notificações? | João | **Decidida para o MVP em `D-20`: `nenhum`** — o aviso vive na aba Avisos. Chat por espaço foi recusado (vazaria chamado de todos numa sala, contra `RF-30`); e-mail entra quando houver provedor HTTP. Ver também `D-19`. Os dois canais estão implementados e testados; o que falta é *escolher*, e a escolha é um campo de config. Enquanto `canal_notificacao_padrao` for `null`, o aviso é registrado e suprimido, e o console diz quantos |
+| Q11 | Google Chat, e-mail ou ambos na v1 de notificações? | João | ✅ **FECHADA em `D-56`: `nenhum`.** **Decidida para o MVP em `D-20`: `nenhum`** — o aviso vive na aba Avisos. Chat por espaço foi recusado (vazaria chamado de todos numa sala, contra `RF-30`); e-mail entra quando houver provedor HTTP. Ver também `D-19`. Os dois canais estão implementados e testados; o que falta é *escolher*, e a escolha é um campo de config. Enquanto `canal_notificacao_padrao` for `null`, o aviso é registrado e suprimido, e o console diz quantos |
 | Q12 | ~~O GoDeploy já oferece SSO Google pronto?~~ | Kaique | **Respondida — ver D-02** |
-| Q13 | Quais 1–2 áreas entram no piloto? | João | **Decidida para o MVP em `D-20`: piloto DESLIGADO** — o gate só faz sentido depois de `T-333`/`T-334`. Ver também `D-16`. O gate existe e `emails_piloto` vazio mantém o piloto desligado; falta a lista (sugestão do documento: CX + Produção) |
+| Q13 | Quais 1–2 áreas entram no piloto? | João | ✅ **FECHADA em `D-56`: piloto desligado.** **Decidida para o MVP em `D-20`: piloto DESLIGADO** — o gate só faz sentido depois de `T-333`/`T-334`. Ver também `D-16`. O gate existe e `emails_piloto` vazio mantém o piloto desligado; falta a lista (sugestão do documento: CX + Produção) |

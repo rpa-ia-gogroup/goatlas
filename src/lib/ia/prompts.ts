@@ -11,6 +11,11 @@
  */
 
 import { SLA_PRIMEIRA_RESPOSTA_HORAS } from '../atlassian/tipos'
+// ⚠️ `urlDeLeituraNoApp` é a MESMA função que a mensagem de bloqueio usa (`rules/`). Um
+// segundo formatador aqui divergiria em silêncio: o link continuaria bonito e levaria a
+// 404 — o par `urlDeLeituraNoApp`/`entradaDaUrl` existe para isso. `rules/` não importa
+// `ia/prompts`, então não há ciclo.
+import { urlDeLeituraNoApp } from '../rules'
 import {
   delimitarConteudoNaoConfiavel,
   type ParametrosClassificacao,
@@ -101,6 +106,8 @@ Peça o que for específico do caso: print da tela, a mensagem de erro copiada, 
 
     `## Quando a resposta já existe
 Não diga "negado" nem "não posso abrir". Mostre o que encontrou, explique em uma frase por que parece resolver o caso, e deixe claro que, se não resolver, você abre o chamado na sequência. Se a documentação não serviu, isso é problema da documentação — registre e siga.
+
+Achou uma página que parece responder? **Cite o título e ponha o link**, no formato \`[Título](/caminho)\` — o link que a ferramenta te devolve já abre a página aqui dentro. Citar a página sem o link obriga a pessoa a procurar de novo o que você acabou de encontrar, e é aí que ela desiste e vai para o chat. E não peça mais contexto antes de mostrar o que já achou: se o trecho não trouxe o passo a passo, a página inteira pode ter — mande a pessoa abrir e diga que você continua aqui se não resolver.
 
 Depois de um bloqueio desses, **não anuncie que montou o chamado** enquanto a pessoa não tiver usado o botão "Isso não resolve meu caso". Ela precisa dizer o que faltou na documentação, e é isso que libera a proposta. Dizer "montei o chamado abaixo" antes disso descreve uma tela que ela não está vendo. Continue conversando normalmente; aponte o botão quando ela quiser seguir.`,
 
@@ -208,12 +215,27 @@ export function montarPromptClassificacao(params: ParametrosClassificacao): stri
  * óbvio do sistema (R-07): qualquer pessoa da empresa pode editar uma página do
  * Confluence e escrever ali uma instrução dirigida ao agente.
  */
+/**
+ * ⚠️ **O link que vai ao modelo é o INTERNO, nunca o `atlassian.net`** (`D-56`).
+ *
+ * `PaginaConfluence.url` é a URL do site da Atlassian, e o público deste app **não tem
+ * assento** — era o que `T-118` já tinha corrigido na mensagem de bloqueio e que aqui
+ * continuava cru. Medido na staging em 12/08/2026: com a página "Conventional Deploys |
+ * Como entregar para master" no resultado, o agente disse que a achou e **não a linkou** —
+ * e se tivesse linkado, teria mandado a pessoa para uma tela de login.
+ *
+ * Sem `id` não há como abrir aqui dentro; aí o externo é pior que o interno e melhor que
+ * nenhum — mesma escolha, com as mesmas palavras, de `montarMensagemBloqueio`.
+ */
 export function montarResultadoBuscaParaModelo(
-  paginas: readonly { titulo: string; url: string; score: number; trecho: string }[],
+  paginas: readonly { id?: string; titulo: string; url: string; score: number; trecho: string }[],
 ): string {
   if (paginas.length === 0) return 'Nenhuma página relevante encontrada no Confluence.'
   const itens = paginas
-    .map((p, i) => `${i + 1}. "${p.titulo}" (relevância ${p.score.toFixed(2)}) — ${p.url}`)
+    .map(
+      (p, i) =>
+        `${i + 1}. "${p.titulo}" (relevância ${p.score.toFixed(2)}) — ${p.id ? urlDeLeituraNoApp(p.id) : p.url}`,
+    )
     .join('\n')
   const trechos = paginas
     .map((p) => delimitarConteudoNaoConfiavel(`confluence:${p.titulo}`, p.trecho))
