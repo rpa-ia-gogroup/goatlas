@@ -31,6 +31,7 @@ import { ExecutorTools } from './agent/tools'
 import { Orquestrador } from './agent/orquestrador'
 import { Outbox } from './tickets/outbox'
 import { RepositorioAnexosPendentes } from './tickets/anexos-pendentes'
+import { AnexosEnviados } from './tickets/anexos-enviados'
 import { RepositorioVinculos } from './tickets/vinculos'
 import { ServicoChamados } from './tickets/servico'
 import { RepositorioInventario } from './governanca/inventario'
@@ -106,6 +107,13 @@ export interface Contexto {
   readonly outbox: Outbox
   /** RF-61 (T-408) — anexos subidos antes de o chamado existir. */
   readonly anexosPendentes: RepositorioAnexosPendentes
+  /**
+   * `RF-31` — o registro do que o app anexou, para a pessoa ver o próprio arquivo.
+   *
+   * ⚠️ Tabela **permanente**, diferente de `anexosPendentes`, que é expurgada em 12 h:
+   * uma lista montada de lá mostraria os anexos sumindo sozinhos meio dia depois.
+   */
+  readonly anexosEnviados: AnexosEnviados
   readonly chamados: ServicoChamados
   readonly orquestrador: Orquestrador
   /**
@@ -315,7 +323,15 @@ export async function montarContexto(
   const vinculos = new RepositorioVinculos(env.DB, agora)
   const outbox = new Outbox(env.DB, agora)
   const anexosPendentes = new RepositorioAnexosPendentes(env.DB, agora)
-  const chamados = new ServicoChamados(atlassian, outbox, vinculos, auditoria, novoId)
+  const anexosEnviados = new AnexosEnviados(env.DB, agora)
+  const chamados = new ServicoChamados(
+    atlassian,
+    outbox,
+    vinculos,
+    auditoria,
+    novoId,
+    anexosEnviados,
+  )
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora)
   const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId)
   const inventarioAssentos = new RepositorioInventario(env.DB, novoId)
@@ -394,6 +410,7 @@ export async function montarContexto(
     vinculos,
     outbox,
     anexosPendentes,
+    anexosEnviados,
     chamados,
     orquestrador,
     organizacao,

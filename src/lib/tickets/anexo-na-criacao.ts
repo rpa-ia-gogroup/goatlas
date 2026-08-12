@@ -78,6 +78,18 @@ export interface DependenciasAnexo {
   readonly auditoria: Auditoria
   /** T-422 — onde o número durável de anexos fica. */
   readonly outbox: Pick<Outbox, 'registrarAnexosAnexados'>
+  /**
+   * `RF-31` — opcional: quem monta as dependências à mão (testes, caminhos antigos)
+   * continua materializando sem registrar, com o comportamento de antes.
+   */
+  readonly anexosEnviados?: {
+    registrar(dados: {
+      issueKey: string
+      solicitanteEmail: string
+      nomeArquivo: string
+      via: 'criacao' | 'chamado'
+    }): Promise<void>
+  }
 }
 
 export async function materializarAnexosDoChamado(
@@ -131,6 +143,15 @@ export async function materializarAnexosDoChamado(
       await deps.atlassian.materializarAnexosTemporarios(dados.issueKey, [
         pendente.temporaryAttachmentId,
       ])
+      // `RF-31` — o arquivo entrou no chamado; fica registrado para a pessoa vê-lo
+      // depois. `anexos_pendentes` não serve para isso: ela é expurgada em 12 h, e a
+      // lista sumiria sozinha meio dia depois de o chamado nascer.
+      await deps.anexosEnviados?.registrar({
+        issueKey: dados.issueKey,
+        solicitanteEmail: dados.solicitanteEmail,
+        nomeArquivo: pendente.nomeArquivo,
+        via: 'criacao',
+      })
       anexados.push(pendente.nomeArquivo)
     } catch {
       // ⚠️ Engolido de propósito, e é a única razão de esta função existir separada: o

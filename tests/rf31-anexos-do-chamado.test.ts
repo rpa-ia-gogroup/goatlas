@@ -267,8 +267,15 @@ describe('T-084 — degradação: "não sei" nunca vira "não tem" (`RNF-18`)', 
     fake.estado.falhas.listarAnexosDoChamado = 'indisponivel'
 
     const d = await detalhe(issueKey)
+    // A dúvida continua sendo dita — mas ela é sobre o anexo do **time** (`D-51`).
     expect(d.anexosIndisponiveis).toBe(true)
-    expect(d.anexos).toEqual([])
+    // ⚠️ E o print que a pessoa mandou **continua na tela**: ele não depende da Atlassian
+    // para ser conhecido, e sumir com ele numa queda é o defeito que `D-51` conserta.
+    // Este caso afirmava `[]` quando a única fonte era a Atlassian.
+    expect(d.anexos.map((a: { nomeArquivo: string }) => a.nomeArquivo)).toEqual(['print.png'])
+    // `origem` marca de onde veio a certeza; o tipo do ajudante local desta suíte é
+    // estreito de propósito, então a leitura é explícita aqui.
+    expect((d.anexos[0] as { origem?: string } | undefined)?.origem).toBe('voce')
     // A queda é só dos anexos: a conversa continua de pé.
     expect(d.comentariosIndisponiveis).toBe(false)
   })
@@ -281,10 +288,11 @@ describe('T-084 — degradação: "não sei" nunca vira "não tem" (`RNF-18`)', 
 
     const d = await detalhe(issueKey)
     expect(d.comentariosIndisponiveis).toBe(true)
-    // Sem prova, não se afirma nada — e o que NÃO pode acontecer é uma lista vazia
-    // silenciosa, que a pessoa leria como "meu print sumiu".
+    // Sem prova, não se afirma nada **sobre o anexo do time** — e o que NÃO pode
+    // acontecer é uma lista vazia silenciosa, que a pessoa leria como "meu print sumiu".
+    // Era exatamente o que acontecia: hoje o print dela vem da nossa própria linha.
     expect(d.anexosIndisponiveis).toBe(true)
-    expect(d.anexos).toEqual([])
+    expect(d.anexos.map((a: { nomeArquivo: string }) => a.nomeArquivo)).toEqual(['print.png'])
   })
 
   it('expansão de anexo ausente na resposta do JSM não vira "chamado sem anexos"', async () => {
@@ -297,7 +305,8 @@ describe('T-084 — degradação: "não sei" nunca vira "não tem" (`RNF-18`)', 
 
     const d = await detalhe(issueKey)
     expect(d.anexosIndisponiveis).toBe(true)
-    expect(d.anexos).toEqual([])
+    // O que o app enviou não passa por essa expansão — ver `D-51`.
+    expect(d.anexos.map((a: { nomeArquivo: string }) => a.nomeArquivo)).toEqual(['print.png'])
   })
 
   it('durante a queda, baixar responde 503 — não 404, que diria que o arquivo sumiu', async () => {
