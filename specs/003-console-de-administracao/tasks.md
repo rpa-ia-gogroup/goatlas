@@ -34,11 +34,27 @@ pronto. Teste antes do código onde o teste é de recusa.
 
 ## Phase 3 — o console
 
-- [x] **T-137** — `src/app/admin/campos.tsx`: descritores em linguagem de decisão
+- [~] **T-137** — `src/app/admin/campos.tsx`: descritores em linguagem de decisão
       (rótulo, ajuda, efeito derivado do valor) e os quatro editores — lista com
       pré-visualização, número com unidade, escolha, e preço por produto do
       inventário.
       _Requirements: RF-49, RF-50, RF-53, RNF-28_
+      ⚠️ **Estava `[x]`; falta um dos quatro parâmetros que `RF-50` nomeia** (auditoria de
+      12/08, `D-47`). Na tela estão o threshold da Regra 1 (`campos.tsx:238`), o critério de
+      agrupamento (`:248`) e os exemplos do prompt (`:262`). **O threshold de recorrência da
+      Regra 2 — e a janela em dias — não têm descritor em `SECOES`:**
+      `regra2_threshold_recorrencia` e `regra2_janela_dias` aparecem em `ChaveEditavel`
+      (`campos.tsx:41-42`) e são aceitos pelo `PUT`, mas nenhum campo os renderiza. São
+      **lidos** na Visão geral (`src/lib/config/diagnostico.ts:184`) e só mudam por
+      `PUT /api/admin/config` na mão — o oposto de `RF-49`/`RF-50`, que existem para o admin
+      calibrar sem deploy.
+      ⚠️ **É lacuna, não decisão:** `D-25` excluiu da tela TTL de cache, rate limit e
+      `regra2_limite_tickets`, e `tests/tela-admin.test.ts:160-170` lista exatamente esses
+      três — o threshold de recorrência **não** está lá. Também é o parâmetro que `RF-11`
+      pede explicitamente ("threshold de recorrência", sugestão 3+ em 90 dias).
+      ⚠️ **Não é só colar um campo:** a seção "Interrupções" já está no teto de 3 controles
+      que `tela-admin.test.ts:135` impõe, então entra decidindo a estrutura — que é o
+      trabalho que `D-25` fez de propósito.
 - [x] **T-138** — `src/app/admin/paineis.tsx`: métricas, assentos, lacunas e
       auditoria movidos, cada um ao lado da configuração que afetam.
       _Requirements: RF-42, RF-53, RF-55, RF-56, RNF-18_

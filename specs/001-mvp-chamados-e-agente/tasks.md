@@ -89,6 +89,15 @@ created: "2026-08-03"
       e botão de sair em computador compartilhado convida confusão. ⚠️ `RF-03` é P0 e
       pede logout explícito, então **falta o aval do João** para isso virar alteração
       de `REQUISITOS.md`. Fica `[~]`, não `[x]`. _Requirements: RF-03, D-08_
+      ⚠️ **A auditoria de 12/08 (`D-47`) mostrou que a nota acima descrevia só metade.**
+      `RF-03` tem duas cláusulas e **nenhuma das duas está no código**: além do logout,
+      "sessão com expiração **configurável**" não existe — não há chave de sessão em
+      `ConfigValores` (`src/lib/config/index.ts:22-144`), e a expiração é a do edge do
+      GoDeploy (`D-02`), que o app não configura nem observa. Dizer "a expiração existe (é
+      do edge)" é verdade sobre o produto e falso sobre o requisito, que pede
+      *configurável*. Ao levar `D-08` ao João, levar as duas cláusulas: o que se decide é
+      se `RF-03` vira "sessão é responsabilidade do edge, sem logout no app" — e aí a
+      emenda é em `docs/REQUISITOS.md`, não uma tarefa aberta para sempre.
 - [x] **T-024** `audit/` append-only (sem UPDATE/DELETE no código), registrando
       também as ações que falham. _Requirements: RF-58, RN-10_
 - [x] **T-025** `atlassian/cliente.ts`: cache com TTL configurável, `Retry-After`,
@@ -109,8 +118,20 @@ created: "2026-08-03"
       Corrige um bug de `RF-56`: sem filtro, a rota usava o e-mail do próprio admin
       como default e o console mostrava só quem estava olhando.
       _Requirements: RF-49, RF-50, RF-56, D-09_
-- [x] **T-029** [P] `GET /api/health` com Atlassian, IA, banco e SSO.
+- [~] **T-029** [P] `GET /api/health` com Atlassian, IA, banco e SSO.
       _Requirements: RF-59_
+      ⚠️ **Estava `[x]`; três das quatro dependências são sondadas de verdade** (auditoria
+      de 12/08, `D-47`). Atlassian (`src/lib/http/rotas.ts:2090`), IA (`:2091`) e banco
+      (`:2098-2102`) consultam. **O SSO é literal:**
+      `sso: { ok: true, detalhe: 'edge GoDeploy' }` (`rotas.ts:2119`) — responde `ok`
+      sempre, inclusive com o edge fora do ar. É o pior estado para uma dependência:
+      silenciosa exatamente quando cai. ⚠️ **E o teste congela o placeholder**
+      (`tests/rotas.test.ts:100-104` cobra só a *presença* da chave), então trocá-lo por
+      uma sonda real não quebra nada — e mantê-lo assim também não.
+      ⚠️ Pode ser que não haja o que sondar (o edge responde antes do worker; se ele cair,
+      `/api/health` nem é alcançado). Se for esse o caso, o honesto é **dizer isso no
+      campo** — `detalhe: 'não sondável: o edge responde antes do worker'` — em vez de
+      afirmar `ok: true`. Mesma regra de `suspensaoConhecida` e `custoConfigurado`.
 - [x] **T-030** [P] Rate limit por usuário. _Requirements: RNF-11_
 
 ## Phase 3 — Regras (funções puras) e orquestrador
@@ -142,9 +163,19 @@ created: "2026-08-03"
       camadas. Faz T-010 passar. _Requirements: RF-08, RN-01, RNF-08_
 - [x] **T-046** Conteúdo recuperado entra no contexto do LLM como **dado**, delimitado
       e nunca como instrução. _Requirements: RNF-08, RNF-09_
-- [x] **T-047** Mensagem de bloqueio com os **três** elementos (regra, motivo
+- [~] **T-047** Mensagem de bloqueio com os **três** elementos (regra, motivo
       legível, link). A redação define a percepção do produto — soa como ajuda, não
       recusa. _Requirements: RF-12, RNF-30, RNF-31_
+      ⚠️ **Estava `[x]`; vale para a Regra 1, não para a Regra 2** (auditoria de 12/08,
+      `D-47`). O texto de `RF-12` pede o link "**sempre na Regra 1, e na Regra 2 quando
+      houver documentação relacionada**". Na Regra 1 os três elementos existem e são
+      testados. Na **Regra 2 não existe link nenhum**, e não há caminho que possa trazer
+      um: `montarMensagemBloqueio` só lista `issueKey`
+      (`src/lib/rules/index.ts:206-219`) e `EvidenciaRegra2` (`rules/index.ts:29-32`) não
+      carrega páginas — o tipo não tem onde guardar documentação relacionada. Sem teste.
+      ⚠️ É a metade do bloqueio que mais depende de `RNF-31` ("o bloqueio precisa soar como
+      ajuda"): bloquear por recorrência **sem** apontar o que ler é a versão do bloqueio
+      mais próxima de uma parede, que é o que `RF-13`/`RN-07` existem para evitar.
 - [x] **T-048** Override: prossegue, registra tentativa **e** override, alimenta o
       backlog de documentação. _Requirements: RF-13, RN-07, RF-42_
 - [x] **T-049** Falha de tool → informa e marca ticket como **não verificado**;
@@ -160,9 +191,25 @@ created: "2026-08-03"
 - [x] **T-061** `POST /api/conversas/:id/confirmar` — a **única** transição que
       autoriza criar; o modelo não tem tool equivalente. Faz T-011 passar.
       _Requirements: RF-17, RN-02_
-- [x] **T-062** Resumo estruturado antes de confirmar (título, descrição, tipo,
+- [~] **T-062** Resumo estruturado antes de confirmar (título, descrição, tipo,
       componente, área, prioridade, SLA) com **prioridade editável**.
       _Requirements: RF-16, RF-18_
+      ⚠️ **Estava `[x]`; o recibo mostra 5 dos 7 campos** (auditoria de 12/08, `D-47`).
+      `src/app/telas.tsx:453-513` imprime título, descrição, área, prioridade e prazo, e a
+      prioridade é editável (`telas.tsx:380,473-503` + `PUT …/proposta`,
+      `src/lib/http/rotas.ts:273-286`) — `RF-16` está atendido **na tela**.
+      Faltam dois: **tipo de chamado não é exibido** (o `tipoChamadoId` só serve para
+      buscar o schema, `telas.tsx:397-423`) — e é justamente o campo que decide **em que
+      fila o chamado cai**, o que a pessoa não tem como conferir antes de confirmar —, e
+      **componente não existe em lugar nenhum**: é sempre `null`
+      (`src/lib/agent/orquestrador.ts:357`) e `PROMPT_EXTRACAO` nem pede o campo
+      (`src/lib/ia/prompts.ts:245`).
+      ⚠️ O teste `tests/rf18-recibo-confirmacao.test.ts:49-54` cobra título, descrição e
+      área — **não cobra as duas ausências**, que é o motivo de elas terem sobrevivido.
+      ⚠️ **Componente pode ser requisito morto:** nenhum request type do `GN` foi medido
+      expondo componente, e `D-36` diz que campo do Jira só significa algo dentro do
+      request type. Decidir entre implementar e emendar `RF-18` em `docs/REQUISITOS.md` —
+      o que não vale é seguir com o board dizendo que o recibo tem sete campos.
 - [x] **T-063** `criarChamado` via `POST /rest/servicedeskapi/request` com a conta de
       serviço como reporter. _Requirements: RF-20_
       → **Saiu do bloqueio e EXECUTOU contra a Atlassian real** (11/08/2026, `GN-6894`,
@@ -172,9 +219,20 @@ created: "2026-08-03"
       ⚠️ **A linha ficou `[ ] [BLOQUEADA: Q1]` por mais de um dia depois de a chamada ter
       rodado em produção** — o board subestimava, que é a mesma classe de defeito de
       `T-081`, na direção oposta. Achado da auditoria de 12/08 (`D-47`).
-- [x] **T-064** Gravar solicitante real no campo customizado "Solicitante" e como
+- [~] **T-064** Gravar solicitante real no campo customizado "Solicitante" e como
       request participant quando aplicável.
       _Requirements: RF-21, R-03_
+      ⚠️ **Rebaixada de `[x]` pela auditoria de 12/08 (`D-47`) — não por defeito novo, mas
+      porque `RF-21` é P0 e tem um "e".** A metade do campo customizado está sólida e nos
+      dois caminhos de criação (`src/lib/tickets/campos-do-solicitante.ts:84`,
+      `rotas.ts:485` no formulário e `rotas.ts:339` na conversa, com o mapa por request type
+      de `D-36`). A metade do **request participant não existe** — zero ocorrência de
+      `requestParticipants` em `src/` — e está adiada com razão registrada logo abaixo
+      (depende de `accountId`, que não existe sob `D-01`).
+      ⚠️ O que muda é só o board **não afirmar** que `RF-21` está completo: ou a cláusula
+      entra pela migração de `RNF-22`, ou `docs/REQUISITOS.md` é emendado para dizer que sob
+      proxy total ela não se aplica. Ficar `[x]` sem uma das duas é o padrão que produziu
+      `T-081`.
       → `atlassian/cliente.ts#montarCamposSolicitante` já escrevia o campo
       quando configurado; o que faltava era a config em si —
       `campoSolicitanteId: null` estava **hardcoded** em `contexto.ts`. Agora é
@@ -190,8 +248,15 @@ created: "2026-08-03"
       lógica da conclusão da submissão. _Requirements: RF-22, RN-03_
 - [x] **T-066** Allowlist de tipos de chamado: só o que o admin liberou é oferecido.
       _Requirements: RF-28, RNF-07_
-- [x] **T-067** Confirmação final: chave, prioridade, prazo de primeira resposta e
+- [~] **T-067** Confirmação final: chave, prioridade, prazo de primeira resposta e
       link de acompanhamento **interno**. _Requirements: RF-26_
+      ⚠️ **Estava `[x]`; três dos quatro** (auditoria de 12/08, `D-47`). Chave, prioridade e
+      prazo de primeira resposta saem na resposta (`src/lib/http/rotas.ts:1854-1880`) e na
+      tela (`src/app/telas.tsx:594-645`). O **"link para acompanhamento"** é um botão que
+      leva à **lista** de chamados (`telas.tsx:637`), não ao chamado recém-criado — quem
+      acabou de abrir precisa procurá-lo entre os outros, no momento em que ele é o único
+      que importa. ⚠️ E o componente `ChamadoAberto` **não tem teste nenhum** (não aparece
+      em `tests/`), que é por que isso passou.
 - [x] **T-068** Cron `POST /api/cron/reprocessar-submissoes` (valida
       `X-Godeploy-Cron`) + job no GoDeploy. _Requirements: RNF-17_
 - [x] **T-069** Cron `POST /api/cron/reconciliar-vinculos`: varre o Jira pelo campo
@@ -203,11 +268,35 @@ created: "2026-08-03"
 
 ## Phase 5 — Acompanhamento
 
-- [x] **T-080** `GET /api/chamados` filtrado por vínculo **no servidor**: resumo,
+- [~] **T-080** `GET /api/chamados` filtrado por vínculo **no servidor**: resumo,
       status, prioridade, SLA, última atualização. Faz T-012 passar.
       _Requirements: RF-29, RF-30, RN-04_
-- [x] **T-081** Detalhe: descrição, campos, comentários **públicos**, anexos, status,
+      ⚠️ **Estava `[x]`; 3 dos 5 campos de `RF-29` existem** (auditoria de 12/08, `D-47`).
+      Resumo, status e prioridade saem na rota (`src/lib/http/rotas.ts:650-652`) e na tela
+      (`src/app/telas.tsx:840-847`). Faltam dois: **`SLA` não existe em ponto nenhum** da
+      lista — é a mesma causa raiz de T-100 — e **a data da última atualização volta na
+      rota (`rotas.ts:653`) e a tela não a imprime** (`.chamado-meta`, `telas.tsx:846-850`,
+      mostra prioridade, selo e área; nenhuma data em `telas.tsx`). O isolamento de
+      `RF-30`/`RN-04` continua íntegro e testado — o que falta é superfície.
+- [~] **T-081** Detalhe: descrição, campos, comentários **públicos**, anexos, status,
       histórico de SLA — sem campo interno. _Requirements: RF-31_
+      🚨 **Estava `[x]` e o requisito tem SEIS itens — três estão prontos.** É o achado que
+      abriu a auditoria de 12/08 (`D-47`): uma linha marcada cedo demais escondeu um **P0**
+      por semanas, e ninguém tinha como perceber lendo o board.
+      ✅ **Descrição** (`rotas.ts:718` → `telas.tsx:997`) · **comentários públicos**
+      (`rotas.ts:710-726` → `telas.tsx:1074-1084`, com `D-43`) · **status**
+      (`telas.tsx:978`).
+      ❌ **Anexos** — não existe rota nem método de cliente que **liste** o que está anexado
+      a um chamado; `cliente.ts:1020` só faz `POST …/attachment`, e a seção "Anexos" da tela
+      (`telas.tsx:1025-1061`) é só formulário de envio. Depois de anexar, a pessoa **nunca
+      mais vê o que anexou**. 🔧 **Em implementação agora** (branch `rf31-anexos-do-chamado`).
+      ❌ **Histórico de SLA** — ver **T-100**.
+      ⚠️ **Campos: parcial.** A rota devolve `via`, `verificadoRegras`, `area`, `criadoEm` e
+      `atualizadoEm` (`rotas.ts:717-732`) e a tela imprime só status, prioridade e o selo
+      (`telas.tsx:977-981`) — área e as duas datas são descartadas na renderização. E os
+      **campos dinâmicos** do request type (`RF-27`), gravados em
+      `submissoes.payload.camposDinamicos`, nunca são relidos: `obterChamado` extrai apenas
+      `summary`, `description` e `priority` de `requestFieldValues` (`cliente.ts:524-536`).
 - [x] **T-082** Comentar publicamente, atribuído de forma legível ao solicitante real.
       _Requirements: RF-33_
       → **Resolvida (D-13):** prefixo `**Nome** (email) via goatlas:` no corpo do
@@ -375,10 +464,34 @@ created: "2026-08-03"
       contrato *pretendido* e esconde a divergência — **exatamente** a família de `D-38`
       (obrigatório faltando), `D-39` (campo de seleção) e `D-43` (autor do comentário).
       Nenhum teste menciona `campoPrioridadeId`.
-      ⚠️ **Não implementar sem medir o schema primeiro** (`D-36`): id de campo não
-      significa nada fora do request type, e há branch de diagnóstico em curso
-      (`diag/schema-de-prioridade`). Se o `GN` expuser prioridade como campo de sistema,
-      o caminho pode não ser um `customfield_` nenhum.
+      ⚠️ **Não implementar sem medir o schema primeiro** (`D-36`, `D-44`): id de campo não
+      significa nada fora do request type, e `D-44` já abriu o caminho de diagnóstico
+      (`GET /api/admin/tipos-chamado/schema`) exatamente porque a rota de produto **não
+      podia** responder "este tipo expõe prioridade?". Ligar `campoPrioridadeId` continua
+      sendo decisão a tomar depois de ler o `validValues` real — inclusive os **rótulos**
+      (`ROTULO_PRIORIDADE`, hoje `Highest`/`High`/`Medium`), que são forma do formulário do
+      Jira e moram no código com teste.
+- [ ] **T-100** 🚨 **O SLA nunca é lido da Atlassian — o `expand` é pedido e jogado fora.**
+      _Requirements: RF-29, RF-31, RN-08_
+      `RF-29` pede SLA na **lista** e `RF-31` pede o **histórico de SLA** no detalhe. Nenhum
+      dos dois existe, e a causa é uma só: `obterChamado` monta a URL **com**
+      `expand=…sla…` (`src/lib/atlassian/cliente.ts:516`) e devolve
+      **`slaPrimeiraResposta: null` fixo** (`cliente.ts:539`) — a resposta é pedida, paga e
+      descartada. O caminho degradado faz o mesmo (`src/lib/tickets/servico.ts:411`).
+      ⚠️ **Nem o fake preenche** (`src/lib/atlassian/fake.ts:359` devolve
+      `{prazo: null, cumprido: null}`), então este campo **nunca teve valor em teste
+      nenhum** — é por isso que não há suíte vermelha a apontar para cá. Não é "SÓ-FAKE": é
+      ausente nas duas pontas.
+      ⚠️ **E a tela não teria como mostrar mesmo se a rota mandasse**: o tipo
+      `DetalheChamado.chamado` do front (`src/app/api.ts:105-114`) não tem o campo.
+      ⚠️ **"Histórico" é mais do que um prazo.** Ciclos de SLA (decorrido, pausado,
+      cumprido) não existem em modelo nenhum do app; o que o `expand` traz é, no máximo, um
+      retrato. Decidir o escopo antes de implementar — `RN-08` diz que o SLA é de
+      **primeira resposta**, e é isso que a pessoa precisa ver.
+      ⚠️ **Interage com T-099:** o `GN-6894` voltou com `slaPrimeiraResposta: null` **e**
+      `prioridade: null`. São dois defeitos distintos com o mesmo sintoma — se o Jira
+      calcula SLA a partir da prioridade que nunca enviamos, consertar só um deles não
+      produz número nenhum na tela.
 - [ ] **T-097** Fechar a Definição de Pronto da Fase 1 (§13 dos requisitos) item por
       item, incluindo os testes de burla. _Requirements: todos_
 
