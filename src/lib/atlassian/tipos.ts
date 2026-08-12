@@ -237,6 +237,16 @@ export interface TicketHistorico {
 
 export interface BuscaConfluenceParams {
   readonly termo: string
+  /**
+   * Palavras da **segunda tentativa** (`D-41`). Quando presente e não vazia, a
+   * consulta casa QUALQUER uma delas em vez da frase inteira de `termo` — que
+   * continua sendo o que a pessoa escreveu, e é ele que a auditoria registra.
+   *
+   * Quem decide ampliar é `confluence/busca.ts`, acima desta camada: aqui só se
+   * monta a consulta. ⚠️ Ampliar **nunca** mexe em `espacosPermitidos` nem em
+   * `labelsBloqueadas` — "achar mais" não pode virar "procurar em mais lugares".
+   */
+  readonly palavrasAlternativas?: readonly string[]
   /** Allowlist de espaços. Restringe a QUERY, não o resultado (RN-06, RNF-07). */
   readonly espacosPermitidos: readonly string[]
   /** Labels que bloqueiam a página mesmo em espaço liberado (RF-38). */

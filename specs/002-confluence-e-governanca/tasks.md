@@ -87,7 +87,7 @@ created: "2026-08-04"
 
 ## Phase 2 — Confluence como superfície
 
-> **Estado: Phase 2 COMPLETA** (T-110 a T-118) — **348 testes** na suíte (121 novos),
+> **Estado: Phase 2 COMPLETA** (T-110 a T-119) — **348 testes** na suíte (121 novos),
 > typecheck, build e bundle do worker limpos. Busca, leitura, proxy de anexo, árvore do
 > espaço e o mapa de lacunas existem **com tela**, a deflexão da Regra 1 abre a página
 > **dentro do app**, e os testes de burla foram escritos antes de cada rota. O que resta
@@ -238,6 +238,38 @@ created: "2026-08-04"
         atravessa o isolamento por e-mail, e usá-lo numa rota de colaborador precisa
         ser bug visível na revisão.
       - Aparece na **aba de admin** que já existia (`D-09`), acima da auditoria.
+- [x] **T-119** A busca amplia quando a frase inteira não casa nada, e o resultado
+      volta com o espaço de origem (`D-41`, `D-42`). _Requirements: RF-37, RF-09,
+      RF-42, RN-06, RNF-07_
+      - **Medido na staging em 12/08/2026**, e é o cenário que `D-33` nomeia como o mais
+        caro: o tópico `processo de deploy na Gocase` devolveu **zero**, o agente
+        respondeu *"não encontrei nenhuma página relevante"*, e a palavra `deploy`
+        devolvia **10 páginas** na mesma instalação. `text ~ "<frase inteira>"` casa
+        quase nada.
+      - **A correção mora na CONSULTA** (`confluence/busca.ts`), não no prompt nem no
+        parâmetro da tool: o mesmo defeito chega pelo tópico do modelo **e** pela caixa
+        de busca da aba Documentação, onde quem digita é uma pessoa. Instrução não
+        alcança a segunda nem garante a primeira — e falha em silêncio, que é como este
+        bug viveu. O prompt **não** foi tocado, de propósito.
+      - **Teto: duas consultas por busca** (`MAX_CONSULTAS_BUSCA`) — a frase e, só no
+        zero, até 6 palavras significativas em `OR`. Cada resultado ainda custa uma
+        consulta de restrição (`R-02`), e termo de uma palavra não amplia.
+      - 🚨 **O grupo `OR` é parentizado**, e é isso que mantém a allowlist: em CQL o
+        `AND` liga mais forte, então um `OR` solto faria `space in (...)` valer só para
+        a primeira palavra. Teste de burla escrito junto.
+      - **O terceiro zero.** Termo sem palavra significativa ("como faço isso?") não
+        registra lacuna de `RF-42` — nem na auditoria nem em `buscas`. Família de
+        `buscaConfigurada` (zero por config) e do escopo vazio de `D-30` (zero por
+        escopo).
+      - **A auditoria mostra os dois lados:** `recurso` = o que a pessoa escreveu;
+        `detalhe.ampliou`/`detalhe.consultado` = o que foi à Atlassian.
+      - **`espaco: ""` em todo resultado** (`D-42`): a v1 de search não expande
+        `content.space` sem `&expand=`. O fallback lê `displayUrl` (`/spaces/GT`),
+        **nunca** o `title`, que é o *nome* do espaço — nome onde se espera chave é a
+        mesma classe de bug do `spaceId` numérico da v2.
+      - Testes afirmam sobre o **CQL montado** e sobre a **contagem de consultas**, não
+        sobre "achou página": o fake ignora o termo por padrão (`filtrarPorTermo`), e um
+        teste de resultado passaria sem a correção existir.
 
 ## Phase 3 — Governança de assentos
 

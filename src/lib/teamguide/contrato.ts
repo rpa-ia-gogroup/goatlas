@@ -24,14 +24,65 @@
  * _Requirements: RF-19, RNF-04, RNF-18, RF-58_
  */
 
+/**
+ * **Onde** a leitura da base quebrou — `D-40`.
+ *
+ * 🚨 Existe porque `erro_de_rede` era o fim da linha: um único rótulo cobria "o Worker não
+ * alcança o host", "a resposta veio pela metade" e "a promessa da cache não era desta
+ * requisição", que pedem consertos opostos e são indistinguíveis na auditoria.
+ *
+ * - `conexao` — o `fetch` não chegou a devolver uma `Response`. Ninguém do outro lado.
+ * - `corpo` — a `Response` veio e a leitura/desserialização dela é que falhou. É o sintoma
+ *   de resposta grande demais ou lenta demais para a janela: **os cabeçalhos chegam rápido
+ *   e o corpo é que não termina**, e abortar no meio dele não se parece com um timeout.
+ * - `promessa` — a falha **não veio da nossa chamada**. A cache do módulo guarda a
+ *   *promessa* (não o valor, ao contrário de `cachesAtlassianDoIsolate`), então uma
+ *   requisição pode acabar esperando a leitura iniciada por **outra** — e a plataforma
+ *   proíbe I/O entre contextos de requisição. Esta fase é o que torna essa hipótese
+ *   visível em vez de suposta.
+ */
+export type FaseTeamGuide = 'conexao' | 'corpo' | 'promessa'
+
+/**
+ * Uma falha de leitura da base, já reduzida a **rótulos**.
+ *
+ * 🚨 Nada aqui carrega a mensagem do erro nem o corpo da resposta (`RNF-01`, `RNF-30`):
+ * os dois podem conter nome e e-mail de gente da empresa, e este texto sobe até a
+ * auditoria. `classe` é o **nome** do erro, saneado e com teto de tamanho — ver
+ * `classeDe` em `http.ts`.
+ *
+ * ⚠️ `fase` e `classe` só aparecem quando `motivo` **não se explica sozinho**. `http_401`
+ * e `formato_inesperado` já dizem tudo; `erro_de_rede` e `timeout` não dizem nada sem elas.
+ */
+export interface FalhaTeamGuide {
+  /** `http_<status>` · `formato_inesperado` · `timeout` · `erro_de_rede` · `credencial_ausente`. */
+  readonly motivo: string
+  readonly fase?: FaseTeamGuide
+  /** Nome/classe do erro em `snake_case` — nunca a mensagem. */
+  readonly classe?: string
+}
+
 export type ResultadoArea =
   | { readonly estado: 'encontrada'; readonly area: string }
   | { readonly estado: 'nao_encontrada' }
-  | { readonly estado: 'indisponivel'; readonly motivo: string }
+  | ({ readonly estado: 'indisponivel' } & FalhaTeamGuide)
 
 export interface ClienteTeamGuide {
   /** A área organizacional de um e-mail. **Nunca lança.** */
   areaDe(email: string): Promise<ResultadoArea>
+  /**
+   * Sonda para `RF-59`. **Nunca lança**, pelo mesmo motivo de `areaDe`.
+   *
+   * ⚠️ Existe para que medir esta camada não custe **abrir um chamado numa fila real**:
+   * até `D-40` a única evidência de que a leitura falhava era uma linha de auditoria
+   * produzida por alguém abrindo um chamado de verdade.
+   */
+  verificarSaude(): Promise<{ readonly ok: boolean; readonly detalhe: string }>
+}
+
+/** A falha em uma linha, para o health check. Só rótulos — ver `FalhaTeamGuide`. */
+export function rotuloDaFalha(f: FalhaTeamGuide): string {
+  return [f.motivo, f.fase, f.classe].filter((p) => !!p).join(' · ')
 }
 
 /**
@@ -46,5 +97,9 @@ export class TeamGuideIndisponivel implements ClienteTeamGuide {
 
   async areaDe(): Promise<ResultadoArea> {
     return { estado: 'indisponivel', motivo: this.motivo }
+  }
+
+  async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {
+    return { ok: false, detalhe: this.motivo }
   }
 }

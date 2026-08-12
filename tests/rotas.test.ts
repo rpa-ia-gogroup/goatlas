@@ -14,6 +14,7 @@ import { montarContexto, type Contexto } from '@/lib/contexto'
 import { tratarRequisicao } from '@/lib/http/rotas'
 import { HEADER_EMAIL } from '@/lib/auth'
 import { ClienteAtlassianFake } from '@/lib/atlassian/fake'
+import { ClienteTeamGuideFake } from '@/lib/teamguide/fake'
 
 const ANA = 'ana@gocase.com'
 const BRUNO = 'bruno@gocase.com'
@@ -101,6 +102,23 @@ describe('RF-01 / RF-05 — nenhuma rota de dados responde sem identidade válid
     expect(corpo.dependencias).toHaveProperty('ia')
     expect(corpo.dependencias).toHaveProperty('banco')
     expect(corpo.dependencias).toHaveProperty('sso')
+    // `D-40` — a fonte organizacional entra aqui para que medi-la não custe abrir um
+    // chamado numa fila real.
+    expect(corpo.dependencias).toHaveProperty('teamguide')
+  })
+
+  it('🚨 fonte organizacional no chão NÃO derruba o health — ela é fail-open (D-37)', async () => {
+    // Com a fonte caída os chamados continuam abrindo (`RNF-18`): um 503 aqui diria "o app
+    // caiu" sobre um app inteiro de pé, e ensinaria o time a ignorar o health check.
+    ;(ctx.teamguide as ClienteTeamGuideFake).falha = 'erro_de_rede · conexao · typeerror'
+    const r = await chamar(req('/api/health'))
+    expect(r.status).toBe(200)
+    const corpo = await r.json()
+    expect(corpo.ok).toBe(true)
+    expect(corpo.dependencias.teamguide).toEqual({
+      ok: false,
+      detalhe: 'erro_de_rede · conexao · typeerror',
+    })
   })
 })
 

@@ -248,6 +248,20 @@ destes reabre um vazamento que já foi fechado.
   edita descrição, label ou qualquer campo — comparar por ele avisaria "mudou para Em
   andamento" três vezes porque o agente ajustou o resumo três vezes. Daí a coluna
   `vinculos.ultimo_status_notificado`.
+- 🚨 **A TELA também não detecta autoria pelo AUTOR** (`tickets/comentario-exibicao.ts`,
+  `D-43`). Mesmo motivo do item abaixo, na superfície que a pessoa lê: o comentário que ela
+  acabou de escrever aparecia assinado pela **conta de serviço** — hoje a conta pessoal de um
+  colega — com o prefixo de `D-13` logo abaixo dizendo outro nome (medido na staging em
+  12/08/2026, `GN-6897`), e a leitura natural é *alguém escreveu em meu nome*. Quem classifica
+  é `ehComentarioDoSolicitante`, o **mesmo** predicado do SLA de `RF-46`; condição escrita só
+  na tela seria a segunda regra que diverge em silêncio (`config/diagnostico.ts`). ⚠️ E o
+  nome da conta **fica**, enunciado como registro (`Conta que registrou: …`), nunca como
+  autoria: quem responde pelo portal com a conta de serviço não é distinguível, e apagar o
+  autor de todos consertaria esse caso e estragaria o comum — o agente que respondeu de
+  verdade. O prefixo sai do corpo exibido por `removerPrefixoAutoria`, o par de `RF-48`, e não
+  por um `replace` novo. ⚠️ **O fake escondia isto**: `comentar` guardava o texto sem prefixo e
+  com o nome do autor real — o oposto de produção nas duas pontas —, e corrigi-lo não quebrou
+  **nenhum** teste existente, que é a medida exata do ponto cego (família de `D-38`/`D-39`).
 - ⚠️ **Ação própria não se detecta pelo AUTOR** (`notificacoes/acoes.ts`, `RF-48`). Sob
   proxy total todo comentário sai da conta de serviço: o da pessoa e o do agente do time
   têm o mesmo autor. O que distingue é o app ter registrado a ação **no momento em que a
@@ -488,7 +502,36 @@ destes reabre um vazamento que já foi fechado.
 - ⚠️ **`area_indisponivel` e `area_nao_encontrada` são DUAS ações de auditoria, não uma
   com `motivo`.** As duas deixam a pessoa sem área e o chamado aberto (`RNF-18`), e pedem
   trabalho oposto: cadastro faltando × fonte fora do ar. Mesma família de
-  `buscaConfigurada` e `schema_tipo_indisponivel`.
+  `buscaConfigurada` e `schema_tipo_indisponivel`. ⚠️ `D-40` acrescentou `fase`/`classe`
+  **dentro** de `area_indisponivel` — detalhe, não terceira ação: é o mesmo plantão, com
+  uma pista a mais.
+- 🚨 **O timeout da TeamGuide é decidido pelo SINAL, nunca por `e.name`** (`teamguide/http.ts`,
+  `D-40`). `e.name === 'AbortError'` só vale quando o aborto acontece **antes** da resposta;
+  com os cabeçalhos já recebidos, abortar derruba a conexão no meio da leitura do corpo e o
+  runtime lança o erro genérico de rede. Ou seja: o nosso próprio timeout se apresentava como
+  `erro_de_rede`, e a hipótese mais provável (resposta grande demais para 8 s) era justamente
+  a única que o registro **nunca** poderia acusar. Quem responde é `controle.signal.aborted`.
+- **`erro_de_rede` sem `fase` não é diagnóstico, é desistência** (`D-40`). `FalhaTeamGuide`
+  carrega `fase` — `conexao` (o `fetch` não devolveu `Response`) · `corpo` (a `Response` veio
+  e a leitura falhou) · `promessa` (a falha não veio da nossa chamada) — e `classe`
+  (construtor + `name` + `cause.code`, saneados). ⚠️ **Os dois só aparecem quando `motivo`
+  não se explica sozinho:** `http_401` e `formato_inesperado` já dizem tudo, e espalhar `fase`
+  por toda falha faz o sinal parar de saltar aos olhos. ⚠️ `classe` é **o nome** do erro,
+  nunca a mensagem — charset `[a-z0-9_]` mais teto de 24 por pedaço é o que torna isso
+  estrutural (`RNF-01`, `RNF-30`). O teste `/^[a-z0-9_]+$/` sobre `e.message` **saiu**: ele
+  promovia mensagem de terceiro a rótulo sempre que ela fosse uma palavra minúscula.
+- ⚠️ **A cache da TeamGuide é a ÚNICA que guarda PROMESSA** — as três de
+  `novasCachesAtlassian` guardam valor. A promessa dá dedupe de leitura em voo, e é também a
+  única coisa do arquivo que atravessa o limite de uma requisição, que é o que a plataforma
+  proíbe para I/O. A fase `promessa` existe para essa hipótese **aparecer no registro** em vez
+  de continuar suposta; se ela aparecer, o conserto é guardar valor, como as outras.
+- **A fonte organizacional é sondada em `/api/health`, e FICA FORA do `ok` agregado**
+  (`D-40`). Entrou ali porque a única evidência de que a leitura falhava era uma linha de
+  auditoria produzida por alguém abrindo um chamado **numa fila real** — o custo que já deixou
+  `GN-6894` para alguém apagar. Usa o mesmo `baseCacheada`: sonda que exercita outro caminho
+  responde sobre o caminho que ninguém usa. 🚨 Mas a área é fail-open (`D-37`, `RNF-18`), e um
+  503 por causa dela diria "o app caiu" sobre um app de pé — alarme falso ensina o time a
+  ignorar o health check.
 - **A base da TeamGuide é UMA chamada, e a árvore NÃO foi copiada** (`D-37`). O godocs
   deriva o nó-área canônico subindo `/teams` com **sete nomes de líder embutidos no
   código**; aqui grava-se o **time folha** de `/employees/refs`. Nome de pessoa no repo
@@ -510,6 +553,42 @@ destes reabre um vazamento que já foi fechado.
   config"), não o mecanismo, justamente para continuar reprovando se alguém trocar a
   interseção por substituição. E escopo vazio **não** registra lacuna de `RF-42`: zero por
   escopo ≠ zero por documentação.
+- 🚨 **A frase inteira em `text ~` casa quase nada, e o app dizia "não encontrei"** (`D-41`,
+  `confluence/busca.ts`). Medido na staging em 12/08/2026: o tópico `processo de deploy na
+  Gocase` devolveu **zero** e a palavra `deploy` devolvia **10 páginas** na mesma instalação —
+  o cenário que `D-33` nomeia como o mais caro do projeto, e ainda gravando
+  `lacunaDocumentacao: true` para um termo que ninguém deixou de documentar. `buscarComAmpliacao`
+  faz **no máximo duas** consultas: a frase e, só no zero, as palavras significativas em `OR`
+  (`MAX_CONSULTAS_BUSCA`, `MAX_PALAVRAS_AMPLIACAO`; termo de uma palavra não amplia).
+  ⚠️ **A correção é da CONSULTA de propósito** — o mesmo defeito chega pelo tópico do modelo
+  **e** pela caixa de busca da aba Documentação, onde quem digita é uma pessoa; instrução no
+  prompt não alcança a segunda nem garante a primeira, e falha em silêncio. Por isso o prompt
+  **não** foi tocado. ⚠️ E ampliar **nunca** mexe em `espacosPermitidos`/`labelsBloqueadas`:
+  "achar mais" não pode virar "procurar em mais lugares".
+- 🚨 **O grupo `OR` da busca ampliada é PARENTIZADO, e isso é a allowlist** (`montarCql`). Em
+  CQL o `AND` liga mais forte que o `OR`: `space in ("GT") AND text ~ "a" OR text ~ "b"`
+  significa `(space AND a) OR b` — a segunda palavra buscaria o site **inteiro**, e `RN-06`
+  teria sido contornada pela própria consulta que a aplica, sem erro nenhum e com resultado
+  plausível na tela. Há teste de burla afirmando os parênteses **e** a ausência da forma sem
+  eles.
+- **Zero por TERMO mal formado é o TERCEIRO zero** (`D-41`). Já havia zero por configuração
+  (`buscaConfigurada`) e zero por escopo (`D-30`); "como faço isso?" não tem palavra
+  significativa nenhuma — não houve o que procurar, e isso **não** é lacuna de `RF-42`, nem na
+  auditoria (`termo_sem_palavras_significativas`, `lacunaDocumentacao: false`) nem na tabela
+  `buscas`, que é o que o mapa de T-117 de fato lê. ⚠️ Termo não pesquisável que **mesmo
+  assim** achou página continua em `buscas`: ali o valor é o `houve_clique`, o segundo sinal
+  de `RF-42`. O que não pode entrar é o par (não pesquisável, zero).
+- **Busca que reescreve o termo REGISTRA os dois lados** (`D-41`). `recurso` continua sendo o
+  que a pessoa escreveu — é ele que o mapa agrupa; `detalhe.ampliou` e `detalhe.consultado`
+  dizem o que foi de fato à Atlassian. Ampliação invisível faria a auditoria descrever uma
+  busca que não aconteceu, que é o mapa mentindo de outro jeito.
+- 🚨 **A v1 de search NÃO devolve `content.space` sem `&expand=`** (`D-42`). Todo resultado
+  saía com `espaco: ''` — os 10 itens de `?q=deploy` na staging. Não é furo de exposição (o
+  CQL já restringe por `space in (...)`), é a origem sumindo da tela. ⚠️ **O fallback lê
+  `resultGlobalContainer.displayUrl` (`/spaces/GT`), nunca o `title`** — o título é o **nome**
+  do espaço ("Gestão de Tecnologia") e a allowlist, a árvore e o `?espaco=` são todos por
+  **chave**. Nome onde se espera chave é a mesma classe de bug do `spaceId` numérico da v2:
+  funciona na tela e nega tudo no resto.
 - **`livesearch` é o único bloco dinâmico que virou funcional** (`D-30`), e a razão é que
   ele não é um **resultado** — é uma caixa de busca, e o app já busca. `recently-updated`,
   `listlabels` e `jira` continuam placeholder porque reproduzi-los exige refazer a consulta
@@ -971,7 +1050,18 @@ o cliente inteiro fala `servicedeskapi`, então `TASK` é inalcançável, e escr
 sem comentário público/interno, sem SLA). Há também um espaço `IA` no Confluence (2 páginas),
 que é documentação, não fila.
 
-**1027 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+🚨 **A área do solicitante NUNCA foi resolvida no app publicado** (medido em 12/08/2026, duas
+criações na staging às 12:08 e 12:21). As duas registraram
+`area_indisponivel {"motivo":"erro_de_rede","caiuNoMapa":false}`: os chamados abriram (o
+fail-open de `D-37` funciona), mas `vinculos.area` fica `null`. **Este caminho nunca rodou
+fora do fake** — até 11/08 a TeamGuide só tinha sido chamada por `curl`, de fora do Worker.
+`D-40` desfez a indistinção do rótulo (fase + classe, e o timeout pelo sinal) e pôs a sonda em
+`/api/health`; **a causa continua em aberto**, e o que a fecha é `dependencias.teamguide.detalhe`
+na staging — a tabela de leitura está no `D-40`. ⚠️ Nada foi paginado nem teve o timeout
+mexido de propósito: mudar o comportamento no mesmo movimento em que se instala o instrumento
+estraga a medição.
+
+**1073 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`

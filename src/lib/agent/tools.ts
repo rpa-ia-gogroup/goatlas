@@ -20,6 +20,7 @@ import {
 } from '../ia/prompts'
 import type { Auditoria } from '../audit'
 import type { ConfigValores } from '../config'
+import { buscarComAmpliacao } from '../confluence/busca'
 import { CONCORRENCIA_IA, mapearComLimite } from '../paralelo'
 import {
   avaliarRegra1,
@@ -78,12 +79,20 @@ export class ExecutorTools {
     config: ConfigValores,
   ): Promise<ResultadoTool> {
     try {
-      const paginas = await this.atlassian.buscarConfluence({
+      /**
+       * ⚠️ `buscarComAmpliacao`, nunca `buscarConfluence` direto (`D-41`). O tópico
+       * que o modelo extrai é uma **frase** ("processo de deploy na Gocase"), e
+       * frase inteira em `text ~` casa quase nada — o agente então afirmava que
+       * não havia documentação sobre algo documentado, que é o cenário mais caro
+       * do projeto (`D-33`).
+       */
+      const busca = await buscarComAmpliacao(this.atlassian, {
         termo: topico,
         espacosPermitidos: config.espacos_confluence,
         labelsBloqueadas: config.labels_bloqueadas,
         limite: 5,
       })
+      const paginas = busca.paginas
 
       const veredito = avaliarRegra1(paginas, config.regra1_threshold_score)
       await this.auditoria.registrar({
@@ -91,12 +100,20 @@ export class ExecutorTools {
         acao: 'busca_confluence',
         recurso: topico,
         resultado: 'sucesso',
-        detalhe: { encontradas: paginas.length, bloqueou: veredito.bloquear },
+        // `recurso` é o que a pessoa (ou o modelo) pediu; `consultado` é o que de
+        // fato foi à Atlassian. Sem os dois lados, ampliação silenciosa faria a
+        // auditoria e o mapa de lacunas contarem histórias diferentes.
+        detalhe: {
+          encontradas: paginas.length,
+          bloqueou: veredito.bloquear,
+          ampliou: busca.ampliou,
+          ...(busca.ampliou ? { consultado: busca.palavras.join(' ') } : {}),
+        },
       })
 
       // Busca sem resultado útil é o mapa das lacunas de documentação (RF-42).
       if (paginas.length === 0) {
-        await this.registrarBuscaSemResultado(atorEmail, topico)
+        await this.registrarBuscaSemResultado(atorEmail, topico, busca.palavras)
       }
 
       return {
@@ -275,14 +292,29 @@ export class ExecutorTools {
     }
   }
 
-  /** RF-42 — busca sem resultado útil é backlog de documentação. */
-  private async registrarBuscaSemResultado(atorEmail: string, topico: string): Promise<void> {
+  /**
+   * RF-42 — busca sem resultado útil é backlog de documentação.
+   *
+   * ⚠️ **Menos o zero que veio de termo sem palavra significativa** (`D-41`). "Como
+   * faço isso?" não deixou de ser documentado: não houve o que procurar. É o
+   * terceiro zero da família de `buscaConfigurada` (zero por configuração) e do
+   * escopo vazio de `D-30` (zero por escopo) — e registrá-lo como lacuna mandaria
+   * alguém escrever uma página para uma frase, não para um assunto.
+   */
+  private async registrarBuscaSemResultado(
+    atorEmail: string,
+    topico: string,
+    palavras: readonly string[],
+  ): Promise<void> {
+    const pesquisavel = palavras.length > 0
     await this.auditoria.registrar({
       atorEmail,
       acao: 'busca_confluence',
       recurso: topico,
       resultado: 'falha',
-      detalhe: { motivo: 'sem_resultado_util', lacunaDocumentacao: true },
+      detalhe: pesquisavel
+        ? { motivo: 'sem_resultado_util', lacunaDocumentacao: true }
+        : { motivo: 'termo_sem_palavras_significativas', lacunaDocumentacao: false },
     })
   }
 }
