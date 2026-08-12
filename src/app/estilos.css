@@ -1513,10 +1513,77 @@
   outline: 3px solid var(--go-blue);
   outline-offset: 2px;
 }
+/* O campo do DETALHE (`RF-34`) desabilita durante o envio — o da criação nunca desabilita.
+   Sem esta regra o `label` continuaria com cara de botão vivo enquanto o clique não faz
+   nada: estado que só o cursor denuncia é estado invisível. */
+.entrada-arquivo:disabled + .rotulo-arquivo {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .lista-anexos {
   margin: 0;
   padding-left: var(--space-5);
   font-size: var(--fs-small);
+}
+
+/* Arquivos que JÁ estão no chamado (T-084 / RF-31).
+   Deliberadamente diferente da `.lista-anexos` acima: aquela é a seleção do envio — nomes
+   que a pessoa acabou de escolher e ainda pode trocar —, esta é o registro do que o
+   chamado tem. Lista de ação × lista de registro; desenhá-las iguais faria as duas
+   parecerem a mesma coisa, logo acima e logo abaixo do mesmo botão. */
+.arquivos-do-chamado {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.arquivos-do-chamado .arquivo {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--go-white);
+  color: var(--go-text-primary);
+  text-decoration: none;
+  /* A espinha lime é a mesma da leitura de documentação — aqui ela nasce transparente e
+     aparece no hover/foco: o realce é do item apontado, não decoração fixa de todos. */
+  border-left: 3px solid transparent;
+}
+.arquivos-do-chamado .arquivo-nome {
+  font-weight: var(--fw-semibold);
+  /* Nome de arquivo é longo e não tem espaço para quebrar: sem isto ele estoura o cartão
+     no celular. */
+  overflow-wrap: anywhere;
+}
+.arquivos-do-chamado .dica {
+  grid-column: 1;
+}
+.arquivos-do-chamado .arquivo-seta {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  font-size: 1.125rem;
+  color: var(--go-blue);
+}
+.arquivos-do-chamado .arquivo:hover {
+  border-left-color: var(--go-lime);
+  background: var(--go-light-blue);
+}
+/* Foco visível é piso de a11y (regra 9) — e aqui ele precisa ser o mesmo realce do
+   hover MAIS o anel, porque a lista inteira é feita de links vizinhos. */
+.arquivos-do-chamado .arquivo:focus-visible {
+  border-left-color: var(--go-lime);
+  background: var(--go-light-blue);
+  outline: 2px solid var(--go-blue);
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .arquivos-do-chamado .arquivo {
+    min-height: 56px;
+  }
 }
 
 /* Cartões de rádio — nasceram na escolha de canal (T-224) e servem à declaração de anexo

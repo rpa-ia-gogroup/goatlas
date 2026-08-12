@@ -19,7 +19,7 @@
  * changelog antes de fixar novos endpoints v1.
  */
 
-import { prefixarAutoria, filtrarPublicos, montarQueryComentarios } from './comentarios'
+import { anexoDaApi, prefixarAutoria, filtrarPublicos, montarQueryComentarios } from './comentarios'
 import { CacheTtl, TransporteAtlassian, type OpcoesHttp } from './http'
 import { CONCORRENCIA_ATLASSIAN, mapearComLimite } from '../paralelo'
 import { normalizarSchema, type CampoDoSchema } from './schema-diagnostico'
@@ -32,6 +32,7 @@ import {
   ErroAtlassian,
   MAX_ANEXO_BYTES,
   SLA_PRIMEIRA_RESPOSTA_HORAS,
+  type AnexoDoChamado,
   type BuscaConfluenceParams,
   type CampoRequestType,
   type Chamado,
@@ -94,6 +95,15 @@ export interface OpcoesCliente extends OpcoesHttp {
    */
   readonly caches?: CachesAtlassian
 }
+
+/**
+ * Teto de anexos lidos por chamado (`RF-31`).
+ *
+ * Não é preferência: sem `limit` explícito quem escolhe o tamanho da resposta é a
+ * Atlassian, e a lista chega inteira à memória de um Worker de 128 MB. Cinquenta arquivos
+ * num chamado já é caso extremo; passar disso é histórico de anexo, não leitura de tela.
+ */
+const MAX_ANEXOS_LISTADOS = 50
 
 /**
  * Escapa valor para dentro de string CQL.
@@ -658,12 +668,116 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     }
   }
 
-  /** RF-32 / RN-05 — as duas camadas. Ver `comentarios.ts` para o porquê. */
+  /**
+   * RF-32 / RN-05 — as duas camadas. Ver `comentarios.ts` para o porquê.
+   *
+   * A expansão `attachment` (`RF-31`, `D-45`) é **tentada**, não exigida: ela é a prova de
+   * publicidade dos anexos, e ninguém verificou contra a Atlassian real se este endpoint a
+   * aceita. Um `expand` recusado com 4xx derrubaria a conversa inteira do chamado — P0
+   * funcionando hoje — para servir a um requisito diferente. Por isso a recusa
+   * **definitiva** faz uma segunda tentativa sem a expansão, e o resultado sai com
+   * `anexos: null`, que a camada de cima traduz em "não conseguimos confirmar os anexos".
+   *
+   * ⚠️ Falha **transitória** (503/429) não faz retentativa aqui: quem lida com isso é o
+   * backoff do transporte, e insistir com outra query esconderia uma queda como se fosse
+   * incompatibilidade de contrato.
+   */
   async listarComentariosPublicos(issueKey: string): Promise<readonly ComentarioPublico[]> {
+    const url = (comAnexos: boolean) =>
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/comment${montarQueryComentarios(comAnexos)}`
+    try {
+      const dados = (await this.transporte.requisitar(url(true))) as { values?: unknown[] }
+      return filtrarPublicos(dados?.values ?? [])
+    } catch (erro) {
+      if (!(erro instanceof ErroAtlassian) || erro.detalhe.transitorio) throw erro
+      const dados = (await this.transporte.requisitar(url(false))) as { values?: unknown[] }
+      return filtrarPublicos(dados?.values ?? [])
+    }
+  }
+
+  /**
+   * `RF-31` — a testemunha de que o anexo existe. Ver `tickets/anexos-do-chamado.ts`
+   * para por que ela **não** é a lista que a pessoa vê.
+   *
+   * O teto de itens é o mesmo raciocínio do resto: lista sem limite é a Atlassian
+   * decidindo quanta memória o Worker usa.
+   */
+  async listarAnexosDoChamado(issueKey: string): Promise<readonly AnexoDoChamado[]> {
     const dados = (await this.transporte.requisitar(
-      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/comment${montarQueryComentarios()}`,
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/attachment?start=0&limit=${MAX_ANEXOS_LISTADOS}`,
     )) as { values?: unknown[] }
-    return filtrarPublicos(dados?.values ?? [])
+    return (dados?.values ?? [])
+      .map(anexoDaApi)
+      .filter((a): a is AnexoDoChamado => a !== null)
+  }
+
+  /**
+   * `RF-31`/`RNF-02` — bytes de um anexo do chamado, pelo mesmo desenho de `obterAnexo`
+   * (Confluence):
+   *
+   * 1. **O nome é casado contra a lista daquele chamado.** Não existe baixar por caminho:
+   *    o caminho vem da URL, e um caminho montado à mão alcançaria anexo de outro chamado.
+   * 2. **O link de conteúdo só é aceito no próprio site.** Ele vem da Atlassian; absoluto
+   *    para outro host, faria o app buscar **com a credencial** onde a resposta mandasse.
+   */
+  async obterAnexoDoChamado(issueKey: string, nomeArquivo: string): Promise<ResultadoAnexo> {
+    if (!issueKey || !nomeArquivo) return { estado: 'nao_encontrado' }
+
+    const dados = (await this.transporte.requisitar(
+      `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/attachment?start=0&limit=${MAX_ANEXOS_LISTADOS}`,
+    )) as { values?: { filename?: unknown; mimeType?: unknown; size?: unknown; _links?: unknown }[] }
+
+    const achado = (dados?.values ?? []).find((a) => String(a.filename ?? '') === nomeArquivo)
+    if (!achado) return { estado: 'nao_encontrado' }
+
+    const tamanho = Number((achado as { size?: unknown }).size ?? 0)
+    if (Number.isFinite(tamanho) && tamanho > MAX_ANEXO_BYTES) {
+      return { estado: 'grande_demais', tamanhoBytes: tamanho }
+    }
+
+    const caminho = this.caminhoDeConteudo(achado._links)
+    if (caminho === null) return { estado: 'nao_encontrado' }
+
+    const baixado = await this.transporte.requisitarBinario(caminho, MAX_ANEXO_BYTES)
+    if (baixado.estado === 'grande_demais') return baixado
+
+    return {
+      estado: 'ok',
+      anexo: {
+        nomeArquivo,
+        tipoDeclarado:
+          baixado.tipoDeclarado ??
+          (typeof achado.mimeType === 'string' ? achado.mimeType : null),
+        bytes: baixado.bytes,
+      },
+    }
+  }
+
+  /**
+   * `_links.content` → caminho **relativo à base**, ou `null`.
+   *
+   * O JSM devolve URL absoluta aqui (ao contrário da v2 do Confluence, que devolve
+   * caminho). Aceitar a absoluta como veio faria o transporte concatenar base + URL e
+   * produzir lixo; aceitar host diferente seria pedir bytes, com a credencial, ao lugar
+   * que a resposta escolhesse. Então: mesmo host que a base, ou nada.
+   */
+  private caminhoDeConteudo(links: unknown): string | null {
+    if (!links || typeof links !== 'object') return null
+    const bruto = (links as { content?: unknown }).content
+    if (typeof bruto !== 'string' || bruto === '') return null
+
+    if (bruto.startsWith('/') && !bruto.startsWith('//')) return bruto
+
+    let alvo: URL
+    let base: URL
+    try {
+      alvo = new URL(bruto)
+      base = new URL(this.opcoes.baseUrl)
+    } catch {
+      return null
+    }
+    if (alvo.origin !== base.origin) return null
+    return `${alvo.pathname}${alvo.search}`
   }
 
   async comentar(issueKey: string, corpo: string, autorEmail: string, autorNome?: string): Promise<void> {

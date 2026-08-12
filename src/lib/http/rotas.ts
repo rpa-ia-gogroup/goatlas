@@ -776,6 +776,21 @@ async function rotear(
     } catch {
       comentariosIndisponiveis = true
     }
+    /**
+     * `RF-31` — os anexos. **Uma** ida a mais à Atlassian por abertura de tela, e ela é a
+     * testemunha de existência; a prova de publicidade sai dos comentários que já vieram
+     * (`D-45`), sem chamada nova.
+     *
+     * ⚠️ Não dá para paralelizar com os comentários: esta chamada **consome** o resultado
+     * deles. Cruzar as duas fontes é o que impede o anexo de um comentário interno de
+     * chegar à tela da pessoa (`RN-05`), e uma corrida entre elas trocaria a trava por
+     * uma economia de algumas centenas de milissegundos.
+     */
+    const anexos = await ctx.chamados.listarAnexosDoSolicitante(
+      detalhe[1]!,
+      eu.email,
+      comentariosIndisponiveis ? null : comentarios,
+    )
     return json({
       chamado: r.chamado,
       via: r.vinculo.via,
@@ -786,11 +801,16 @@ async function rotear(
       // `D-13`. Devolver o cru daqui obrigaria a tela a remontar a regra, e duas
       // regras para o mesmo fato divergem em silêncio.
       comentarios: paraExibicao(comentarios ?? []),
+      // `RF-31` — o que a pessoa anexou, para ela poder ver de novo. Cada item traz a URL
+      // **deste app** (`RNF-02`): o navegador nunca fala com a Atlassian.
+      anexos: anexos?.itens ?? [],
       // `RNF-19` — a tela precisa distinguir "não há resposta ainda" de "não consegui
       // buscar as respostas". Sem estes campos, uma queda do Jira apareceria como um
-      // chamado sem histórico, o que é uma informação falsa.
+      // chamado sem histórico, o que é uma informação falsa. O mesmo vale, palavra por
+      // palavra, para os anexos.
       degradado: r.degradado,
       comentariosIndisponiveis,
+      anexosIndisponiveis: anexos?.indisponivel ?? true,
     })
   }
 
@@ -1030,6 +1050,105 @@ async function rotear(
       detalhe: { quantidade: enviados.length },
     })
     return json({ ok: true, enviados }, 201)
+  }
+
+  // --- anexo do chamado, de volta para quem mandou (RF-31, T-084) ------------
+  //
+  // ## O que esta rota é
+  //
+  // O par de leitura do `POST` acima, pelo mesmo motivo do proxy do Confluence
+  // (`RNF-02`): o navegador não tem credencial e não fala com a Atlassian, então o app
+  // rebusca os bytes e os re-serve com o `Content-Type` que **ele** afirma (`D-11`).
+  //
+  // ## O que muda em relação ao proxy do Confluence
+  //
+  // Lá a autorização é a exposição da página (`RN-06`); aqui o arquivo é de **uma
+  // pessoa**, e valem duas condições, nesta ordem:
+  //
+  // 1. **O chamado é dela** — vínculo com o e-mail no `WHERE` (`RF-30`). Sem vínculo,
+  //    404, nunca 403: "existe, mas não é seu" já é informação sobre o chamado alheio.
+  // 2. **O anexo é público** — a interseção de `D-45`. Nome que não está na lista
+  //    autorizada responde a **mesma** 404 (`D-12`): motivo diferente por resposta
+  //    diferente transformaria a rota em oráculo sobre o anexo interno do chamado.
+  //
+  // ⚠️ **Decidir vem antes de pedir bytes**, como em `confluence/acesso.ts`. Baixar
+  // primeiro e filtrar depois funciona hoje e vaza no dia em que um caminho esquecer o
+  // filtro — e aqui o conteúdo já estaria na memória do app quando a decisão fosse
+  // tomada.
+  const baixarAnexo = caminho.match(/^\/api\/chamados\/([^/]+)\/anexos\/(.+)$/)
+  if (baixarAnexo && req.method === 'GET') {
+    const issueKey = decodificar(baixarAnexo[1]!)
+    const nome = decodificar(baixarAnexo[2]!)
+
+    const negar = async (motivo: string, resposta: Response) => {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'anexo_servido',
+        recurso: issueKey ?? '',
+        resultado: motivo === 'indisponivel' ? 'falha' : 'negado',
+        // O NOME do arquivo não vai para a auditoria: ele é conteúdo do chamado de
+        // alguém, e o admin lê esta tabela (mesmo raciocínio do destino em `RF-45`).
+        detalhe: { motivo },
+      })
+      return resposta
+    }
+
+    if (issueKey === null || nome === null) return await negar('id_invalido', ERROS.naoEncontrado())
+
+    let comentarios: Awaited<ReturnType<typeof ctx.chamados.listarComentariosDoSolicitante>>
+    try {
+      comentarios = await ctx.chamados.listarComentariosDoSolicitante(issueKey, eu.email)
+    } catch {
+      // Sem os comentários não há prova de publicidade — e ausência de prova nunca vira
+      // permissão. Indisponível é 503, não 404: o anexo existe, só não deu para autorizar.
+      return await negar('indisponivel', ERROS.conteudoIndisponivel())
+    }
+    if (comentarios === null) return await negar('sem_vinculo', ERROS.chamadoNaoSeu())
+
+    const anexos = await ctx.chamados.listarAnexosDoSolicitante(issueKey, eu.email, comentarios)
+    if (anexos === null) return await negar('sem_vinculo', ERROS.chamadoNaoSeu())
+    if (anexos.indisponivel) return await negar('indisponivel', ERROS.conteudoIndisponivel())
+    if (!anexos.itens.some((a) => a.nomeArquivo === nome)) {
+      // Não está na lista que a pessoa vê: pode ser inexistente, pode ser interno. A
+      // resposta é a mesma, e o motivo fica só na auditoria.
+      return await negar('anexo_nao_autorizado', ERROS.naoEncontrado())
+    }
+
+    let resultado
+    try {
+      resultado = await ctx.atlassian.obterAnexoDoChamado(issueKey, nome)
+    } catch {
+      return await negar('indisponivel', ERROS.conteudoIndisponivel())
+    }
+    if (resultado.estado === 'nao_encontrado') {
+      return await negar('anexo_nao_encontrado', ERROS.naoEncontrado())
+    }
+    if (resultado.estado === 'grande_demais') {
+      return await negar('anexo_grande_demais', ERROS.anexoGrandeDemais())
+    }
+
+    // ⚠️ O tipo declarado pela Atlassian NÃO é repassado — quem decide é `decidirEntrega`
+    // (`D-11`), a mesma função do proxy do Confluence: allowlist de tipos exibíveis,
+    // `image/svg+xml` fora, `nosniff` e CSP `sandbox` no resto.
+    const entrega = decidirEntrega(resultado.anexo.tipoDeclarado)
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'anexo_servido',
+      recurso: issueKey,
+      resultado: 'sucesso',
+      detalhe: { tipoServido: entrega.contentType, disposicao: entrega.disposicao },
+    })
+    return new Response(resultado.anexo.bytes, {
+      status: 200,
+      headers: {
+        ...CABECALHOS_ANEXO,
+        'Content-Type': entrega.contentType,
+        'Content-Disposition': cabecalhoContentDisposition(
+          resultado.anexo.nomeArquivo,
+          entrega.disposicao,
+        ),
+      },
+    })
   }
 
   // --- resolver / reabrir (RF-36, T-242) -------------------------------------

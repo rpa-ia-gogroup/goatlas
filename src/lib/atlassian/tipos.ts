@@ -83,6 +83,25 @@ export interface Chamado {
 }
 
 /**
+ * Um anexo **do chamado** (JSM), como a Atlassian o descreve — `RF-31`.
+ *
+ * ⚠️ Não confundir com `AnexoConfluence`: lá o objeto já carrega os **bytes**, porque o
+ * proxy do Confluence resolve conteúdo; aqui é só descrição. Trazer bytes de todos os
+ * anexos para montar uma lista seria baixar megabytes que ninguém pediu.
+ *
+ * `tamanhoBytes`/`criadoEm` são `null` quando a Atlassian não os mandou. Nulo é
+ * "não sei", nunca zero: um `0 KB` na tela é uma afirmação falsa sobre o arquivo da
+ * pessoa.
+ */
+export interface AnexoDoChamado {
+  readonly nomeArquivo: string
+  /** O que a Atlassian declarou. Nunca vira `Content-Type` sem passar por `decidirEntrega`. */
+  readonly tipoDeclarado: string | null
+  readonly tamanhoBytes: number | null
+  readonly criadoEm: string | null
+}
+
+/**
  * Comentário JÁ FILTRADO como público. A camada nunca devolve comentário interno
  * para cima — ver `listarComentariosPublicos` (RF-32, RN-05).
  */
@@ -91,6 +110,17 @@ export interface ComentarioPublico {
   readonly corpo: string
   readonly autorNome: string
   readonly criadoEm: string
+  /**
+   * Anexos **carregados por este comentário público** — a prova de publicidade de
+   * `RF-31` (`D-45`).
+   *
+   * 🚨 **`null` NÃO é "nenhum anexo": é "não deu para saber".** A lista só vem quando a
+   * resposta traz a expansão `attachment`; sem ela, tratar como lista vazia diria "este
+   * chamado não tem anexos" sobre um chamado que tem — a frase oposta à verdade, que faz
+   * a pessoa mandar o print de novo. Quem transforma isso em `anexosIndisponiveis` é
+   * `tickets/anexos-do-chamado.ts`.
+   */
+  readonly anexos: readonly AnexoDoChamado[] | null
 }
 
 export interface PaginaConfluence {
@@ -334,6 +364,37 @@ export interface ClienteAtlassian {
    * item — defesa em profundidade, duas camadas dentro de uma função.
    */
   listarComentariosPublicos(issueKey: string): Promise<readonly ComentarioPublico[]>
+
+  /**
+   * Anexos que o chamado TEM — `RF-31` (`D-45`).
+   *
+   * 🚨 **Isto não é a lista que se mostra.** A documentação do JSM diz, sobre este mesmo
+   * endpoint: *"Customers will only get a list of public attachments"* — ou seja, o filtro
+   * é pelo **papel de quem pergunta**, e sob proxy total (`D-01`) quem pergunta é sempre a
+   * conta de serviço, que é agente. Um anexo posto pelo time num comentário **interno**
+   * viria aqui com HTTP 200 e nada na tela distinguindo — o vazamento de `RN-05` na
+   * versão arquivo. Quem prova publicidade é o comentário público que carrega o anexo
+   * (`ComentarioPublico.anexos`), e quem cruza os dois é `tickets/anexos-do-chamado.ts`.
+   *
+   * O papel desta chamada é o de **testemunha**: ela diz que existe anexo. Existir sem
+   * prova de publicidade não vira lista nem vira silêncio — vira "não conseguimos
+   * confirmar", que é a única frase honesta nesse estado.
+   */
+  listarAnexosDoChamado(issueKey: string): Promise<readonly AnexoDoChamado[]>
+
+  /**
+   * Bytes de UM anexo do chamado, casado por nome exato **dentro daquele chamado**
+   * — `RF-31`, `RNF-02`.
+   *
+   * Mesma trava de `obterAnexo` (Confluence): não existe "baixar anexo por caminho". O
+   * `issueKey` vem do vínculo já verificado (`RF-30`) e o nome é casado contra a lista
+   * daquele chamado — um nome montado à mão não alcança arquivo de chamado alheio.
+   *
+   * ⚠️ A autorização de **publicidade** não mora aqui: esta função entrega o que o
+   * chamado tem. Quem decide o que a pessoa pode ver é a rota, antes de chamar — a ordem
+   * é decidir → conteúdo, como em `confluence/acesso.ts`.
+   */
+  obterAnexoDoChamado(issueKey: string, nomeArquivo: string): Promise<ResultadoAnexo>
 
   /**
    * Comentário público atribuído de forma legível ao solicitante real (RF-33).

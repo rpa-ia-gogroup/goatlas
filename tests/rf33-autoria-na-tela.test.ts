@@ -111,7 +111,7 @@ describe('T-083 — o comentário do solicitante é identificado como dele', () 
     expect(ehComentarioDoSolicitante(corpo)).toBe(true)
 
     const [exibido] = paraExibicao([
-      { id: 'c1', corpo, autorNome: NOME_CONTA_DE_SERVICO_FAKE, criadoEm: AGORA },
+      { id: 'c1', corpo, autorNome: NOME_CONTA_DE_SERVICO_FAKE, criadoEm: AGORA, anexos: [] },
     ])
     expect(exibido!.doSolicitante).toBe(true)
     expect(exibido!.corpo).toBe('Segue o print.')
@@ -124,6 +124,7 @@ describe('T-083 — o comentário do solicitante é identificado como dele', () 
         corpo: prefixarAutoria('Texto da pessoa.', 'Ana Souza', ANA),
         autorNome: NOME_CONTA_DE_SERVICO_FAKE,
         criadoEm: AGORA,
+        anexos: [],
       },
     ])
     expect(exibido!.corpo).not.toMatch(/via goatlas/)
@@ -132,7 +133,7 @@ describe('T-083 — o comentário do solicitante é identificado como dele', () 
 
   it('comentário do TIME passa inteiro e não vira "seu"', () => {
     const [exibido] = paraExibicao([
-      { id: 't1', corpo: 'Já estamos olhando, Ana.', autorNome: 'Maria Lima', criadoEm: AGORA },
+      { id: 't1', corpo: 'Já estamos olhando, Ana.', autorNome: 'Maria Lima', criadoEm: AGORA, anexos: [] },
     ])
     expect(exibido!.doSolicitante).toBe(false)
     // Corpo sem prefixo volta inalterado — não há o que remover.
