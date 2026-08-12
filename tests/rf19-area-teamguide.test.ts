@@ -8,12 +8,12 @@
  * _Requirements: RF-19, RNF-18, RF-58, FR-13_
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SqliteLocal } from '@/lib/db/sqlite-local'
 import { migrar } from '@/lib/db/schema'
 import { AuditoriaBanco } from '@/lib/audit'
 import { ClienteTeamGuideFake } from '@/lib/teamguide/fake'
-import { TeamGuideIndisponivel } from '@/lib/teamguide/contrato'
+import { TeamGuideIndisponivel, type ClienteTeamGuide } from '@/lib/teamguide/contrato'
 import { ClienteTeamGuideHttp, novaCacheTeamGuide } from '@/lib/teamguide/http'
 import { resolverArea } from '@/lib/teamguide/area'
 import { obterResumoMetricas } from '@/lib/governanca/metricas'
@@ -186,6 +186,219 @@ describe('ClienteTeamGuideHttp', () => {
       estado: 'indisponivel',
       motivo: 'formato_inesperado',
     })
+  })
+})
+
+/**
+ * `D-40` — `erro_de_rede` era o fim da linha.
+ *
+ * O que estes casos protegem: as **três** causas que aquele rótulo único cobria são
+ * distinguíveis, e o timeout é decidido pelo **sinal**, não pelo nome do erro. Nenhum
+ * deles afirma sobre a mensagem: o que sai da camada são rótulos (`RNF-01`, `RNF-30`).
+ *
+ * _Requirements: RF-19, RF-58, RF-59, RNF-01, RNF-30_
+ */
+describe('D-40 — a falha diz ONDE quebrou, e o timeout é o sinal', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function clienteQue(fetchImpl: unknown): ClienteTeamGuideHttp {
+    return new ClienteTeamGuideHttp({
+      token: 'tok',
+      fetchImpl: fetchImpl as typeof fetch,
+      agoraMs: () => 1000,
+      cache: novaCacheTeamGuide(),
+    })
+  }
+
+  it('🚨 timeout NOSSO é `timeout` mesmo quando o runtime não lança `AbortError`', async () => {
+    // 🚨 É o caso que motivou o `D-40`. Abortar uma resposta cuja leitura já começou
+    // derruba a conexão, e o que sobe daí é o erro genérico de rede — não `AbortError`.
+    // Perguntar `e.name` classificaria o nosso próprio timeout como `erro_de_rede`, ou
+    // seja: a hipótese mais provável seria a única que o registro nunca acusaria.
+    const cliente = clienteQue(
+      (_u: string, init: RequestInit) =>
+        new Promise((_ok, falhar) => {
+          init.signal?.addEventListener('abort', () =>
+            falhar(new TypeError('Network connection lost.')),
+          )
+        }),
+    )
+
+    vi.useFakeTimers()
+    const emVoo = cliente.areaDe('ana@gocase.com')
+    await vi.advanceTimersByTimeAsync(8000)
+
+    expect(await emVoo).toEqual({
+      estado: 'indisponivel',
+      motivo: 'timeout',
+      fase: 'conexao',
+      classe: 'typeerror',
+    })
+  })
+
+  it('falha ANTES da Response é `conexao`; falha DEPOIS dela é `corpo`', async () => {
+    // A distinção que decide o conserto: `conexao` é "não alcancei o host"; `corpo` é
+    // "a resposta veio e se desfez no meio" — grande demais, lenta demais ou truncada.
+    const semConexao = clienteQue(() => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })
+    })
+    expect(await semConexao.areaDe('ana@gocase.com')).toEqual({
+      estado: 'indisponivel',
+      motivo: 'erro_de_rede',
+      fase: 'conexao',
+      // O `cause.code` entra porque é ele que separa "recusado" de "derrubado no meio".
+      classe: 'typeerror_econnrefused',
+    })
+
+    const corpoQuebrado = clienteQue(async () => ({
+      ok: true,
+      json: async () => {
+        throw new TypeError('Network connection lost.')
+      },
+    }))
+    expect(await corpoQuebrado.areaDe('ana@gocase.com')).toEqual({
+      estado: 'indisponivel',
+      motivo: 'erro_de_rede',
+      fase: 'corpo',
+      classe: 'typeerror',
+    })
+  })
+
+  it('corpo que não é JSON quebra em `corpo`, não em `conexao`', async () => {
+    // O caminho real (sem dublê de `Response`): os cabeçalhos chegaram, o corpo não presta.
+    const cliente = clienteQue(async () => new Response('<html>erro</html>', { status: 200 }))
+    const r = await cliente.areaDe('ana@gocase.com')
+    expect(r).toMatchObject({ estado: 'indisponivel', motivo: 'erro_de_rede', fase: 'corpo' })
+  })
+
+  it('falha que NÃO veio da nossa chamada é `promessa` — a hipótese da cache entre requisições', async () => {
+    // ⚠️ A cache do módulo guarda a **promessa**, não o valor: uma requisição pode acabar
+    // esperando a leitura iniciada por **outra**, e a plataforma proíbe I/O entre contextos
+    // de requisição. Sem esta fase, esse caso é indistinguível de "o host caiu".
+    const cache = novaCacheTeamGuide()
+    cache.em = 1000
+    cache.promessa = Promise.reject(
+      new Error('Cannot perform I/O on behalf of a different request.'),
+    )
+    cache.promessa.catch(() => {}) // não deixa a rejeição escapar antes da hora
+
+    const cliente = new ClienteTeamGuideHttp({
+      token: 'tok',
+      fetchImpl: (() => {
+        throw new Error('não deveria ir à rede: a promessa cacheada é que falha')
+      }) as unknown as typeof fetch,
+      agoraMs: () => 1000,
+      cache,
+    })
+    expect(await cliente.areaDe('ana@gocase.com')).toEqual({
+      estado: 'indisponivel',
+      motivo: 'erro_de_rede',
+      fase: 'promessa',
+      classe: 'error',
+    })
+  })
+
+  it('🚨 `classe` é RÓTULO: nunca a mensagem, mesmo quando ela carrega dado de gente', async () => {
+    const cliente = clienteQue(() => {
+      throw Object.assign(
+        new TypeError('falha ao ler ana.silva@gocase.com da base, token Bearer abc123'),
+        { cause: { code: 'A'.repeat(200) } },
+      )
+    })
+    const r = await cliente.areaDe('ana@gocase.com')
+    const texto = JSON.stringify(r)
+
+    expect(texto).not.toContain('ana.silva@gocase.com')
+    expect(texto).not.toContain('abc123')
+    // Charset fechado e teto de tamanho: "isto é rótulo, não frase" por construção.
+    expect((r as { classe: string }).classe).toMatch(/^[a-z0-9_]+$/)
+    expect((r as { classe: string }).classe.length).toBeLessThan(60)
+  })
+
+  it('motivo que se explica sozinho NÃO ganha `fase` nem `classe`', async () => {
+    // A invariante: os campos novos existem só onde `motivo` não diz nada. Espalhá-los por
+    // toda falha encheria a auditoria de ruído e faria o sinal parar de saltar aos olhos.
+    const cliente = clienteQue(async () => new Response('x', { status: 401 }))
+    expect(await cliente.areaDe('ana@gocase.com')).toEqual({
+      estado: 'indisponivel',
+      motivo: 'http_401',
+    })
+  })
+
+  it('a sonda de `RF-59` usa o MESMO caminho e a MESMA cache da abertura de chamado', async () => {
+    // ⚠️ Sonda que exercita outro caminho responde sobre o caminho que ninguém usa.
+    let leituras = 0
+    const cliente = clienteQue(async () => {
+      leituras++
+      return new Response(JSON.stringify([{ contactEmail: 'ana@gocase.com', teams: ['RPA'] }]), {
+        status: 200,
+      })
+    })
+    expect(await cliente.verificarSaude()).toEqual({ ok: true, detalhe: 'ok' })
+    await cliente.areaDe('ana@gocase.com')
+    expect(leituras).toBe(1)
+  })
+
+  it('a sonda relata a falha inteira em uma linha, só com rótulos', async () => {
+    const cliente = clienteQue(() => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } })
+    })
+    expect(await cliente.verificarSaude()).toEqual({
+      ok: false,
+      detalhe: 'erro_de_rede · conexao · typeerror_enotfound',
+    })
+  })
+})
+
+describe('D-40 — a auditoria ganha a pista, e continua com DUAS ações', () => {
+  /** Dublê mínimo: o `ClienteTeamGuideFake` não encena `fase`/`classe` de propósito. */
+  const fonteQueCaiuNoCorpo: ClienteTeamGuide = {
+    async areaDe() {
+      return { estado: 'indisponivel', motivo: 'erro_de_rede', fase: 'corpo', classe: 'typeerror' }
+    },
+    async verificarSaude() {
+      return { ok: false, detalhe: 'erro_de_rede · corpo · typeerror' }
+    },
+  }
+
+  it('`fase` e `classe` entram no detalhe de `area_indisponivel`', async () => {
+    await resolverArea({
+      email: ANA,
+      teamguide: fonteQueCaiuNoCorpo,
+      areasPorEmail: {},
+      auditoria,
+    })
+    const registro = (await auditoria.listarRecentes(5))[0]!
+    expect(registro.acao).toBe('area_indisponivel')
+    expect(JSON.parse(registro.detalhe_json!)).toEqual({
+      motivo: 'erro_de_rede',
+      fase: 'corpo',
+      classe: 'typeerror',
+      caiuNoMapa: false,
+    })
+  })
+
+  it('🚨 continuam sendo DUAS ações — a pista não virou uma terceira', async () => {
+    await resolverArea({ email: ANA, teamguide: fonteQueCaiuNoCorpo, areasPorEmail: {}, auditoria })
+    await resolverArea({
+      email: ANA,
+      teamguide: new ClienteTeamGuideFake(),
+      areasPorEmail: {},
+      auditoria,
+    })
+    expect(new Set(await acoesAuditadas())).toEqual(
+      new Set(['area_indisponivel', 'area_nao_encontrada']),
+    )
+  })
+
+  it('sem `fase`, o detalhe fica exatamente como era — nada de `null` sugerindo incerteza', async () => {
+    const fonte = new ClienteTeamGuideFake()
+    fonte.falha = 'http_401'
+    await resolverArea({ email: ANA, teamguide: fonte, areasPorEmail: { [ANA]: 'X' }, auditoria })
+    const registro = (await auditoria.listarRecentes(5))[0]!
+    expect(JSON.parse(registro.detalhe_json!)).toEqual({ motivo: 'http_401', caiuNoMapa: true })
   })
 })
 

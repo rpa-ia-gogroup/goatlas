@@ -30,4 +30,14 @@ export class ClienteTeamGuideFake implements ClienteTeamGuide {
     const area = this.areas.get(email.trim().toLowerCase())
     return area ? { estado: 'encontrada', area } : { estado: 'nao_encontrada' }
   }
+
+  /**
+   * ⚠️ O dublê **não** encena `fase`/`classe` (`D-40`), e isso é de propósito: elas nascem
+   * de como o runtime quebra, e um roteiro que as inventasse afirmaria sobre um mecanismo
+   * que só existe em `http.ts`. Quem encena classe de falha é a injeção de `fetchImpl` —
+   * era um dublê complacente que escondeu o `D-38`.
+   */
+  async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {
+    return this.falha ? { ok: false, detalhe: this.falha } : { ok: true, detalhe: 'ok' }
+  }
 }
