@@ -42,8 +42,13 @@ Teste antes do código em toda tarefa que muda comportamento (`Princípio III`).
 - [x] **T-511** — Teste estrutural: a tela **não escreve `customfield_`**, importa o mapa
       compartilhado, e o grupo não é `readOnly`/`disabled`. ⚠️ O que se protege é
       divergência silenciosa entre tela e servidor, não aparência. _Requirements: RF-27_
-- [ ] **T-511b** — A tela da **conversa** (`RF-17`) não mostra esses campos, porque a rota
+- [x] **T-511b** — A tela da **conversa** (`RF-17`) não mostra esses campos, porque a rota
       dela ainda não os envia (ver `T-505`). Os dois caminhos precisam coincidir.
+      ✅ **Já estava pronta — conferido em 12/08/2026 (`D-57`).** `telas.tsx` carrega
+      `api.camposDoTipo` no cartão de confirmação, separa campos do solicitante dos comuns,
+      renderiza os dois grupos e envia `camposDinamicos` em `api.confirmar`; a rota os
+      traduz com `paraValoresDoJira` (`D-39`). ⚠️ É `D-47` na direção oposta: o board dizia
+      aberto e o código estava feito.
 
 ## Fase 3 — área via TeamGuide (precisa de `TG_API_TOKEN`)
 

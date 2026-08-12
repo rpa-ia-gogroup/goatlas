@@ -964,6 +964,22 @@ destes reabre um vazamento que já foi fechado.
   todo o resto. É a diferença entre "não sei desenhar esta moldura" (a moldura se perde, o
   texto aparece) e "não posso mostrar este conteúdo". O `anotar` continua acontecendo: a
   auditoria de `RF-43` é o que diz qual macro vale implementar de verdade um dia.
+- 🚨 **Anexo que não é imagem também é link, e o `ri:page` dele mora no PAI** (`D-57`,
+  `T-142`). `converterAcLink` tratava só `ri:page` e `ri:url`: link para PDF ou planilha
+  anexada virava **texto puro**, sem link e sem nada dizendo que havia arquivo ali — a
+  degradação silenciosa que `RF-43` proíbe para macro. ⚠️ E `ri:attachment` aceita
+  `ri:page`/`ri:space` (arquivo **de outra página**), que o proxy não tem como servir: usar o
+  nome assim entregaria o homônimo **desta** página. ⚠️ **`ri:attachment` está na lista de
+  tags void**, então o `ri:page` do storage não vira filho — vira **irmão**. Procurá-lo
+  dentro do `ri:attachment` produz uma checagem que nunca reprova, o defeito que o `spaceId`
+  numérico já causou em `RN-06`. Em `ac:link` o ramo de `ri:page` **já resolvia melhor**
+  (manda para a página que tem o arquivo); em `ac:image` a imagem sumia calada, e agora o
+  `alt` vira texto.
+- ⚠️ **Teste de latência que mede MILISSEGUNDOS é flake, e o `CLAUDE.md` já dizia isso**
+  (`D-57`). O caso "metadados em paralelo" afirmava `< 45 ms` e falhava sozinho em máquina
+  carregada (50 e 106 medidos em 12/08). Virou **pico de requisições em voo** — 1 em série,
+  2 em paralelo. Mesma afirmação, sem relógio. Vermelho que não fala do código treina o time
+  a ignorar a suíte inteira.
 - **`children`/`pagetree` apontam para a lista que a leitura JÁ mostra** (T-115) em vez de
   dizer "não há o que trazer" — o conteúdo está na tela, alguns centímetros abaixo, com a
   verificação de restrição por item que `RN-06` exige.
@@ -1303,10 +1319,11 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1254 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1263 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
-relação com o código sob teste.
+relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em
+`D-57`: virou pico de requisições em voo.
 ⚠️ **Teste verde não é cobertura** (`D-47`, 12/08): a auditoria requisito→código mexeu em
 **dezessete** tarefas cujo board divergia do que o código faz, com a suíte inteira verde —
 porque nenhum achado é comportamento *errado*, é comportamento **ausente**, e teste ausente
@@ -1437,9 +1454,9 @@ espaço `TECH` que circulava **nunca existiu**.
 |---|---|---|
 | ~~Escolher o canal (**Q11**)~~ | — | ✅ **FECHADA em `D-56`: `nenhum`** — e `nenhum` não é "sem aviso": a aba Avisos lista inclusive as `suprimidas`. Chat vaza (`RF-30`); e-mail exige secret |
 | ~~Lista do piloto (**Q13**)~~ | — | ✅ **FECHADA em `D-56`: piloto desligado.** Ligar é um campo, sem deploy |
-| `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY`, `GODEPLOY_CRON_KEY`, `GOATLAS_WEBHOOK_SEGREDO` | João | Secrets. Cada ausência silencia uma parte, todas fail-closed — ver `docs/DEPLOY.md` |
+| ~~Secrets~~ | — | ✅ **Conferido em 12/08 por `listAppSecrets`: prod tem todos**, menos `GOATLAS_WEBHOOK_SEGREDO` — inócuo, porque o edge bloqueia o webhook de qualquer forma |
 | Registrar o webhook no Jira | time de tech | Opcional: o polling notifica sozinho, com atraso de uma janela de cron |
-| Baseline de assentos (Fase 0) | João | Sem ele a tela diz "sem baseline" em vez de comparar contra zero |
+| ~~Baseline de assentos~~ | — | ✂️ **Cortado em `D-57`:** só se pagaria para reportar "cortamos N assentos", e o controle vivo está na Atlassian. O **inventário** fica — ele diz *quem* está parado |
 | **T-235** — distinguir "defletido e resolveu" de "desistiu e foi pro chat" | Produto | Mitigado, não resolvido: o painel devolve `deflexaoResolvidaConhecida: false` e trata o número como **teto** |
 | Destino do alerta de SLA | Produto | Hoje vai ao solicitante, o único destino que o app conhece. Outro destinatário é uma linha na mesma função |
 | **O request type expõe campo de anexo?** (era `T-425` da spec 005) | time de tech | Verificação de go-live, não código: sem o campo o anexo na criação fica **dormente** e cai em `SC-05` sem quebrar nada; com ele funciona sem uma linha a mudar. Só se confirma observando o envio real, o que exige desligar `GOATLAS_SOMENTE_LEITURA` (`D-24`) |

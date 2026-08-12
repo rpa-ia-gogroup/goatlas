@@ -3330,6 +3330,69 @@ alguém é a chave do provedor de e-mail e os nomes de quem entraria num piloto.
 
 ---
 
+### D-57 · O anexo que não era imagem sumia da página, e a pendência do João saiu da lista
+
+**Data:** 12/08/2026 · **Origem:** `T-142`, `T-511b` · **Contexto:** `RF-39`, `RF-43`,
+`RN-06`, `RNF-02`, Q13
+
+#### O link de anexo (`T-142`)
+
+`RF-39` pede fidelidade em "títulos, listas, tabelas, código, imagens **e anexos servidos
+pelo proxy**". Os cinco primeiros estavam cobertos; o sexto valia **só para imagem**:
+`ri:attachment` era reconhecido dentro de `ac:image`, mas `converterAcLink` tratava apenas
+`ri:page` e `ri:url`. Link para PDF ou planilha anexada caía no `return corpo` e virava
+**texto puro** — sem link e sem nada dizendo que havia um arquivo ali. É a degradação
+silenciosa que `RF-43` proíbe para macro, na mesma tela e pelo mesmo motivo: quem lê decide
+com informação faltando **sem saber que falta**, e conclui que a documentação não serve.
+
+🚨 **A armadilha que veio junto.** `ri:attachment` aceita `ri:page`/`ri:space` — é assim que
+uma página referencia arquivo **de outra**. O proxy serve anexo da página que está sendo
+lida, então usar o nome mesmo assim entregaria um arquivo **homônimo desta página**:
+conteúdo errado com cara de certo, pior que conteúdo ausente (família de `D-42`).
+
+⚠️ **E a detecção quase nasceu no lugar errado.** `ri:attachment` está na lista de tags
+**void** deste sanitizador, então o `ri:page` do storage **não vira filho** — vira irmão,
+dentro do `ac:link`/`ac:image`. Procurar o aninhamento dentro do `ri:attachment` devolveria
+"é desta página" para todo caso: a checagem existiria e **nunca reprovaria**, exatamente o
+que `RN-06` já sofreu com o `spaceId` numérico. Quem responde é o **pai**.
+
+**O que se aprendeu medindo:** em `ac:link`, o ramo de `ri:page` já resolvia o caso e
+resolve **melhor** que qualquer texto nosso — manda a pessoa para a página que tem o
+arquivo. O fallback só é alcançado por `ri:space`. Em `ac:image` não havia ramo nenhum: a
+imagem **sumia calada**, e agora o `alt` que o autor escreveu vira texto.
+
+#### `T-511b` já estava pronto
+
+A tela da conversa carrega os campos do request type, renderiza os dois grupos e envia
+`camposDinamicos` no confirmar (`telas.tsx`, `api.confirmar`). O board é que ficou para
+trás — `D-47` de novo, na direção oposta: board diz aberto, código diz feito.
+
+#### A flake de latência
+
+`tests/latencia.test.ts` tinha um caso medindo **milissegundos** (`< 45`) para provar que
+duas requisições saem em paralelo, e ele falhava sozinho em máquina carregada (50 ms e
+106 ms, medidos hoje). O `CLAUDE.md` já dizia que teste de latência afirma sobre
+**contagem e simultaneidade** — este violava a própria regra. Agora conta o **pico de
+requisições em voo**: em série é 1, em paralelo é 2. Mesma afirmação, sem relógio.
+⚠️ Vermelho que não fala do código treina o time a ignorar a suíte inteira.
+
+#### Pendências cortadas (decisão do mantenedor, 12/08/2026)
+
+- **As 7 tarefas `[HUMANO]`** saem da lista de pendências do projeto: **nenhuma toca o
+  app**. São alinhamentos organizacionais (avisar o time de tech que o reporter muda,
+  acordar o SLA, anunciar o canal). Continuam registradas na spec 004 como trabalho de
+  rollout, não como bloqueio de engenharia.
+- **Baseline de assentos** sai: ele só se pagaria se alguém fosse reportar "cortamos N
+  assentos", e o controle vivo está na própria Atlassian. O **inventário** continua, porque
+  ele responde *quem* está parado — que a Atlassian não entrega mastigado.
+- **Reivindicar `gocase.com`** sai da lista de bloqueio, com o efeito registrado: **ler já
+  funciona** (o `users/search` devolve as 54 contas); o que ele destrava é **escrever** —
+  revogar assento responde 403 enquanto a conta não for gerenciada. Sem intenção de revogar
+  pelo app, não impacta nada.
+
+⚠️ Os três continuam **descritos** aqui: cortar da lista é decidir que ninguém está
+esperando por eles, não fingir que a limitação não existe.
+
 ### D-58 · A Definição de Pronto fechada, e o teste que a suíte jurava ter
 
 **Data:** 12/08/2026 · **Origem:** `T-097`, `T-021`, `T-093`, `T-096`, `T-321` ·
