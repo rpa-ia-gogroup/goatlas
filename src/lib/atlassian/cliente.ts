@@ -286,6 +286,13 @@ export function camposAdicionais(brutos: readonly CampoRequestTypeBruto[]): Camp
       rotulo: String(bruto.name ?? fieldId),
       obrigatorio: Boolean(bruto.required),
       tipo,
+      // ⚠️ `'selecao'` junta escolha única e múltipla — `opcoes.length > 0` é verdade
+      // nas duas. Quem as separa é `jiraSchema.type`: `array` é a Atlassian dizendo que
+      // o campo guarda **lista**, e ali o valor de criação tem de vir dentro de `[…]`.
+      // Sem esta linha, `tickets/valores-de-campo.ts` mandaria o objeto solto e o campo
+      // múltiplo continuaria devolvendo o 400 do `D-39` — o mesmo bug, num subconjunto
+      // menor de tipos, e sem nada na tela indicando.
+      multiplo: tipoBruto === 'array',
       opcoes,
     })
   }

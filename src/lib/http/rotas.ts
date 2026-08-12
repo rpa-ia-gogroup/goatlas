@@ -49,6 +49,11 @@ import {
   obrigatoriosFaltando,
 } from '../tickets/campos-obrigatorios'
 import {
+  mensagemOpcoesDesconhecidas,
+  opcoesDesconhecidas,
+  paraValoresDoJira,
+} from '../tickets/valores-de-campo'
+import {
   exigeDeclaracaoDeAnexo,
   tipoAceitaAnexo,
   validarDeclaracao,
@@ -343,6 +348,14 @@ async function rotear(
       return ERROS.dadosInvalidos(mensagemObrigatoriosFaltando(faltandoNaConversa))
     }
 
+    // `D-39` — opção fora da lista do schema dá o mesmo 400 definitivo de um obrigatório
+    // faltando, com o mesmo desfecho: chamado perdido. Recusa antes de qualquer efeito,
+    // e antes de `registrarConfirmacao`, pela razão do bloco acima.
+    const opcoesRuinsNaConversa = opcoesDesconhecidas(schema, camposDaConversa)
+    if (opcoesRuinsNaConversa.length > 0) {
+      return ERROS.dadosInvalidos(mensagemOpcoesDesconhecidas(opcoesRuinsNaConversa))
+    }
+
     await ctx.conversas.registrarConfirmacao(conversa.id)
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -378,7 +391,11 @@ async function rotear(
       //
       // ⚠️ A conversa não tem formulário dinâmico, então aqui não há valor do cliente para
       // vencer o do login (`FR-3`) — o que chega é sempre a identidade da sessão.
-      camposDaConversa,
+      //
+      // ⚠️ Traduzido para o formato do Jira **aqui**, e não no cliente (`D-39`): é este
+      // objeto que o outbox persiste, então o reprocessamento de `RNF-17` reenvia o mesmo
+      // corpo sem reler o schema.
+      paraValoresDoJira(schema, camposDaConversa),
     )
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
     const anexo = await materializarAnexosDoChamado(ctx, {
@@ -475,6 +492,19 @@ async function rotear(
       return ERROS.dadosInvalidos(mensagemObrigatoriosFaltando(faltando))
     }
 
+    // 🚨 `D-39` — mesma família da recusa acima: valor que não está entre as opções do
+    // schema é recusado pela Atlassian com 400, que este projeto trata como definitivo.
+    // Recusar aqui é a diferença entre "corrija e reenvie" e "o chamado sumiu".
+    const opcoesRuins = opcoesDesconhecidas(schema, camposComSolicitante)
+    if (opcoesRuins.length > 0) {
+      return ERROS.dadosInvalidos(mensagemOpcoesDesconhecidas(opcoesRuins))
+    }
+
+    // 🚨 A tradução para o formato do Jira vem DEPOIS das duas recusas e ANTES de
+    // persistir: campo de seleção precisa ir como objeto (`{id}`), nunca como a string
+    // crua que a tela mandou — era esse o 400 do `D-39`.
+    const camposParaOJira = paraValoresDoJira(schema, camposComSolicitante)
+
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
@@ -491,9 +521,7 @@ async function rotear(
         tipoChamadoId: validada.proposta.tipoChamadoId,
         serviceDeskId,
         prioridade: validada.proposta.prioridade,
-        ...(Object.keys(camposComSolicitante).length > 0
-          ? { camposDinamicos: camposComSolicitante }
-          : {}),
+        ...(camposParaOJira ? { camposDinamicos: camposParaOJira } : {}),
       },
     })
     const anexo = await materializarAnexosDoChamado(ctx, {

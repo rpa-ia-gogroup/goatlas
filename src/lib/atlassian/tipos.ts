@@ -49,11 +49,16 @@ export interface NovoChamado {
   readonly chaveIdempotencia: string
   /**
    * Valores dos campos ADICIONAIS do request type (RF-27, T-130) — chave é o
-   * `fieldId` do schema. Só o formulário sem IA (`D-04`) preenche isto: o fluxo
-   * conversacional não tem schema dinâmico. `undefined`/ausente = nenhum campo
-   * adicional, nunca um objeto vazio inventado.
+   * `fieldId` do schema. `undefined`/ausente = nenhum campo adicional, nunca um objeto
+   * vazio inventado.
+   *
+   * ⚠️ **`unknown`, não `string`** (`D-39`). Campo de texto vai como string, mas campo
+   * de **seleção** exige objeto (`{id}`) e seleção múltipla exige array — a string crua
+   * responde **400**, que é definitivo, e o chamado se perde (`RNF-17`). Quem traduz é
+   * `tickets/valores-de-campo.ts`, na rota, com o schema em mãos; este cliente continua
+   * burro quanto a política e só repassa o que já chegou pronto.
    */
-  readonly camposDinamicos?: Readonly<Record<string, string>>
+  readonly camposDinamicos?: Readonly<Record<string, unknown>>
 }
 
 export interface ChamadoCriado {
@@ -203,6 +208,17 @@ export interface CampoRequestType {
   readonly rotulo: string
   readonly obrigatorio: boolean
   readonly tipo: TipoCampoRequestType
+  /**
+   * O campo guarda **lista** de valores (`jiraSchema.type === 'array'`) — `D-39`.
+   *
+   * ⚠️ Não é enfeite de tipagem: é o que faz a seleção múltipla ir como `[{id}]` em vez
+   * de `{id}` na criação. `tipo` sozinho não distingue as duas (as duas têm `opcoes`),
+   * e mandar a forma errada dá **400 = definitivo = chamado perdido** (`RNF-17`).
+   *
+   * Opcional porque só a tradução do valor a usa: `undefined` é "escolha única", que é
+   * o caso comum e o que o campo era antes de existir.
+   */
+  readonly multiplo?: boolean
   /** Só populado quando `tipo === 'selecao'`. */
   readonly opcoes: readonly OpcaoCampoRequestType[]
 }

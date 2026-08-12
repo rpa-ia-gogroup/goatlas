@@ -29,8 +29,15 @@ export interface PayloadSubmissao {
   readonly tipoChamadoId: string
   readonly serviceDeskId: string
   readonly prioridade: Prioridade
-  /** RF-27 (T-130) — campos adicionais do request type, só no formulário sem IA. */
-  readonly camposDinamicos?: Readonly<Record<string, string>>
+  /**
+   * RF-27 (T-130) — campos adicionais do request type.
+   *
+   * ⚠️ Guardado **já no formato do Jira** (`D-39`): string para texto, `{id}` para
+   * seleção, `[{id}]` para seleção múltipla. É o que faz o reprocessamento de `RNF-17`
+   * reenviar exatamente o mesmo corpo sem precisar reler o schema do request type —
+   * que pode nem estar disponível na hora do retry.
+   */
+  readonly camposDinamicos?: Readonly<Record<string, unknown>>
 }
 
 export interface Submissao {
