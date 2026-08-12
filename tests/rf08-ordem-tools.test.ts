@@ -169,3 +169,46 @@ describe('RNF-08 / R-07 — conteúdo recuperado é dado, nunca instrução', ()
     expect(aberturas).toHaveLength(1)
   })
 })
+
+describe('RF-17 — a confirmação explícita é a MESMA trava, e ela não tinha teste', () => {
+  /**
+   * 🚨 **Este bloco existe porque a suíte AFIRMAVA tê-lo e não tinha** (`T-097` item 5,
+   * `D-58`). O helper `conversaPronta` tem a opção `confirmar: false` desde sempre e
+   * **nenhum caso a usava**; o `CLAUDE.md` e a tabela de travas de `tasks.md` diziam, os
+   * dois, que a burla de `RF-17` estava coberta.
+   *
+   * É o pior formato de ponto cego do projeto: não é comportamento errado, é a **crença
+   * documentada** de que algo está testado. Enquanto durou, a segunda camada de
+   * `autorizarCriacao` podia ter sido apagada num refactor sem uma asserção vermelha —
+   * e o único sinal seria um chamado nascendo sem ninguém ter clicado em confirmar.
+   */
+  it('BURLA 7 — as duas tools rodaram, mas ninguém confirmou: recusa', async () => {
+    const autorizacao = autorizarCriacao(await conversaPronta({ confirmar: false }))
+    expect(autorizacao.ok).toBe(false)
+    if (!autorizacao.ok) expect(autorizacao.motivos).toContain('sem_confirmacao_do_usuario')
+  })
+
+  it('BURLA 8 — sem confirmação E sem tools: os TRÊS motivos, não só o primeiro', async () => {
+    // A recusa lista tudo o que falta. Parar no primeiro motivo faria quem depura
+    // consertar uma trava e descobrir a seguinte só na tentativa seguinte.
+    const c = await conversaPronta({ confluence: false, historico: false, confirmar: false })
+    const autorizacao = autorizarCriacao(c)
+    expect(autorizacao.ok).toBe(false)
+    if (!autorizacao.ok) {
+      expect(autorizacao.motivos).toContain('sem_confirmacao_do_usuario')
+      expect(autorizacao.motivos).toContain('confluence_nao_verificado')
+      expect(autorizacao.motivos).toContain('historico_nao_verificado')
+    }
+  })
+
+  it('🚨 confirmar DEPOIS de tudo pronto é o que autoriza — e só isso', async () => {
+    // O par do caso acima: a mesma conversa, mudando só a confirmação, passa. Sem este
+    // contraste, um `autorizarCriacao` que recusasse tudo passaria nos dois de cima.
+    const semConfirmar = autorizarCriacao(await conversaPronta({ confirmar: false }))
+    expect(semConfirmar.ok).toBe(false)
+
+    await repo.registrarConfirmacao('c1')
+    const depois = await repo.obter('c1')
+    expect(autorizarCriacao(depois!).ok).toBe(true)
+  })
+})

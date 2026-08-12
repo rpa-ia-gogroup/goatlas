@@ -37,17 +37,34 @@ checklist de deploy. Detalhe em [`CLAUDE.md`](CLAUDE.md).
 
 ## Estado
 
-Planejamento. Nada implementado. Faseamento na seção 12 dos requisitos:
-Fase 0 diagnóstico (sem código) → **Fase 1 MVP** (auth + agente + acompanhamento) →
-Fase 2 conhecimento e governança → Fase 3 SLA e notificações → Fase 4 rollout.
+**No ar em somente leitura**, em produção (`goatlas.devgogroup.com`) e em staging. As
+quatro fases estão completas em código; o que falta para o go-live não é código — é
+desligar `GOATLAS_SOMENTE_LEITURA`, a decisão que `D-24` condiciona à staging validada.
 
-## Credenciais (três, distintas — ver RNF-01, RNF-04, RNF-10)
+Faseamento na seção 12 dos requisitos: Fase 0 diagnóstico (sem código) → Fase 1 MVP (auth
++ agente + acompanhamento) → Fase 2 conhecimento e governança → Fase 3 SLA e notificações
+→ Fase 4 rollout.
 
-| Secret | Para quê | Privilégio |
-|---|---|---|
-| API token Jira/Confluence | JSM REST + Confluence em `goengenharia.atlassian.net` (Basic auth) | conta de serviço dedicada ao app |
-| API key de organização | Organizations API em `api.atlassian.com/admin` (Bearer) | **Org Admin** — isolar do resto |
-| Chave da API de IA | Agente, classificação da Regra 2 | preferir o proxy de IA corporativo |
+⚠️ **O estado detalhado vive no [`CLAUDE.md`](CLAUDE.md), não aqui.** Duas fontes sobre o
+mesmo fato divergem, e a que ninguém abre todo dia é a que envelhece — foi o que aconteceu
+com este parágrafo, que dizia "nada implementado" com quatro fases prontas.
 
-Nenhuma no repositório. Todas como secrets do GoDeploy. Procedimento de rotação em
-`docs/DEPLOY.md` (a criar, **RNF-10**/**RNF-27**).
+## Credenciais (quatro, distintas — RNF-01, RNF-04, RNF-10, RNF-27)
+
+| Secret | Para quê | Privilégio | Se faltar |
+|---|---|---|---|
+| `ATLASSIAN_API_TOKEN` | JSM REST + Confluence, Basic auth | Conta de serviço dedicada. 🚨 Tem de ser um **`ATATT` clássico** — `ATCTT` é chave de organização e dá **401 por design**, e token *scoped* também (`D-22`) | O app não lê nem escreve na Atlassian; `/api/health` acusa |
+| `ATLASSIAN_ORG_API_KEY` | Organizations API (`api.atlassian.com/admin`), Bearer | **Org Admin.** Transporte próprio, isolado do cliente de Jira/Confluence — reaproveitar o outro transformaria um bug de rota em vazamento da credencial de maior privilégio | Governança de assentos responde "não configurado" (`RNF-18`), nunca erro |
+| `LLM_API_KEY` | Agente e classificação da Regra 2 | Proxy de IA corporativo | O agente recusa honestamente (`ClienteIAIndisponivel`); o formulário mínimo continua abrindo chamado (`D-04`) |
+| `TG_API_TOKEN` | Área do solicitante, via TeamGuide (`D-37`) | Leitura de `/employees/refs`. ⚠️ **É o mesmo token do godocs** — rotacionar por causa de um quebra o outro | A área fica `null` e o chamado abre assim mesmo (fail-open, `RNF-18`) |
+
+**Nenhuma no repositório**, nenhuma no bundle do frontend, nenhuma em log ou resposta de
+erro — e isso é estrutural, não disciplina: são lidas **num lugar só**
+(`src/lib/contexto.ts`), e `tests/rnf01-vazamento-credenciais.test.ts` varre `src/`
+procurando um segundo leitor, além de provar que as camadas de transporte não repassam o
+corpo da resposta na mensagem de erro.
+
+**Rotação:** procedimento em [`docs/DEPLOY.md`](docs/DEPLOY.md), com a ordem de troca por
+secret. ⚠️ `listAppSecrets` do GoDeploy devolve **só os nomes** — o valor efetivo não é
+legível de fora, então conferir uma rotação se faz pelo `/api/health` e pelo console, não
+pela plataforma.

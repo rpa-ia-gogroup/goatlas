@@ -489,18 +489,53 @@ Piloto com 1–2 áreas (**Q13**), ajuste dos thresholds com dado real, depois F
 
 ## 13. Definição de pronto (Fase 1)
 
-- [ ] Um colaborador sem nenhum assento Atlassian conversa com o agente e abre um chamado ponta a ponta; o chamado chega ao time de tech com o solicitante correto identificado.
-- [ ] `create_ticket` é **comprovadamente** impossível de executar sem as duas tools anteriores — testado tentando burlar pelo prompt, não só pelo caminho feliz.
+> **Estado em 12/08/2026 (`D-58`).** Onze itens — o do celular foi **removido** por
+> decisão do mantenedor. Nove fechados; os dois abertos dependem de dado, não de código.
+
+- [x] Um colaborador sem nenhum assento Atlassian conversa com o agente e abre um chamado ponta a ponta; o chamado chega ao time de tech com o solicitante correto identificado.
+      → **`GN-6903`**, criado **pela conversa** na staging em 12/08/2026, com o cabeçalho de
+      autoria (`D-13`), a área do solicitante resolvida (`RPA`) e a transcrição anexada
+      (`D-54`). O `GN-6894` de 11/08 não fechava este item: nasceu pelo **formulário**.
+- [x] `create_ticket` é **comprovadamente** impossível de executar sem as duas tools anteriores — testado tentando burlar pelo prompt, não só pelo caminho feliz.
+      → `agent/gate.ts` em duas camadas; `tests/rf08-ordem-tools.test.ts`, **6 burlas**,
+      incluindo instrução vinda de conteúdo do Confluence.
 - [ ] Uma pergunta já respondida no Confluence é bloqueada, com link, motivo legível e caminho de override funcionando.
+      → Os três elementos e o override existem e são testados. ⚠️ **Nunca observado com
+      conteúdo real:** medido em 12/08, com a busca já corrigida (`D-41`) e a página certa no
+      resultado, a Regra 1 **não bloqueou** — o score não alcança `regra1_threshold_score`.
+      Fecha calibrando o threshold com dado real, e é justamente o que a faixa de `D-49`
+      existe para mostrar. **Não é código.**
 - [ ] Um problema com histórico de ajuste operacional recorrente é bloqueado pela Regra 2.
-- [ ] Nenhum chamado é criado sem confirmação explícita.
-- [ ] Um colaborador **não** consegue ver o chamado de outro (testado explicitamente).
-- [ ] Comentário interno do agente não vaza (testado explicitamente, com `internal=false` e filtro server-side).
-- [ ] Nenhuma das três credenciais aparece em log, resposta ou bundle de frontend.
-- [ ] Falha da API de IA não impede abrir chamado; falha de uma tool não vira bypass silencioso da regra.
-- [ ] Log de auditoria registra conversa, bloqueio, override, criação e leitura.
-- [ ] Fluxo completo validado no celular.
-- [ ] README com privilégios de cada credencial e procedimento de rotação.
+      → O código existe e é testado. ⚠️ Na instalação publicada a Regra 2 **nunca roda**: sem
+      os exemplos de **Q3** ela se declara indisponível, que é o fail-safe correto de `RF-14`
+      (medido em 12/08 — o agente diz "não está disponível nesta instalação"). Fecha com a
+      resposta de Q3, um campo de config. **Não é código.**
+- [x] Nenhum chamado é criado sem confirmação explícita.
+      → Duas camadas (`gate.ts` + rota única do usuário). ✅ **E agora com o teste de burla
+      que a suíte afirmava ter e não tinha** (`D-58`): `BURLA 7`/`BURLA 8` exercitam
+      `sem_confirmacao_do_usuario`, mais o contraste que prova que só a confirmação autoriza.
+- [x] Um colaborador **não** consegue ver o chamado de outro (testado explicitamente).
+      → `tickets/vinculos.ts` (e-mail no `WHERE`, sem método sem e-mail); 404, nunca 403.
+- [x] Comentário interno do agente não vaza (testado explicitamente, com `internal=false` e filtro server-side).
+      → As duas camadas, testadas separadamente.
+- [x] Nenhuma das **quatro** credenciais aparece em log, resposta ou bundle de frontend.
+      → Estrutural (varredura de `src/` por um segundo leitor) **e** comportamental. ⚠️ São
+      quatro desde `D-37`: a `TG_API_TOKEN` entrou e foi coberta no mesmo dia.
+- [x] Falha da API de IA não impede abrir chamado; falha de uma tool não vira bypass silencioso da regra.
+      → `ClienteIAIndisponivel` + formulário mínimo; tool que falhou satisfaz a ordem e marca
+      `verificadoRegras: false`.
+- [x] Log de auditoria registra conversa, bloqueio, override, criação e leitura.
+      → As cinco ações, append-only.
+- [x] README com privilégios de cada credencial e procedimento de rotação.
+      → Reescrito em `D-58`: as **quatro** credenciais, o que cada ausência silencia, e a
+      rotação apontando para `docs/DEPLOY.md`, que existe. ⚠️ O parágrafo de estado dizia
+      "Planejamento. Nada implementado." com quatro fases prontas — o detalhe agora mora só
+      no `CLAUDE.md`, porque duas fontes sobre o mesmo fato divergem e a que ninguém abre
+      envelhece.
+
+~~- [ ] Fluxo completo validado no celular.~~ — **removido em 12/08/2026** por decisão do
+mantenedor. A tela foi verificada em viewport de celular no dev; validação em aparelho real
+deixou de ser condição de pronto.
 
 ---
 
