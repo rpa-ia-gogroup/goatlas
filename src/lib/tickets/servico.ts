@@ -80,8 +80,10 @@ export class ServicoChamados {
      * só o formulário preenchia, um chamado do tipo 108 aberto pela conversa nascia sem
      * nome e sem e-mail — e ninguém veria, porque o tipo 108 raramente chega por lá.
      * Divergência silenciosa entre dois caminhos é o defeito que a spec 006 §8 nomeia.
+     *
+     * ⚠️ Chega **já no formato do Jira** (`D-39`) — a rota traduz com o schema em mãos.
      */
-    camposDinamicos: Readonly<Record<string, string>> | null = null,
+    camposDinamicos: Readonly<Record<string, unknown>> | null = null,
   ): Promise<ResultadoCriacao> {
     const autorizacao = autorizarCriacao(conversa)
     if (!autorizacao.ok) {

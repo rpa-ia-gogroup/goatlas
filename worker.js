@@ -323,6 +323,13 @@ function camposAdicionais(brutos) {
       rotulo: String(bruto.name ?? fieldId),
       obrigatorio: Boolean(bruto.required),
       tipo,
+      // ⚠️ `'selecao'` junta escolha única e múltipla — `opcoes.length > 0` é verdade
+      // nas duas. Quem as separa é `jiraSchema.type`: `array` é a Atlassian dizendo que
+      // o campo guarda **lista**, e ali o valor de criação tem de vir dentro de `[…]`.
+      // Sem esta linha, `tickets/valores-de-campo.ts` mandaria o objeto solto e o campo
+      // múltiplo continuaria devolvendo o 400 do `D-39` — o mesmo bug, num subconjunto
+      // menor de tipos, e sem nada na tela indicando.
+      multiplo: tipoBruto === "array",
       opcoes
     });
   }
@@ -7488,6 +7495,42 @@ function mensagemObrigatoriosFaltando(rotulos) {
   return rotulos.length === 1 ? `Falta preencher "${lista2}" \u2014 o Jira exige esse campo para este tipo de chamado.` : `Faltam preencher: ${lista2}. O Jira exige esses campos para este tipo de chamado.`;
 }
 
+// src/lib/tickets/valores-de-campo.ts
+function referenciaDaOpcao(opcao) {
+  return opcao.id === opcao.rotulo ? { value: opcao.id } : { id: opcao.id };
+}
+function ehSelecaoComOpcoes(campo) {
+  return campo.tipo === "selecao" && campo.opcoes.length > 0;
+}
+function opcoesDesconhecidas(schema, valores) {
+  if (!schema.conhecido || !valores) return [];
+  return schema.campos.filter(ehSelecaoComOpcoes).filter((c) => {
+    const valor = (valores[c.fieldId] ?? "").trim();
+    return valor.length > 0 && !c.opcoes.some((o) => o.id === valor);
+  }).map((c) => c.rotulo);
+}
+function mensagemOpcoesDesconhecidas(rotulos) {
+  const lista2 = rotulos.join(", ");
+  return rotulos.length === 1 ? `A op\xE7\xE3o escolhida para "${lista2}" n\xE3o \xE9 uma das oferecidas por este tipo de chamado. Escolha uma das op\xE7\xF5es da lista.` : `As op\xE7\xF5es escolhidas para: ${lista2} n\xE3o est\xE3o entre as oferecidas por este tipo de chamado. Escolha uma das op\xE7\xF5es de cada lista.`;
+}
+function paraValoresDoJira(schema, valores) {
+  if (!valores || Object.keys(valores).length === 0) return null;
+  if (!schema.conhecido) return { ...valores };
+  const porFieldId = new Map(schema.campos.map((c) => [c.fieldId, c]));
+  const saida = {};
+  for (const [fieldId, valor] of Object.entries(valores)) {
+    const campo = porFieldId.get(fieldId);
+    const opcao = campo && ehSelecaoComOpcoes(campo) ? campo.opcoes.find((o) => o.id === valor) : void 0;
+    if (!campo || !opcao) {
+      saida[fieldId] = valor;
+      continue;
+    }
+    const referencia = referenciaDaOpcao(opcao);
+    saida[fieldId] = campo.multiplo ? [referencia] : referencia;
+  }
+  return saida;
+}
+
 // src/lib/tickets/declaracao-anexo.ts
 function tipoAceitaAnexo(campos) {
   return campos.some((c) => c.tipo === "anexo");
@@ -7964,6 +8007,10 @@ async function rotear(req, ctx, eu, caminho, url) {
     if (faltandoNaConversa.length > 0) {
       return ERROS.dadosInvalidos(mensagemObrigatoriosFaltando(faltandoNaConversa));
     }
+    const opcoesRuinsNaConversa = opcoesDesconhecidas(schema, camposDaConversa);
+    if (opcoesRuinsNaConversa.length > 0) {
+      return ERROS.dadosInvalidos(mensagemOpcoesDesconhecidas(opcoesRuinsNaConversa));
+    }
     await ctx.conversas.registrarConfirmacao(conversa.id);
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -7993,7 +8040,11 @@ async function rotear(req, ctx, eu, caminho, url) {
       //
       // ⚠️ A conversa não tem formulário dinâmico, então aqui não há valor do cliente para
       // vencer o do login (`FR-3`) — o que chega é sempre a identidade da sessão.
-      camposDaConversa
+      //
+      // ⚠️ Traduzido para o formato do Jira **aqui**, e não no cliente (`D-39`): é este
+      // objeto que o outbox persiste, então o reprocessamento de `RNF-17` reenvia o mesmo
+      // corpo sem reler o schema.
+      paraValoresDoJira(schema, camposDaConversa)
     );
     if (r.estado === "criado") await ctx.conversas.definirEstado(conversa.id, "criado");
     const anexo = await materializarAnexosDoChamado(ctx, {
@@ -8054,6 +8105,11 @@ async function rotear(req, ctx, eu, caminho, url) {
     if (faltando.length > 0) {
       return ERROS.dadosInvalidos(mensagemObrigatoriosFaltando(faltando));
     }
+    const opcoesRuins = opcoesDesconhecidas(schema, camposComSolicitante);
+    if (opcoesRuins.length > 0) {
+      return ERROS.dadosInvalidos(mensagemOpcoesDesconhecidas(opcoesRuins));
+    }
+    const camposParaOJira = paraValoresDoJira(schema, camposComSolicitante);
     const r = await ctx.chamados.abrirPorFormulario({
       solicitanteEmail: eu.email,
       chaveIdempotencia: chave,
@@ -8070,7 +8126,7 @@ async function rotear(req, ctx, eu, caminho, url) {
         tipoChamadoId: validada.proposta.tipoChamadoId,
         serviceDeskId,
         prioridade: validada.proposta.prioridade,
-        ...Object.keys(camposComSolicitante).length > 0 ? { camposDinamicos: camposComSolicitante } : {}
+        ...camposParaOJira ? { camposDinamicos: camposParaOJira } : {}
       }
     });
     const anexo = await materializarAnexosDoChamado(ctx, {

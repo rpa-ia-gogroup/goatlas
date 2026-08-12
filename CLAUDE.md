@@ -449,6 +449,19 @@ destes reabre um vazamento que já foi fechado.
   Tipo **sem** obrigatório continua abrindo sem campo nenhum, e campo extra malformado
   continua não derrubando — os dois têm teste. Schema desconhecido **não** recusa (`D-27`),
   e o campo de **anexo** fica fora da checagem, senão `RN-11` viraria "anexe um arquivo".
+- 🚨 **Campo de SELEÇÃO vai como OBJETO, e quem traduz é a rota** (`D-39`, medido na staging
+  em 12/08/2026 com o tipo 70). `customfield_10071` ("Recorrência") ia como a string
+  `"10127"` e a criação respondia **400 = definitivo = chamado perdido** (`RNF-17`); o mesmo
+  caminho com o tipo 68, que não tem campo dinâmico, devolvia 201. `tickets/valores-de-campo.ts`
+  traduz pelo **tipo do campo** — string para texto, `{id}` para seleção, `[{id}]` quando
+  `jiraSchema.type === 'array'` — e roda na **rota**, com o schema que `RF-62` já leu.
+  ⚠️ **Não mova para o cliente:** é este objeto que o outbox persiste, e é isso que faz o
+  retry de `RNF-17` reenviar o mesmo corpo sem reler schema. ⚠️ **`id`, não `value`:** o
+  navegador manda `opcoes[].id`, nunca o rótulo — `{value}` exigiria texto exibido, que muda
+  ao renomear a opção. A única exceção é `id === rotulo`, quando o que a Atlassian ofereceu
+  foi o texto. E **opção fora da lista é recusa antes do efeito**, com o rótulo (`RNF-30`),
+  como em `D-37`/`D-38`. Número, data e cascading select continuam indo crus — declarado no
+  `D-39`.
 - 🚨 **A área do solicitante é GUARDADA, nunca enviada** (`D-37`, `teamguide/area.ts`). O
   campo `Setor Gocase` do Jira é multi-checkbox com **15 opções fixas**, e a área real da
   primeira pessoa medida (`RPA`) **não está entre elas** — mandar valor fora da lista dá
@@ -937,7 +950,7 @@ o cliente inteiro fala `servicedeskapi`, então `TASK` é inalcançável, e escr
 sem comentário público/interno, sem SLA). Há também um espaço `IA` no Confluence (2 páginas),
 que é documentação, não fila.
 
-**952 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1005 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`

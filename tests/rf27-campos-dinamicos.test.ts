@@ -155,10 +155,12 @@ describe('POST /api/chamados — camposDinamicos chega até criarChamado', () =>
     )
     expect(r.status).toBe(201)
     const chamada = fake.chamadas.find((c) => c.operacao === 'criarChamado')
-    const params = chamada?.params as { camposDinamicos?: Record<string, string> }
+    const params = chamada?.params as { camposDinamicos?: Record<string, unknown> }
+    // ⚠️ O de SELEÇÃO chega como objeto, não como a string que a tela mandou (`D-39`):
+    // a string crua devolvia 400 na Atlassian, e 400 aqui é definitivo — chamado perdido.
     expect(params?.camposDinamicos).toEqual({
       customfield_1: 'Servidor de vendas',
-      customfield_2: '1',
+      customfield_2: { id: '1' },
     })
   })
 
@@ -208,13 +210,17 @@ describe('POST /api/chamados — camposDinamicos chega até criarChamado', () =>
           // `customfield_3` NÃO está no schema deste tipo. Ele passava antes de
           // T-401 — a allowlist era de valor, não de chave. Ver
           // `tests/rf27-campos-fora-do-schema.test.ts` para o porquê.
-          camposDinamicos: { customfield_1: '   ', customfield_2: 'Produção', customfield_3: 'ok' },
+          //
+          // ⚠️ `customfield_2` vai com o **id** da opção (`'1'`), que é o que a tela
+          // manda: o rótulo (`'Produção'`) não é valor válido e desde `D-39` é recusado
+          // antes de qualquer efeito — quem cobra isso é `rf27-campo-de-selecao`.
+          camposDinamicos: { customfield_1: '   ', customfield_2: '1', customfield_3: 'ok' },
         },
       }),
     )
     const chamada = fake.chamadas.find((c) => c.operacao === 'criarChamado')
-    const params = chamada?.params as { camposDinamicos?: Record<string, string> }
-    expect(params?.camposDinamicos).toEqual({ customfield_2: 'Produção' })
+    const params = chamada?.params as { camposDinamicos?: Record<string, unknown> }
+    expect(params?.camposDinamicos).toEqual({ customfield_2: { id: '1' } })
   })
 
   it('🚨 obrigatório faltando é RECUSA com o rótulo, não 500 depois', async () => {

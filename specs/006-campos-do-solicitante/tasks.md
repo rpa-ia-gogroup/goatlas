@@ -79,6 +79,36 @@ e é o primeiro item a revisitar se um dia o godocs rotacionar.
       decide e **relata** o resto. Sem chamado nenhum, a tela diz "sem dado" em vez de `0`.
       _Requirements: RF-19, RF-55, D-25, D-37_
 
+## Fase 4 — a FORMA do valor que vai ao Jira (`D-39`, 12/08/2026)
+
+🚨 **Medido na staging com o tipo 70, já com os obrigatórios de `D-38` respondidos:** a
+criação devolveu `400` (`chamado_criado falha … "transitorio":false`) porque
+`customfield_10071` ("Recorrência", seleção) ia como a **string** `"10127"`. O mesmo caminho
+com o tipo 68 — sem campo dinâmico — devolveu `201`. 400 é definitivo: a submissão vira
+`falha` e **nunca** é reprocessada (`RNF-17`), então o chamado da pessoa se perde. Afeta os
+tipos **70, 89, 91, 92, 94 e 95** do `GN`.
+
+- [x] **T-521** — Testes **antes**: `paraValoresDoJira` (texto → string · seleção → `{id}` ·
+      seleção múltipla → `[{id}]` · `id === rotulo` → `{value}` · schema desconhecido → cru)
+      e `opcoesDesconhecidas` (rótulo, nunca `fieldId`). ⚠️ E os testes de rota afirmam sobre
+      o **corpo enviado ao transporte** (`fetchImpl`) e sobre o **payload persistido** — o
+      `ClienteAtlassianFake` não valida nada, e foi ele que escondeu `D-38`.
+      _Requirements: RF-27, RNF-17, RNF-30_
+- [x] **T-522** — `src/lib/tickets/valores-de-campo.ts` (função pura) + `multiplo` em
+      `CampoRequestType`, derivado de `jiraSchema.type === 'array'` no cliente.
+      _Requirements: RF-27, RNF-17_
+- [x] **T-523** — Ligado nas **duas** rotas de criação, na ordem *obrigatórios → opções
+      válidas → traduzir → persistir*; na conversa, as duas recusas vêm **antes** de
+      `registrarConfirmacao`. Os tipos de `camposDinamicos` (cliente, outbox, serviço) passam
+      a `unknown`, porque o outbox guarda o valor **já traduzido**.
+      _Requirements: RF-27, RF-17, RNF-17_
+- [x] **T-524** — `D-39` em `docs/DECISOES.md`, `CLAUDE.md` na seção de padrões, e este
+      arquivo. _Requirements: RNF-27_
+- [ ] **T-525** — **Verificação de go-live:** abrir um chamado do tipo **70** pela staging
+      com a escrita ligada e confirmar `201` **e** o valor de "Recorrência" gravado no Jira.
+      Só isso separa "a forma está certa" de "a forma parece certa" — é a mesma classe de
+      verificação de `T-425`. _Requirements: RF-27, D-24_
+
 ## Fora desta spec
 
 - Enviar `Setor Gocase` ao Jira — depende de o campo ser publicado num formulário de portal.

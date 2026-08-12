@@ -135,6 +135,12 @@ export interface CampoRequestType {
   readonly rotulo: string
   readonly obrigatorio: boolean
   readonly tipo: TipoCampoRequestType
+  /**
+   * O campo guarda lista de valores (`D-39`). A tela **não** muda por causa disto — ela
+   * segue oferecendo escolha única, e quem embrulha o valor em `[…]` é o servidor. Está
+   * aqui para o contrato não mentir sobre o que a rota devolve.
+   */
+  readonly multiplo?: boolean
   readonly opcoes: readonly OpcaoCampoRequestType[]
 }
 

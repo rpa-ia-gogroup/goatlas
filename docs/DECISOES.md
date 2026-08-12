@@ -1857,6 +1857,93 @@ confirmação passar a coletá-los, como o formulário já fazia.
 
 ---
 
+### D-39 · Campo de seleção vai como OBJETO, e quem traduz é o servidor com o schema
+
+**Data:** 12/08/2026 · **Medido por:** teste na staging (`appId 3936ca2d`) ·
+**Contexto:** `RF-27`, `RNF-17`, `RNF-18`, `D-38`, `D-37`, `ScC-4`
+
+**A medição.** Preenchido o formulário do request type **70** com os dois obrigatórios
+respondidos — ou seja, já passando pela recusa de `D-38` —, a criação devolveu 500 na tela e
+isto na auditoria:
+
+```
+12:04:10 chamado_criado falha submissao:96c986a0-…
+         {"erro":"Atlassian respondeu 400","transitorio":false}
+```
+
+O corpo que a tela mandou:
+
+```json
+{"tipoChamadoId":"70","prioridade":"alta",
+ "camposDinamicos":{"customfield_10092":"goatlas (staging) - teste automatizado",
+                    "customfield_10071":"10127"},
+ "declarouAnexo":false}
+```
+
+**Isolamento:** o **mesmo** caminho com o tipo **68** (que não tem campo dinâmico) devolveu
+**201** e criou `GN-6897`. A causa são os campos dinâmicos — e, entre eles, o de **seleção**:
+`customfield_10071` é "Recorrência", e `10127` é o **id de uma opção**, não texto.
+
+🚨 **E 400 é definitivo neste projeto.** A submissão vira `falha` e **nunca** é reprocessada
+(`RNF-17`): não era um erro de formulário, era o chamado da pessoa desaparecendo. Tipos do
+`GN` afetados (têm "Recorrência" obrigatória): **70, 89, 91, 92, 94, 95** — 6 dos 15.
+
+**A causa exata.** `extrairCamposDinamicos` descarta tudo que não é `string` (correto: o
+corpo vem do navegador), e `criarChamado` espalhava o objeto **cru** dentro de
+`requestFieldValues`. A API `POST /rest/servicedeskapi/request` aceita string para texto,
+mas exige **objeto** para campo de opção. Ninguém traduzia — porque até `D-38` nenhum
+chamado com campo dinâmico obrigatório chegava a ser enviado.
+
+**A decisão.** A tradução mora em `tickets/valores-de-campo.ts`, é **função pura** e roda na
+**rota**, com o schema que `RF-62` e `obrigatoriosFaltando` já leram (`R-02`: não custa uma
+ida a mais):
+
+| Tipo do campo | O que vai no corpo |
+|---|---|
+| `texto`, `texto_longo` | a string, como sempre |
+| `selecao` (única) | `{"id":"10127"}` |
+| `selecao` **múltipla** (`jiraSchema.type === 'array'`) | `[{"id":"10127"}]` |
+| qualquer dúvida (schema desconhecido, campo fora do schema, opção não reconhecida) | o valor cru — fail-open, `D-27` |
+
+**Por que na rota, e não no cliente.** Três razões que valem sozinhas: (1) é o objeto que o
+**outbox persiste**, então o reprocessamento de `RNF-17` reenvia o mesmo corpo sem reler o
+schema — que pode nem estar disponível na hora do retry; (2) o cliente continua burro quanto
+a política, como já é para `RN-06` e para `D-36`; (3) traduzir lá exigiria uma chamada de
+schema **dentro** de `criarChamado`, cuja falha cairia no `try/catch` que classifica a
+submissão — o erro que `D-26` já registrou noutra forma.
+
+**Por que `id` e não `value`, com evidência.** O navegador manda **sempre** `opcoes[].id`,
+que é o identificador que o schema ofereceu (`validValues[].id ?? .value`) — o `<select>` da
+tela usa `value={o.id}` e mostra `o.rotulo`. O valor medido (`"10127"`) é um id, não texto.
+`{"value": …}` exigiria o **rótulo**, que é texto exibido: mudaria num "renomear opção" do
+Jira e casaria por acento e caixa. ⚠️ **A exceção é medível, não é palpite:** quando `id` e
+`rotulo` voltam **idênticos**, o que a Atlassian ofereceu foi o texto e não um id — aí, e só
+aí, vai `{"value"}`. Sem essa metade, `{"id":"Sim"}` seria uma busca por um id inexistente,
+que é o mesmo 400.
+
+**Opção fora da lista é RECUSA, não tentativa.** Mesmo raciocínio de `D-37` (área fora das 15
+opções fixas) e de `D-38`: valor que o schema não conhece dá 400 definitivo. `opcoesDesconhecidas`
+recusa antes de qualquer efeito, nomeando o **rótulo** do campo (`RNF-30`) — nas duas rotas, e
+na conversa **antes** de `registrarConfirmacao`. Fail-open onde a dúvida é nossa: schema
+desconhecido e seleção sem opções conhecidas não acusam nada.
+
+**Nada decide por id de campo** (`ScC-4`): quem responde "qual é a forma deste valor?" é
+`campo.tipo`, traduzido de `jiraSchema` no cliente. Uma comparação de `fieldId` com uma
+constante funcionaria na Gocase e pararia de funcionar em outra instalação **sem quebrar
+nada** — os chamados voltariam a morrer no 400, em silêncio.
+
+**Custo aceito.** O que **não** foi resolvido: campo de **número** e campo de **data** ainda
+vão como string (não medidos, e nenhum tipo do `GN` os expõe como obrigatório hoje), e
+**cascading select** recebe só o pai. Os dois caem no fail-open acima — vão crus, exatamente
+como iam antes desta decisão.
+
+**A lição, de novo.** Quatro testes verdes afirmavam que o campo dinâmico chegava ao Jira —
+todos contra o `ClienteAtlassianFake`, que aceita qualquer forma. Por isso os testes novos
+afirmam sobre o **corpo enviado ao transporte** (`fetchImpl`) e sobre o **payload persistido**,
+não sobre "abriu chamado". Mesma família de `D-38` e de `linhasComoObjetos`.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
