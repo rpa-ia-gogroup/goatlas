@@ -27,6 +27,16 @@ import {
   type TicketHistorico,
   type TipoChamado,
 } from './tipos'
+import { prefixarAutoria } from './comentarios'
+
+/**
+ * O `displayName` que o JSM devolveria para a conta de serviço (`D-01`, `D-43`).
+ *
+ * ⚠️ Em produção este é o nome de uma **pessoa real** — a conta que gerou o `ATATT`.
+ * O nome fictício aqui existe para o teste não depender de quem é essa pessoa hoje,
+ * mas o papel é o mesmo: é a conta que registra, nunca quem escreveu.
+ */
+export const NOME_CONTA_DE_SERVICO_FAKE = 'Conta de serviço goatlas'
 
 /** Comentário como o JSM devolve: com a flag `public` que RF-32 obriga a filtrar. */
 export interface ComentarioBruto {
@@ -268,7 +278,16 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
    */
   simularMudancaDoTime(
     issueKey: string,
-    mudanca: { status?: string; comentarioPublico?: { corpo: string; autorNome: string; criadoEm: string }; atualizadoEm?: string },
+    mudanca: {
+      status?: string
+      /**
+       * ⚠️ `publico` existe para encenar a camada 1 de `RF-32` falhando — a API
+       * devolvendo um interno apesar de `internal=false`. Default `true`, que é o
+       * caso comum; passar `false` prova que a camada 2 ainda segura.
+       */
+      comentarioPublico?: { corpo: string; autorNome: string; criadoEm: string; publico?: boolean }
+      atualizadoEm?: string
+    },
   ): void {
     const atual = this.estado.chamados.get(issueKey)
     if (atual) {
@@ -287,7 +306,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
           corpo: mudanca.comentarioPublico.corpo,
           autorNome: mudanca.comentarioPublico.autorNome,
           criadoEm: mudanca.comentarioPublico.criadoEm,
-          publico: true,
+          publico: mudanca.comentarioPublico.publico ?? true,
         },
       ])
     }
@@ -382,9 +401,16 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     this.estado.comentarios.set(issueKey, [
       ...atuais,
       {
+        // 🚨 O dublê grava o comentário como ele VOLTA da Atlassian, não como
+        // chegou aqui (`D-43`). O cliente real prefixa a autoria (`D-13`) e o JSM
+        // devolve o `displayName` da **conta de serviço** — sob `D-01` é sempre ela.
+        // Guardar o texto cru com o nome do autor real era o dublê escondendo a
+        // divergência, mesma família de `linhasComoObjetos` e do `D-38`: nenhum teste
+        // via o que a staging mostrou (nome de um colega em cima do texto de outra
+        // pessoa), porque no fake o nome estava certo e o prefixo nem existia.
         id: `c${atuais.length + 1}`,
-        corpo,
-        autorNome: autorNome ?? autorEmail,
+        corpo: prefixarAutoria(corpo, autorNome ?? autorEmail, autorEmail),
+        autorNome: NOME_CONTA_DE_SERVICO_FAKE,
         criadoEm: new Date(0).toISOString(),
         publico: true,
       },

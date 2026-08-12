@@ -12,6 +12,7 @@ import {
   PRIORIDADES,
   prioridadePor,
   type CampoRequestType,
+  type ComentarioPublico,
   type DetalheChamado,
   type Identidade,
   type EstadoVerificacao,
@@ -1077,10 +1078,7 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
         ) : (
           <div className="conversa">
             {dados.comentarios.map((c) => (
-              <div key={c.id}>
-                <span className="autor">{c.autorNome}</span>
-                <TextoDoAgente texto={c.corpo} />
-              </div>
+              <ComentarioDoChamado key={c.id} comentario={c} />
             ))}
           </div>
         )}
@@ -1108,6 +1106,59 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
         </form>
       </section>
     </div>
+  )
+}
+
+/**
+ * Um comentário na conversa do chamado — `D-43`.
+ *
+ * ## O que esta tela pode afirmar, e o que não pode
+ *
+ * Sob proxy total (`D-01`) o `autorNome` que volta do JSM é o da conta que
+ * **registrou** o comentário, e para tudo que sai do goatlas essa conta é a de
+ * serviço. A tela imprimia esse nome como autor: o comentário da própria pessoa
+ * aparecia assinado por um colega, com o prefixo de `D-13` logo abaixo dizendo
+ * outro nome. A leitura natural — *alguém escreveu em meu nome* — é a pior possível.
+ *
+ * Então a tela só afirma o que o servidor sabe:
+ *
+ * - **`doSolicitante`** → "Você". O servidor classificou pelo prefixo que o próprio
+ *   app escreveu, e o chamado é isolado por e-mail (`RF-30`): não há outro caminho
+ *   para um comentário prefixado existir aqui.
+ * - **Caso contrário** → "Resposta do time", que é verdade mesmo se quem respondeu
+ *   usou a conta de serviço pelo portal. E o nome da conta continua na tela, uma
+ *   linha abaixo, enunciado como **registro** (`Conta que registrou: …`) e não como
+ *   autoria — apagá-lo consertaria o caso da conta de serviço e estragaria o caso
+ *   comum, o agente que respondeu de verdade com a conta dele.
+ *
+ * ## Acessibilidade
+ *
+ * "É seu" é dito por **três** sinais e nenhum deles é só cor: o rótulo em palavras, o
+ * lado da coluna e a bolha (o mesmo vocabulário que a tela de conversa já ensina —
+ * `.fala-usuario`). Nenhuma animação entra aqui, então não há `prefers-reduced-motion`
+ * a respeitar; o `<article>` com `<h3>` dá ao leitor de tela o mesmo agrupamento que o
+ * olho recebe da moldura.
+ */
+function ComentarioDoChamado({ comentario }: { comentario: ComentarioPublico }) {
+  if (comentario.doSolicitante) {
+    return (
+      <article className="comentario comentario-meu">
+        <h3 className="autor">Você</h3>
+        <p className="fala-usuario">{comentario.corpo}</p>
+      </article>
+    )
+  }
+  return (
+    <article className="comentario">
+      <h3 className="autor">Resposta do time</h3>
+      {comentario.autorNome && (
+        // ⚠️ "Conta que registrou" e não "escrito por": é o que o Jira guarda, e sob
+        // `D-01` a conta pode não ser a pessoa. Enunciar o registro é honesto nos dois
+        // casos; enunciar autoria é honesto só em um.
+        <p className="autor-registro">Conta que registrou: {comentario.autorNome}</p>
+      )}
+      <TextoDoAgente texto={comentario.corpo} />
+    </article>
   )
 }
 

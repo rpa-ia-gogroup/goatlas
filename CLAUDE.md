@@ -248,6 +248,20 @@ destes reabre um vazamento que já foi fechado.
   edita descrição, label ou qualquer campo — comparar por ele avisaria "mudou para Em
   andamento" três vezes porque o agente ajustou o resumo três vezes. Daí a coluna
   `vinculos.ultimo_status_notificado`.
+- 🚨 **A TELA também não detecta autoria pelo AUTOR** (`tickets/comentario-exibicao.ts`,
+  `D-43`). Mesmo motivo do item abaixo, na superfície que a pessoa lê: o comentário que ela
+  acabou de escrever aparecia assinado pela **conta de serviço** — hoje a conta pessoal de um
+  colega — com o prefixo de `D-13` logo abaixo dizendo outro nome (medido na staging em
+  12/08/2026, `GN-6897`), e a leitura natural é *alguém escreveu em meu nome*. Quem classifica
+  é `ehComentarioDoSolicitante`, o **mesmo** predicado do SLA de `RF-46`; condição escrita só
+  na tela seria a segunda regra que diverge em silêncio (`config/diagnostico.ts`). ⚠️ E o
+  nome da conta **fica**, enunciado como registro (`Conta que registrou: …`), nunca como
+  autoria: quem responde pelo portal com a conta de serviço não é distinguível, e apagar o
+  autor de todos consertaria esse caso e estragaria o comum — o agente que respondeu de
+  verdade. O prefixo sai do corpo exibido por `removerPrefixoAutoria`, o par de `RF-48`, e não
+  por um `replace` novo. ⚠️ **O fake escondia isto**: `comentar` guardava o texto sem prefixo e
+  com o nome do autor real — o oposto de produção nas duas pontas —, e corrigi-lo não quebrou
+  **nenhum** teste existente, que é a medida exata do ponto cego (família de `D-38`/`D-39`).
 - ⚠️ **Ação própria não se detecta pelo AUTOR** (`notificacoes/acoes.ts`, `RF-48`). Sob
   proxy total todo comentário sai da conta de serviço: o da pessoa e o do agente do time
   têm o mesmo autor. O que distingue é o app ter registrado a ação **no momento em que a
@@ -1026,7 +1040,7 @@ na staging — a tabela de leitura está no `D-40`. ⚠️ Nada foi paginado nem
 mexido de propósito: mudar o comportamento no mesmo movimento em que se instala o instrumento
 estraga a medição.
 
-**1043 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1051 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`

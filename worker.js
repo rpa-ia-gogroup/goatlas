@@ -874,6 +874,7 @@ var ClienteAtlassianHttp = class {
 };
 
 // src/lib/atlassian/fake.ts
+var NOME_CONTA_DE_SERVICO_FAKE = "Conta de servi\xE7o goatlas";
 var FALHAS = Object.freeze({
   indisponivel: { status: 503, transitorio: true },
   rate_limit: { status: 429, transitorio: true },
@@ -969,7 +970,7 @@ var ClienteAtlassianFake = class {
           corpo: mudanca.comentarioPublico.corpo,
           autorNome: mudanca.comentarioPublico.autorNome,
           criadoEm: mudanca.comentarioPublico.criadoEm,
-          publico: true
+          publico: mudanca.comentarioPublico.publico ?? true
         }
       ]);
     }
@@ -1039,9 +1040,16 @@ var ClienteAtlassianFake = class {
     this.estado.comentarios.set(issueKey, [
       ...atuais,
       {
+        // 🚨 O dublê grava o comentário como ele VOLTA da Atlassian, não como
+        // chegou aqui (`D-43`). O cliente real prefixa a autoria (`D-13`) e o JSM
+        // devolve o `displayName` da **conta de serviço** — sob `D-01` é sempre ela.
+        // Guardar o texto cru com o nome do autor real era o dublê escondendo a
+        // divergência, mesma família de `linhasComoObjetos` e do `D-38`: nenhum teste
+        // via o que a staging mostrou (nome de um colega em cima do texto de outra
+        // pessoa), porque no fake o nome estava certo e o prefixo nem existia.
         id: `c${atuais.length + 1}`,
-        corpo,
-        autorNome: autorNome ?? autorEmail,
+        corpo: prefixarAutoria(corpo, autorNome ?? autorEmail, autorEmail),
+        autorNome: NOME_CONTA_DE_SERVICO_FAKE,
         criadoEm: (/* @__PURE__ */ new Date(0)).toISOString(),
         publico: true
       }
@@ -7739,6 +7747,17 @@ function resolverCamposDoSolicitante(tipoChamadoId, schema, identidade) {
   return saida;
 }
 
+// src/lib/tickets/comentario-exibicao.ts
+function paraExibicao(comentarios) {
+  return comentarios.map((c) => ({
+    id: c.id,
+    corpo: removerPrefixoAutoria(c.corpo),
+    autorNome: c.autorNome,
+    criadoEm: c.criadoEm,
+    doSolicitante: ehComentarioDoSolicitante(c.corpo)
+  }));
+}
+
 // src/lib/tickets/campos-obrigatorios.ts
 function obrigatoriosFaltando(schema, valores) {
   if (!schema.conhecido) return [];
@@ -8535,7 +8554,11 @@ async function rotear(req, ctx, eu, caminho, url) {
       via: r.vinculo.via,
       verificadoRegras: r.vinculo.verificadoRegras,
       area: r.vinculo.area,
-      comentarios: comentarios ?? [],
+      // ⚠️ `paraExibicao` é a ÚNICA tradução de "corpo cru" para "o que a tela mostra"
+      // (`D-43`): ela classifica pelo mesmo predicado do SLA e tira o prefixo de
+      // `D-13`. Devolver o cru daqui obrigaria a tela a remontar a regra, e duas
+      // regras para o mesmo fato divergem em silêncio.
+      comentarios: paraExibicao(comentarios ?? []),
       // `RNF-19` — a tela precisa distinguir "não há resposta ainda" de "não consegui
       // buscar as respostas". Sem estes campos, uma queda do Jira apareceria como um
       // chamado sem histórico, o que é uma informação falsa.
