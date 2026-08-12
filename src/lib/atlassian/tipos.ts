@@ -12,6 +12,8 @@
  * `raiseOnBehalfOf` — e nada acima desta camada muda.
  */
 
+import type { CampoDoSchema } from './schema-diagnostico'
+
 /** Prioridade do goatlas com o SLA de PRIMEIRA RESPOSTA (RF-15, RN-08). */
 export type Prioridade = 'critica' | 'alta' | 'normal'
 
@@ -278,6 +280,20 @@ export interface ClienteAtlassian {
     serviceDeskId: string,
     requestTypeId: string,
   ): Promise<readonly CampoRequestType[]>
+
+  /**
+   * O **mesmo** schema, sem a tradução para o vocabulário do formulário — diagnóstico
+   * de admin (`RF-16`).
+   *
+   * ⚠️ Não é duplicata de `obterCamposDoTipo`: aquele responde "o que a tela precisa
+   * desenhar" e por isso **descarta** `summary`/`description`/`priority`. Descarte certo
+   * para o produto, e ponto cego para diagnóstico — `priority` não aparece por lá nem
+   * quando existe. Ver `atlassian/schema-diagnostico.ts`.
+   */
+  obterSchemaDoTipo(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<readonly CampoDoSchema[]>
 
   criarChamado(dados: NovoChamado): Promise<ChamadoCriado>
 
