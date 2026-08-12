@@ -26,6 +26,7 @@ import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../
 import { buscarComAmpliacao } from '../confluence/busca'
 import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
 import { ENDPOINTS_NAO_VERIFICADOS, LIMITACOES_ULTIMO_ACESSO } from '../atlassian/organizacao'
+import { temCampoDePrioridade } from '../atlassian/schema-diagnostico'
 import { calcularCusto } from '../governanca/custo'
 import { obterResumoMetricas } from '../governanca/metricas'
 import { lerEntradaDoPainel, montarPainel } from '../governanca/painel'
@@ -1553,6 +1554,80 @@ async function rotear(
       ? await ctx.auditoria.listarPorAtor(alvo, 200)
       : await ctx.auditoria.listarRecentes(200)
     return json({ itens })
+  }
+
+  // --- diagnóstico: o schema do request type COMO A ATLASSIAN O ENTREGA -----
+  //
+  // Existe porque `GET /api/tipos-chamado/:id/campos` **não consegue** responder a
+  // pergunta "este tipo expõe campo de prioridade?": ele serve o formulário de `RF-27` e
+  // por isso descarta `summary`/`description`/`priority` antes de qualquer um poder
+  // olhar (`camposAdicionais`). Descarte certo para o produto, ponto cego para
+  // diagnóstico — e uma conclusão sobre prioridade tirada daquela rota é inválida por
+  // construção, não por engano de quem leu.
+  //
+  // Três limites, os mesmos das rotas vizinhas — não é uma janela para varrer o site:
+  //
+  // 1. **Admin**, como todo `/api/admin/*`.
+  // 2. **Só a allowlist de `RF-28`**, e `?tipo=` só sabe ESTREITAR: tipo fora dela
+  //    responde 404 sem consultar a Atlassian, igual à rota de campos.
+  // 3. **Só o service desk configurado** — o `serviceDeskId` vem de `ctx.valores`,
+  //    nunca da query.
+  //
+  // ⚠️ A falha é **por tipo**, não da resposta inteira. Um id de outro desk na allowlist
+  // (situação real, ver `listarTiposChamado`) derrubaria a leitura dos outros catorze se
+  // uma exceção subisse — e o diagnóstico voltaria vazio justamente na instalação em que
+  // ele é mais necessário. Tipo não lido sai como `nao_lido` e **fica fora das duas
+  // listas de conclusão**: "não tem prioridade" e "não deu para saber" são respostas
+  // diferentes, e misturá-las é o erro que esta rota existe para consertar.
+  if (caminho === '/api/admin/tipos-chamado/schema' && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+
+    const serviceDeskId = ctx.valores.service_desk_id
+    if (!serviceDeskId) {
+      return ERROS.dadosInvalidos(
+        'A abertura de chamados ainda não foi configurada nesta instalação. Fale com o time de tech.',
+      )
+    }
+
+    const permitidos = ctx.valores.tipos_chamado_permitidos
+    const pedido = url.searchParams.get('tipo')?.trim() ?? ''
+    if (pedido !== '' && !permitidos.includes(pedido)) return ERROS.naoEncontrado()
+    const alvos = pedido === '' ? permitidos : [pedido]
+
+    const lidos = await mapearComLimite(alvos, CONCORRENCIA_ATLASSIAN, async (requestTypeId) => {
+      try {
+        const campos = await ctx.atlassian.obterSchemaDoTipo(serviceDeskId, requestTypeId)
+        return { requestTypeId, campos }
+      } catch {
+        // ⚠️ Sem detalhe do erro na resposta (`RNF-01`, `RNF-30`): o corpo devolvido pela
+        // Atlassian pode carregar nome de projeto e dado interno, e este JSON é lido —
+        // e provavelmente colado em algum lugar — por quem está diagnosticando.
+        return { requestTypeId, campos: null }
+      }
+    })
+
+    return json({
+      serviceDeskId,
+      // A pergunta destilada, para não depender de ninguém varrer `itens` na mão.
+      tiposComPrioridade: lidos
+        .filter((i) => i.campos !== null && temCampoDePrioridade(i.campos))
+        .map((i) => i.requestTypeId),
+      tiposSemPrioridade: lidos
+        .filter((i) => i.campos !== null && !temCampoDePrioridade(i.campos))
+        .map((i) => i.requestTypeId),
+      tiposNaoLidos: lidos.filter((i) => i.campos === null).map((i) => i.requestTypeId),
+      itens: lidos.map((i) =>
+        i.campos === null
+          ? { requestTypeId: i.requestTypeId, estado: 'nao_lido' as const }
+          : {
+              requestTypeId: i.requestTypeId,
+              estado: 'lido' as const,
+              temCampoDePrioridade: temCampoDePrioridade(i.campos),
+              totalCampos: i.campos.length,
+              campos: i.campos,
+            },
+      ),
+    })
   }
 
   // --- governança de assentos (RF-51 a RF-54, T-124 a T-128) ----------------

@@ -86,8 +86,8 @@ var TransporteAtlassian = class {
   }
   async requisitar(caminho, init = {}) {
     const resposta = await this.enviar(caminho, init, "application/json");
-    const texto2 = await resposta.text();
-    return texto2.length > 0 ? JSON.parse(texto2) : null;
+    const texto3 = await resposta.text();
+    return texto3.length > 0 ? JSON.parse(texto3) : null;
   }
   /**
    * Upload multipart — `attachTemporaryFile` do JSM (`RF-25`, T-240).
@@ -106,8 +106,8 @@ var TransporteAtlassian = class {
       { method: "POST", corpoBruto: form, headers: { "X-Atlassian-Token": "no-check" } },
       "application/json"
     );
-    const texto2 = await resposta.text();
-    return texto2.length > 0 ? JSON.parse(texto2) : null;
+    const texto3 = await resposta.text();
+    return texto3.length > 0 ? JSON.parse(texto3) : null;
   }
   /**
    * Baixa **bytes**, não JSON — anexo de página (`RNF-02`: o navegador não fala com
@@ -227,6 +227,48 @@ async function mapearComLimite(itens, limite2, fn) {
   const falha = conclusoes.find((c) => c.status === "rejected");
   if (falha && falha.status === "rejected") throw falha.reason;
   return resultados;
+}
+
+// src/lib/atlassian/schema-diagnostico.ts
+var MAX_OPCOES_LISTADAS = 20;
+function texto(valor) {
+  return typeof valor === "string" && valor.length > 0 ? valor : null;
+}
+function normalizarSchema(brutos) {
+  if (!Array.isArray(brutos)) return [];
+  const resultado = [];
+  for (const item of brutos) {
+    const fieldId = texto(item?.fieldId);
+    if (fieldId === null) continue;
+    const valores = Array.isArray(item?.validValues) ? item.validValues : [];
+    const listadas = valores.slice(0, MAX_OPCOES_LISTADAS).map((v) => {
+      const bruto = v ?? {};
+      return {
+        id: String(bruto.id ?? bruto.value ?? ""),
+        rotulo: String(bruto.label ?? bruto.value ?? bruto.id ?? "")
+      };
+    });
+    resultado.push({
+      fieldId,
+      name: typeof item?.name === "string" ? item.name : fieldId,
+      required: Boolean(item?.required),
+      jiraSchema: {
+        type: texto(item?.jiraSchema?.type),
+        system: texto(item?.jiraSchema?.system),
+        custom: texto(item?.jiraSchema?.custom),
+        items: texto(item?.jiraSchema?.items)
+      },
+      validValues: {
+        total: valores.length,
+        opcoes: listadas,
+        omitidas: valores.length - listadas.length
+      }
+    });
+  }
+  return resultado;
+}
+function temCampoDePrioridade(campos) {
+  return campos.some((c) => c.jiraSchema.system === "priority");
 }
 
 // src/lib/atlassian/cliente.ts
@@ -406,6 +448,26 @@ var ClienteAtlassianHttp = class {
       `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`
     );
     const campos = camposAdicionais(dados?.requestTypeFields ?? []);
+    this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg);
+    return campos;
+  }
+  /**
+   * O mesmo endpoint, sem o filtro nem a tradução — diagnóstico de admin.
+   *
+   * ⚠️ **Cache com chave própria**, apesar de a requisição ser a mesma de
+   * `obterCamposDoTipo`: os dois guardam formas diferentes do mesmo corpo, e uma chave
+   * compartilhada faria o segundo a chamar receber a forma do primeiro — `[]` para o
+   * diagnóstico ou uma caixa de texto a mais no formulário, dependendo da ordem. Bug que
+   * só aparece com o cache quente, que é o caso comum em produção (`RNF-13`).
+   */
+  async obterSchemaDoTipo(serviceDeskId, requestTypeId) {
+    const chave = `schemaDoTipo:${serviceDeskId}:${requestTypeId}`;
+    const cacheado = this.cacheMetadados.obter(chave);
+    if (cacheado) return cacheado;
+    const dados = await this.transporte.requisitar(
+      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`
+    );
+    const campos = normalizarSchema(dados?.requestTypeFields);
     this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg);
     return campos;
   }
@@ -881,8 +943,8 @@ var FALHAS = Object.freeze({
   timeout: { status: 504, transitorio: true },
   rejeitado: { status: 400, transitorio: false }
 });
-function normalizar(texto2) {
-  return texto2.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+function normalizar(texto3) {
+  return texto3.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 }
 function palavrasDe(termo) {
   return normalizar(termo).split(/[^a-z0-9]+/).filter((p) => p.length > 0);
@@ -901,6 +963,7 @@ var ClienteAtlassianFake = class {
     this.estado = {
       tiposChamado: inicial.tiposChamado ?? [],
       camposPorTipo: inicial.camposPorTipo ?? /* @__PURE__ */ new Map(),
+      schemaPorTipo: inicial.schemaPorTipo ?? /* @__PURE__ */ new Map(),
       paginas: inicial.paginas ?? [],
       idsRestritos: inicial.idsRestritos ?? /* @__PURE__ */ new Set(),
       filtrarPorTermo: inicial.filtrarPorTermo ?? false,
@@ -922,6 +985,7 @@ var ClienteAtlassianFake = class {
         listarComentarios: "nenhum",
         obterPagina: "nenhum",
         obterCamposDoTipo: "nenhum",
+        obterSchemaDoTipo: "nenhum",
         paginaRestrita: "nenhum",
         obterAnexo: "nenhum",
         buscarAtualizados: "nenhum",
@@ -988,6 +1052,11 @@ var ClienteAtlassianFake = class {
     this.chamadas.push({ operacao: "obterCamposDoTipo", params: { serviceDeskId, requestTypeId } });
     this.checar(this.estado.falhas.obterCamposDoTipo, "obterCamposDoTipo");
     return this.estado.camposPorTipo.get(requestTypeId) ?? [];
+  }
+  async obterSchemaDoTipo(serviceDeskId, requestTypeId) {
+    this.chamadas.push({ operacao: "obterSchemaDoTipo", params: { serviceDeskId, requestTypeId } });
+    this.checar(this.estado.falhas.obterSchemaDoTipo, "obterSchemaDoTipo");
+    return this.estado.schemaPorTipo.get(requestTypeId) ?? [];
   }
   async criarChamado(dados) {
     this.chamadas.push({ operacao: "criarChamado", params: dados });
@@ -1064,9 +1133,9 @@ var ClienteAtlassianFake = class {
     const palavras = this.estado.filtrarPorTermo && alternativas.length === 0 ? palavrasDe(params.termo) : [];
     return this.estado.paginas.filter((p) => {
       if (alternativas.length === 0 && palavras.length === 0) return true;
-      const texto2 = normalizar(`${p.titulo} ${p.trecho}`);
-      if (alternativas.length > 0) return alternativas.some((palavra) => texto2.includes(palavra));
-      return palavras.every((palavra) => texto2.includes(palavra));
+      const texto3 = normalizar(`${p.titulo} ${p.trecho}`);
+      if (alternativas.length > 0) return alternativas.some((palavra) => texto3.includes(palavra));
+      return palavras.every((palavra) => texto3.includes(palavra));
     }).filter((p) => permitidos.has(p.espaco)).filter((p) => !p.labels.some((l) => bloqueadas.has(l))).filter((p) => !this.estado.idsRestritos.has(p.id)).sort((a, b) => b.score - a.score).slice(0, params.limite);
   }
   async obterMetadadosPagina(idPagina) {
@@ -1321,6 +1390,15 @@ var ClienteAtlassianSomenteLeitura = class {
   obterCamposDoTipo(sd, rt) {
     return this.real.obterCamposDoTipo(sd, rt);
   }
+  /**
+   * ⚠️ Leitura, e tem de continuar passando **justamente aqui**: a pergunta que este
+   * método responde ("o request type expõe prioridade?") só se responde contra a
+   * Atlassian real, e o app real está em somente leitura (`D-24`). Um diagnóstico que a
+   * trava recusa é um diagnóstico que nunca roda.
+   */
+  obterSchemaDoTipo(sd, rt) {
+    return this.real.obterSchemaDoTipo(sd, rt);
+  }
   obterChamado(issueKey) {
     return this.real.obterChamado(issueKey);
   }
@@ -1431,8 +1509,8 @@ var TransporteOrganizacao = class {
         ...init.body === void 0 ? {} : { body: init.body }
       });
       if (resposta.ok) {
-        const texto2 = await resposta.text();
-        return texto2.length > 0 ? JSON.parse(texto2) : null;
+        const texto3 = await resposta.text();
+        return texto3.length > 0 ? JSON.parse(texto3) : null;
       }
       const transitorio = resposta.status === 429 || resposta.status >= 500;
       ultimoErro = new ErroAtlassian(`Organizations API respondeu ${resposta.status}`, {
@@ -1452,7 +1530,7 @@ var TransporteOrganizacao = class {
 var BASE_ORGANIZACAO = "https://api.atlassian.com";
 var MAX_PAGINAS_USUARIOS = 40;
 var TAMANHO_PAGINA = 100;
-var texto = (v) => typeof v === "string" && v.length > 0 ? v : null;
+var texto2 = (v) => typeof v === "string" && v.length > 0 ? v : null;
 function normalizarCarimbo(bruto) {
   if (typeof bruto === "string" && bruto.length > 0) {
     const ms = Date.parse(bruto);
@@ -1468,9 +1546,9 @@ function produtosDe(bruto) {
   if (!Array.isArray(bruto)) return [];
   const saida = [];
   for (const item of bruto) {
-    const chave = texto(item?.key);
+    const chave = texto2(item?.key);
     if (!chave) continue;
-    saida.push({ chave, nome: texto(item?.name) ?? chave });
+    saida.push({ chave, nome: texto2(item?.name) ?? chave });
   }
   return saida;
 }
@@ -1558,13 +1636,13 @@ var ClienteOrganizacaoHttp = class {
         })
       });
       for (const bruto of Array.isArray(dados?.data) ? dados.data : []) {
-        const accountId = texto(bruto?.accountId);
+        const accountId = texto2(bruto?.accountId);
         if (!accountId) continue;
-        if (texto(bruto?.accountStatus) === "inactive") continue;
+        if (texto2(bruto?.accountStatus) === "inactive") continue;
         usuarios.push({
           accountId,
-          email: texto(bruto?.email) ?? "",
-          nome: texto(bruto?.name) ?? texto(bruto?.email) ?? accountId,
+          email: texto2(bruto?.email) ?? "",
+          nome: texto2(bruto?.name) ?? texto2(bruto?.email) ?? accountId,
           // ⚠️ **Sempre vazio hoje**, e isso é honesto em vez de inventado: o produto
           // atribuído NÃO vem deste endpoint (ver `UsuarioBruto.productAccess`). Enquanto
           // for assim, `registrarColeta` grava zero linha por conta — o inventário fica
@@ -1587,7 +1665,7 @@ var ClienteOrganizacaoHttp = class {
     const bruto = Array.isArray(dados?.data?.product_access) ? dados.data.product_access : [];
     const porProduto = [];
     for (const item of bruto) {
-      const produto = texto(item?.key);
+      const produto = texto2(item?.key);
       if (!produto) continue;
       porProduto.push({
         produto,
@@ -1613,7 +1691,7 @@ var ClienteOrganizacaoHttp = class {
   }
 };
 function cursorDaProximaPagina(bruto) {
-  const url = texto(bruto);
+  const url = texto2(bruto);
   if (!url) return null;
   try {
     const alvo = new URL(url, BASE_ORGANIZACAO);
@@ -3100,16 +3178,16 @@ var COLUNAS_ADICIONADAS = [
   `ALTER TABLE submissoes ADD COLUMN anexos_anexados INTEGER`
 ];
 function versaoDoSchema() {
-  const texto2 = [...TABELAS, ...COLUNAS_ADICIONADAS].join("\n");
+  const texto3 = [...TABELAS, ...COLUNAS_ADICIONADAS].join("\n");
   let h1 = 5381;
   let h2 = 52711;
-  for (let i = 0; i < texto2.length; i++) {
-    const c = texto2.charCodeAt(i);
+  for (let i = 0; i < texto3.length; i++) {
+    const c = texto3.charCodeAt(i);
     h1 = h1 * 33 + c | 0;
     h2 = h2 * 31 + c | 0;
   }
   const hex = (n) => (n >>> 0).toString(16).padStart(8, "0");
-  return `${hex(h1)}${hex(h2)}-${texto2.length}`;
+  return `${hex(h1)}${hex(h2)}-${texto3.length}`;
 }
 var VERSAO_SCHEMA = versaoDoSchema();
 async function jaAplicado(db) {
@@ -3685,11 +3763,11 @@ function regra2Disponivel(exemplos) {
 }
 
 // src/lib/agent/tools.ts
-function hashConteudo(texto2) {
+function hashConteudo(texto3) {
   let h1 = 2166136261;
   let h2 = 16777619;
-  for (let i = 0; i < texto2.length; i += 1) {
-    const c = texto2.charCodeAt(i);
+  for (let i = 0; i < texto3.length; i += 1) {
+    const c = texto3.charCodeAt(i);
     h1 = Math.imul(h1 ^ c, 16777619) >>> 0;
     h2 = Math.imul(h2 + c, 2246822507) >>> 0;
   }
@@ -5286,11 +5364,11 @@ var MarcaAguaPolling = class {
 };
 
 // src/lib/notificacoes/acoes.ts
-function normalizarParaImpressao(texto2) {
-  return removerPrefixoAutoria(texto2).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+function normalizarParaImpressao(texto3) {
+  return removerPrefixoAutoria(texto3).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
-function impressaoDigital(texto2) {
-  return hashConteudo(normalizarParaImpressao(texto2));
+function impressaoDigital(texto3) {
+  return hashConteudo(normalizarParaImpressao(texto3));
 }
 var RepositorioAcoesProprias = class {
   constructor(db, agora, novoId) {
@@ -6337,17 +6415,17 @@ function anotar(coletor, motivo, detalhe) {
 function tokenizar(entrada, coletor) {
   const tokens = [];
   let i = 0;
-  let texto2 = "";
+  let texto3 = "";
   const despejarTexto = () => {
-    if (texto2 !== "") {
-      tokens.push({ t: "texto", valor: decodificarEntidades(texto2) });
-      texto2 = "";
+    if (texto3 !== "") {
+      tokens.push({ t: "texto", valor: decodificarEntidades(texto3) });
+      texto3 = "";
     }
   };
   while (i < entrada.length) {
     const c = entrada[i];
     if (c !== "<") {
-      texto2 += c;
+      texto3 += c;
       i += 1;
       continue;
     }
@@ -6372,7 +6450,7 @@ function tokenizar(entrada, coletor) {
     if (entrada.startsWith("</", i)) {
       const nome2 = lerNome(entrada, i + 2);
       if (nome2 === null) {
-        texto2 += c;
+        texto3 += c;
         i += 1;
         continue;
       }
@@ -6384,7 +6462,7 @@ function tokenizar(entrada, coletor) {
     }
     const nome = lerNome(entrada, i + 1);
     if (nome === null) {
-      texto2 += c;
+      texto3 += c;
       i += 1;
       continue;
     }
@@ -6870,8 +6948,8 @@ function converterMacro(bruto, coletor) {
     return conteudo.trim() === "" ? [] : [{ tipo: "codigo", linguagem, conteudo }];
   }
   if (nome === "status") {
-    const texto2 = parametroDaMacro(bruto, "title");
-    return texto2 === null ? [] : [{ tipo: "etiqueta", texto: texto2 }];
+    const texto3 = parametroDaMacro(bruto, "title");
+    return texto3 === null ? [] : [{ tipo: "etiqueta", texto: texto3 }];
   }
   const painel = PAINEL_POR_MACRO[nome];
   if (painel !== void 0) {
@@ -8168,8 +8246,8 @@ async function rotear(req, ctx, eu, caminho, url) {
   const mensagens = caminho.match(/^\/api\/conversas\/([^/]+)\/mensagens$/);
   if (mensagens && req.method === "POST") {
     const corpo = await lerJson(req);
-    const texto2 = typeof corpo?.texto === "string" ? corpo.texto.trim() : "";
-    if (!texto2) return ERROS.dadosInvalidos("Escreva sua mensagem antes de enviar.");
+    const texto3 = typeof corpo?.texto === "string" ? corpo.texto.trim() : "";
+    if (!texto3) return ERROS.dadosInvalidos("Escreva sua mensagem antes de enviar.");
     const conversa = await ctx.conversas.obterDoSolicitante(mensagens[1], eu.email);
     if (!conversa) return ERROS.naoEncontrado();
     await ctx.auditoria.registrar({
@@ -8178,7 +8256,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       recurso: conversa.id,
       resultado: "sucesso"
     });
-    const r = await ctx.orquestrador.processarMensagem(conversa, texto2, ctx.valores);
+    const r = await ctx.orquestrador.processarMensagem(conversa, texto3, ctx.valores);
     const depois = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email);
     return json({
       texto: r.texto,
@@ -8571,14 +8649,14 @@ async function rotear(req, ctx, eu, caminho, url) {
     const vinculo = await ctx.vinculos.obterDoSolicitante(comentar[1], eu.email);
     if (!vinculo) return ERROS.chamadoNaoSeu();
     const corpo = await lerJson(req);
-    const texto2 = typeof corpo?.texto === "string" ? corpo.texto.trim() : "";
-    if (!texto2) return ERROS.dadosInvalidos("Escreva o coment\xE1rio antes de enviar.");
-    await ctx.atlassian.comentar(comentar[1], texto2, eu.email, eu.nome);
+    const texto3 = typeof corpo?.texto === "string" ? corpo.texto.trim() : "";
+    if (!texto3) return ERROS.dadosInvalidos("Escreva o coment\xE1rio antes de enviar.");
+    await ctx.atlassian.comentar(comentar[1], texto3, eu.email, eu.nome);
     await ctx.acoesProprias.registrar({
       issueKey: comentar[1],
       atorEmail: eu.email,
       tipoEvento: "comentario_publico",
-      conteudo: texto2
+      conteudo: texto3
     });
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -9111,6 +9189,43 @@ async function rotear(req, ctx, eu, caminho, url) {
     const itens = alvo ? await ctx.auditoria.listarPorAtor(alvo, 200) : await ctx.auditoria.listarRecentes(200);
     return json({ itens });
   }
+  if (caminho === "/api/admin/tipos-chamado/schema" && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    const serviceDeskId = ctx.valores.service_desk_id;
+    if (!serviceDeskId) {
+      return ERROS.dadosInvalidos(
+        "A abertura de chamados ainda n\xE3o foi configurada nesta instala\xE7\xE3o. Fale com o time de tech."
+      );
+    }
+    const permitidos = ctx.valores.tipos_chamado_permitidos;
+    const pedido = url.searchParams.get("tipo")?.trim() ?? "";
+    if (pedido !== "" && !permitidos.includes(pedido)) return ERROS.naoEncontrado();
+    const alvos = pedido === "" ? permitidos : [pedido];
+    const lidos = await mapearComLimite(alvos, CONCORRENCIA_ATLASSIAN, async (requestTypeId) => {
+      try {
+        const campos = await ctx.atlassian.obterSchemaDoTipo(serviceDeskId, requestTypeId);
+        return { requestTypeId, campos };
+      } catch {
+        return { requestTypeId, campos: null };
+      }
+    });
+    return json({
+      serviceDeskId,
+      // A pergunta destilada, para não depender de ninguém varrer `itens` na mão.
+      tiposComPrioridade: lidos.filter((i) => i.campos !== null && temCampoDePrioridade(i.campos)).map((i) => i.requestTypeId),
+      tiposSemPrioridade: lidos.filter((i) => i.campos !== null && !temCampoDePrioridade(i.campos)).map((i) => i.requestTypeId),
+      tiposNaoLidos: lidos.filter((i) => i.campos === null).map((i) => i.requestTypeId),
+      itens: lidos.map(
+        (i) => i.campos === null ? { requestTypeId: i.requestTypeId, estado: "nao_lido" } : {
+          requestTypeId: i.requestTypeId,
+          estado: "lido",
+          temCampoDePrioridade: temCampoDePrioridade(i.campos),
+          totalCampos: i.campos.length,
+          campos: i.campos
+        }
+      )
+    });
+  }
   if (caminho === "/api/admin/assentos" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();
     const snapshot = await ctx.inventarioAssentos.obterMaisRecente();
@@ -9255,8 +9370,8 @@ function descreverFormato(valor) {
     segmentos: valor.split(/[^A-Za-z0-9_-]+/).filter((s) => s.length > 0).map((s) => ({ tamanho: s.length, conjunto: conjuntoDe(s) }))
   };
 }
-function normalizarBusca(texto2) {
-  return texto2.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
+function normalizarBusca(texto3) {
+  return texto3.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
 }
 var LIMITE_POLLING = 50;
 var LIMITE_ENVIO_NOTIFICACOES = 25;

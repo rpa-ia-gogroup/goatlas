@@ -58,6 +58,9 @@ const ROTAS_ADMIN = [
   '/api/admin/assentos',
   '/api/admin/assentos/recomendacoes',
   '/api/admin/assentos/recomendacoes?formato=csv',
+  // Diagnóstico do schema do request type: metadado de formulário, mas de toda a
+  // instalação — e a rota varre a allowlist inteira. Entra no mesmo checklist.
+  '/api/admin/tipos-chamado/schema',
 ] as const
 
 describe.each(ROTAS_ADMIN)('BURLA — %s', (rota) => {

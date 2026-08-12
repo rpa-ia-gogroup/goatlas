@@ -22,6 +22,7 @@
 import { prefixarAutoria, filtrarPublicos, montarQueryComentarios } from './comentarios'
 import { CacheTtl, TransporteAtlassian, type OpcoesHttp } from './http'
 import { CONCORRENCIA_ATLASSIAN, mapearComLimite } from '../paralelo'
+import { normalizarSchema, type CampoDoSchema } from './schema-diagnostico'
 import {
   ErroAtlassian,
   MAX_ANEXO_BYTES,
@@ -444,6 +445,32 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     )) as { requestTypeFields?: CampoRequestTypeBruto[] }
 
     const campos = camposAdicionais(dados?.requestTypeFields ?? [])
+    this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg)
+    return campos
+  }
+
+  /**
+   * O mesmo endpoint, sem o filtro nem a tradução — diagnóstico de admin.
+   *
+   * ⚠️ **Cache com chave própria**, apesar de a requisição ser a mesma de
+   * `obterCamposDoTipo`: os dois guardam formas diferentes do mesmo corpo, e uma chave
+   * compartilhada faria o segundo a chamar receber a forma do primeiro — `[]` para o
+   * diagnóstico ou uma caixa de texto a mais no formulário, dependendo da ordem. Bug que
+   * só aparece com o cache quente, que é o caso comum em produção (`RNF-13`).
+   */
+  async obterSchemaDoTipo(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<readonly CampoDoSchema[]> {
+    const chave = `schemaDoTipo:${serviceDeskId}:${requestTypeId}`
+    const cacheado = this.cacheMetadados.obter(chave)
+    if (cacheado) return cacheado as CampoDoSchema[]
+
+    const dados = (await this.transporte.requisitar(
+      `/rest/servicedeskapi/servicedesk/${encodeURIComponent(serviceDeskId)}/requesttype/${encodeURIComponent(requestTypeId)}/field`,
+    )) as { requestTypeFields?: unknown }
+
+    const campos = normalizarSchema(dados?.requestTypeFields)
     this.cacheMetadados.definir(chave, campos, this.opcoes.ttlMetadadosSeg)
     return campos
   }
