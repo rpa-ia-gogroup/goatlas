@@ -368,6 +368,50 @@
   display: block;
 }
 
+/**
+ * Um comentário na conversa do chamado — D-40.
+ *
+ * A tela reaproveita o vocabulário que a conversa com o agente já ensina: o que a
+ * pessoa escreveu vem em bolha, encostado à direita; o que veio do outro lado vem
+ * corrido, à esquerda. Aqui isso não é decoração — é o **terceiro** sinal de "este
+ * comentário é seu", ao lado do rótulo em palavras ("Você") e da linha que nomeia a
+ * conta. Cor sozinha nunca diz o estado; tirar a cor da bolha deixa a distinção
+ * intacta, e é assim que ela precisa ser.
+ */
+.comentario {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* O `gap` acima já separa o rótulo; a margem herdada dobraria o respiro. */
+.comentario .autor {
+  margin-bottom: 0;
+}
+
+.comentario-meu {
+  align-self: flex-end;
+  align-items: flex-end;
+  max-width: 85%;
+}
+/* O 85% de `.fala-usuario` é medido contra a coluna inteira da conversa. Dentro de
+   um bloco que já está a 85%, ele encolheria a bolha duas vezes. */
+.comentario-meu .fala-usuario {
+  max-width: 100%;
+}
+
+/**
+ * A conta que registrou a resposta no Jira — D-40.
+ *
+ * Fica em tipo de legenda, e não no lugar do autor, porque é o que ela é: o registro,
+ * não a afirmação de quem escreveu. Sob proxy total (D-01) esta pode ser a conta de
+ * serviço, e o app não tem como saber a diferença — mas apagá-la estragaria o caso
+ * comum, o agente que respondeu de verdade com a conta dele.
+ */
+.autor-registro {
+  font-size: var(--fs-caption);
+  color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
+}
+
 /* ---------- o momento da deflexão: onde o lime carrega estrutura -------- */
 
 .cartao-deflexao {

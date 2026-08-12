@@ -44,6 +44,7 @@ import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
 import { resolverCamposDoSolicitante } from '../tickets/campos-do-solicitante'
+import { paraExibicao } from '../tickets/comentario-exibicao'
 import {
   mensagemObrigatoriosFaltando,
   obrigatoriosFaltando,
@@ -717,7 +718,11 @@ async function rotear(
       via: r.vinculo.via,
       verificadoRegras: r.vinculo.verificadoRegras,
       area: r.vinculo.area,
-      comentarios: comentarios ?? [],
+      // ⚠️ `paraExibicao` é a ÚNICA tradução de "corpo cru" para "o que a tela mostra"
+      // (`D-40`): ela classifica pelo mesmo predicado do SLA e tira o prefixo de
+      // `D-13`. Devolver o cru daqui obrigaria a tela a remontar a regra, e duas
+      // regras para o mesmo fato divergem em silêncio.
+      comentarios: paraExibicao(comentarios ?? []),
       // `RNF-19` — a tela precisa distinguir "não há resposta ainda" de "não consegui
       // buscar as respostas". Sem estes campos, uma queda do Jira apareceria como um
       // chamado sem histórico, o que é uma informação falsa.

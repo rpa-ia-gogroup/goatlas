@@ -82,9 +82,24 @@ export interface TransicaoDisponivel {
 
 export interface ComentarioPublico {
   readonly id: string
+  /** Já **sem** o prefixo de autoria do `D-13` — quem o remove é o servidor (`D-40`). */
   readonly corpo: string
+  /**
+   * O nome da CONTA que registrou o comentário no Jira.
+   *
+   * ⚠️ **Não é uma afirmação de autoria.** Sob proxy total (`D-01`) esta pode ser a
+   * conta de serviço, que hoje é a conta pessoal de um colaborador — foi exatamente
+   * o que a tela imprimia como autor do comentário da própria pessoa (`D-40`).
+   */
   readonly autorNome: string
   readonly criadoEm: string
+  /**
+   * `true` = a pessoa que está lendo escreveu este comentário, pelo goatlas.
+   *
+   * Vem do servidor, do **mesmo** predicado que o SLA de `RF-46` usa. A tela não
+   * recalcula: condição escrita só aqui divergiria em silêncio da de lá.
+   */
+  readonly doSolicitante: boolean
 }
 
 export interface DetalheChamado {
