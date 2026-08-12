@@ -13,7 +13,13 @@
  * a recupera — nunca fica um chamado órfão sem rastro.
  */
 
-import { ErroAtlassian, type ClienteAtlassian } from '../atlassian/tipos'
+import {
+  ErroAtlassian,
+  type AnexoDoChamado,
+  type ClienteAtlassian,
+  type ComentarioPublico,
+} from '../atlassian/tipos'
+import { anexosParaExibir, provaDePublicidade, type AnexosParaExibir } from './anexos-do-chamado'
 import type { Auditoria } from '../audit'
 import { CriacaoRecusada, autorizarCriacao } from '../agent/gate'
 import type { Conversa } from '../agent/estado'
@@ -420,5 +426,40 @@ export class ServicoChamados {
     if (!vinculo) return null
     // O cliente já garante público-somente; o isolamento garante que é dele.
     return this.atlassian.listarComentariosPublicos(issueKey)
+  }
+
+  /**
+   * Anexos que a pessoa pode ver — `RF-31`, `RN-05`, `D-45`.
+   *
+   * Duas fontes cruzadas (ver `tickets/anexos-do-chamado.ts`): a lista do chamado prova
+   * que o anexo **existe**, os comentários públicos provam que ele é **público**. O
+   * isolamento por vínculo vem antes das duas — sem e-mail no `WHERE`, nada é lido.
+   *
+   * ⚠️ **Falha de qualquer uma das fontes vira `indisponivel`, nunca lista vazia**
+   * (`RNF-18`, `RNF-19`): "este chamado não tem anexos" durante uma queda faz a pessoa
+   * mandar o arquivo de novo, e é a mesma frase errada de `comentariosIndisponiveis`.
+   */
+  async listarAnexosDoSolicitante(
+    issueKey: string,
+    solicitanteEmail: string,
+    comentarios: readonly ComentarioPublico[] | null,
+  ): Promise<AnexosParaExibir | null> {
+    const vinculo = await this.vinculos.obterDoSolicitante(issueKey, solicitanteEmail)
+    if (!vinculo) return null
+
+    let doChamado: readonly AnexoDoChamado[] | null = null
+    try {
+      doChamado = await this.atlassian.listarAnexosDoChamado(issueKey)
+    } catch {
+      // `null` = a testemunha caiu. `anexosParaExibir` transforma isso na frase honesta.
+      doChamado = null
+    }
+    // Sem os comentários não há prova de publicidade nenhuma — e prova ausente não é
+    // prova de que não há anexo público.
+    const prova =
+      comentarios === null
+        ? { disponivel: false, anexos: [] as readonly AnexoDoChamado[] }
+        : provaDePublicidade(comentarios)
+    return anexosParaExibir(issueKey, doChamado, prova)
   }
 }
