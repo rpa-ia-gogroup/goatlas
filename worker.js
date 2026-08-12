@@ -5117,7 +5117,7 @@ var AnexosEnviados = class {
       nomeArquivo: l.nome_arquivo,
       tamanhoBytes: l.tamanho_bytes === null ? null : Number(l.tamanho_bytes),
       tipo: l.tipo,
-      via: l.via === "criacao" ? "criacao" : "chamado",
+      via: l.via === "criacao" || l.via === "transcricao" ? l.via : "chamado",
       criadoEm: l.criado_em
     }));
   }
@@ -5310,10 +5310,11 @@ function mesmoArquivo(a, b) {
   return a.tamanhoBytes === b.tamanhoBytes;
 }
 function anexosParaExibir(issueKey, doChamado, prova, enviadosPeloApp = []) {
-  const meus = enviadosPeloApp.map((a) => ({
+  const meus = enviadosPeloApp.map(({ via, ...a }) => ({
     ...a,
     url: urlDoAnexoNoApp(issueKey, a.nomeArquivo),
-    origem: "voce"
+    // `via` ausente = os caminhos antigos, que só gravavam envio da pessoa.
+    origem: via === "transcricao" ? "goatlas" : "voce"
   }));
   const jaListado = (a) => meus.some((m) => mesmoArquivo(m, a));
   if (doChamado === null) return { itens: meus, indisponivel: true };
@@ -5675,7 +5676,11 @@ var ServicoChamados = class {
       // passar por `decidirEntrega` (`D-11`) — o nome do campo é o mesmo por isso.
       tipoDeclarado: a.tipo,
       tamanhoBytes: a.tamanhoBytes,
-      criadoEm: a.criadoEm
+      criadoEm: a.criadoEm,
+      // `RF-23` — o que distingue o arquivo da pessoa da transcrição que o app gerou.
+      // Sem ele os dois sairiam como "você enviou", e a tela afirmaria que ela mandou
+      // um arquivo que nunca existiu do lado dela.
+      via: a.via
     })) : [];
     return anexosParaExibir(issueKey, doChamado, prova, meus);
   }
@@ -8638,6 +8643,112 @@ async function materializarAnexosDoChamado(deps, dados) {
   return { estado, anexados, falharam, mensagem: mensagemDe(estado, falharam) };
 }
 
+// src/lib/tickets/transcricao.ts
+var LIMITE_TRANSCRICAO_BYTES = 256 * 1024;
+var ROTULO_TOOL = {
+  search_confluence: "consultou a documenta\xE7\xE3o",
+  check_jira_history: "consultou o hist\xF3rico de chamados"
+};
+function rotuloDoPapel(m) {
+  switch (m.papel) {
+    case "user":
+      return "Solicitante";
+    case "assistant":
+      return "Agente";
+    default:
+      return null;
+  }
+}
+function montarTranscricao(mensagens, dados) {
+  const cabecalho = [
+    "# Conversa com o agente do goatlas",
+    "",
+    `- **Chamado:** ${dados.issueKey}`,
+    `- **Solicitante:** ${dados.solicitanteEmail}`,
+    `- **Conversa:** ${dados.conversaId}`,
+    `- **Gerado em:** ${dados.geradoEm}`,
+    "",
+    "> Di\xE1logo que originou este chamado. O resultado das verifica\xE7\xF5es autom\xE1ticas n\xE3o \xE9",
+    "> reproduzido aqui \u2014 s\xF3 o registro de que elas rodaram antes de o chamado ser aberto.",
+    "",
+    "---",
+    ""
+  ].join("\n");
+  const corpo = [];
+  for (const m of mensagens) {
+    if (m.papel === "tool") {
+      const rotulo = m.toolNome ? ROTULO_TOOL[m.toolNome] : void 0;
+      corpo.push(`_(o agente ${rotulo ?? "usou uma ferramenta de verifica\xE7\xE3o"})_`, "");
+      continue;
+    }
+    const quem = rotuloDoPapel(m);
+    if (quem === null) continue;
+    const texto3 = m.conteudo.trim();
+    if (texto3.length === 0) continue;
+    corpo.push(`**${quem}:**`, "", texto3, "");
+  }
+  if (corpo.length === 0) {
+    corpo.push("_(esta conversa n\xE3o tem mensagens registradas)_", "");
+  }
+  return recortar(cabecalho + corpo.join("\n"));
+}
+function recortar(texto3) {
+  const aviso = "\n\n---\n\n_\u26A0\uFE0F Transcri\xE7\xE3o truncada: a conversa passou do limite de arquivo do goatlas. O di\xE1logo completo continua registrado no app._\n";
+  const codificador = new TextEncoder();
+  if (codificador.encode(texto3).length <= LIMITE_TRANSCRICAO_BYTES) return texto3;
+  const sobra = LIMITE_TRANSCRICAO_BYTES - codificador.encode(aviso).length;
+  const bytes = codificador.encode(texto3).slice(0, Math.max(0, sobra));
+  const decodificador = new TextDecoder("utf-8", { fatal: false });
+  return decodificador.decode(bytes).replace(/�+$/u, "") + aviso;
+}
+function nomeDoArquivo(issueKey) {
+  return `conversa-${issueKey.replace(/[^A-Za-z0-9-]/g, "")}.md`;
+}
+async function anexarTranscricaoDoChamado(deps, dados) {
+  const registrar = (resultado, detalhe) => deps.auditoria.registrar({
+    atorEmail: dados.solicitanteEmail,
+    acao: "transcricao_anexada",
+    recurso: dados.issueKey ?? `conversa:${dados.conversaId}`,
+    resultado,
+    detalhe
+  }).catch(() => void 0);
+  if (dados.issueKey === null) {
+    await registrar("falha", { motivo: "criacao_diferida" });
+    return false;
+  }
+  try {
+    const mensagens = await deps.conversas.listarMensagens(dados.conversaId);
+    const texto3 = montarTranscricao(mensagens, {
+      conversaId: dados.conversaId,
+      solicitanteEmail: dados.solicitanteEmail,
+      issueKey: dados.issueKey,
+      geradoEm: deps.agora()
+    });
+    const bytes = new TextEncoder().encode(texto3);
+    const nome = nomeDoArquivo(dados.issueKey);
+    const id = await deps.atlassian.subirAnexoTemporario(dados.serviceDeskId, {
+      nome,
+      tipo: "text/markdown",
+      // `slice()` porque o `Uint8Array` do encoder pode ser uma vista de um buffer maior.
+      bytes: bytes.slice().buffer
+    });
+    await deps.atlassian.materializarAnexosTemporarios(dados.issueKey, [id]);
+    await deps.anexosEnviados?.registrar({
+      issueKey: dados.issueKey,
+      solicitanteEmail: dados.solicitanteEmail,
+      nomeArquivo: nome,
+      tamanhoBytes: bytes.byteLength,
+      tipo: "text/markdown",
+      via: "transcricao"
+    }).catch(() => void 0);
+    await registrar("sucesso", { bytes: bytes.byteLength, mensagens: mensagens.length });
+    return true;
+  } catch {
+    await registrar("falha", { motivo: "anexo_recusado" });
+    return false;
+  }
+}
+
 // src/lib/config/validar.ts
 var FAMILIA = {
   dominios_permitidos: "lista_de_texto",
@@ -9086,6 +9197,12 @@ async function rotear(req, ctx, eu, caminho, url) {
     const anexo = await materializarAnexosDoChamado(ctx, {
       chaveIdempotencia: chaveDaConversa,
       solicitanteEmail: eu.email,
+      issueKey: r.issueKey
+    });
+    await anexarTranscricaoDoChamado(ctx, {
+      conversaId: conversa.id,
+      solicitanteEmail: eu.email,
+      serviceDeskId,
       issueKey: r.issueKey
     });
     await avisarCriacao(ctx, r, {

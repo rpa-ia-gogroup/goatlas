@@ -310,7 +310,23 @@ destes reabre um vazamento que já foi fechado.
   de T-422). ⚠️ E `anexosIndisponiveis` **mudou de significado** — hoje fala só do time, e por
   isso deixou de esconder a lista; os três casos de `T-084` que afirmavam `[]` durante a queda
   foram atualizados, e um deles já dizia no comentário que lista vazia silenciosa era o que
-  não podia acontecer. A origem vai à tela em **palavras** (*você enviou* × *do time*).
+  não podia acontecer. A origem vai à tela em **palavras** (*você enviou* × *do time* ×
+  *gerado pelo goatlas*, `D-54`).
+- 🚨 **A transcrição da conversa é ANEXO, e as outras duas formas estão descartadas por
+  medição** (`D-54`, `tickets/transcricao.ts`). `RF-23` pede persistir **e** anexar; só a
+  primeira metade existia. **Linkar para dentro do app está morto**: `RF-30` não tem leitura
+  sem e-mail (o filtro está no `WHERE`, e `obterPorIssueKey` sem e-mail não existe), então o
+  agente do time receberia **404** — e antes disso o edge `authenticated` o mandaria ao
+  OAuth. **Colar na descrição perde chamado**: ela viaja no corpo da criação, 400 é
+  definitivo (`RNF-17`), e o limite do campo **não foi medido** — falharia justo nas
+  conversas mais ricas. O anexo roda **depois** da criação e **fora** do `catch` que
+  classifica falha, pela razão exata de `D-26`; nada ali lança. ⚠️ **O prompt do sistema e o
+  conteúdo das tools ficam de fora** — o primeiro é configuração da instalação (`D-33`), o
+  segundo é página do Confluence e chamado de terceiros dentro de um arquivo que **ninguém
+  reavalia** (`RN-06` decide na leitura). O que vai é o registro de que a verificação rodou.
+  ⚠️ E a falha é **silenciosa na tela, gritada na auditoria** (`transcricao_anexada`): "não
+  consegui anexar a transcrição" num recibo de chamado recém-aberto faz a pessoa abrir o
+  segundo.
 - 🚨 **Quem prova que o anexo do chamado é PÚBLICO não é o endpoint de anexos** (`D-45`,
   `tickets/anexos-do-chamado.ts`). A documentação do JSM diz, sobre
   `GET /request/{key}/attachment`: *"customers will only get a list of public attachments"* —
@@ -1239,7 +1255,7 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1187 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1223 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste.

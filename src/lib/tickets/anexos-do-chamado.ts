@@ -33,6 +33,7 @@
  */
 
 import type { AnexoDoChamado, ComentarioPublico } from '../atlassian/tipos'
+import type { ViaDoAnexo } from './anexos-enviados'
 
 /** O anexo como a tela o recebe: descrição + o link **do app** para baixá-lo. */
 export interface AnexoExibivel extends AnexoDoChamado {
@@ -43,8 +44,14 @@ export interface AnexoExibivel extends AnexoDoChamado {
    *
    * `voce` — o app o enviou a pedido desta pessoa; a prova é a nossa própria linha.
    * `time` — veio da Atlassian e passou pela interseção de `D-45`.
+   * `goatlas` — o app o **gerou** (hoje só a transcrição de `RF-23`). Ninguém o enviou.
+   *
+   * ⚠️ O terceiro valor existe porque os dois primeiros mentiriam sobre a transcrição:
+   * "você enviou" é falso (a pessoa não mandou arquivo nenhum) e "do time" é falso do
+   * jeito pior (sugere que um agente do time anexou algo ao chamado dela). Afirmar
+   * autoria errada na tela é exatamente o defeito que `D-43` corrigiu no comentário.
    */
-  readonly origem: 'voce' | 'time'
+  readonly origem: 'voce' | 'time' | 'goatlas'
 }
 
 export interface AnexosParaExibir {
@@ -128,17 +135,18 @@ export function anexosParaExibir(
   issueKey: string,
   doChamado: readonly AnexoDoChamado[] | null,
   prova: ProvaDePublicidade,
-  enviadosPeloApp: readonly AnexoDoChamado[] = [],
+  enviadosPeloApp: readonly (AnexoDoChamado & { readonly via?: ViaDoAnexo })[] = [],
 ): AnexosParaExibir {
   // ⚠️ **Os nossos vêm primeiro, e não passam por prova nenhuma.** Cada um saiu de um
   // upload autenticado desta pessoa para um chamado com vínculo dela; nenhum pode ser de
   // comentário interno, porque comentário interno é escrito por quem tem assento e este
   // caminho não existe para o solicitante. Perguntar à Atlassian se o arquivo que **nós**
   // enviamos é público é o que produzia o silêncio medido no `GN-6898`.
-  const meus: AnexoExibivel[] = enviadosPeloApp.map((a) => ({
+  const meus: AnexoExibivel[] = enviadosPeloApp.map(({ via, ...a }) => ({
     ...a,
     url: urlDoAnexoNoApp(issueKey, a.nomeArquivo),
-    origem: 'voce' as const,
+    // `via` ausente = os caminhos antigos, que só gravavam envio da pessoa.
+    origem: via === 'transcricao' ? ('goatlas' as const) : ('voce' as const),
   }))
   const jaListado = (a: AnexoDoChamado) => meus.some((m) => mesmoArquivo(m, a))
 

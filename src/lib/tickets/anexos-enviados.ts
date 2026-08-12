@@ -54,8 +54,15 @@
 import type { Banco } from '../db/tipos'
 import { linhasComoObjetos } from '../db/tipos'
 
-/** Por onde o arquivo entrou. Serve à leitura da tela, não a nenhuma regra. */
-export type ViaDoAnexo = 'criacao' | 'chamado'
+/**
+ * Por onde o arquivo entrou. Serve à leitura da tela, não a nenhuma regra.
+ *
+ * ⚠️ **`transcricao` não é "a pessoa enviou".** Ninguém a enviou: o app a gerou a partir
+ * da conversa (`RF-23`, `transcricao.ts`). Ela mora nesta tabela porque a tabela é o
+ * registro permanente do que **nós** pusemos no chamado — e é este valor que impede a
+ * tela de afirmar uma autoria falsa, como `D-43` já ensinou uma vez.
+ */
+export type ViaDoAnexo = 'criacao' | 'chamado' | 'transcricao'
 
 export interface AnexoEnviado {
   readonly issueKey: string
@@ -146,7 +153,7 @@ export class AnexosEnviados {
       nomeArquivo: l.nome_arquivo,
       tamanhoBytes: l.tamanho_bytes === null ? null : Number(l.tamanho_bytes),
       tipo: l.tipo,
-      via: l.via === 'criacao' ? 'criacao' : 'chamado',
+      via: l.via === 'criacao' || l.via === 'transcricao' ? l.via : 'chamado',
       criadoEm: l.criado_em,
     }))
   }

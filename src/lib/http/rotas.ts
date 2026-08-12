@@ -86,6 +86,7 @@ import {
   materializarAnexosDoChamado,
   type ResultadoAnexoNaCriacao,
 } from '../tickets/anexo-na-criacao'
+import { anexarTranscricaoDoChamado } from '../tickets/transcricao'
 import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
 import { buscaConfigurada } from '../config/diagnostico'
 
@@ -469,6 +470,16 @@ async function rotear(
     const anexo = await materializarAnexosDoChamado(ctx, {
       chaveIdempotencia: chaveDaConversa,
       solicitanteEmail: eu.email,
+      issueKey: r.issueKey,
+    })
+    // `RF-23` — a transcrição vai junto, e **só por este caminho**: o formulário mínimo
+    // (`D-04`) não tem conversa nenhuma para transcrever. Depois da criação e fora do
+    // `catch` acima pela mesma razão do anexo (`D-26`); não lança e não fala com a
+    // pessoa — o que ela precisa saber já está no recibo (`transcricao.ts`).
+    await anexarTranscricaoDoChamado(ctx, {
+      conversaId: conversa.id,
+      solicitanteEmail: eu.email,
+      serviceDeskId,
       issueKey: r.issueKey,
     })
     await avisarCriacao(ctx, r, {

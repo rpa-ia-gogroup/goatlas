@@ -453,8 +453,22 @@ created: "2026-08-03"
 > como pronto, procurou-se **onde ele vive** no código. As duas abaixo são requisitos
 > que nenhuma tarefa cobria — não regressões, e sim lacunas que o board nunca mostrou.
 
-- [ ] **T-098** **`RF-23` — a transcrição da conversa nunca chega ao chamado.**
+- [x] **T-098** **`RF-23` — a transcrição da conversa nunca chega ao chamado.**
       _Requirements: RF-23_
+      ✅ **Resolvida em 12/08/2026 (`D-54`).** A transcrição vai como **anexo** — um
+      `conversa-<chave>.md` gerado depois da criação e **fora** do `catch` que classifica
+      falha de submissão, pela razão exata de `D-26`. As outras duas formas caíram por
+      medição, não por gosto: **linkar** para dentro do app dá **404** para o agente do time
+      (`RF-30` não tem leitura sem e-mail, e o edge `authenticated` o mandaria ao OAuth
+      antes disso), e **colar na descrição** faria uma conversa comprida encostar num limite
+      de campo **não medido**, onde 400 é definitivo e o chamado se perde (`RNF-17`).
+      O prompt do sistema e o **conteúdo** das tools ficam de fora (`D-33`; `RN-06` decide
+      exposição na leitura, e anexo ninguém reavalia); o registro de que rodaram fica.
+      A falha é silenciosa na tela e auditada em `transcricao_anexada`, e a origem na tela
+      ganhou uma terceira palavra — *gerado pelo goatlas* —, porque "você enviou" e "do
+      time" seriam autoria falsa (`D-43` na versão arquivo).
+      ⚠️ O teste que vale é o dos **bytes entregues à Atlassian**: o fake registra só nome e
+      tipo, então um caso contra ele passaria com o arquivo vazio (`D-47`).
       O requisito (P1) pede duas coisas: **persistir** a transcrição **e** anexá-la (ou
       **linká-la**) ao chamado. A primeira metade existe desde a Fase 1 — as tabelas
       `conversas`/`mensagens` guardam a conversa inteira, e `submissoes.conversa_id`
