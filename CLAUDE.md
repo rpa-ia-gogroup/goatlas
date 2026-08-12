@@ -462,6 +462,22 @@ destes reabre um vazamento que já foi fechado.
   foi o texto. E **opção fora da lista é recusa antes do efeito**, com o rótulo (`RNF-30`),
   como em `D-37`/`D-38`. Número, data e cascading select continuam indo crus — declarado no
   `D-39`.
+- 🚨 **O leitor de PRODUTO filtra; o leitor de DIAGNÓSTICO não pode filtrar nada** (`D-44`,
+  `atlassian/schema-diagnostico.ts`). `camposAdicionais` descarta `summary`/`description`/
+  `priority` porque o formulário de `RF-27` já os tem fixos — descarte certo, e por isso
+  `GET /api/tipos-chamado/:id/campos` **nunca mostra `priority`, exista ele ou não**. Quem
+  consultou aquela rota para saber se o request type expõe prioridade recebeu a resposta
+  errada com cara de resposta (12/08/2026). O diagnóstico tem caminho próprio
+  (`GET /api/admin/tipos-chamado/schema`), e o teste que põe os dois leitores lado a lado
+  sobre o mesmo corpo bruto existe para reprovar quem os fundir "para não duplicar código".
+  ⚠️ E `tiposNaoLidos` é uma **terceira** lista: "não deu para saber" fora de
+  `tiposSemPrioridade`, como `area_indisponivel` × `area_nao_encontrada`.
+- ⚠️ **A prioridade NUNCA sai do app hoje** — `montarCamposSolicitante` só a envia com
+  `opcoes.campoPrioridadeId` preenchido, e `contexto.ts` não passa esse campo (não há chave
+  em `ConfigValores`). `RF-16` é editável na tela e inerte no Jira. Antes de ligar, `D-36`
+  vale: o **rótulo** (`ROTULO_PRIORIDADE`, `Highest`/`High`/`Medium`) é forma do formulário,
+  mora no código com teste, e os rótulos reais do site saem do `validValues` que o
+  diagnóstico mostra — nunca da suposição.
 - 🚨 **A área do solicitante é GUARDADA, nunca enviada** (`D-37`, `teamguide/area.ts`). O
   campo `Setor Gocase` do Jira é multi-checkbox com **15 opções fixas**, e a área real da
   primeira pessoa medida (`RPA`) **não está entre elas** — mandar valor fora da lista dá
@@ -933,9 +949,14 @@ volta pela rota isolada por e-mail: a descrição chegou com o bloco de autoria 
 chave `form:<email>:<chave>`. ⚠️ **É um chamado de teste numa fila real** (`[TESTE goatlas -
 ignorar]`) — alguém do time de tech precisa apagá-lo; o app não tem essa operação.
 ⚠️ **Mandamos `prioridade: "normal"` e o chamado voltou com `prioridade: null` e
-`slaPrimeiraResposta: null`** — ou o tipo 68 não expõe campo de prioridade, ou o mapeamento
-não está sendo aplicado. Se for o segundo, `RF-16` (prioridade editável) não tem efeito no
-Jira. **Não investigado.**
+`slaPrimeiraResposta: null`.** Uma metade já está explicada: **a prioridade nunca sai do
+app**. `montarCamposSolicitante` só a envia se `opcoes.campoPrioridadeId` estiver preenchido,
+e `contexto.ts` **nunca passa esse campo** — não existe chave para ele em `ConfigValores`.
+Logo `RF-16` (prioridade editável) não tem efeito no Jira hoje, independentemente do que o
+request type exponha. A outra metade — *o tipo expõe campo de prioridade?* — é medível desde
+`D-44`: `GET /api/admin/tipos-chamado/schema` (ver `docs/DEPLOY.md`). ⚠️ **Não a responda por
+`GET /api/tipos-chamado/:id/campos`**: aquela rota descarta `priority` por construção, e a
+resposta é "não tem" nos dois mundos.
 
 ⚠️ **A allowlist de tipos foi ampliada em 11/08** para os **15** tipos do `GN`
 (`68,70,71,89,90,91,92,93,94,95,96,108,134,143,144`), em prod e staging. O **`69`
@@ -950,7 +971,7 @@ o cliente inteiro fala `servicedeskapi`, então `TASK` é inalcançável, e escr
 sem comentário público/interno, sem SLA). Há também um espaço `IA` no Confluence (2 páginas),
 que é documentação, não fila.
 
-**1005 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1027 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`

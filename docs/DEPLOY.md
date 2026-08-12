@@ -460,6 +460,36 @@ houver, revogue de todo modo.
 
 ---
 
+## Diagnóstico: o formulário do request type, como a Atlassian o entrega
+
+`GET /api/admin/tipos-chamado/schema` (admin) devolve o schema **normalizado campo a
+campo** dos request types da allowlist, no service desk configurado. Existe porque
+`GET /api/tipos-chamado/:id/campos` **não pode** responder perguntas sobre
+`summary`/`description`/`priority`: ele serve o formulário de `RF-27` e descarta os três
+antes de qualquer um poder olhar (`D-44`).
+
+**Chamar (staging `3936ca2d`), logado no navegador — a rota está atrás do edge:**
+
+```
+https://3936ca2d.devgogroup.com/api/admin/tipos-chamado/schema
+```
+
+Um tipo por vez: `…/schema?tipo=68`. O `?tipo=` só sabe **estreitar** — id fora da
+allowlist responde 404 sem consultar a Atlassian.
+
+**Como ler:**
+
+| Campo da resposta | O que significa |
+|---|---|
+| `tiposComPrioridade` | O request type **publica** campo de prioridade no formulário do portal. `RF-16` tem para onde escrever — falta ligar `campoPrioridadeId` e conferir os rótulos reais em `validValues` |
+| `tiposSemPrioridade` | O campo **não está no formulário** do request type. Não quer dizer que a issue do Jira não tenha prioridade: quer dizer que a API de portal não aceita esse valor na criação. Saídas: publicar o campo no formulário (admin da Atlassian) ou setar depois da criação |
+| `tiposNaoLidos` | **Não deu para saber** — a leitura do schema falhou. Nunca conte como "não tem": são conclusões diferentes, com trabalhos opostos |
+| `itens[].campos[].jiraSchema.system` | Quem responde a pergunta. `"priority"` é o sinal; o `fieldId` **não** é critério (`ScC-4`, `D-36`) |
+| `itens[].campos[].validValues` | `total` sempre; `opcoes` quando são poucas (teto de 20) e `omitidas` no resto. É daqui que saem os **rótulos reais** de prioridade do site — `ROTULO_PRIORIDADE` (`Highest`/`High`/`Medium`) é suposição até serem conferidos |
+
+⚠️ A rota é **leitura pura** e passa pelo decorador de somente leitura de propósito: a
+pergunta só se responde contra a Atlassian real, e o app real está travado (`D-24`).
+
 ## Checklist antes de produção
 
 - [ ] `npm run test` verde, incluindo os testes de burla (`RF-08`, `RF-17`,

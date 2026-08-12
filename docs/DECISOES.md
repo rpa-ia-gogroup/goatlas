@@ -1944,6 +1944,63 @@ não sobre "abriu chamado". Mesma família de `D-38` e de `linhasComoObjetos`.
 
 ---
 
+### D-44 · O instrumento de medida não pode ter o cego do objeto medido
+
+**Data:** 12/08/2026 · **Contexto:** `RF-16`, `RF-27`, `RF-28`, `RNF-01`, `RNF-30`, `D-36`,
+`ScC-4`
+
+**A pergunta que não tinha como ser respondida.** `GN-6894` e `GN-6897` foram criados com
+`prioridade: "normal"` e voltaram com `prioridade: null`. Duas explicações possíveis, com
+trabalhos opostos: ou os request types do `GN` **não expõem** campo de prioridade, ou expõem
+e o nosso código não o preenche. A rota consultada para decidir foi
+`GET /api/tipos-chamado/:id/campos` — e ela **não pode** responder isso.
+
+**Por quê.** `camposAdicionais` (`atlassian/cliente.ts`) serve o formulário de `RF-27`, e por
+isso descarta `summary`, `description` e `priority`: os três já têm input fixo (`D-04`), e
+mostrá-los de novo seria campo em dobro na tela. O descarte está certo. A consequência é que
+aquela rota **nunca** mostra `priority` — exista ele ou não —, então "consultei e não tem
+prioridade" é uma frase que ela produz nos dois mundos. Foi tirada uma conclusão dali, e ela
+era inválida por construção, não por desatenção de quem leu.
+
+⚠️ É a mesma família de `D-38` e `linhasComoObjetos`, com o alvo deslocado: lá o **dublê**
+escondia a divergência; aqui é o **instrumento de diagnóstico** que herdou o cego do caminho
+de produto que ele deveria medir.
+
+**A decisão.** O diagnóstico ganha caminho próprio — `atlassian/schema-diagnostico.ts` +
+`GET /api/admin/tipos-chamado/schema` —, e o critério que o separa é este: *o leitor de
+produto pode filtrar; o leitor de diagnóstico não pode filtrar nada*. Fundir os dois "para
+não duplicar código" reabre exatamente este furo, e o teste que coloca os dois lado a lado
+sobre o mesmo corpo bruto existe para reprovar essa fusão.
+
+**Três coisas que parecem detalhe e são a decisão:**
+
+- **Normalizado campo a campo, nunca o JSON cru.** Repassar `requestTypeFields` inteiro seria
+  mais curto e faria a resposta carregar qualquer campo que a Atlassian acrescente, sem
+  ninguém decidir — é assim que um oráculo cresce. A lista de campos devolvidos é fechada.
+- **Quem responde "tem prioridade?" é `jiraSchema.system`, nunca o id do campo.** Mesma regra
+  de `ScC-4` e mesmo motivo de `D-36`: id de campo não significa nada fora do request type,
+  e comparar contra um literal daria "não tem" em silêncio em qualquer outra instalação.
+- **Tipo não lido fica FORA das duas listas de conclusão.** `tiposNaoLidos` é uma terceira
+  lista, ao lado de `tiposComPrioridade` e `tiposSemPrioridade`, porque "não deu para saber"
+  e "não tem" pedem trabalhos opostos — a mesma distinção de `area_indisponivel` ×
+  `area_nao_encontrada` e de `buscaConfigurada`. E a falha é **por tipo**: um id de outro
+  service desk dentro da allowlist (situação real, ver `listarTiposChamado`) não pode derrubar
+  a leitura dos outros catorze.
+
+**Os limites são os das rotas vizinhas, não menores.** Admin · só a allowlist de `RF-28`
+(`?tipo=` só sabe **estreitar**, como `?espaco=` em `D-30`) · só o `service_desk_id` da
+config, nunca da query. Nenhuma credencial e nenhum corpo de erro da Atlassian na resposta
+(`RNF-01`, `RNF-30`): este JSON é lido — e provavelmente colado em algum lugar — por quem
+está diagnosticando.
+
+**O que a resposta ainda NÃO decide.** Se `priority` aparecer, ligar `campoPrioridadeId`
+continua sendo decisão a tomar, com a ressalva de `D-36`: o **rótulo** de prioridade
+(`ROTULO_PRIORIDADE`, hoje `Highest`/`High`/`Medium`) é forma do formulário do Jira e mora no
+código com teste — e os rótulos reais do site da Gocase têm de sair do `validValues` que esta
+rota agora mostra, nunca da suposição.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
