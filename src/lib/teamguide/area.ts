@@ -52,11 +52,23 @@ export async function resolverArea(p: ResolverAreaParams): Promise<string | null
 
   await p.auditoria.registrar({
     atorEmail: p.email,
+    // 🚨 Continuam sendo DUAS ações, e `D-40` não mexeu nisso: `fase`/`classe` detalham
+    // **por que** a fonte caiu, dentro de `area_indisponivel`. Promovê-las a uma terceira
+    // ação diria que existe um terceiro trabalho a fazer — e não existe: é o mesmo
+    // plantão, com uma pista a mais.
     acao: r.estado === 'indisponivel' ? 'area_indisponivel' : 'area_nao_encontrada',
     recurso: 'teamguide',
     resultado: r.estado === 'indisponivel' ? 'falha' : 'negado',
     detalhe: {
-      ...(r.estado === 'indisponivel' ? { motivo: r.motivo } : {}),
+      ...(r.estado === 'indisponivel'
+        ? {
+            motivo: r.motivo,
+            // Ausentes quando `motivo` se explica sozinho (`http_401`, `formato_inesperado`)
+            // — ver `FalhaTeamGuide`. Gravar `null` ali sugeriria que não deu para saber.
+            ...(r.fase ? { fase: r.fase } : {}),
+            ...(r.classe ? { classe: r.classe } : {}),
+          }
+        : {}),
       // Diz se a pessoa fica sem área ou se o mapa cobriu — é a diferença entre "temos um
       // buraco" e "temos um buraco que a configuração está tapando".
       caiuNoMapa: doMapa !== null,

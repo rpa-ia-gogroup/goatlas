@@ -2055,9 +2055,13 @@ async function tratarWebhook(req: Request, ctx: Contexto, url: URL): Promise<Res
 
 /** RF-59 — health check das dependências, em rota própria e pública. */
 async function tratarHealth(ctx: Contexto): Promise<Response> {
-  const [atlassian, ia] = await Promise.all([
+  const [atlassian, ia, teamguide] = await Promise.all([
     ctx.atlassian.verificarSaude(),
     ctx.ia.verificarSaude(),
+    // `D-40` — a fonte organizacional entra aqui para que medi-la **não custe abrir um
+    // chamado numa fila real**: era essa a única evidência que existia dela.
+    // Fonte não configurada é estado válido (`FR-13`), não avaria.
+    ctx.teamguide?.verificarSaude() ?? Promise.resolve({ ok: true, detalhe: 'não configurada' }),
   ])
   let banco = { ok: true, detalhe: 'ok' }
   try {
@@ -2065,6 +2069,10 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
   } catch {
     banco = { ok: false, detalhe: 'indisponível' }
   }
+  // 🚨 `teamguide` fica FORA do agregado, de propósito. A área é fail-open por desenho
+  // (`D-37`, `RNF-18`): com a fonte no chão os chamados continuam abrindo, então um 503
+  // aqui diria "o app caiu" sobre um app inteiro de pé — e ensinaria o time a ignorar o
+  // health check, que é o custo que nenhum alarme falso paga.
   const ok = atlassian.ok && ia.ok && banco.ok
   return json(
     {
@@ -2072,7 +2080,13 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
       usandoFakes: ctx.usandoFakes,
       modoDemo: ctx.modoDemo,
       somenteLeitura: ctx.somenteLeitura,
-      dependencias: { atlassian, ia, banco, sso: { ok: true, detalhe: 'edge GoDeploy' } },
+      dependencias: {
+        atlassian,
+        ia,
+        banco,
+        teamguide,
+        sso: { ok: true, detalhe: 'edge GoDeploy' },
+      },
     },
     ok ? 200 : 503,
   )
