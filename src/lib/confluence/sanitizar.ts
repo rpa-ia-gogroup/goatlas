@@ -49,6 +49,16 @@ export type DestinoLink =
       readonly titulo: string
       readonly espaco: string | null
     }
+  /**
+   * `T-142` — anexo da **própria** página, servido pelo proxy do app (`RNF-02`).
+   *
+   * `RF-39` pede fidelidade em "títulos, listas, tabelas, código, imagens **e anexos
+   * servidos pelo proxy**", e o sexto valia só para imagem: `converterAcLink` tratava
+   * `ri:page` e `ri:url`, então um link para PDF ou planilha anexada caía no `return
+   * corpo` e virava **texto puro** — sem link e sem nada na tela dizendo que havia um
+   * arquivo ali. É a degradação silenciosa que `RF-43` proíbe para macro, na mesma tela.
+   */
+  | { readonly tipo: 'anexoDaPagina'; readonly nomeArquivo: string }
 
 export type OrigemImagem =
   /** Anexo da página — servido pelo proxy do app, nunca pelo navegador (RNF-02). */
@@ -110,6 +120,13 @@ export type MotivoDescarte =
   | 'imagem_externa_recusada'
   | 'macro_nao_suportada'
   | 'profundidade'
+  /**
+   * `T-142` — `ri:attachment` apontando para outra página. Não é conteúdo hostil nem
+   * limitação nossa de renderização: é referência que o proxy **não tem como** resolver
+   * sem servir o arquivo errado. Auditado à parte porque o volume dele é o que diria se
+   * vale um dia resolver anexo entre páginas.
+   */
+  | 'anexo_de_outra_pagina'
 
 export interface Descarte {
   readonly motivo: MotivoDescarte
@@ -1068,15 +1085,51 @@ function converterImg(bruto: ElementoBruto, coletor: Coletor): No[] {
   return [{ tipo: 'imagem', origem: { tipo: 'externa', url }, alt: atributo(bruto, 'alt') ?? '' }]
 }
 
+/**
+ * 🚨 **O nome do anexo só serve se ele for da PRÓPRIA página.**
+ *
+ * No storage format, `ri:attachment` aceita um `ri:page`/`ri:space` aninhado — é assim
+ * que uma página referencia arquivo de outra. O proxy do app serve anexo **da página que
+ * está sendo lida**, então usar o nome mesmo assim entregaria um arquivo homônimo desta
+ * página (ou um 404) no lugar do que o autor escreveu: conteúdo errado com cara de certo,
+ * que é pior que conteúdo ausente — a mesma razão de `D-42` recusar nome onde se espera
+ * chave.
+ *
+ * `null` aqui não é erro: é "não dá para resolver com segurança", e quem chama degrada
+ * dizendo que havia um arquivo, em vez de linkar para o lugar errado.
+ */
+function nomeDeAnexoDaPropriaPagina(
+  /**
+   * ⚠️ **O pai, não o `ri:attachment`.** `ri:attachment` está na lista de tags **void**
+   * deste sanitizador, então `<ri:attachment><ri:page/></ri:attachment>` do storage não
+   * produz um filho: o `ri:page` vira **irmão**, dentro do `ac:link`/`ac:image`. Procurar
+   * o aninhamento no lugar errado devolveria "é desta página" para todo caso — a checagem
+   * existiria e nunca reprovaria, que é o defeito que `RN-06` já sofreu com o `spaceId`.
+   */
+  pai: ElementoBruto,
+  anexo: ElementoBruto,
+  coletor: Coletor,
+): string | null {
+  conferirAtributos(anexo, coletor)
+  if (primeiroFilho(pai, 'ri:page') !== null || primeiroFilho(pai, 'ri:space') !== null) {
+    anotar(coletor, 'anexo_de_outra_pagina', 'ri:attachment')
+    return null
+  }
+  const nomeArquivo = atributo(anexo, 'ri:filename')
+  return nomeArquivo !== null && nomeArquivo !== '' ? nomeArquivo : null
+}
+
 function converterAcImage(bruto: ElementoBruto, coletor: Coletor): No[] {
   const alt = atributo(bruto, 'ac:alt') ?? ''
   const anexo = primeiroFilho(bruto, 'ri:attachment')
   if (anexo !== null) {
-    conferirAtributos(anexo, coletor)
-    const nomeArquivo = atributo(anexo, 'ri:filename')
-    if (nomeArquivo !== null && nomeArquivo !== '') {
+    const nomeArquivo = nomeDeAnexoDaPropriaPagina(bruto, anexo, coletor)
+    if (nomeArquivo !== null) {
       return [{ tipo: 'imagem', origem: { tipo: 'anexo', nomeArquivo }, alt }]
     }
+    // Imagem de outra página: não dá para servir sem arriscar o arquivo errado, e sumir
+    // calada é o que `RF-43` proíbe. O `alt` — que o autor escreveu — vira o texto.
+    if (alt !== '') return [{ tipo: 'texto' as const, texto: `Imagem em outra página: ${alt}` }]
   }
   const externa = primeiroFilho(bruto, 'ri:url')
   if (externa !== null) {
@@ -1103,6 +1156,26 @@ function converterAcLink(bruto: ElementoBruto, coletor: Coletor): No[] {
       ]
     }
   }
+  // `T-142` — o anexo da página. Sem isto, link para PDF ou planilha virava texto puro.
+  const anexo = primeiroFilho(bruto, 'ri:attachment')
+  if (anexo !== null) {
+    const nomeArquivo = nomeDeAnexoDaPropriaPagina(bruto, anexo, coletor)
+    if (nomeArquivo !== null) {
+      // ⚠️ Corpo vazio usa o **nome do arquivo** como texto visível, como `ri:page` usa o
+      // título. Um `<a>` sem texto é um link que ninguém vê nem alcança pelo teclado.
+      const filhos = corpo.length > 0 ? corpo : [{ tipo: 'texto' as const, texto: nomeArquivo }]
+      return [{ tipo: 'link', destino: { tipo: 'anexoDaPagina', nomeArquivo }, filhos }]
+    }
+    // Não deu para resolver com segurança — mas houve um arquivo ali, e sumir com ele
+    // calado é o defeito que esta tarefa conserta. O texto do link (ou o nome, quando ele
+    // existe) fica na tela; quem lê sabe que falta algo em vez de decidir sem saber.
+    const nomeCru = atributo(anexo, 'ri:filename')
+    if (corpo.length > 0) return corpo
+    if (nomeCru !== null && nomeCru !== '') {
+      return [{ tipo: 'texto' as const, texto: `Arquivo anexado em outra página: ${nomeCru}` }]
+    }
+  }
+
   const externa = primeiroFilho(bruto, 'ri:url')
   if (externa !== null) {
     conferirAtributos(externa, coletor)

@@ -482,7 +482,7 @@ created: "2026-08-04"
 
 ### Achado da auditoria do board (12/08/2026 — `D-47`)
 
-- [ ] **T-142** **`RF-39` — link para anexo que não é imagem some sem aviso.**
+- [x] **T-142** **`RF-39` — link para anexo que não é imagem some sem aviso.**
       _Requirements: RF-39, RF-43_
       `RF-39` pede fidelidade em "títulos, listas, tabelas, código, imagens **e anexos
       servidos pelo proxy**". Os cinco primeiros estão cobertos e testados. O sexto vale
@@ -503,6 +503,15 @@ created: "2026-08-04"
 
 ---
 ## Coverage check
+      ✅ **Resolvida em 12/08/2026 (`D-57`).** `DestinoLink` ganhou `anexoDaPagina`, e o
+      link sai pelo **mesmo proxy** da imagem (`RNF-02`); corpo vazio usa o nome do arquivo
+      como texto visível. 🚨 **A armadilha:** `ri:attachment` aceita `ri:page`/`ri:space`
+      (arquivo de **outra** página) e o proxy serviria o homônimo desta — e como
+      `ri:attachment` está na lista de tags **void**, o `ri:page` do storage vira **irmão**,
+      não filho: procurá-lo dentro produziria uma checagem que nunca reprova (o defeito do
+      `spaceId` em `RN-06`). Em `ac:link` o ramo de `ri:page` já resolvia melhor — manda para
+      a página que tem o arquivo; em `ac:image` a imagem sumia calada, e agora o `alt` vira
+      texto. Descarte próprio: `anexo_de_outra_pagina`.
 - [x] Todo RF/RNF no escopo da spec aparece em ao menos uma tarefa
 - [x] Toda tarefa referencia requisito
 - [x] Os testes de burla (T-101 a T-104) vêm **antes** da implementação

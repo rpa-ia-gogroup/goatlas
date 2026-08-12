@@ -7599,15 +7599,24 @@ function converterImg(bruto, coletor) {
   }
   return [{ tipo: "imagem", origem: { tipo: "externa", url }, alt: atributo(bruto, "alt") ?? "" }];
 }
+function nomeDeAnexoDaPropriaPagina(pai, anexo, coletor) {
+  conferirAtributos(anexo, coletor);
+  if (primeiroFilho(pai, "ri:page") !== null || primeiroFilho(pai, "ri:space") !== null) {
+    anotar(coletor, "anexo_de_outra_pagina", "ri:attachment");
+    return null;
+  }
+  const nomeArquivo = atributo(anexo, "ri:filename");
+  return nomeArquivo !== null && nomeArquivo !== "" ? nomeArquivo : null;
+}
 function converterAcImage(bruto, coletor) {
   const alt = atributo(bruto, "ac:alt") ?? "";
   const anexo = primeiroFilho(bruto, "ri:attachment");
   if (anexo !== null) {
-    conferirAtributos(anexo, coletor);
-    const nomeArquivo = atributo(anexo, "ri:filename");
-    if (nomeArquivo !== null && nomeArquivo !== "") {
+    const nomeArquivo = nomeDeAnexoDaPropriaPagina(bruto, anexo, coletor);
+    if (nomeArquivo !== null) {
       return [{ tipo: "imagem", origem: { tipo: "anexo", nomeArquivo }, alt }];
     }
+    if (alt !== "") return [{ tipo: "texto", texto: `Imagem em outra p\xE1gina: ${alt}` }];
   }
   const externa = primeiroFilho(bruto, "ri:url");
   if (externa !== null) {
@@ -7631,6 +7640,19 @@ function converterAcLink(bruto, coletor) {
           filhos
         }
       ];
+    }
+  }
+  const anexo = primeiroFilho(bruto, "ri:attachment");
+  if (anexo !== null) {
+    const nomeArquivo = nomeDeAnexoDaPropriaPagina(bruto, anexo, coletor);
+    if (nomeArquivo !== null) {
+      const filhos = corpo.length > 0 ? corpo : [{ tipo: "texto", texto: nomeArquivo }];
+      return [{ tipo: "link", destino: { tipo: "anexoDaPagina", nomeArquivo }, filhos }];
+    }
+    const nomeCru = atributo(anexo, "ri:filename");
+    if (corpo.length > 0) return corpo;
+    if (nomeCru !== null && nomeCru !== "") {
+      return [{ tipo: "texto", texto: `Arquivo anexado em outra p\xE1gina: ${nomeCru}` }];
     }
   }
   const externa = primeiroFilho(bruto, "ri:url");

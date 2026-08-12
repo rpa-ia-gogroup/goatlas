@@ -240,6 +240,13 @@ function fetchEncenado(opcoes: {
   const contagem = new Map<string, number>()
   let emVooRestricao = 0
   let picoRestricao = 0
+  // ⚠️ **Pico de requisições em voo, não tempo de parede.** O `CLAUDE.md` já diz que teste
+  // de latência afirma sobre CONTAGEM e SIMULTANEIDADE — este arquivo tinha um caso que
+  // media milissegundos e falhava sozinho em máquina carregada (visto em 12/08/2026 com
+  // 50 ms e 106 ms contra um teto de 45). Vermelho que não fala do código treina todo
+  // mundo a ignorar a suíte.
+  let emVooGeral = 0
+  let picoGeral = 0
 
   const impl = (async (url: string) => {
     const atraso = opcoes.atrasoMs ?? 0
@@ -281,12 +288,18 @@ function fetchEncenado(opcoes: {
     // ⚠️ `labels` antes de `pages/{id}`: as duas rotas compartilham o prefixo.
     if (url.includes('/labels')) {
       contagem.set('labels', (contagem.get('labels') ?? 0) + 1)
+      emVooGeral += 1
+      picoGeral = Math.max(picoGeral, emVooGeral)
       if (atraso > 0) await new Promise((ok) => setTimeout(ok, atraso))
+      emVooGeral -= 1
       return new Response(JSON.stringify({ results: [] }), { status: 200 })
     }
     if (url.includes('/wiki/api/v2/spaces/')) {
       contagem.set('espaco', (contagem.get('espaco') ?? 0) + 1)
+      emVooGeral += 1
+      picoGeral = Math.max(picoGeral, emVooGeral)
       if (atraso > 0) await new Promise((ok) => setTimeout(ok, atraso))
+      emVooGeral -= 1
       return new Response(JSON.stringify({ key: 'TECH' }), { status: 200 })
     }
     if (url.includes('body-format=storage')) {
@@ -313,7 +326,12 @@ function fetchEncenado(opcoes: {
     return new Response('{}', { status: 200 })
   }) as unknown as typeof fetch
 
-  return { impl, contagem, get picoRestricao() { return picoRestricao } }
+  return {
+    impl,
+    contagem,
+    get picoRestricao() { return picoRestricao },
+    get picoGeral() { return picoGeral },
+  }
 }
 
 describe('cache do Atlassian: sobrevive entre requisições (RNF-13)', () => {
@@ -423,10 +441,10 @@ describe('restrição por página: paralela, com teto e ordem preservada (RN-06)
     // toca até seis páginas (RF-41).
     const rede = fetchEncenado({ atrasoMs: 25 })
     const cliente = new ClienteAtlassianHttp({ ...BASE, fetchImpl: rede.impl })
-    const inicio = Date.now()
     await cliente.obterMetadadosPagina('p1')
-    // Em série: ~50 ms. Em paralelo: ~25 ms.
-    expect(Date.now() - inicio).toBeLessThan(45)
+    // Em série o pico é 1; em paralelo, 2. É a MESMA afirmação de antes ("as duas saem
+    // juntas") sem depender do relógio da máquina que roda o teste.
+    expect(rede.picoGeral).toBeGreaterThanOrEqual(2)
   })
 
   it('metadados: se a chave do espaço não resolve, ainda NEGA (fail-closed)', async () => {
