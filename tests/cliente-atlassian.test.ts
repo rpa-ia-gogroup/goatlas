@@ -590,3 +590,161 @@ describe('classificador — resposta ilegível NUNCA vira ajuste operacional', (
       .toBe('sem justificativa')
   })
 })
+
+/**
+ * `RF-31` — anexos do chamado no cliente real (`D-45`).
+ *
+ * Duas coisas que o `ClienteAtlassianFake` **não** consegue afirmar, porque não faz HTTP:
+ *
+ * 1. A expansão `attachment` dos comentários é **tentada**, e a recusa dela não derruba a
+ *    conversa do chamado — que é `RF-32`, P0, e não pode cair por causa de um `expand`
+ *    que ninguém verificou contra a Atlassian real.
+ * 2. O `_links.content` do anexo vem como URL **absoluta**, e só é aceito no próprio
+ *    site: host diferente faria o app buscar bytes, **com a credencial**, onde a resposta
+ *    mandasse.
+ */
+describe('anexos do chamado — o que só o cliente real decide', () => {
+  function clienteComRespostas(
+    responder: (url: string) => { status?: number; corpo?: unknown },
+  ): { cliente: ClienteAtlassianHttp; urls: string[] } {
+    const urls: string[] = []
+    const fetchImpl = (async (url: string | URL | Request) => {
+      const u = String(url)
+      urls.push(u)
+      const r = responder(u)
+      return new Response(r.corpo === undefined ? null : JSON.stringify(r.corpo), {
+        status: r.status ?? 200,
+      })
+    }) as unknown as typeof fetch
+    return { cliente: new ClienteAtlassianHttp({ ...BASE, fetchImpl }), urls }
+  }
+
+  const COMENTARIO_PUBLICO = {
+    id: '1',
+    public: true,
+    body: 'oi',
+    created: { iso8601: '2026-08-12T12:00:00.000Z' },
+    author: { displayName: 'Time' },
+  }
+
+  it('a expansão vai na query — é ela que prova publicidade', async () => {
+    const { cliente, urls } = clienteComRespostas(() => ({ corpo: { values: [COMENTARIO_PUBLICO] } }))
+    await cliente.listarComentariosPublicos('GN-1')
+    expect(urls[0]).toContain('public=true&internal=false&expand=attachment')
+  })
+
+  it('expansão RECUSADA (4xx) não derruba os comentários — repete sem ela', async () => {
+    const { cliente, urls } = clienteComRespostas((url) =>
+      url.includes('expand=attachment')
+        ? { status: 400 }
+        : { corpo: { values: [COMENTARIO_PUBLICO] } },
+    )
+    const comentarios = await cliente.listarComentariosPublicos('GN-1')
+    expect(comentarios).toHaveLength(1)
+    // ⚠️ `null`, não `[]`: sem a expansão não há prova, e a camada de cima diz
+    // "não conseguimos confirmar" em vez de "não há anexos".
+    expect(comentarios[0]!.anexos).toBeNull()
+    expect(urls).toHaveLength(2)
+  })
+
+  it('indisponibilidade (5xx) NÃO vira retentativa sem expansão — isso esconderia a queda', async () => {
+    const urls: string[] = []
+    const fetchImpl = (async (url: string | URL | Request) => {
+      urls.push(String(url))
+      return new Response(null, { status: 503 })
+    }) as unknown as typeof fetch
+    // `maxTentativas: 1` isola o que está sob teste: o backoff de `RNF-14` tem teste
+    // próprio, e aqui ele só faria a suíte dormir.
+    const cliente = new ClienteAtlassianHttp({ ...BASE, fetchImpl, maxTentativas: 1 })
+    await expect(cliente.listarComentariosPublicos('GN-1')).rejects.toThrow()
+    // Uma tentativa só: a queda sobe como queda. Repetir sem a expansão diria que o
+    // problema é de contrato quando ele é de disponibilidade.
+    expect(urls).toHaveLength(1)
+  })
+
+  it('200 SEM a expansão devolve `null`, nunca lista vazia', async () => {
+    const { cliente } = clienteComRespostas(() => ({ corpo: { values: [COMENTARIO_PUBLICO] } }))
+    const comentarios = await cliente.listarComentariosPublicos('GN-1')
+    expect(comentarios[0]!.anexos).toBeNull()
+  })
+
+  it('a expansão paginada do JSM (`{values}`) é lida como lista de anexos', async () => {
+    const { cliente } = clienteComRespostas(() => ({
+      corpo: {
+        values: [
+          {
+            ...COMENTARIO_PUBLICO,
+            attachment: {
+              size: 1,
+              values: [{ filename: 'print.png', mimeType: 'image/png', size: 42 }],
+            },
+          },
+        ],
+      },
+    }))
+    const [c] = await cliente.listarComentariosPublicos('GN-1')
+    expect(c!.anexos).toEqual([
+      { nomeArquivo: 'print.png', tipoDeclarado: 'image/png', tamanhoBytes: 42, criadoEm: null },
+    ])
+  })
+
+  it('tamanho ausente vira `null`, nunca `0` — "não sei" e "vazio" são frases diferentes', async () => {
+    const { cliente } = clienteComRespostas(() => ({
+      corpo: { values: [{ filename: 'x.pdf' }] },
+    }))
+    const [a] = await cliente.listarAnexosDoChamado('GN-1')
+    expect(a!.tamanhoBytes).toBeNull()
+    expect(a!.tipoDeclarado).toBeNull()
+  })
+
+  it('o download só aceita `_links.content` do PRÓPRIO site', async () => {
+    const { cliente, urls } = clienteComRespostas(() => ({
+      corpo: {
+        values: [
+          {
+            filename: 'x.png',
+            size: 4,
+            _links: { content: 'https://evil.example.com/rest/api/3/attachment/content/9' },
+          },
+        ],
+      },
+    }))
+    expect(await cliente.obterAnexoDoChamado('GN-1', 'x.png')).toEqual({ estado: 'nao_encontrado' })
+    // Nenhuma requisição saiu para o host de fora — a credencial não foi oferecida a ele.
+    expect(urls.some((u) => u.includes('evil.example.com'))).toBe(false)
+  })
+
+  it('URL absoluta do próprio site vira caminho relativo à base', async () => {
+    const { cliente, urls } = clienteComRespostas((url) =>
+      url.includes('/attachment/content/')
+        ? { corpo: null }
+        : {
+            corpo: {
+              values: [
+                {
+                  filename: 'x.png',
+                  size: 4,
+                  _links: {
+                    content:
+                      'https://goengenharia.atlassian.net/rest/api/3/attachment/content/9',
+                  },
+                },
+              ],
+            },
+          },
+    )
+    const r = await cliente.obterAnexoDoChamado('GN-1', 'x.png')
+    expect(r.estado).toBe('ok')
+    expect(urls[1]).toBe('https://goengenharia.atlassian.net/rest/api/3/attachment/content/9')
+  })
+
+  it('nome que não está na lista DAQUELE chamado não baixa nada', async () => {
+    const { cliente, urls } = clienteComRespostas(() => ({
+      corpo: { values: [{ filename: 'outro.png', size: 4, _links: { content: '/x' } }] },
+    }))
+    expect(await cliente.obterAnexoDoChamado('GN-1', 'print.png')).toEqual({
+      estado: 'nao_encontrado',
+    })
+    expect(urls).toHaveLength(1)
+  })
+})

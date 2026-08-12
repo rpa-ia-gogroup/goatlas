@@ -286,10 +286,10 @@ created: "2026-08-03"
       ✅ **Descrição** (`rotas.ts:718` → `telas.tsx:997`) · **comentários públicos**
       (`rotas.ts:710-726` → `telas.tsx:1074-1084`, com `D-43`) · **status**
       (`telas.tsx:978`).
-      ❌ **Anexos** — não existe rota nem método de cliente que **liste** o que está anexado
-      a um chamado; `cliente.ts:1020` só faz `POST …/attachment`, e a seção "Anexos" da tela
-      (`telas.tsx:1025-1061`) é só formulário de envio. Depois de anexar, a pessoa **nunca
-      mais vê o que anexou**. 🔧 **Em implementação agora** (branch `rf31-anexos-do-chamado`).
+      ✅ **Anexos** — era o achado que abriu a auditoria: não existia rota nem método de
+      cliente que **listasse** o que está anexado a um chamado, e a seção "Anexos" da tela
+      era só formulário de envio; depois de anexar, a pessoa nunca mais via o que anexou.
+      **Feito em T-084** (`D-45`).
       ❌ **Histórico de SLA** — ver **T-100**.
       ⚠️ **Campos: parcial.** A rota devolve `via`, `verificadoRegras`, `area`, `criadoEm` e
       `atualizadoEm` (`rotas.ts:717-732`) e a tela imprime só status, prioridade e o selo
@@ -324,6 +324,32 @@ created: "2026-08-03"
       prefixo e com o nome do autor real, o oposto de produção nas duas pontas;
       corrigi-lo não quebrou nenhum teste existente, que é a medida do ponto cego.
       8 testes novos em `tests/rf33-autoria-na-tela.test.ts`, um deles estrutural.
+- [x] **T-084** A pessoa vê os anexos do próprio chamado — a parte de `RF-31` que
+      `T-081` não entregou. _Requirements: RF-31, RF-30, RF-32, RN-05, RNF-02, RNF-18_
+      → **Resolvida (D-45, 12/08/2026), a partir de defeito medido na staging
+      (`GN-6898`):** o chamado nasceu com arquivo anexado (`RF-63` funcionando) e o
+      detalhe não devolvia campo de anexo nenhum — a pessoa mandava o print e nunca
+      mais o via. 🚨 **A lista da Atlassian não serve como está:** a documentação do
+      endpoint diz *"customers will only get a list of public attachments"*, ou seja o
+      filtro é pelo **papel de quem pergunta**, e sob `D-01` quem pergunta é sempre a
+      conta de serviço, que é agente — anexo de comentário **interno** viria com HTTP
+      200 direto para a tela (`RN-05` na versão arquivo). São duas fontes cruzadas:
+      `listarAnexosDoChamado` prova que **existe**, o comentário público que o carrega
+      prova que é **público**, e a interseção é o que se mostra
+      (`tickets/anexos-do-chamado.ts`, função pura). Existir sem prova não vira lista
+      vazia — vira `anexosIndisponiveis`, porque "não tem anexo" e "não deu para saber"
+      são frases opostas (o mesmo par de `comentariosIndisponiveis`). O download é do
+      app (`RNF-02`), reusando `decidirEntrega`/`CABECALHOS_ANEXO` de `D-11`, com
+      vínculo por e-mail no `WHERE` e **404, nunca 403**. A expansão `attachment` dos
+      comentários é **tentada**: 4xx repete sem ela, para `RF-32` (P0) não cair junto.
+      ⚠️ **O fake devolve TAMBÉM o anexo interno**, de propósito — dublê que filtrasse
+      deixaria o teste de `RN-05` passar por construção (família de `D-38`/`D-43`).
+      32 testes novos (`tests/rf31-anexos-do-chamado.test.ts` e o cliente real), 8 de
+      burla e de degradação. ⚠️ **O campo de arquivo do detalhe recebeu o tratamento de
+      `D-46`** — que nasceu na tela de criação e deixou esta de fora de propósito: o
+      `input` sai por `clip`, o `label` vira o botão e o anel de foco é reemitido nele.
+      O par estrutural do teste de lá está aqui, para a segunda superfície não regredir
+      sozinha.
 
 ## Phase 6 — Frontend, mobile e fechamento
 

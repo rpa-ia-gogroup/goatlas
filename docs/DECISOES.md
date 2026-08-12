@@ -2272,7 +2272,87 @@ já era público e já era do chamado dela (`RF-32`/`RN-05` seguem intactos: a c
 
 **Não resolvido nesta decisão:** o detalhe do chamado continua **sem listar os anexos
 existentes** — a pessoa anexa na criação (`RF-63`) e depois não vê o próprio arquivo. Levantado
-junto, proposto no PR, **fora do escopo deste conserto**.
+junto, proposto no PR, **fora do escopo deste conserto**. ✅ **Resolvido em `D-45`.**
+
+---
+
+### D-45 · Quem prova que o anexo é público não é o endpoint de anexos — é o comentário que o carrega
+
+**Data:** 12/08/2026 · **Medido por:** teste na staging (`appId 3936ca2d`), chamado `GN-6898`
+· **Contexto:** `RF-31`, `RF-30`, `RF-32`, `RN-05`, `RNF-02`, `RNF-18`, `D-01`, `D-11`, `D-12`,
+`D-43`
+
+**A medição.** `GN-6898` nasceu com um arquivo anexado — `anexo.estado: "anexado"`, o caminho
+de `RF-63` funcionando de ponta a ponta. E `GET /api/chamados/GN-6898` devolvia `chamado`,
+`via`, `verificadoRegras`, `area`, `comentarios`, `degradado` e `comentariosIndisponiveis`:
+**nenhum campo de anexo**. A tela de detalhe mostrava a caixa de *enviar* e nada do que já
+estava lá. A pessoa manda o print e nunca mais o vê — e `RF-31` é P0 e cita anexos desde o
+texto do requisito e do `SC-26`. `T-081` estava marcada `[x]` com essa parte nunca
+implementada; reaberta como `T-084`.
+
+**A decisão.** A lista de anexos é a **interseção de duas fontes**: `listarAnexosDoChamado`
+(`GET /rest/servicedeskapi/request/{key}/attachment`) prova que o anexo **existe**; o
+comentário **público** que o carrega prova que ele é **público**. Mostra-se o que aparece nas
+duas. E existir sem prova de publicidade **não vira lista vazia**: vira
+`anexosIndisponiveis: true`, que na tela é *"não conseguimos confirmar os anexos"*.
+
+**Por que não a lista da Atlassian, direto.** A documentação do próprio endpoint diz:
+*"Customers will only get a list of public attachments."* O filtro é pelo **papel de quem
+pergunta** — e sob proxy total (`D-01`) quem pergunta nunca é o cliente: é a conta de serviço,
+que hoje é a conta pessoal de um colega, agente no projeto. O anexo que o time pôs num
+comentário **interno** voltaria com **HTTP 200**, iria para a tela da pessoa, e nada
+distinguiria. É a pegadinha do `internal` (`RN-05`, `atlassian/comentarios.ts`) na versão
+arquivo, com o mesmo desfecho: comunicação interna sobre a pessoa, entregue à própria pessoa.
+🚨 **E é a mesma família de bug do `D-38`, `D-39` e `D-43`:** teste verde, resposta 200, sintoma
+zero — até alguém abrir o chamado errado.
+
+**Por que não os comentários, sozinhos.** Eles provam publicidade mas não provam existência: se
+a expansão `attachment` for ignorada em silêncio (200 sem o campo), a lista sai **vazia** e o
+app diz *"este chamado não tem anexos"* sobre o chamado que tem. Duas fontes é o que transforma
+esse caso em pergunta respondida — existe, não consegui provar — em vez de afirmação falsa. É o
+mesmo raciocínio de `organizacao.ts`: filtro que pode não filtrar é **verificado**, não
+acreditado.
+
+**Três frases, porque são três estados.** "Nenhum arquivo anexado ainda" · "estes são os
+arquivos" · "não conseguimos confirmar". Trocar a terceira pela primeira é o defeito que
+`comentariosIndisponiveis` já resolveu na seção logo acima, e o custo é o mesmo: a pessoa manda
+tudo de novo. As fontes que caem levam junto **só** o bloco de anexos — a conversa e o chamado
+continuam de pé (`RNF-18`, `RNF-19`).
+
+**A expansão é tentada, nunca exigida.** `expand=attachment` no endpoint de comentários **não
+foi verificado** contra a Atlassian real. Recusa **definitiva** (4xx) faz o cliente repetir a
+chamada **sem** a expansão e devolver `anexos: null`: `RF-32` é P0 e não pode cair junto com um
+parâmetro de outro requisito. Falha **transitória** (5xx/429) sobe como falha — repetir ali
+diria que o problema é de contrato quando é de disponibilidade.
+
+**O download é do app, e a autorização tem duas condições.** `RNF-02`: o navegador nunca fala
+com a Atlassian, então `GET /api/chamados/{key}/anexos/{nome}` rebusca os bytes e os re-serve
+com o `Content-Type` **afirmado** por `decidirEntrega` — a mesma função do proxy do Confluence,
+com `image/svg+xml` fora, `nosniff` e CSP `sandbox` (`D-11`). Antes de pedir byte nenhum:
+(1) o chamado é da pessoa (vínculo com o e-mail no `WHERE`, `RF-30`) e (2) o nome está na lista
+autorizada. As duas recusas respondem a **mesma 404** de tudo (`D-12`) — motivo diferente por
+resposta diferente transformaria a rota em oráculo sobre o anexo interno. E **decidir vem antes
+de buscar o conteúdo**, como em `confluence/acesso.ts`.
+
+**Custo aceito.** (a) **Uma** ida a mais à Atlassian por abertura do detalhe — de 2 para 3; ela
+não paraleliza com os comentários porque **consome** o resultado deles, e trocar a trava por
+algumas centenas de milissegundos não é troca. (b) Anexo público que **não** esteja em nenhum
+comentário público não aparece: fica fora por falta de prova, e o estado é dito, não silenciado.
+(c) Dois arquivos de **mesmo nome e mesmo tamanho** no mesmo chamado, um público e um interno,
+são indistinguíveis — o casamento é por nome + tamanho, e nome sozinho deixaria um interno
+herdar a publicidade do outro.
+
+**O que o dublê passou a fazer.** `ClienteAtlassianFake.listarAnexosDoChamado` devolve
+**também** o anexo interno, de propósito: um fake que filtrasse deixaria o teste de `RN-05`
+passar por construção e o vazamento só apareceria na staging — exatamente o que aconteceu em
+`D-38` e em `D-43`. E `anexarArquivo`/`materializarAnexosTemporarios` passam a criar o
+**comentário público** que carrega o anexo, como o JSM faz (o `POST .../attachment` responde
+com um `comment`).
+
+**Fica em aberto, e só a Atlassian real responde:** o endpoint de comentários aceita
+`expand=attachment`? A materialização de `RF-61`/`RF-34` produz mesmo um comentário público
+carregando o anexo? As duas se leem na staging pelo mesmo lugar: `anexos` e `anexosIndisponiveis`
+no detalhe de `GN-6898`. `anexosIndisponiveis: true` com o arquivo lá dentro é a resposta "não".
 
 ---
 

@@ -299,6 +299,20 @@ destes reabre um vazamento que já foi fechado.
   por um `replace` novo. ⚠️ **O fake escondia isto**: `comentar` guardava o texto sem prefixo e
   com o nome do autor real — o oposto de produção nas duas pontas —, e corrigi-lo não quebrou
   **nenhum** teste existente, que é a medida exata do ponto cego (família de `D-38`/`D-39`).
+- 🚨 **Quem prova que o anexo do chamado é PÚBLICO não é o endpoint de anexos** (`D-45`,
+  `tickets/anexos-do-chamado.ts`). A documentação do JSM diz, sobre
+  `GET /request/{key}/attachment`: *"customers will only get a list of public attachments"* —
+  o filtro é pelo **papel de quem pergunta**, e sob `D-01` quem pergunta é sempre a conta de
+  serviço, que é agente. Mostrar essa lista entregaria o anexo de um comentário **interno**
+  à própria pessoa, com HTTP 200 e nada na tela: é a pegadinha do `internal` (`RN-05`) na
+  versão arquivo. São **duas fontes cruzadas** — aquela lista prova que o anexo **existe**, o
+  comentário público que o carrega prova que ele é **público** —, e mostra-se a interseção.
+  ⚠️ **Existir sem prova não vira lista vazia:** vira `anexosIndisponiveis`, porque "não tem
+  anexo" e "não deu para saber" são frases opostas e a errada faz a pessoa mandar o print de
+  novo (mesmo par de `comentariosIndisponiveis`). E a expansão `attachment` dos comentários é
+  **tentada, nunca exigida**: recusa 4xx repete a chamada sem ela e devolve `anexos: null` —
+  `RF-32` é P0 e não pode cair por causa de um `expand` que ninguém verificou. Falha 5xx
+  **não** repete: seria esconder queda como se fosse contrato.
 - ⚠️ **Ação própria não se detecta pelo AUTOR** (`notificacoes/acoes.ts`, `RF-48`). Sob
   proxy total todo comentário sai da conta de serviço: o da pessoa e o do agente do time
   têm o mesmo autor. O que distingue é o app ter registrado a ação **no momento em que a
@@ -1132,7 +1146,19 @@ na staging — a tabela de leitura está no `D-40`. ⚠️ Nada foi paginado nem
 mexido de propósito: mudar o comportamento no mesmo movimento em que se instala o instrumento
 estraga a medição.
 
-**1109 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+🚨 **A pessoa não via os anexos do próprio chamado** (medido em 12/08/2026 no `GN-6898`, que
+nasceu com arquivo anexado). `RF-31` é P0 e cita anexos desde o texto do requisito, e `T-081`
+estava marcada `[x]` com essa parte nunca implementada — foi o achado que abriu a auditoria de
+`D-47`, e está resolvido em `D-45`/`T-084`. ⚠️ **O que a staging ainda tem de responder** é se
+o endpoint de comentários aceita `expand=attachment` e se a materialização de `RF-61`/`RF-34`
+produz mesmo o comentário público que carrega o anexo: as duas se leem em
+`anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
+arquivo lá dentro é a resposta "não".
+
+**1141 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
+20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
+relação com o código sob teste.
 ⚠️ **Teste verde não é cobertura** (`D-47`, 12/08): a auditoria requisito→código mexeu em
 **dezessete** tarefas cujo board divergia do que o código faz, com a suíte inteira verde —
 porque nenhum achado é comportamento *errado*, é comportamento **ausente**, e teste ausente

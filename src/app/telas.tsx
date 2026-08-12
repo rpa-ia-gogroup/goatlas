@@ -11,6 +11,7 @@ import {
   ErroApi,
   PRIORIDADES,
   prioridadePor,
+  type AnexoDoChamado,
   type CampoRequestType,
   type ComentarioPublico,
   type DetalheChamado,
@@ -1123,18 +1124,40 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
         <h2 className="titulo-secao" style={{ fontSize: 'var(--fs-h3)' }}>
           Anexos
         </h2>
+
+        {/* T-084 / RF-31 — o que JÁ está no chamado vem antes da caixa de envio: a
+            pessoa chega aqui para conferir se o print chegou, e só depois para mandar
+            outro. Ler antes de escrever. */}
+        <ArquivosDoChamado
+          itens={dados.anexos}
+          indisponiveis={dados.anexosIndisponiveis}
+        />
+
         <form className="zona-anexo" onSubmit={anexar}>
-          <label htmlFor="anexo-chamado">Anexar print, planilha ou documento</label>
-          <input
-            id="anexo-chamado"
-            type="file"
-            multiple
-            onChange={(e) => setArquivos(Array.from(e.target.files ?? []))}
-            disabled={anexando}
-          />
-          <span className="dica">
-            Até 3 arquivos por envio, de no máximo 8 MB cada. Quem trabalha o chamado vê
-            os anexos junto com a sua descrição.
+          {/* `D-46` aplicado à segunda superfície: o `input[type=file]` sai da tela por
+              `clip` — **nunca** `display: none`, que o tiraria da ordem de tabulação — e
+              quem aparece é o `label`, que já era o nome acessível do campo. O anel de
+              foco é reemitido nele por `:focus-visible +` (`estilos.css`).
+              ⚠️ O texto que descrevia o que anexar desceu para a `dica`, apontada por
+              `aria-describedby`: com o rótulo virando botão, ele precisa dizer a **ação**
+              ("Escolher arquivo"), e o resto é descrição, não nome. */}
+          <div className="escolher-arquivo">
+            <input
+              id="anexo-chamado"
+              className="entrada-arquivo"
+              type="file"
+              multiple
+              aria-describedby="dica-anexo-chamado"
+              onChange={(e) => setArquivos(Array.from(e.target.files ?? []))}
+              disabled={anexando}
+            />
+            <label htmlFor="anexo-chamado" className="botao botao-contorno rotulo-arquivo">
+              Escolher arquivo
+            </label>
+          </div>
+          <span className="dica" id="dica-anexo-chamado">
+            Print, planilha ou documento — até 3 arquivos por envio, de no máximo 8 MB
+            cada. Quem trabalha o chamado vê os anexos junto com a sua descrição.
           </span>
           {arquivos.length > 0 && (
             <ul className="lista-anexos">
@@ -1203,6 +1226,88 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
         </form>
       </section>
     </div>
+  )
+}
+
+/**
+ * Tamanho legível — `RF-31`.
+ *
+ * ⚠️ `null` devolve `null`, nunca `'0 KB'`: o app não sabe o tamanho daquele arquivo, e
+ * inventar um número é afirmar sobre o arquivo da pessoa. Arredonda para cima no piso de
+ * 1 KB pelo mesmo motivo da lista de envio — `0 KB` num arquivo que existe lê-se como
+ * arquivo corrompido.
+ */
+function tamanhoLegivel(bytes: number | null): string | null {
+  if (bytes === null || !Number.isFinite(bytes)) return null
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
+}
+
+/**
+ * Extensão em maiúscula, a partir do NOME — `RF-31`.
+ *
+ * Do nome e não do `tipoDeclarado` de propósito: o tipo é o que alguém escolheu no upload
+ * (é por isso que `D-11` não confia nele), e `application/octet-stream` na tela não diz
+ * nada a ninguém. `PNG` diz.
+ */
+function extensaoLegivel(nomeArquivo: string): string | null {
+  const ponto = nomeArquivo.lastIndexOf('.')
+  if (ponto <= 0 || ponto === nomeArquivo.length - 1) return null
+  const ext = nomeArquivo.slice(ponto + 1)
+  return ext.length <= 5 ? ext.toUpperCase() : null
+}
+
+/**
+ * Os arquivos que já estão no chamado — `RF-31`, T-084.
+ *
+ * ⚠️ **Três estados, três frases**, e trocar uma pela outra é o defeito: "nenhum arquivo
+ * anexado" e "não conseguimos confirmar" são afirmações opostas, e a errada faz a pessoa
+ * mandar o print de novo — o mesmo raciocínio de `comentariosIndisponiveis`, na seção de
+ * cima. A ordem é a do risco: a dúvida é dita antes de qualquer lista.
+ *
+ * O nome do arquivo **é** o link (texto descritivo é o que leitor de tela anuncia); o
+ * tipo e o tamanho ficam numa linha secundária, e a seta é decorativa.
+ */
+function ArquivosDoChamado({
+  itens,
+  indisponiveis,
+}: {
+  itens: readonly AnexoDoChamado[]
+  indisponiveis: boolean
+}) {
+  if (indisponiveis) {
+    return (
+      <p className="dica">
+        Não conseguimos confirmar os anexos deste chamado agora. Isso não significa que
+        não há nenhum — tente recarregar em instantes.
+      </p>
+    )
+  }
+  if (itens.length === 0) {
+    return <p className="dica">Nenhum arquivo anexado a este chamado ainda.</p>
+  }
+  return (
+    <ul className="arquivos-do-chamado">
+      {itens.map((a) => {
+        const detalhes = [extensaoLegivel(a.nomeArquivo), tamanhoLegivel(a.tamanhoBytes)]
+          .filter((p): p is string => p !== null)
+          .join(' · ')
+        return (
+          <li key={a.nomeArquivo}>
+            {/* `download` sugere salvar; quem quiser ver na hora abre pelo navegador. O
+                servidor decide inline × anexo por allowlist de tipo (`D-11`) — o
+                atributo é preferência de uso, nunca a trava. */}
+            <a className="arquivo" href={a.url} download>
+              <span className="arquivo-nome">{a.nomeArquivo}</span>
+              {detalhes && <span className="dica">{detalhes}</span>}
+              <span className="arquivo-seta" aria-hidden="true">
+                ↓
+              </span>
+            </a>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

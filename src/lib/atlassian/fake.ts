@@ -11,6 +11,7 @@
 import {
   ErroAtlassian,
   MAX_ANEXO_BYTES,
+  type AnexoDoChamado,
   type BuscaConfluenceParams,
   type CampoRequestType,
   type Chamado,
@@ -46,6 +47,32 @@ export interface ComentarioBruto {
   readonly autorNome: string
   readonly criadoEm: string
   readonly publico: boolean
+  /**
+   * Anexos que ESTE comentário carrega (`RF-31`, `D-45`) — a expansão `attachment`.
+   *
+   * Omitir é "este comentário não tem anexo". Quem encena "a expansão não veio" é
+   * `estado.expansaoDeAnexoIndisponivel`, e a diferença é o requisito inteiro.
+   */
+  readonly anexos?: readonly { nome: string; tipo: string; tamanho: number }[]
+}
+
+/**
+ * Anexo **do chamado**, como o JSM o guarda — `RF-31`.
+ *
+ * 🚨 **`publico` existe para o dublê poder mentir como a Atlassian mente.** O endpoint de
+ * anexos do JSM filtra pelo papel de quem pergunta ("customers will only get a list of
+ * public attachments"), e sob `D-01` quem pergunta é sempre a conta de serviço, que é
+ * agente — então `listarAnexosDoChamado` devolve **também o interno**, de propósito. Um
+ * fake que só guardasse anexo público deixaria o teste de `RN-05` passar por construção e
+ * esconderia o vazamento até a staging, que é a família de `D-38` e `D-43`.
+ */
+export interface AnexoDeChamadoFake {
+  readonly nome: string
+  readonly tipo: string
+  readonly tamanho: number
+  /** Default `true` — anexo posto pelo solicitante nasce público (`RF-34`, `RF-61`). */
+  readonly publico?: boolean
+  readonly bytes?: ArrayBuffer
 }
 
 /**
@@ -158,6 +185,9 @@ export interface EstadoFake {
      */
     paginaRestrita: ModoFalha
     obterAnexo: ModoFalha
+    /** `RF-31` — a testemunha de existência fora do ar não pode virar "não tem anexo". */
+    listarAnexosDoChamado: ModoFalha
+    obterAnexoDoChamado: ModoFalha
     /** T-210 — polling fora do ar não pode avançar a marca-d'água. */
     buscarAtualizados: ModoFalha
     /** T-240 — anexo falha sem derrubar a criação do chamado (RNF-18). */
@@ -197,7 +227,16 @@ export interface EstadoFake {
   /** T-242 — transições que o "workflow" oferece ao cliente. Vazio = sem botão. */
   transicoes: Map<string, { id: string; nome: string; statusDestino: string }[]>
   /** T-240 — anexos recebidos por chamado, para o teste afirmar sobre eles. */
-  anexosDeChamado: Map<string, { nome: string; tipo: string; tamanho: number }[]>
+  anexosDeChamado: Map<string, AnexoDeChamadoFake[]>
+  /**
+   * `RF-31` — encena a resposta que **não traz** a expansão `attachment` (`D-45`).
+   *
+   * Ninguém verificou contra a Atlassian real que o endpoint de comentários aceita
+   * `expand=attachment`; se ele ignorar o parâmetro em silêncio, o app fica sem prova de
+   * publicidade. Esta flag é o que torna esse cenário testável — sem ela, o único jeito de
+   * descobrir seria a pessoa lendo "este chamado não tem anexos" sobre o próprio print.
+   */
+  expansaoDeAnexoIndisponivel: boolean
 }
 
 export interface RegistroChamada {
@@ -251,6 +290,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       relogio: inicial.relogio ?? (() => new Date(0).toISOString()),
       transicoes: inicial.transicoes ?? new Map(),
       anexosDeChamado: inicial.anexosDeChamado ?? new Map(),
+      expansaoDeAnexoIndisponivel: inicial.expansaoDeAnexoIndisponivel ?? false,
       temporariosInvalidos: inicial.temporariosInvalidos ?? new Set(),
       falhas: {
         criarChamado: 'nenhum',
@@ -262,6 +302,8 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
         obterSchemaDoTipo: 'nenhum',
         paginaRestrita: 'nenhum',
         obterAnexo: 'nenhum',
+        listarAnexosDoChamado: 'nenhum',
+        obterAnexoDoChamado: 'nenhum',
         buscarAtualizados: 'nenhum',
         anexarArquivo: 'nenhum',
         subirAnexoTemporario: 'nenhum',
@@ -407,7 +449,59 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     // fazer. O teste de RF-32 confere as duas camadas no cliente real.
     return todos
       .filter((c) => c.publico)
-      .map(({ id, corpo, autorNome, criadoEm }) => ({ id, corpo, autorNome, criadoEm }))
+      .map(({ id, corpo, autorNome, criadoEm, anexos }) => ({
+        id,
+        corpo,
+        autorNome,
+        criadoEm,
+        // 🚨 `null` = a expansão não veio, e é o oposto de `[]`. Ver `D-45`: é este valor
+        // que impede o app de afirmar "não há anexos" sobre um chamado que tem.
+        anexos: this.estado.expansaoDeAnexoIndisponivel
+          ? null
+          : (anexos ?? []).map((a) => ({
+              nomeArquivo: a.nome,
+              tipoDeclarado: a.tipo,
+              tamanhoBytes: a.tamanho,
+              criadoEm,
+            })),
+      }))
+  }
+
+  /**
+   * `RF-31` — devolve **tudo**, inclusive o interno, como a Atlassian faz para um agente.
+   *
+   * ⚠️ Isto é fidelidade, não descuido: se o dublê filtrasse aqui, o teste de `RN-05`
+   * passaria porque o fake é gentil, e o vazamento só apareceria na staging. A trava mora
+   * acima, em `tickets/anexos-do-chamado.ts`.
+   */
+  async listarAnexosDoChamado(issueKey: string): Promise<readonly AnexoDoChamado[]> {
+    this.chamadas.push({ operacao: 'listarAnexosDoChamado', params: issueKey })
+    this.checar(this.estado.falhas.listarAnexosDoChamado, 'listarAnexosDoChamado')
+    return (this.estado.anexosDeChamado.get(issueKey) ?? []).map((a) => ({
+      nomeArquivo: a.nome,
+      tipoDeclarado: a.tipo,
+      tamanhoBytes: a.tamanho,
+      criadoEm: new Date(0).toISOString(),
+    }))
+  }
+
+  async obterAnexoDoChamado(issueKey: string, nomeArquivo: string): Promise<ResultadoAnexo> {
+    this.chamadas.push({ operacao: 'obterAnexoDoChamado', params: { issueKey, nomeArquivo } })
+    this.checar(this.estado.falhas.obterAnexoDoChamado, 'obterAnexoDoChamado')
+    // Casa por nome exato DENTRO do chamado, como o cliente real — e **sem** olhar
+    // publicidade: quem autoriza é a rota, antes de pedir bytes.
+    const achado = (this.estado.anexosDeChamado.get(issueKey) ?? []).find(
+      (a) => a.nome === nomeArquivo,
+    )
+    if (!achado) return { estado: 'nao_encontrado' }
+    const bytes = achado.bytes ?? new ArrayBuffer(achado.tamanho)
+    if (bytes.byteLength > this.estado.limiteAnexoBytes) {
+      return { estado: 'grande_demais', tamanhoBytes: bytes.byteLength }
+    }
+    return {
+      estado: 'ok',
+      anexo: { nomeArquivo: achado.nome, tipoDeclarado: achado.tipo, bytes },
+    }
   }
 
   /** Só para teste: devolve TUDO, inclusive interno — para provar que não vazou. */
@@ -637,10 +731,41 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       params: { serviceDeskId, issueKey, nome: arquivo.nome, tipo: arquivo.tipo },
     })
     this.checar(this.estado.falhas.anexarArquivo, 'anexarArquivo')
-    const atuais = this.estado.anexosDeChamado.get(issueKey) ?? []
-    this.estado.anexosDeChamado.set(issueKey, [
-      ...atuais,
+    this.registrarAnexosNoChamado(issueKey, [
       { nome: arquivo.nome, tipo: arquivo.tipo, tamanho: arquivo.bytes.byteLength },
+    ])
+  }
+
+  /**
+   * Guarda o anexo **e** o comentário público que o carrega — como o JSM faz.
+   *
+   * ⚠️ O segundo passo (`POST .../attachment` com `public: true`) responde com um
+   * `comment`: no JSM o anexo público **é** carregado por um comentário público. É essa
+   * ligação que dá ao app a prova de publicidade de `RF-31` (`D-45`), e um dublê que
+   * guardasse só o arquivo faria a lista da pessoa aparecer sempre como "não conseguimos
+   * confirmar" — teste vermelho por infidelidade do dublê, não por defeito do código.
+   *
+   * Anexo com `publico: false` (o do time, em comentário interno) fica **sem** comentário
+   * de propósito: é assim que o teste de burla encena o que `RN-05` proíbe.
+   */
+  private registrarAnexosNoChamado(issueKey: string, novos: readonly AnexoDeChamadoFake[]): void {
+    const atuais = this.estado.anexosDeChamado.get(issueKey) ?? []
+    this.estado.anexosDeChamado.set(issueKey, [...atuais, ...novos])
+
+    const publicos = novos.filter((a) => a.publico !== false)
+    if (publicos.length === 0) return
+    const comentarios = this.estado.comentarios.get(issueKey) ?? []
+    this.estado.comentarios.set(issueKey, [
+      ...comentarios,
+      {
+        id: `c${comentarios.length + 1}`,
+        // Corpo vazio: no JSM o comentário de anexo sem `additionalComment` é isso mesmo.
+        corpo: '',
+        autorNome: NOME_CONTA_DE_SERVICO_FAKE,
+        criadoEm: new Date(0).toISOString(),
+        publico: true,
+        anexos: publicos.map(({ nome, tipo, tamanho }) => ({ nome, tipo, tamanho })),
+      },
     ])
   }
 
@@ -678,7 +803,6 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       })
     }
 
-    const atuais = this.estado.anexosDeChamado.get(issueKey) ?? []
     const novos = ids.map((id) => {
       const t = this.temporarios.get(id)
       // Id que o fake nunca emitiu não é erro aqui: quem testa o caminho de expiração
@@ -686,7 +810,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
       // teste de materialização depender da ordem em que o fake foi montado.
       return { nome: t?.nome ?? id, tipo: t?.tipo ?? 'application/octet-stream', tamanho: t?.tamanho ?? 0 }
     })
-    this.estado.anexosDeChamado.set(issueKey, [...atuais, ...novos])
+    this.registrarAnexosNoChamado(issueKey, novos)
   }
 
   async listarTransicoes(issueKey: string): Promise<readonly { id: string; nome: string }[]> {

@@ -30,6 +30,7 @@
 
 import {
   ErroAtlassian,
+  type AnexoDoChamado,
   type BuscaConfluenceParams,
   type CampoRequestType,
   type Chamado,
@@ -143,6 +144,14 @@ export class ClienteAtlassianSomenteLeitura implements ClienteAtlassian {
 
   listarComentariosPublicos(issueKey: string): Promise<readonly ComentarioPublico[]> {
     return this.real.listarComentariosPublicos(issueKey)
+  }
+
+  listarAnexosDoChamado(issueKey: string): Promise<readonly AnexoDoChamado[]> {
+    return this.real.listarAnexosDoChamado(issueKey)
+  }
+
+  obterAnexoDoChamado(issueKey: string, nomeArquivo: string): Promise<ResultadoAnexo> {
+    return this.real.obterAnexoDoChamado(issueKey, nomeArquivo)
   }
 
   buscarConfluence(params: BuscaConfluenceParams): Promise<readonly PaginaConfluence[]> {
