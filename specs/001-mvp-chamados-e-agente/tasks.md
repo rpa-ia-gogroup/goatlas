@@ -494,20 +494,56 @@ created: "2026-08-03"
       produz número nenhum na tela.
 - [ ] **T-097** Fechar a Definição de Pronto da Fase 1 (§13 dos requisitos) item por
       item, incluindo os testes de burla. _Requirements: todos_
+      **Passagem item por item feita em 12/08/2026 (`D-47`). 6 dos 12 fechados.** A tarefa
+      **continua aberta** — o ponto dela é o oposto de se autodeclarar pronta.
+
+      | # | Item da §13 | Estado | Evidência / o que falta |
+      |---|---|---|---|
+      | 1 | Colaborador sem assento abre chamado ponta a ponta, com o solicitante correto identificado | ❌ **não** | O fluxo existe e é testado contra os fakes (`tests/fluxo-ponta-a-ponta.test.ts:75`). **Ponta a ponta real nunca aconteceu pela conversa:** o único chamado criado na Atlassian (`GN-6894`) nasceu pelo **formulário** — a chave é `form:<email>:<chave>`. E "solicitante correto" hoje é o cabeçalho de `D-13` na descrição mais os campos por request type, que a rota da **conversa ainda não envia** (`T-505` `[~]`, `T-511b` aberta) |
+      | 2 | `create_ticket` comprovadamente impossível sem as duas tools, testado por burla | ✅ **sim** | `src/lib/agent/gate.ts:79-95` (não oferece) + `:108-129` (recusa se vier); `tests/rf08-ordem-tools.test.ts:57-142`, **6 burlas**, incluindo instrução vinda de conteúdo do Confluence |
+      | 3 | Pergunta já respondida no Confluence é bloqueada, com link, motivo legível e override funcionando | ⚠️ **com ressalva** | Os três elementos e o override existem e são testados (`tests/regras.test.ts:151`, `tests/rn07-caminho-override.test.ts`, `T-118` para o link interno). ⚠️ **Nunca observado com conteúdo real:** até `D-41` (12/08) a busca por frase devolvia zero na staging, então a deflexão que este item descreve não chegou a disparar em produção. Vale para a Regra 1; a Regra 2 não tem link (`T-047`) |
+      | 4 | Problema com histórico de ajuste operacional recorrente é bloqueado pela Regra 2 | ❌ **não** | O código existe e é testado (`tests/regras.test.ts:94`), mas **na instalação publicada a Regra 2 nunca roda**: sem os exemplos de **Q3** ela se declara indisponível (`regra2Disponivel`), que é o fail-safe correto de `RF-14`. Fecha com a resposta de Q3, não com código |
+      | 5 | Nenhum chamado é criado sem confirmação explícita | ⚠️ **com ressalva** | A trava existe em duas camadas (`gate.ts:119-120` + rota única `src/lib/http/rotas.ts:288`), e o modelo não tem a tool. ⚠️ **Mas não há teste direto do motivo `sem_confirmacao_do_usuario`**: o helper de `tests/rf08-ordem-tools.test.ts:44-51` tem a opção `confirmar: false` e **nenhum caso a usa**. O `CLAUDE.md` e a tabela de travas abaixo afirmam que a suíte tem o teste de burla de `RF-17`; ela não tem. Fechar é escrever esse caso — é barato, e é literalmente o que este item pede |
+      | 6 | Um colaborador **não** vê o chamado de outro (testado explicitamente) | ✅ **sim** | `src/lib/tickets/vinculos.ts` (e-mail no `WHERE`, sem método sem e-mail); `tests/rf30-isolamento.test.ts:53`; 404, nunca 403 |
+      | 7 | Comentário interno não vaza (testado, `internal=false` **e** filtro server-side) | ✅ **sim** | `src/lib/atlassian/comentarios.ts`; `tests/rf32-comentarios.test.ts:29` (query) e `:43` (filtro) — as duas camadas, separadas |
+      | 8 | Nenhuma credencial em log, resposta ou bundle | ✅ **sim** | `tests/rnf01-vazamento-credenciais.test.ts`, estrutural + comportamental. ⚠️ Já são **quatro** credenciais, não três: `TG_API_TOKEN` entrou em `D-37` e foi coberta no mesmo dia (`T-515`) |
+      | 9 | Falha da IA não impede abrir chamado; falha de tool não vira bypass silencioso | ✅ **sim** | `ClienteIAIndisponivel` + formulário mínimo (`tests/ia-indisponivel-sem-chave.test.ts`); tool que falhou satisfaz a ordem mas marca `verificadoRegras: false` (`T-049`) |
+      | 10 | Auditoria registra conversa, bloqueio, override, criação e leitura | ✅ **sim** | As cinco ações existem: `conversa_iniciada`, `bloqueio_disparado`, `override_registrado`, `chamado_criado`, `chamado_lido` (+ `pagina_confluence_lida`), em `src/lib/audit/index.ts:22-113`, append-only |
+      | 11 | Fluxo completo validado no celular | ❌ **não** | `T-093`, aberta por decisão. Feita em viewport de celular no dev; falta aparelho real |
+      | 12 | README com privilégios de cada credencial e procedimento de rotação | ❌ **não** | O `README.md` ainda abre com **"Planejamento. Nada implementado."**, lista **três** credenciais (falta a `TG_API_TOKEN` de `D-37`) e manda o procedimento de rotação para `docs/DEPLOY.md` **"(a criar)"** — que existe desde `T-006` e cobre rotação. `RNF-27` fica formalmente aberto por causa de um arquivo que ninguém reabriu, não por falta de conteúdo |
+
+      **Leitura dos quatro que faltam:** dois são humanos/de dado (celular · Q3), um é
+      documentação desatualizada (README) e **um é o item 1** — que só fecha quando a
+      conversa abrir um chamado real com os campos do solicitante, ou seja, depois de
+      `T-505`/`T-511b` e do go-live de `D-24`. Os itens 3 e 5 fecham com trabalho pequeno e
+      conhecido: medir a deflexão com a busca já corrigida, e escrever o caso de burla de
+      `RF-17` que a suíte afirma ter.
 
 ---
-## Estado da implementação (03/08/2026)
+## Estado da implementação
 
-**49 concluídas · 9 pendentes.** 152 testes passando, typecheck limpo, build da SPA
-e do worker OK, e o fluxo validado no navegador — tudo **sem nenhuma credencial e
-sem rede**, pelos fakes.
+> ⚠️ **Atualizado em 12/08/2026 pela auditoria do board (`D-47`).** O texto abaixo estava
+> congelado em 03/08 ("49 concluídas · 9 pendentes · 152 testes") e a contagem de tarefas
+> deixou de ser informação útil no dia em que dez linhas `[x]` passaram a valer pela metade.
+> **1051 testes**, typecheck e build limpos, tudo sem credencial e sem rede.
+>
+> **O que a auditoria mudou aqui:** `T-063` foi para `[x]` (executou de verdade, `GN-6894`)
+> e dez tarefas foram para `[~]` por não sustentarem o requisito inteiro — `T-029`, `T-047`,
+> `T-062`, `T-064`, `T-067`, `T-080`, `T-081`, e fora desta spec `T-128`, `T-131`, `T-137`,
+> `T-231`, `T-233`, `T-310`, `T-516`. Três tarefas novas: `T-098` (`RF-23`), `T-099`
+> (prioridade que não chega ao Jira), `T-100` (SLA que nunca é lido).
+>
+> **O padrão que apareceu, e que vale mais que a lista:** quase todo achado é *servidor
+> pronto, tela ausente* ou *metade de uma frase com "e"*. Nenhum deles quebrava teste, e
+> nenhum deles era visível no board — que é exatamente como `T-081` escondeu um P0 por
+> semanas.
 
-As **seis travas críticas estão implementadas e com teste de burla**:
+As **seis travas críticas estão implementadas**, cinco com teste de burla:
 
 | Trava | Onde mora | Teste |
 |---|---|---|
 | `RF-08` ordem das tools | `agent/gate.ts` — duas camadas: não oferecer + recusar se vier | `rf08-ordem-tools.test.ts` (6 burlas) |
-| `RF-17` confirmação | `agent/gate.ts` + carimbo só por rota do usuário | idem |
+| `RF-17` confirmação | `agent/gate.ts` + carimbo só por rota do usuário | ⚠️ **a suíte NÃO tem o caso de burla** — ver item 5 de `T-097` |
 | `RF-30` isolamento | `tickets/vinculos.ts` — não existe leitura sem e-mail | `rf30-isolamento.test.ts` |
 | `RF-32` comentário interno | `atlassian/comentarios.ts` — query + filtro | `rf32-comentarios.test.ts` |
 | `RF-24` idempotência | `UNIQUE` no banco, detectado pela constraint | `rf24-outbox-degradacao.test.ts` |
