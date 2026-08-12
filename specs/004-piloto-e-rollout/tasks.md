@@ -34,11 +34,19 @@ created: "2026-08-04"
 
 ## Phase 2 — Calibragem com dado
 
-- [~] **T-310** Leitura de calibragem por regra: threshold atual **ao lado** da taxa
+- [x] **T-310** Leitura de calibragem por regra: threshold atual **ao lado** da taxa
       de override, **e as páginas apontadas nos overrides**. Sem as páginas, a tela
       empurra para o ajuste de threshold por ser o botão mais fácil — quando a
       resposta certa pode ser escrever a página que falta (`RF-13`).
       _Requirements: RF-50, RF-42, R-04_
+      ✅ **Reentregue em 12/08/2026 (`D-49`)**, na seção **Interrupções** — a mesma em que o
+      threshold é editado. `admin/paineis.tsx#FaixaCalibragem`: barra, certeza de hoje, taxa
+      de override, motivos e páginas apontadas **na mesma caixa**, com o trilho listrado e o
+      `aria-label` dizendo "nenhum bloqueio ainda" quando não houve medição. E a trava contra
+      a terceira vez é `tests/painel-do-console.test.ts`, que renderiza a seção e procura os
+      números — verificada por mutação.
+      ---
+      _Diagnóstico que a produziu, preservado:_
       🚨 **Foi entregue e SE PERDEU no rewrite do console** (`D-25`/`T-138`) — achado da
       auditoria de 12/08 (`D-47`). O servidor continua montando a calibragem
       (`src/lib/governanca/painel.ts`), mas `src/app/admin/paineis.tsx` consome só
@@ -57,8 +65,14 @@ created: "2026-08-04"
       ausente **não** inventa número — a tela diz "sem baseline" em vez de comparar contra
       zero, que mostraria economia de 100%. ⚠️ **O dado depende da Fase 0 (João).**
       _Requirements: O2_
+      ⚠️ **A comparação também tinha sumido no rewrite** e voltou em `D-49`, na seção
+      Assentos. O `[x]` desta linha estava certo sobre o servidor e errado sobre a tela —
+      mesmo formato de `T-310`, que é o motivo de `PAINEIS_DO_CONSOLE` existir.
 - [x] **T-312** [P] Métrica por área e por prioridade, usando `vinculos.area`.
       _Requirements: RF-55_
+      ⚠️ **Idem:** as duas eram calculadas e descartadas na tela até `D-49`. Hoje moram na
+      seção Chamados — por área com "Sem área" nomeado (o app não chuta), por prioridade com
+      `sem_prioridade` virando frase em vez de nome de chave.
 
 ## Phase 3 — Rollout
 

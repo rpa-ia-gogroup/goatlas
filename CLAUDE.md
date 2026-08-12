@@ -337,7 +337,18 @@ destes reabre um vazamento que já foi fechado.
 - **A calibragem mostra os MOTIVOS junto com a barra** (`governanca/painel.ts`, T-310). O
   threshold é o único campo editável ali, então mostrar "66% de override" sozinho empurra
   para mexer nele — quando a resposta certa costuma ser escrever a página que as pessoas
-  apontaram. As duas informações moram na mesma caixa de propósito.
+  apontaram. As duas informações moram na mesma caixa de propósito. ⚠️ **A regra já foi
+  quebrada uma vez, e do jeito mais silencioso** (`D-49`): a faixa sumiu inteira no rewrite
+  do console (`D-25`) e o threshold ficou editável **sem número nenhum ao lado** — pior que
+  o cenário que esta linha descreve. Ela vive em `admin/paineis.tsx#FaixaCalibragem`, na
+  seção `interrupcao`, e quem garante isso é `tests/painel-do-console.test.ts`.
+- ⚠️ **Todo número calculado tem uma CASA declarada** (`PAINEIS_DO_CONSOLE`, `D-49`). O mapa
+  é `Record<keyof ResumoPainel, SecaoDoConsole | null>`: campo novo no painel sem destino
+  **não compila** (mesmo desenho de `FAMILIA` em `config/validar.ts`). E como declarar a casa
+  sem desenhar o painel *compila*, `tests/painel-do-console.test.ts` renderiza cada seção e
+  procura o número lá dentro. ⚠️ Ele afirma que o painel **existe**, nunca como ele é
+  desenhado: teste que copia layout reprova em toda melhoria de tela, vira peso morto e é
+  apagado — devolvendo o buraco que ele tapa.
 - **Anexo enviado é o caminho OPOSTO ao do proxy de leitura** (`http/anexo-entrada.ts`).
   Lá o risco é `Content-Type` (SVG com script servido do nosso domínio); aqui é **recurso**
   — sem disco nem streaming, o arquivo passa duas vezes pela memória do Worker. Por isso o
@@ -401,10 +412,13 @@ destes reabre um vazamento que já foi fechado.
   que vale afirma sobre o corpo entregue ao `fetchImpl`, como `T-521` faz; o que afirma sobre
   o que o fake devolveu só prova que o fake é consistente consigo mesmo. ⚠️ Próximo da fila
   sem essa rede: `RF-25` — `attachTemporaryFile` não aparece em `tests/`.
-- ⚠️ **Teste de tela afirma sobre descritores e estados, nunca sobre quais PAINÉIS existem**
-  (`tela-admin.test.ts`, `D-47`). Por isso a faixa de calibragem de `T-310` desapareceu
-  inteira no rewrite do console (`D-25`) sem uma asserção vermelha — e o CSS órfão
-  `.faixa-calibragem` é a única coisa que restou dela. Painel que some não quebra nada.
+- ⚠️ **`tela-admin.test.ts` afirma sobre descritores e estados, nunca sobre quais PAINÉIS
+  existem** (`D-47`). Foi assim que a faixa de calibragem de `T-310` desapareceu inteira no
+  rewrite do console (`D-25`) sem uma asserção vermelha, deixando só o CSS órfão
+  `.faixa-calibragem`. ✅ **Fechado em `D-49`** por um segundo arquivo —
+  `tests/painel-do-console.test.ts` —, não por asserções novas naquele: os dois fazem
+  perguntas diferentes (*o campo diz o efeito?* × *o painel chega à tela?*), e misturá-las
+  faria a segunda morrer junto com a primeira no próximo rewrite.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -1141,7 +1155,7 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1125 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1141 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste.
@@ -1151,7 +1165,8 @@ porque nenhum achado é comportamento *errado*, é comportamento **ausente**, e 
 não falha. O formato dominante é *servidor pronto, tela ausente* e *metade de uma frase com
 "e"*. Os três que mudam o que se sabe do produto: a prioridade que não sai do app (`T-099`),
 o SLA que nunca é lido (`T-100`) e a faixa de calibragem que o rewrite do console descartou
-(`T-233`/`T-310`). A lista por tarefa está nos `tasks.md`.
+(`T-233`/`T-310`) — ✅ **esta última corrigida em `D-49`**, com os dez números do painel de
+volta à tela e um teste que reprova se um deles sumir. A lista por tarefa está nos `tasks.md`.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`
