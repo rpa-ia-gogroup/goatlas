@@ -3054,6 +3054,41 @@ ruído. Foi atualizado com o motivo. O que continua proibido é a linha **vazia*
 
 ---
 
+### D-53 · O assunto entra no resumo — e o componente já entrava por outro caminho
+
+**Data:** 12/08/2026 · **Origem:** auditoria de `D-47` · **Contexto:** `RF-18`, `RF-28`,
+`RF-27`, `RNF-18`, `RNF-30`
+
+**O que faltava.** `RF-18` lista o que o resumo tem de mostrar — *título, descrição,
+**tipo**, **componente**, área, prioridade e SLA*. O cartão mostrava tudo menos o tipo.
+
+**Por que isso não é cosmético.** O tipo decide **qual fila** recebe o chamado. Confirmar
+sem vê-lo é confirmar o roteamento no escuro — e roteamento é o que a Regra 1 e a
+allowlist de `RF-28` existem para acertar. Quem escolhe pela conversa nunca viu uma lista
+de assuntos; o cartão é a única chance de discordar antes de o chamado nascer.
+
+**A decisão.** O servidor devolve `tipoNome` ao lado da proposta, resolvido com a **mesma**
+lista que `/api/tipos-chamado` oferece (allowlist de `RF-28` + filtro pelo service desk
+configurado). Regra própria aqui poderia nomear um tipo que a lista não oferece, e o
+cartão passaria a anunciar uma fila que a criação recusa.
+
+⚠️ **Nunca o id.** `68`/`70`/`134` são números internos do Jira: não informam ninguém e
+`RNF-30` os mantém fora da tela. Sem nome, a tela **diz** que não identificou — inventar
+rótulo a partir do id é pior, porque parece informação (mesmo raciocínio de `D-52` para a
+área).
+
+⚠️ **`tipoNome` fica FORA da proposta persistida.** É rótulo de exibição; guardá-lo faria o
+cartão mostrar o nome de ontem depois de alguém renomear o request type no Jira. E falha ao
+listar devolve `null` sem derrubar a confirmação (`RNF-18`): rótulo não vira trava.
+
+**Sobre o componente.** Ele **não** ganhou campo próprio, e isso é decisão: `Componentes` é
+um campo do request type como qualquer outro — aparece no schema (medido: 9 opções no tipo
+68, opcional; também no 89 e 92) e já é coletado e exibido pelo caminho genérico de `RF-27`
+mais `D-39`. Um campo especial "componente" seria uma segunda regra para o mesmo dado, com
+o risco de divergir do schema — a armadilha de `D-36` para `campo_solicitante_id`.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

@@ -45,6 +45,13 @@ export interface RespostaTurno {
   }
   readonly podeConfirmar: boolean
   readonly proposta: Proposta | null
+  /**
+   * `RF-18` — o **nome** do assunto, resolvido pelo servidor (`D-53`).
+   *
+   * Fora de `Proposta` de propósito: é rótulo de exibição, não parte do que se grava.
+   * `null` = a lista de tipos não respondeu, ou o tipo saiu da allowlist.
+   */
+  readonly tipoNome: string | null
   readonly tetoCustoAtingido: boolean
 }
 
@@ -652,7 +659,7 @@ export const api = {
     }),
 
   registrarOverride: (conversaId: string, motivo: string) =>
-    chamar<{ ok: true; proposta: Proposta | null }>(
+    chamar<{ ok: true; proposta: Proposta | null; tipoNome: string | null }>(
       `/api/conversas/${encodeURIComponent(conversaId)}/override`, {
       method: 'POST',
       body: JSON.stringify({ motivo }),

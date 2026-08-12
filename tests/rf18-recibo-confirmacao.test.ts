@@ -30,7 +30,10 @@ const PROPOSTA: Proposta = {
   componente: null,
 }
 
-function render(proposta: Proposta = PROPOSTA): string {
+function render(
+  proposta: Proposta = PROPOSTA,
+  extras: { tipoNome?: string | null } = {},
+): string {
   return renderToStaticMarkup(
     createElement(ReciboConfirmacao, {
       // A identidade preenche os campos do solicitante (`RF-21`); aqui ela só precisa
@@ -38,6 +41,7 @@ function render(proposta: Proposta = PROPOSTA): string {
       eu: { email: 'ana@gocase.com', nome: 'Ana', isAdmin: false, modoDemo: false, somenteLeitura: false },
       conversaId: 'c1',
       propostaInicial: proposta,
+      tipoNome: 'tipoNome' in extras ? (extras.tipoNome ?? null) : 'Relatar um problema (Sistema)',
       aoCriar: () => {},
       // `D-46` — a saída da falha definitiva. Não participa da copy do recibo em si.
       aoRecomecar: () => {},
@@ -95,5 +99,29 @@ describe('RF-16 — a prioridade é editável, e o critério fica LEGÍVEL', () 
     const saida = render()
     expect(saida).toContain('Sugerimos alta')
     expect(saida).toContain('ajuste se não bate com o seu caso')
+  })
+})
+
+/**
+ * `RF-18` pede o **tipo** no resumo, e ele faltava — `D-53`.
+ *
+ * O assunto decide a fila que recebe o chamado. Confirmar sem vê-lo é confirmar o
+ * roteamento no escuro, que é o que a Regra 1 e a allowlist de `RF-28` existem para
+ * acertar.
+ */
+describe('RF-18 — o assunto aparece no resumo (D-53)', () => {
+  it('mostra o NOME do assunto, nunca o id', () => {
+    const saida = render()
+    expect(saida).toContain('Assunto')
+    expect(saida).toContain('Relatar um problema (Sistema)')
+    // ⚠️ `RNF-30`: `134` não informa ninguém, e id de campo/tipo não vai à tela.
+    expect(saida).not.toContain('>134<')
+  })
+
+  it('sem nome, diz que não identificou — e não inventa rótulo a partir do id', () => {
+    const saida = render(undefined, { tipoNome: null })
+    expect(saida).toContain('Assunto')
+    expect(saida).toContain('não foi possível identificar o assunto agora')
+    expect(saida).not.toContain('>134<')
   })
 })

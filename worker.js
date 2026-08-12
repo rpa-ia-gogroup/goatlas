@@ -8389,6 +8389,13 @@ async function garantirAreaNaProposta(conversa, conversas, resolver) {
   return atualizada;
 }
 
+// src/lib/tickets/nome-do-tipo.ts
+function nomeDoTipo(tipoChamadoId, tipos) {
+  const achado = tipos.find((t) => t.id === tipoChamadoId);
+  const nome = (achado?.nome ?? "").trim();
+  return nome.length > 0 ? nome : null;
+}
+
 // src/lib/retencao.ts
 var PISO_AUDITORIA_DIAS = 180;
 function limite(agoraMs, dias) {
@@ -8922,6 +8929,10 @@ async function rotear(req, ctx, eu, caminho, url) {
       // quando a proposta passa a existir; nas mensagens seguintes o campo já está lá e
       // nada é reconsultado.
       proposta: depois ? await areaNaProposta(ctx, eu.email, depois) : null,
+      // `RF-18`/`D-53` — o **nome** do assunto, nunca o id (`RNF-30`). Fora da proposta
+      // persistida de propósito: é rótulo de exibição, e guardá-lo faria o cartão mostrar
+      // o nome de ontem se alguém renomear o request type no Jira.
+      tipoNome: depois?.proposta ? await nomeDoTipoDaProposta(ctx, depois.proposta.tipoChamadoId) : null,
       tetoCustoAtingido: r.tetoCustoAtingido
     });
   }
@@ -8951,7 +8962,12 @@ async function rotear(req, ctx, eu, caminho, url) {
       proposta2 = (await ctx.conversas.obterDoSolicitante(conversa.id, eu.email))?.proposta ?? null;
     }
     const comArea = liberada ? await areaNaProposta(ctx, eu.email, { ...liberada, proposta: proposta2 }) : proposta2;
-    return json({ ok: true, bloqueiosSobrepostos: sobrepostos, proposta: comArea });
+    return json({
+      ok: true,
+      bloqueiosSobrepostos: sobrepostos,
+      proposta: comArea,
+      tipoNome: comArea ? await nomeDoTipoDaProposta(ctx, comArea.tipoChamadoId) : null
+    });
   }
   const proposta = caminho.match(/^\/api\/conversas\/([^/]+)\/proposta$/);
   if (proposta && req.method === "PUT") {
@@ -10149,6 +10165,17 @@ function limiteDeBusca(bruto) {
 function decodificar(bruto) {
   try {
     return decodeURIComponent(bruto);
+  } catch {
+    return null;
+  }
+}
+async function nomeDoTipoDaProposta(ctx, tipoChamadoId) {
+  try {
+    const permitidos = new Set(ctx.valores.tipos_chamado_permitidos);
+    const desk = ctx.valores.service_desk_id;
+    const todos = await ctx.atlassian.listarTiposChamado();
+    const oferecidos = todos.filter((t) => t.serviceDeskId === desk && permitidos.has(t.id));
+    return nomeDoTipo(tipoChamadoId, oferecidos);
   } catch {
     return null;
   }
