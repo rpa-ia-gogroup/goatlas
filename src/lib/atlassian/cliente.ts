@@ -131,12 +131,28 @@ export function montarCql(params: BuscaConfluenceParams): string {
   const partes = [
     `type = page`,
     `space in (${espacos})`,
-    `text ~ "${escaparCql(params.termo)}"`,
+    condicaoDeTexto(params),
   ]
   for (const label of params.labelsBloqueadas) {
     partes.push(`label != "${escaparCql(label)}"`)
   }
   return partes.join(' AND ')
+}
+
+/**
+ * A condição de texto: a frase inteira, ou QUALQUER uma das palavras (`D-41`).
+ *
+ * 🚨 **O grupo `OR` vai entre parênteses, e isso não é estilo.** Em CQL o `AND` liga
+ * mais forte que o `OR`: `space in (...) AND text ~ "a" OR text ~ "b"` significa
+ * `(space in (...) AND text ~ "a") OR text ~ "b"` — e a segunda palavra buscaria o
+ * site **inteiro**. A allowlist de `RN-06` teria sido contornada pela própria
+ * consulta que existe para aplicá-la, sem erro nenhum e com resultado plausível na
+ * tela. Há teste de burla afirmando os parênteses.
+ */
+function condicaoDeTexto(params: BuscaConfluenceParams): string {
+  const palavras = params.palavrasAlternativas ?? []
+  if (palavras.length === 0) return `text ~ "${escaparCql(params.termo)}"`
+  return `(${palavras.map((p) => `text ~ "${escaparCql(p)}"`).join(' OR ')})`
 }
 
 /**
@@ -300,13 +316,46 @@ export function camposAdicionais(brutos: readonly CampoRequestTypeBruto[]): Camp
 }
 
 interface RespostaBusca {
-  results?: {
-    content?: { id?: unknown; title?: unknown; space?: { key?: unknown } }
-    title?: unknown
-    score?: unknown
-    excerpt?: unknown
-    url?: unknown
-  }[]
+  results?: ResultadoBruto[]
+}
+
+interface ResultadoBruto {
+  content?: { id?: unknown; title?: unknown; space?: { key?: unknown } }
+  /** O espaço do resultado — `title` é o NOME dele, `displayUrl` é `/spaces/<CHAVE>`. */
+  resultGlobalContainer?: { title?: unknown; displayUrl?: unknown }
+  title?: unknown
+  score?: unknown
+  excerpt?: unknown
+  url?: unknown
+}
+
+/**
+ * Expansão pedida ao endpoint **v1** de search.
+ *
+ * 🚨 Sem ela, `content` volta **sem** `space`, e todo resultado saía com
+ * `espaco: ''` — medido na staging em 12/08/2026, os 10 itens de `?q=deploy`
+ * (`D-42`). Não era furo de exposição (o CQL já restringe por `space in (...)` e
+ * `RN-06` segue avaliada por página), era a origem sumindo da tela de resultados e
+ * espaço vazio indo para `paginas_lidas`.
+ */
+const EXPAND_BUSCA = 'content.space'
+
+/**
+ * A **chave** do espaço de um resultado de busca.
+ *
+ * ⚠️ O fallback lê `displayUrl` (`/spaces/GT`), **nunca** `resultGlobalContainer.title`
+ * — o título é o *nome* do espaço ("Gestão de Tecnologia") e a allowlist, a árvore e
+ * o `?espaco=` são todos por *chave*. Nome onde se espera chave é a mesma classe de
+ * bug que o `spaceId` numérico da v2 provoca: funciona na tela e nega tudo no resto.
+ *
+ * Não achou nenhuma das duas? Vazio, como antes. Palpite aqui é pior que ausência.
+ */
+function chaveDoEspaco(r: ResultadoBruto): string {
+  const daExpansao = r.content?.space?.key
+  if (typeof daExpansao === 'string' && daExpansao !== '') return daExpansao
+  const url = r.resultGlobalContainer?.displayUrl
+  const casado = typeof url === 'string' ? /\/spaces\/([^/?#]+)/.exec(url) : null
+  return casado ? decodeURIComponent(casado[1]!) : ''
 }
 
 export class ClienteAtlassianHttp implements ClienteAtlassian {
@@ -525,13 +574,13 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     if (cacheado) return cacheado as PaginaConfluence[]
 
     const dados = (await this.transporte.requisitar(
-      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}`,
+      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}&expand=${EXPAND_BUSCA}`,
     )) as RespostaBusca
 
     const candidatas: PaginaConfluence[] = (dados?.results ?? []).map((r) => ({
       id: String(r.content?.id ?? ''),
       titulo: String(r.content?.title ?? r.title ?? ''),
-      espaco: String(r.content?.space?.key ?? ''),
+      espaco: chaveDoEspaco(r),
       url: `${this.opcoes.baseUrl}/wiki${String(r.url ?? '')}`,
       score: typeof r.score === 'number' ? r.score : 0,
       trecho: String(r.excerpt ?? '').replace(/<[^>]*>/g, ''),
@@ -724,13 +773,13 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     if (cacheado) return cacheado as PaginaConfluence[]
 
     const dados = (await this.transporte.requisitar(
-      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}`,
+      `/wiki/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${params.limite}&expand=${EXPAND_BUSCA}`,
     )) as RespostaBusca
 
     const candidatas: PaginaConfluence[] = (dados?.results ?? []).map((r) => ({
       id: String(r.content?.id ?? ''),
       titulo: String(r.content?.title ?? r.title ?? ''),
-      espaco: String(r.content?.space?.key ?? ''),
+      espaco: chaveDoEspaco(r),
       url: `${this.opcoes.baseUrl}/wiki${String(r.url ?? '')}`,
       score: typeof r.score === 'number' ? r.score : 0,
       trecho: '',

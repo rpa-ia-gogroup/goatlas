@@ -23,6 +23,7 @@ import { CriacaoRecusada, MENSAGEM_RECUSA } from '../agent/gate'
 import { ErroAtlassian, SLA_PRIMEIRA_RESPOSTA_HORAS, type Prioridade } from '../atlassian/tipos'
 import type { PropostaChamado } from '../agent/estado'
 import { ancestraisExpostos, lerPaginaAutorizada, verificarExposicao } from '../confluence/acesso'
+import { buscarComAmpliacao } from '../confluence/busca'
 import { CABECALHOS_ANEXO, cabecalhoContentDisposition, decidirEntrega } from '../confluence/anexo'
 import { ENDPOINTS_NAO_VERIFICADOS, LIMITACOES_ULTIMO_ACESSO } from '../atlassian/organizacao'
 import { calcularCusto } from '../governanca/custo'
@@ -1103,9 +1104,13 @@ async function rotear(
     // distinção de `buscaConfigurada`: zero por escopo ≠ zero por documentação.
     const escopoValido = espacoPedido === '' || espacosDaBusca.length > 0
 
-    let paginas
+    // ⚠️ `buscarComAmpliacao` (`D-41`): quem digita aqui é uma pessoa, e pessoa
+    // digita frase. `text ~ "<frase inteira>"` casa quase nada — a caixa de busca
+    // tinha o mesmo defeito do tópico do agente, e é por isso que a correção mora
+    // na consulta, e não numa instrução ao modelo que esta tela não lê.
+    let busca
     try {
-      paginas = await ctx.atlassian.buscarConfluence({
+      busca = await buscarComAmpliacao(ctx.atlassian, {
         termo,
         espacosPermitidos: espacosDaBusca,
         labelsBloqueadas: ctx.valores.labels_bloqueadas,
@@ -1124,30 +1129,51 @@ async function rotear(
       return ERROS.conteudoIndisponivel()
     }
 
+    const paginas = busca.paginas
+    // ⚠️ O TERCEIRO zero (`D-41`): termo sem nenhuma palavra significativa ("como
+    // faço isso?"). Ele não é lacuna de documentação — não houve o que procurar —
+    // e é a mesma família de `buscaConfigurada` (zero por config) e do escopo
+    // vazio de `D-30` (zero por escopo).
+    const termoPesquisavel = busca.palavras.length > 0
+    const procurouDeVerdade = configurada && escopoValido && termoPesquisavel
+
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: 'busca_confluence',
       recurso: termo,
       resultado: 'sucesso',
-      detalhe: { encontradas: paginas.length, via: 'superficie' },
+      // `recurso` é o que a pessoa escreveu; `consultado` é o que foi à Atlassian.
+      // Ampliação invisível faria a auditoria descrever uma busca que não houve.
+      detalhe: {
+        encontradas: paginas.length,
+        via: 'superficie',
+        ampliou: busca.ampliou,
+        ...(busca.ampliou ? { consultado: busca.palavras.join(' ') } : {}),
+      },
     })
     // Busca sem resultado é o mapa das lacunas de documentação (RF-42) — na MESMA
     // forma que a Regra 1 grava, para T-117 ler uma coisa só. Mas só quando havia
     // onde procurar: sem espaço configurado a lacuna é de configuração, e registrar
     // envenenaria o mapa com termos que ninguém deixou de documentar.
-    if (configurada && escopoValido && paginas.length === 0) {
+    if (paginas.length === 0 && configurada && escopoValido) {
       await ctx.auditoria.registrar({
         atorEmail: eu.email,
         acao: 'busca_confluence',
         recurso: termo,
         resultado: 'falha',
-        detalhe: { motivo: 'sem_resultado_util', lacunaDocumentacao: true, via: 'superficie' },
+        detalhe: procurouDeVerdade
+          ? { motivo: 'sem_resultado_util', lacunaDocumentacao: true, via: 'superficie' }
+          : { motivo: 'termo_sem_palavras_significativas', lacunaDocumentacao: false, via: 'superficie' },
       })
     }
 
     // T-116 — o registro só acontece quando a busca de fato procurou em algum lugar.
     // Sem espaço configurado ela não é lacuna de documentação, é lacuna de config.
-    const buscaId = configurada && escopoValido
+    //
+    // ⚠️ Termo não pesquisável que MESMO ASSIM achou página continua registrado: ali
+    // o valor é o clique (`houve_clique`), que é o segundo sinal de `RF-42` e não
+    // depende de o termo ser bom. O que não pode entrar é o par (não pesquisável, zero).
+    const buscaId = configurada && escopoValido && (termoPesquisavel || paginas.length > 0)
       ? await ctx.conhecimento.registrarBusca({
           solicitanteEmail: eu.email,
           termo,

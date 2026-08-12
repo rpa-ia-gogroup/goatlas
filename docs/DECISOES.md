@@ -2058,6 +2058,134 @@ plataforma proíbe para I/O. Não "consertei" isso agora pela razão do parágra
 
 ---
 
+### D-41 · A frase inteira não casa nada — a busca amplia na CONSULTA, não no prompt
+
+**Data:** 12/08/2026 · **Medido por:** uso real na staging (`appId 3936ca2d`) ·
+**Contexto:** `RF-37`, `RF-09`, `RF-42`, `RN-06`, `RNF-07`, `R-02`, `D-33`, `D-30`
+
+**A medição.** A pessoa perguntou *"Preciso saber como funciona o processo de deploy aqui na
+Gocase. Onde vejo isso?"*. O modelo mandou `processo de deploy na Gocase` como tópico, e a
+auditoria gravou:
+
+```
+busca_confluence sucesso  recurso="processo de deploy na Gocase"  {"encontradas":0,"bloqueou":false}
+busca_confluence falha    recurso="processo de deploy na Gocase"  {"motivo":"sem_resultado_util","lacunaDocumentacao":true}
+```
+
+O agente respondeu: *"Não encontrei nenhuma página relevante no Confluence sobre o processo
+de deploy."* **A mesma instalação, buscando `deploy`, devolvia 10 páginas** — uma delas
+"Conventional Deploys | Como entregar para produção".
+
+**A causa.** `montarCql` põe o termo em `text ~ "<termo>"`, e o que chega ali é a **frase**.
+Frase longa casa quase nada.
+
+🚨 **São dois danos, e o segundo é silencioso.** O primeiro é o cenário que `D-33` nomeia
+como o mais caro do projeto: o app afirma o oposto da verdade e manda a pessoa abrir chamado
+por algo que está escrito. O segundo é `lacunaDocumentacao: true` gravado — o mapa de `RF-42`
+passa a listar um termo que **ninguém deixou de documentar**, e alguém recebe como backlog
+"escrever sobre processo de deploy" para uma página que já existe.
+
+**A decisão: a correção mora na consulta.** `src/lib/confluence/busca.ts`
+(`buscarComAmpliacao`) faz **no máximo duas** consultas por busca — a frase inteira e, **só
+se ela não casar nada**, as palavras significativas em `OR`. Precisão primeiro; a ampliação
+só existe para o zero.
+
+**Por que não no prompt nem na tool.** As três camadas eram possíveis, e duas foram
+descartadas por motivo, não por gosto:
+
+| Camada | Por que não |
+|---|---|
+| System prompt (`montarPromptAgente`) | Instrui, não garante (Princípio X). E o modo de falha é o silencioso: o app continua respondendo, só que a coisa errada — foi exatamente assim que este bug viveu |
+| Parâmetro da tool ("mande palavras-chave") | Mesma fragilidade, **e não alcança a caixa de busca da aba Documentação**, onde quem digita é uma pessoa — e pessoa digita frase. O defeito chega por dois caminhos; a correção precisa cobrir os dois |
+| **Consulta** ✅ | Um mecanismo para os dois chamadores, verificável **sem modelo nenhum** (o teste afirma sobre o CQL montado e sobre a contagem de consultas) |
+
+⚠️ **Nada foi mexido no prompt de propósito.** Com a ampliação no lugar, um tópico em forma
+de frase passa a funcionar; instruir o modelo a mandar palavras-chave faria o conserto
+depender de ele obedecer, que é o que se está evitando.
+
+🚨 **O grupo `OR` vai entre parênteses, e isso é segurança, não estilo.** Em CQL o `AND` liga
+mais forte que o `OR`, então
+
+```
+space in ("GT") AND text ~ "processo" OR text ~ "deploy"
+```
+
+significa `(space in ("GT") AND text ~ "processo") OR text ~ "deploy"` — a segunda palavra
+buscaria o **site inteiro**, e a allowlist de `RN-06` teria sido contornada pela própria
+consulta que existe para aplicá-la, sem erro nenhum e com resultado plausível na tela. O
+teste de burla afirma os parênteses, e afirma a ausência da forma sem eles.
+
+**O teto, e por quê** (`R-02`, `RNF-15`). `MAX_CONSULTAS_BUSCA = 2` e
+`MAX_PALAVRAS_AMPLIACAO = 6`. Cada resultado ainda custa uma consulta de restrição por página
+(`RN-06`), e o burst limit da Atlassian por API token não é publicado — um leque de N
+tentativas por turno é como se descobre esse limite do jeito ruim. Termo de **uma** palavra
+não amplia: a segunda consulta seria idêntica à que acabou de voltar vazia.
+
+⚠️ **Ampliar nunca mexe no escopo.** `espacosPermitidos`, `labelsBloqueadas` e `limite` vão
+idênticos na segunda tentativa. "Achar mais" jamais pode virar "procurar em mais lugares" —
+`D-30` continua valendo inteiro, e `?espaco=` continua só sabendo estreitar.
+
+**O TERCEIRO zero.** Já havia dois zeros distintos: por configuração (`buscaConfigurada`) e
+por escopo (`D-30`). Agora há um terceiro — **zero por termo sem palavra significativa**
+("como faço isso?"). Ele **não** registra lacuna de `RF-42`, nem na auditoria nem na tabela
+`buscas` (que é o que o mapa de T-117 de fato lê); a auditoria recebe
+`motivo: 'termo_sem_palavras_significativas'` com `lacunaDocumentacao: false`, para que
+"ninguém escreveu sobre isso" e "não havia o que procurar" não virem a mesma linha.
+⚠️ Termo não pesquisável que **mesmo assim** achou página continua registrado em `buscas`:
+ali o valor é o `houve_clique`, que é o segundo sinal de `RF-42` e não depende de o termo ser
+bom. O que não pode entrar é o par (não pesquisável, zero).
+
+**A auditoria mostra os dois lados.** `recurso` continua sendo o que a pessoa (ou o modelo)
+escreveu — é ele que o mapa agrupa. Ao lado, `detalhe.ampliou` e, quando ampliou,
+`detalhe.consultado` com as palavras que de fato foram à Atlassian. Ampliação invisível faria
+a auditoria descrever uma busca que não aconteceu, que é o mapa mentindo de outro jeito.
+
+**A lista de palavras vazias é curta de propósito** e só tem palavra de **função** (artigo,
+preposição, pronome, interrogativo, os verbos de pedido que abrem toda pergunta). Palavra de
+conteúdo fica: "acesso", "erro" e "ajuda" são assunto, e cortá-las trocaria um zero por um
+resultado **errado**, que é pior. A palavra volta **como foi escrita**, com acento e caixa —
+o CQL casa o texto da página, e "producao" não é "produção"; a normalização serve só para
+comparar com a lista.
+
+**Custo aceito.** (1) Uma consulta a mais no pior caso — só no caminho que hoje já produz
+zero, isto é, no caminho que hoje não serve para nada. (2) A Regra 1 (`RF-09`) passa a poder
+bloquear com base numa página achada pela consulta ampliada, que é por construção mais frouxa
+que a frase. É aceitável porque bloqueio **não é parede** (`RF-13`): há override, o override é
+registrado, e o motivo alimenta a calibragem de `R-04`. E a alternativa — continuar dizendo
+"não encontrei nada" — já é o pior resultado possível. (3) Nenhum ajuste no threshold foi
+feito às cegas: se a taxa de override subir, o número a mexer é
+`regra1_threshold_score`, no console, sem deploy.
+
+---
+
+### D-42 · `espaco: ""` em todo resultado — a v1 de search não expande `content.space`
+
+**Data:** 12/08/2026 · **Medido por:** `GET /api/confluence/busca?q=deploy` na staging ·
+**Contexto:** `RF-37`, `RF-41`, `RN-06`
+
+**A medição.** Os 10 itens voltaram com `"espaco": ""`. A origem é
+`String(r.content?.space?.key ?? '')`: o endpoint **v1** de search não traz `content.space`
+sem `&expand=`.
+
+**Não é furo de exposição** — o CQL já restringe por `space in (...)` e `RN-06` continua
+avaliada por página. O que se perdia era a **origem** na tela de resultados.
+
+**A decisão.** `&expand=content.space` na consulta, e a chave lida por uma função só
+(`chaveDoEspaco`), com fallback pelo `displayUrl` do `resultGlobalContainer` (`/spaces/GT`).
+
+⚠️ **O fallback NUNCA lê `resultGlobalContainer.title`.** O título é o **nome** do espaço
+("Gestão de Tecnologia"); a allowlist, a árvore e o `?espaco=` são todos por **chave** (`GT`).
+Nome onde se espera chave é a mesma classe de bug que o `spaceId` numérico da v2 provoca
+(`D-29` e o aviso do `CLAUDE.md`): funciona na tela e nega tudo no resto, sem erro nenhum. Há
+teste afirmando que o nome não sai. Sem expansão **e** sem `displayUrl` reconhecível, o campo
+fica vazio como antes — palpite ali é pior que ausência.
+
+**Não medido contra a Atlassian real:** a expansão é documentada e padrão, mas este PR não
+foi a produção nem à staging. Se o `expand` for ignorado pelo servidor, o fallback responde;
+se os dois falharem, o comportamento é o de hoje.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

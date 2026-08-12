@@ -402,11 +402,21 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
     // confere que a decisão de exposição não depende de filtro acima da camada.
     const permitidos = new Set(params.espacosPermitidos)
     const bloqueadas = new Set(params.labelsBloqueadas)
-    const palavras = this.estado.filtrarPorTermo ? palavrasDe(params.termo) : []
+    /**
+     * A segunda tentativa de `D-41` casa QUALQUER palavra; a frase inteira casa
+     * todas. O dublê precisa da distinção: sem ela a ampliação devolveria o mesmo
+     * zero da frase e o teste da correção passaria por acidente, como em `D-38`.
+     */
+    const alternativas = this.estado.filtrarPorTermo
+      ? palavrasDe((params.palavrasAlternativas ?? []).join(' '))
+      : []
+    const palavras =
+      this.estado.filtrarPorTermo && alternativas.length === 0 ? palavrasDe(params.termo) : []
     return this.estado.paginas
       .filter((p) => {
-        if (palavras.length === 0) return true
+        if (alternativas.length === 0 && palavras.length === 0) return true
         const texto = normalizar(`${p.titulo} ${p.trecho}`)
+        if (alternativas.length > 0) return alternativas.some((palavra) => texto.includes(palavra))
         return palavras.every((palavra) => texto.includes(palavra))
       })
       .filter((p) => permitidos.has(p.espaco))
