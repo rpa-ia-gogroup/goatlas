@@ -6,6 +6,7 @@
  */
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -61,6 +62,14 @@ import {
   type Declaracao,
 } from './anexo'
 import { MAX_ANEXOS_POR_CHAMADO } from '@/lib/tickets/anexos-pendentes'
+import {
+  deveMostrarAtalhoDoFim,
+  ehRolagemNossa,
+  estaNoFim,
+  JANELA_ROLAGEM_PROPRIA_MS,
+  medidaDaJanela,
+  rolarAoFim,
+} from './rolagem'
 import {
   faltaAlgumaCoisa,
   mensagemDePendencias,
@@ -189,7 +198,17 @@ function ConversaEmCurso({
   const [vendo, setVendo] = useState<AnexoParaVer | null>(null)
   // `D-59` — só o **realce** do arrasto. O upload em si é do hook abaixo.
   const [arrastando, setArrastando] = useState(false)
-  const fim = useRef<HTMLDivElement>(null)
+  /**
+   * `D-69` — a conversa acompanha o fim **só quando a pessoa já está no fim**.
+   *
+   * O par é o mesmo de `bloqueio`/`temBloqueioPendente` (`D-21`): o `ref` é lido dentro do
+   * efeito de rolagem (que não pode depender de render para estar certo), e o estado existe
+   * para a tela desenhar o atalho. Um `useState` sozinho chegaria atrasado ao efeito; um `ref`
+   * sozinho não redesenharia o botão.
+   */
+  const grudadoNoFim = useRef(true)
+  const [longeDoFim, setLongeDoFim] = useState(false)
+  const [novidadeNaoVista, setNovidadeNaoVista] = useState(false)
   /** `D-59b` — ver `garantirConversa`. Guarda a PROMESSA, não o id. */
   const conversaEmVoo = useRef<Promise<string> | null>(null)
 
@@ -202,8 +221,56 @@ function ConversaEmCurso({
     aoVerArquivo: setVendo,
   })
 
+  // `D-69` — quem rola diz onde está. `passive` porque este listener nunca chama
+  // `preventDefault`, e sem ele o navegador espera por nós antes de pintar cada quadro da
+  // rolagem.
+  /** Até quando um `scroll` ainda é o nosso — ver `ehRolagemNossa`. */
+  const rolagemPropriaAte = useRef(0)
+  const rolarAcompanhando = useCallback(() => {
+    rolagemPropriaAte.current = Date.now() + JANELA_ROLAGEM_PROPRIA_MS
+    rolarAoFim()
+  }, [])
+
   useEffect(() => {
-    fim.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    function aoRolar() {
+      // 🚨 A rolagem suave dispara `scroll` a cada quadro, e no meio do voo a posição está
+      // longe do fim: sem esta guarda, o movimento que leva ao fim marcava a pessoa como
+      // "lendo o histórico".
+      if (ehRolagemNossa(Date.now(), rolagemPropriaAte.current)) return
+      const noFim = estaNoFim(medidaDaJanela())
+      grudadoNoFim.current = noFim
+      setLongeDoFim(!noFim)
+      // Chegar ao fim é ter visto: o atalho apaga sozinho, sem exigir clique.
+      if (noFim) setNovidadeNaoVista(false)
+    }
+    window.addEventListener('scroll', aoRolar, { passive: true })
+    return () => window.removeEventListener('scroll', aoRolar)
+  }, [])
+
+  /**
+   * ⚠️ **A conversa cresce DEPOIS do alvo.** O efeito abaixo rola quando `falas` muda, e nesse
+   * instante o cartão de leitura do anexo, a fonte e a linha de espera ainda estão mudando de
+   * altura — medido: a página ficava 200 px curta. Quem mantém o fim colado é este observador.
+   */
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return
+    const observador = new ResizeObserver(() => {
+      if (!grudadoNoFim.current) return
+      if (estaNoFim(medidaDaJanela())) return
+      rolarAcompanhando()
+    })
+    observador.observe(document.body)
+    return () => observador.disconnect()
+  }, [rolarAcompanhando])
+
+  useEffect(() => {
+    if (grudadoNoFim.current) {
+      rolarAcompanhando()
+      return
+    }
+    // ⚠️ Lendo o histórico, **nada** arrasta a pessoa — nem a mensagem que ela mesma mandou.
+    // O que muda é o atalho acender: é ele o caminho de volta (ver `app/rolagem.ts`).
+    setNovidadeNaoVista(true)
   }, [falas, proposta, criado])
 
   /**
@@ -388,7 +455,6 @@ function ConversaEmCurso({
             Solte para anexar ao chamado
           </p>
         )}
-        <div ref={fim} />
       </div>
 
       {bloqueado && (
@@ -422,6 +488,15 @@ function ConversaEmCurso({
         enviando={enviando}
         justificando={justificando}
         anexo={anexo.elemento}
+        atalhoDoFim={
+          deveMostrarAtalhoDoFim({ longeDoFim, novidade: novidadeNaoVista })
+            ? () => {
+                rolarAcompanhando()
+                grudadoNoFim.current = true
+                setNovidadeNaoVista(false)
+              }
+            : undefined
+        }
       />
 
       <Visualizador anexo={vendo} aoFechar={() => setVendo(null)} />
@@ -480,6 +555,7 @@ export function Compositor({
   enviando,
   justificando,
   anexo,
+  atalhoDoFim,
 }: {
   valor: string
   aoMudar: (v: string) => void
@@ -488,9 +564,20 @@ export function Compositor({
   justificando: boolean
   /** `D-59` — o clipe e a lista de enviados. `null` antes de a conversa existir. */
   anexo?: ReactElement | null
+  /**
+   * `D-69` — o caminho de volta ao fim. `undefined` quando não há nada a alcançar, e é
+   * `undefined` que faz o botão **não existir**: botão apagado que continua na tela seria
+   * móvel permanente no espaço mais caro da conversa.
+   */
+  atalhoDoFim?: (() => void) | undefined
 }) {
   return (
     <form className="compositor" onSubmit={aoEnviar}>
+      {atalhoDoFim && (
+        <button type="button" className="atalho-fim" onClick={atalhoDoFim}>
+          <span aria-hidden="true">↓</span> Ir para a última mensagem
+        </button>
+      )}
       <div className="campo">
         <label htmlFor="mensagem">Sua mensagem</label>
         <textarea

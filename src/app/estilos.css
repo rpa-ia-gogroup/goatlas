@@ -687,6 +687,30 @@
   color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
 }
 
+/*
+ * `D-69` — o caminho de volta ao fim, para quem está lendo o histórico.
+ *
+ * Mora **dentro** do compositor, que é `sticky`: assim ele está sempre visível sem
+ * `position: fixed` próprio e sem cálculo de deslocamento contra a altura do compositor, que
+ * muda com a lista de anexos. ⚠️ Alinhado ao centro e discreto de propósito — ele divide o
+ * espaço mais caro da tela com o campo de mensagem, e só existe enquanto há algo a alcançar.
+ */
+.atalho-fim {
+  align-self: center;
+  padding: 0.35rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--go-blue) 25%, transparent);
+  border-radius: 999px;
+  background: var(--go-white);
+  color: var(--go-blue);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.atalho-fim:hover {
+  background: color-mix(in srgb, var(--go-lime) 18%, var(--go-white));
+}
+
 .compositor {
   display: flex;
   flex-direction: column;
