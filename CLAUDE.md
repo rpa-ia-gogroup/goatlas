@@ -949,6 +949,12 @@ destes reabre um vazamento que já foi fechado.
   `float: left` + `width: 100%`: o float tira o elemento daquela categoria e, num container
   flex, é ignorado — sobra um item de flex comum, que respeita padding e gap. Não trocar o
   `fieldset`/`legend` por `div`: são eles que nomeiam o grupo de rádio para leitor de tela.
+- 🚨 **Toda tela tem caminho — inclusive a conversa, em `/chat`** (`D-67`). Ela era a única
+  ainda morando em `/`, e a tela mais usada do app era a única sem endereço. ⚠️ **`/` continua
+  caindo nela**, e isso protege duas coisas: o link que as pessoas têm salvo e o `?pagina=`
+  antigo, que vem da mensagem de bloqueio da Regra 1 — quebrá-lo derrubaria a deflexão de
+  `RF-13`. ⚠️ A reescrita de `/` para `/chat` é **`replaceState`**: empilhar faria o primeiro ←
+  da sessão parecer travado, voltando para a mesma tela.
 - 🚨 **Toda tela tem caminho, e o histórico EMPILHA** (`app/rotas.ts`, `D-65`). Antes tudo
   morava em `/` e a URL era escrita com `replaceState` — que **substitui** a entrada atual:
   cinco páginas abertas deixavam **uma** entrada no histórico, e o ← saía do app. Continua

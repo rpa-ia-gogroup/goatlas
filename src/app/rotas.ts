@@ -49,15 +49,32 @@ export type NomeDeTela = Tela['nome']
 export const CAMINHO_DOCUMENTACAO = '/documentacao'
 
 /**
+ * A conversa também tem caminho próprio — `/chat`.
+ *
+ * 🚨 **Antes ela era a raiz, e isso deixava uma tela sem endereço.** Pedido do mantenedor:
+ * *"tudo tem que ser paginado"*. Consequência concreta, não estética: sem caminho próprio não
+ * havia como mandar alguém direto para a conversa, e o ← saía do app quando a primeira coisa
+ * que a pessoa fazia era trocar de aba — a raiz não empilhava nada distinguível.
+ *
+ * ⚠️ **`/` continua funcionando e continua caindo aqui.** É o endereço que as pessoas têm
+ * salvo, é o que o edge do GoDeploy serve, e é o que o link `?pagina=` antigo usa (`D-56`:
+ * `urlDeLeituraNoApp` escrevia `/?pagina=`). A diferença é que, ao abrir em `/`, o app
+ * **reescreve** a URL para `/chat` com `replaceState` — nunca `push`, senão o primeiro ← da
+ * sessão voltaria para a mesma tela e pareceria travado.
+ */
+export const CAMINHO_CONVERSA = '/chat'
+
+/**
  * Caminho de cada tela — em português, como todo texto que a pessoa lê (regra 4). A URL é
  * superfície: `/meus-chamados` diz onde se está, `/` não diz nada.
  *
- * ⚠️ `conversa` é a **raiz**, e isso não é detalhe: é a tela de entrada, e um link para o
- * app sem caminho nenhum tem de cair nela. É também o que faz `entradaDaUrl` continuar
- * funcionando para quem chega por `?pagina=` num link antigo, sem caminho.
+ * ⚠️ `conversa` tem caminho próprio (`/chat`), e a **raiz continua caindo nela** — ver
+ * `CAMINHO_CONVERSA`. Um link para o app sem caminho nenhum tem de chegar em algum lugar
+ * útil, e é também o que faz `entradaDaUrl` continuar funcionando para quem chega por
+ * `?pagina=` num link antigo, sem caminho.
  */
 const CAMINHO_POR_TELA: Readonly<Record<NomeDeTela, string>> = {
-  conversa: '/',
+  conversa: CAMINHO_CONVERSA,
   documentacao: CAMINHO_DOCUMENTACAO,
   chamados: '/meus-chamados',
   formulario: '/abrir-chamado',
@@ -101,7 +118,10 @@ export function telaDoCaminho(caminho: string): Tela {
   }
 
   for (const [nome, caminhoDaEntrada] of Object.entries(CAMINHO_POR_TELA)) {
-    if (nome === 'detalhe' || nome === 'conversa') continue
+    // `detalhe` já foi tratado acima (ele compartilha o caminho da lista, com a chave depois).
+    // ⚠️ `conversa` **não** é mais exceção aqui: desde que ela tem `/chat`, ela casa pela
+    // tabela como qualquer outra — e continua sendo o destino do desconhecido, logo abaixo.
+    if (nome === 'detalhe') continue
     if (primeiro === caminhoDaEntrada) return { nome: nome as NomeDeTela } as Tela
   }
 
