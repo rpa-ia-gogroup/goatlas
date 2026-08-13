@@ -3528,6 +3528,85 @@ esta mudança. A regra 10 continua valendo para as próximas.
 
 ---
 
+### D-60 · O campo de `Q3` sai do console, e a Regra 2 fica desligada por decisão
+
+**Data:** 13/08/2026 · **Origem:** pedido direto do mantenedor ("tira esse campo de ajuste
+operacional") · **Contexto:** `RF-10`, `RF-11`, `RF-14`, `Q3`, `RNF-25`, `D-25`
+
+**A decisão:** `regra2_exemplos_ajuste_operacional` **deixa de ter campo no console de
+admin**. A chave continua em `ConfigValores`, com o default vazio, e `regra2Disponivel`
+continua sendo o predicado que decide se a Regra 2 roda. Consequência assumida: a
+**verificação de histórico (`RF-10`/`RF-11`) fica desligada**, e `Q3` deixa de ser
+pendência de alguém.
+
+**Por que não foi só apagar a linha da lista de pendências.** Um campo de texto vazio na
+tela é uma **pergunta**: ele diz *"falta você preencher isto"*. Enquanto `Q3` estava viva
+isso era verdade e o campo era o caminho da resposta — foi por isso que ele nasceu (`RF-49`,
+"pergunta em aberto não é motivo para hardcode"). Com a pergunta cortada, a mesma caixa
+passa a cobrar um trabalho que ninguém vai fazer, na seção onde mora o **único** ajuste que
+de fato se calibra (o threshold da Regra 1). O custo de um campo no console é atenção de
+quem precisa achar o que importa — o mesmo argumento de `D-25`.
+
+**O que muda além do descritor:**
+
+- ⚠️ **A frase do diagnóstico mudou, e o predicado NÃO** (`config/diagnostico.ts`). Ela dizia
+  *"Sem exemplos reais da Gocase, a verificação de histórico não roda"* — descrição de uma
+  **falta a resolver**, que sem campo na tela manda a pessoa procurar um controle inexistente
+  na própria seção que a frase abre. Agora diz *"está desligada por decisão, e não tem campo
+  nesta tela"*. Quem responde continua sendo `regra2Disponivel`, importado de `rules/`: o
+  console **relata**, nunca recalcula (`D-25`).
+- 🗑️ **O tipo de campo `linhas` saiu junto** (`admin/campos.tsx`): o `textarea`, a conversão
+  por `\n` e a pré-visualização de itens existiam **só** para este descritor, e caminho que
+  nenhuma tela alcança não é opcionalidade — é código que ninguém exercita. O caso de teste
+  que afirmava "separa por LINHA, não por vírgula" saiu com ele. **Devolver o campo é devolver
+  os quatro** — está anotado no lugar onde o descritor estava.
+
+**O que NÃO muda, de propósito:**
+
+- **A tool `check_jira_history` continua existindo e continua sendo chamada.** `RF-08` exige
+  que as duas verificações rodem antes de `create_ticket`, e ela **se declara indisponível**
+  em vez de não rodar — remover a Regra 2 do produto era a outra leitura do pedido, foi
+  oferecida e **recusada**: mexeria numa trava crítica com testes de burla.
+- **O prompt do agente continua sendo função da instalação** (`D-33`): sem exemplos ele não
+  promete a segunda verificação. Nenhuma frase nova foi escrita ali.
+- **Reabrir é preencher, não programar:** `PUT /api/admin/config` aceita a chave (a família
+  `lista_de_texto` está em `config/validar.ts`), então a Regra 2 volta a rodar sem deploy —
+  só sem tela. `tests/tela-admin.test.ts` reprova quem devolver o campo sem passar por aqui,
+  e afirma **também** que a chave continua em `CONFIG_PADRAO`.
+
+⚠️ **A `Q3` não foi "respondida" — foi cortada.** A pergunta continua descrita, como os
+quatro itens de `D-57`/`D-58`: cortar da lista é decidir que ninguém espera por ela, não
+fingir que não existe. Se um dia a deflexão por recorrência voltar à mesa, o caminho é
+reabrir `D-60` — e aí o campo, o tipo `linhas` e o teste voltam com ela.
+
+#### `D-60b` — o teto de custo da IA sai da tela, e a trava fica
+
+**Pedido do mantenedor, no mesmo dia:** *"esse campo não vai ser útil já que usamos proxy"*.
+Está certo sobre a **decisão**: sob o proxy de IA corporativo o dinheiro não é deste app, e
+"quanto uma conversa pode gastar em dólar" não é escolha de quem abre o console — é
+orçamento de outra pessoa, em outro lugar.
+
+🚨 **Mas o teto não é só um número na tela: é o fim de uma conversa em laço**
+(`orquestrador.ts:123` e `:214` — o turno é recusado quando `custoUsd + custoTurno` alcança
+o teto, e a pessoa é mandada ao formulário, nunca deixada sem chamado). Por isso saiu **o
+campo**, não a trava: `teto_custo_conversa_usd` continua em `ConfigValores` com o default de
+`US$ 0,50` por conversa, e continua ajustável por `PUT /api/admin/config`. Remover a
+verificação era outra mudança, e não foi pedida.
+
+⚠️ **A seção "Custo da IA" FICA, sem nenhum campo dentro.** Ela é a casa declarada de dois
+painéis em `PAINEIS_DO_CONSOLE` — `ia` (custo total e médio) e `telemetriaAtlassian` (os 429
+de `RF-60`) —, e apagá-la deixaria esses números sem onde aparecer: exatamente o buraco que
+`D-49` fechou depois de a faixa de calibragem desaparecer inteira num rewrite. O que mudou
+foi a **classificação**: `grupo` passou de `configurar` para `acompanhar`, porque anunciar em
+"configurar" uma seção sem ajuste nenhum promete um controle que não está lá. O título deixou
+de ser *"Quanto a IA pode gastar"* — o "pode" era o teto — e virou *"Quanto a IA gastou"*.
+
+**Teste:** `tests/tela-admin.test.ts` afirma as três coisas — a chave fora da tela, a chave
+**dentro** de `CONFIG_PADRAO` (é dela que a trava depende) e a seção viva, vazia e em
+`acompanhar`.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
@@ -3537,7 +3616,7 @@ implementado antes da resposta.
 |---|---|---|---|
 | Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | ✅ **RESPONDIDA na parte de credencial — `D-23`, 07/08/2026.** `ATATT` clássico validado (`/rest/api/3/myself` → 200), `ATCTT` em `ATLASSIAN_ORG_API_KEY`, org id validado, `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"). **T-063 saiu do bloqueio** — falta escolher os tipos da allowlist de `RF-28`, que é roteamento. ⚠️ **Pendências que não são "qual credencial":** a conta é **pessoal do João** (contra `RNF-03` — conta de serviço dedicada continua a fazer), o `ATCTT` precisa de **rotação** e pode virar chave só-leitura, e a **escrita** de governança exige reivindicar o domínio, não credencial |
 | Q2 | Qual campo do Jira delimita "mesmo tipo de ticket" para a Regra 2 — label, componente ou tipo de issue? | João + time de tech | RF-10, RF-11 (o agrupamento do `check_jira_history`) |
-| Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | RF-14 — e sem ele a Regra 2 classifica mal (é pré-requisito, não refinamento) |
+| Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | ✂️ **CORTADA em `D-60`, 13/08/2026: a Regra 2 fica desligada por decisão.** O campo saiu do console — caixa vazia na tela cobra um trabalho que ninguém vai fazer. `RF-14` continua descrito e `regra2Disponivel` continua sendo o predicado; a tool `check_jira_history` continua rodando e **se declarando indisponível**, que é o que `RF-08` exige. Reabrir é preencher a chave por `PUT /api/admin/config` (sem deploy) e reabrir `D-60` para devolver a tela |
 | Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | ✅ **RESPONDIDA pela medição — `D-36`, 11/08/2026.** Não existe um campo "Solicitante": o que existe é um par **`customfield_10089` (Nome do Colaborador)** + **`customfield_10091` (E-mail)**, obrigatórios, **só no request type 108**. 🚨 E o mesmo id significa outra coisa em outro tipo (`10092`: cargo no 108, sistema do bug no 70), então `campo_solicitante_id` — um id **global** — tinha a forma errada: sai da config e vira mapeamento **por request type**, fixo no código. RF-21, RNF-21 (reconciliação) |
 | Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | **Lista autoritativa em mãos (`D-23`): 32 espaços, com nome e tipo.** ⚠️ O `TECH` que circulava **nunca existiu**, e a recomendação do `D-22` estava furada: **`GO` é "Go Shopify"**, não engenharia. Candidatos reais: `GT` (GO Tecnologia, `knowledge_base`), `DTE`, `GN`, `DE` (Devops), `GI` (GO INFRA), `dicas`, `GLPI`. **Parcialmente aplicada:** o secret existe desde 07/08 17:35 e o `CLAUDE.md` registra `GT,DTE,GN` (3 de 31 espaços reais). ⚠️ **O que resta é conflito, não ausência** — a sugestão do João inclui `GO`/`PROD` e a `D-23` §7 diz que `GO` não é engenharia. Ver `D-29` |
 | Q6 | ~~Qual API de IA?~~ Resta: qual a **política de retenção/treinamento** do provedor atrás do proxy corporativo? | João | **Provedor decidido — ver D-05.** O que resta bloqueia o *rollout* (conformidade **RNF-34**), não a arquitetura |

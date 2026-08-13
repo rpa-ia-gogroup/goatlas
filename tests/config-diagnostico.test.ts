@@ -95,7 +95,12 @@ describe('a Regra 2 sem exemplos reais não roda (RF-14, Q3)', () => {
       'interrupcao',
     )
     expect(c.estado).toBe('parcial')
-    expect(c.consequencia).toMatch(/exemplos/i)
+    expect(c.consequencia).toMatch(/desligada por decis[ãa]o/i)
+    // ⚠️ `D-60`: a frase não pode mais falar de "exemplos" que faltam. O campo saiu
+    // do console, então descrever a falta mandaria a pessoa procurar, na mesma
+    // seção, um controle que não existe — e "está desligada por decisão" é o que de
+    // fato aconteceu. O predicado continua sendo `regra2Disponivel`.
+    expect(c.consequencia).not.toMatch(/exemplos/i)
   })
 
   it('sem exemplos E sem espaço, o agente não interrompe ninguém', () => {

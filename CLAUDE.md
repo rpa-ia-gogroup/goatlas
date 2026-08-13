@@ -116,6 +116,21 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   tela **de propósito**: continuam em `ConfigValores` e mudáveis sem deploy, mas
   ninguém os decide sem ler o código, e cada um deles na tela custava atenção de quem
   precisa achar o que importa. Devolvê-los é reabrir `D-25`, não "completar a tela".
+  🚨 **Mais dois saíram em `D-60`, e o critério é o mesmo lido ao contrário: campo é uma
+  PERGUNTA.** Os **exemplos de `Q3`** (`regra2_exemplos_ajuste_operacional`) saíram porque a
+  `Q3` foi **cortada** — caixa de texto vazia diz *"falta você preencher isto"* sobre um
+  trabalho que ninguém vai fazer, e ficava na seção do único ajuste que de fato se calibra
+  (o threshold da Regra 1). Consequência assumida: a Regra 2 fica **desligada**, com
+  `check_jira_history` rodando e **se declarando indisponível** (`RF-08` intacto). ⚠️ **A
+  frase do diagnóstico mudou junto, e o predicado NÃO** — dizer "sem exemplos reais" mandava
+  procurar um controle que já não existe. E o tipo de campo **`linhas` foi apagado** (era só
+  daquele descritor): devolver o campo é devolver tipo, `textarea` e teste.
+  🚨 **O teto de custo da IA saiu em `D-60b`, e a TRAVA FICOU** — sob proxy corporativo o
+  dinheiro não é deste app, então o valor não é decisão de quem abre o console; mas
+  `teto_custo_conversa_usd` continua em `ConfigValores` (default `US$ 0,50`) e continua
+  encerrando **conversa em laço** em `orquestrador.ts`. ⚠️ **A seção "Custo da IA" fica viva e
+  vazia**: ela é a casa declarada de `ia` e `telemetriaAtlassian` em `PAINEIS_DO_CONSOLE`, e
+  apagá-la reabriria o buraco de `D-49`. Sem campo, ela é `acompanhar`, nunca `configurar`.
 - **O anexo NÃO viaja dentro da chamada de criação** (`D-26`). Parece a simplificação
   óbvia — é o que o portal nativo do JSM faz — e é a que perde chamado: id temporário
   vencido faz a **criação** responder 400, que `atlassian/http.ts` classifica como

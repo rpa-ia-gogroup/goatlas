@@ -168,6 +168,25 @@ describe('a estrutura não volta a acumular', () => {
       expect(editaveis.has(fora), `${fora} voltou à tela sem passar por D-25`).toBe(false)
     }
   })
+
+  it('o que saiu do console em D-60 continua fora, e a chave continua existindo', () => {
+    const editaveis = new Set(CAMPOS.map((c) => c.chave as string))
+    for (const fora of ['regra2_exemplos_ajuste_operacional', 'teto_custo_conversa_usd']) {
+      expect(editaveis.has(fora), `${fora} voltou à tela sem passar por D-60`).toBe(false)
+      // A chave NÃO saiu da configuração: reabrir é preencher, não reescrever código —
+      // e no caso do teto, a trava de `orquestrador.ts` depende dela continuar lá.
+      expect(Object.keys(CONFIG_PADRAO)).toContain(fora)
+    }
+  })
+
+  it('a seção de custo sobrevive sem campo, porque é a casa de dois painéis (D-49)', () => {
+    const custo = SECOES.find((s) => s.id === 'custo')
+    expect(custo, 'a seção custo sumiu — ia/telemetriaAtlassian ficariam sem casa').toBeDefined()
+    expect(custo?.campos).toHaveLength(0)
+    // Sem campo, ela deixou de ser lugar de decidir: anunciá-la em "configurar"
+    // prometeria um ajuste que não está lá.
+    expect(custo?.grupo).toBe('acompanhar')
+  })
 })
 
 describe('a porcentagem da tela e a fração do banco são a mesma coisa', () => {
@@ -178,13 +197,9 @@ describe('a porcentagem da tela e a fração do banco são a mesma coisa', () =>
     expect(doRascunho('70', 'porcentagem')).toBe(0.7)
   })
 
-  it('exemplo de ajuste operacional separa por LINHA, não por vírgula', () => {
-    const texto = 'trocar o CEP de um pedido, mesmo faturado\nreenviar a nota fiscal'
-    expect(doRascunho(texto, 'linhas')).toEqual([
-      'trocar o CEP de um pedido, mesmo faturado',
-      'reenviar a nota fiscal',
-    ])
-  })
+  // O caso do tipo `linhas` SAIU com o campo (D-60): era o único descritor que o
+  // usava, e teste sobre caminho que nenhuma tela alcança afirma o que ninguém
+  // pode quebrar. Devolver o campo é devolver o tipo, o `textarea` e este caso.
 })
 
 describe('RNF-18 — um painel que falha não derruba o console', () => {

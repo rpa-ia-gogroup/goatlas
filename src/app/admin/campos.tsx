@@ -41,16 +41,12 @@ export type ChaveEditavel =
   | 'regra2_threshold_recorrencia'
   | 'regra2_janela_dias'
   | 'regra2_campo_agrupamento'
-  | 'regra2_exemplos_ajuste_operacional'
-  | 'teto_custo_conversa_usd'
   | 'org_id'
   | 'assentos_ocioso_dias'
 
 export type TipoCampo =
   /** Itens curtos separados por vírgula, com pré-visualização do que será salvo. */
   | 'lista'
-  /** Um item por linha — para frases, onde vírgula é pontuação e não separador. */
-  | 'linhas'
   | 'texto'
   | 'numero'
   /** 0–1 no banco, 0–100 na tela. A pessoa pensa em "75% de certeza". */
@@ -258,37 +254,32 @@ export const SECOES: readonly DescritorSecao[] = [
             : 'Hoje o agrupamento usa um campo que esta tela não conhece — confirme com o time de tech.'
         },
       },
-      {
-        chave: 'regra2_exemplos_ajuste_operacional',
-        rotulo: 'Exemplos reais de ajuste operacional',
-        ajuda:
-          'Um por linha, com as palavras que a Gocase usa de verdade. É com eles que o agente reconhece o pedido repetido que deveria virar processo — sem exemplos do nosso contexto ele erra, e errar aqui é interromper quem não devia. Lista vazia desliga esta verificação, de propósito.',
-        tipo: 'linhas',
-        exemplo: 'trocar o CEP de um pedido já faturado',
-        efeito: (c) =>
-          c.regra2_exemplos_ajuste_operacional.length === 0
-            ? 'Hoje a verificação de histórico não roda: sem exemplos, o agente não tem como reconhecer o pedido repetido.'
-            : `Hoje o agente reconhece o padrão a partir de ${contar(c.regra2_exemplos_ajuste_operacional.length, 'exemplo', 'exemplos')}.`,
-      },
+      // `regra2_exemplos_ajuste_operacional` NÃO tem campo aqui, e isso é `D-60`:
+      // a Regra 2 ficou desligada por decisão, e uma caixa de texto vazia na tela
+      // dizia o contrário — "falta você preencher isto" — sobre uma pendência
+      // (`Q3`) que ninguém está esperando. A chave continua em `ConfigValores`,
+      // então reabrir é preencher por `PUT /api/admin/config`; devolvê-la à tela é
+      // reabrir `D-60`, não "completar o console" (mesmo raciocínio de `D-25`).
     ],
   },
   {
     id: 'custo',
     rotulo: 'Custo da IA',
-    titulo: 'Quanto a IA pode gastar',
-    resumo: 'O teto existe para uma conversa longa não consumir o orçamento de todos.',
-    grupo: 'configurar',
+    titulo: 'Quanto a IA gastou',
+    resumo:
+      'O que as conversas consumiram em IA, e quanto a Atlassian recusou por excesso de requisição. O teto por conversa continua de pé, sem tela: quem governa o orçamento é o proxy corporativo.',
+    // Seção de RELATO, não de ajuste — o teto saiu da tela em `D-60b`. Ela **fica**
+    // porque é a casa declarada de dois painéis (`ia` e `telemetriaAtlassian` em
+    // `PAINEIS_DO_CONSOLE`): apagá-la deixaria o custo de IA e os 429 de `RF-60` sem
+    // onde aparecer, que é exatamente o que `D-49` existe para impedir.
+    grupo: 'acompanhar',
     campos: [
-      {
-        chave: 'teto_custo_conversa_usd',
-        rotulo: 'Teto por conversa',
-        ajuda:
-          'Vale por conversa, não por dia nem por pessoa. Ao atingir o teto a conversa encerra e aponta o formulário — ninguém fica sem abrir chamado.',
-        tipo: 'numero',
-        unidade: 'US$',
-        efeito: (c) =>
-          `Hoje uma conversa encerra ao passar de US$ ${c.teto_custo_conversa_usd.toFixed(2)} em IA.`,
-      },
+      // `teto_custo_conversa_usd` NÃO tem campo aqui (`D-60b`), e o teto **continua
+      // valendo** em `orquestrador.ts` com o valor de `CONFIG_PADRAO`: tirar da tela
+      // é tirar a decisão, nunca a trava. Sob proxy corporativo o dinheiro não é
+      // nosso, então "quanto a IA pode gastar" não é decisão de quem abre o console —
+      // mas conversa em laço continua precisando de um fim. Ajustar é por
+      // `PUT /api/admin/config`; devolver à tela é reabrir `D-60b`.
     ],
   },
   {
@@ -337,7 +328,6 @@ export const SECOES: readonly DescritorSecao[] = [
 
 export function paraRascunho(valor: unknown, tipo: TipoCampo): string {
   if (tipo === 'lista') return Array.isArray(valor) ? valor.join(', ') : ''
-  if (tipo === 'linhas') return Array.isArray(valor) ? valor.join('\n') : ''
   if (tipo === 'porcentagem') {
     return typeof valor === 'number' ? String(Math.round(valor * 100)) : ''
   }
@@ -345,9 +335,9 @@ export function paraRascunho(valor: unknown, tipo: TipoCampo): string {
 }
 
 export function doRascunho(texto: string, tipo: TipoCampo): unknown {
-  if (tipo === 'lista' || tipo === 'linhas') {
+  if (tipo === 'lista') {
     return texto
-      .split(tipo === 'lista' ? ',' : '\n')
+      .split(',')
       .map((v) => v.trim())
       .filter((v) => v.length > 0)
   }
@@ -414,9 +404,7 @@ export function Campo({
   const atual = paraRascunho(config[descritor.chave as keyof ConfigValores], descritor.tipo)
   const mudou = rascunho !== atual
   const itens =
-    descritor.tipo === 'lista' || descritor.tipo === 'linhas'
-      ? (doRascunho(rascunho, descritor.tipo) as string[])
-      : []
+    descritor.tipo === 'lista' ? (doRascunho(rascunho, descritor.tipo) as string[]) : []
 
   return (
     <div className="campo-console">
@@ -495,19 +483,6 @@ function Controle({
           <option value={rascunho}>{rascunho}</option>
         )}
       </select>
-    )
-  }
-
-  if (descritor.tipo === 'linhas') {
-    return (
-      <textarea
-        id={id}
-        aria-describedby={descrito}
-        value={rascunho}
-        rows={4}
-        placeholder={descritor.exemplo}
-        onChange={(e) => aoMudar(e.target.value)}
-      />
     )
   }
 
