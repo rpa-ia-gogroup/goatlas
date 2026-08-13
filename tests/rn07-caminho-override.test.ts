@@ -105,7 +105,13 @@ describe('RN-07 — o compositor fecha enquanto a justificativa está aberta', (
     )
     expect(saida).not.toContain('disabled')
     expect(saida).not.toContain('Termine a justificativa acima')
-    expect(saida).not.toContain('aria-describedby')
+    // ⚠️ **A asserção estreitou em `D-68`, e o motivo importa.** Ela dizia
+    // `not.toContain('aria-describedby')` — um proxy largo para "não explica que está
+    // pausado", que passou a reprovar quando o campo ganhou a dica do atalho
+    // (`Enter envia`). O que `RN-07` protege é o compositor **não anunciar pausa** quando
+    // não há pausa; qualquer `describedby` era o alvo errado.
+    expect(saida).not.toContain('mensagem-pausada')
+    expect(saida).toContain('mensagem-atalho')
   })
 
   it('campo vazio continua desabilitando só o botão — o textarea segue aberto', () => {

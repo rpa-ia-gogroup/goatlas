@@ -487,9 +487,14 @@ export function useAnexoNaConversa({
             **invisível**: quem não soubesse do atalho só tinha o clipe. A frase diz os dois,
             e diz o teto, porque a recusa em cima da hora é pior que o número anunciado. */}
         {!cheio && (
+          /*
+           * ⚠️ **Uma linha, e curta** (`D-68`). A frase original tinha três linhas e explicava
+           * o Ctrl+V com calma — certo enquanto o compositor rolava com a conversa, e caro
+           * depois de ele virar fixo: medido em 13/08, o compositor ocupava **39% da tela**, e
+           * 49px eram só desta dica. O atalho continua dito; o que saiu foi a explicação.
+           */
           <span className="dica dica-anexo">
-            Clique para escolher, ou cole com <kbd>Ctrl</kbd>+<kbd>V</kbd> — o print do
-            clipboard entra direto. Até {maximo} arquivos.
+            ou cole com <kbd>Ctrl</kbd>+<kbd>V</kbd> · até {maximo} arquivos
           </span>
         )}
 
