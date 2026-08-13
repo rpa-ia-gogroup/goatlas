@@ -85,6 +85,7 @@ import {
 // spec 007 — a leitura do anexo (no upload) e a espera do turno por ela.
 import { analisarAnexoDaConversa } from './analise-no-upload'
 import { esperarAnalises, montarContextoDeAnalises } from '../agent/espera-de-analises'
+import { rotuloDaFalhaOcr } from '../ocr/contrato'
 import { analiseVaiParaConversa, type AnaliseDeAnexo } from '../tickets/analises-anexo'
 import {
   materializarAnexosDoChamado,
@@ -2552,6 +2553,23 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
     // Fonte não configurada é estado válido (`FR-13`), não avaria.
     ctx.teamguide?.verificarSaude() ?? Promise.resolve({ ok: true, detalhe: 'não configurada' }),
   ])
+
+  /**
+   * spec 007, `T-662` — a leitura de PDF, sondada pelo **mesmo caminho** que ela usa.
+   *
+   * ⚠️ Sonda com um PDF mínimo de verdade (`%PDF-1.4` + `%%EOF`), não com bytes aleatórios:
+   * sonda que exercita outro caminho responde sobre o caminho que ninguém usa — a lição de
+   * `D-40` para a TeamGuide. O worker pode legitimamente não achar texto nisto, e
+   * `sem_conteudo` **é** resposta: significa que a conexão saiu e o serviço respondeu.
+   */
+  const pdfDeSonda = new TextEncoder().encode('%PDF-1.4\n%%EOF\n')
+  const leituraDePdf = await ctx.lerPdf(pdfDeSonda).then(
+    (r) =>
+      r.estado === 'falhou'
+        ? { ok: false, detalhe: rotuloDaFalhaOcr(r) }
+        : { ok: true, detalhe: r.estado === 'lido' ? 'ok' : 'ok · sem texto na sonda' },
+    () => ({ ok: false, detalhe: 'erro_inesperado' }),
+  )
   let banco = { ok: true, detalhe: 'ok' }
   try {
     await ctx.db.query('SELECT 1 AS ok', [])
@@ -2562,6 +2580,9 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
   // (`D-37`, `RNF-18`): com a fonte no chão os chamados continuam abrindo, então um 503
   // aqui diria "o app caiu" sobre um app inteiro de pé — e ensinaria o time a ignorar o
   // health check, que é o custo que nenhum alarme falso paga.
+  // ⚠️ **`leituraDePdf` fica fora pela MESMA razão** (spec 007): sem ela a conversa segue,
+  // o anexo continua no chamado e a tela diz que não leu (`FR-7`). Um 503 por causa da
+  // leitura de um formato de arquivo é alarme falso sobre o app inteiro.
   const ok = atlassian.ok && ia.ok && banco.ok
   return json(
     {
@@ -2574,6 +2595,8 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
         ia,
         banco,
         teamguide,
+        // spec 007 — a quinta credencial tem sonda própria, fora do `ok` agregado.
+        leituraDePdf,
         sso: { ok: true, detalhe: 'edge GoDeploy' },
       },
     },
