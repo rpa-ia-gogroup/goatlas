@@ -242,8 +242,26 @@ não da prosa. Validado por `tickets/motivo-da-prioridade.ts` **antes** de virar
 
 Recusado, cai em `FR-5`: nível e prazo aparecem, o botão continua vivo, e a tela **declara**
 que a sugestão não veio justificada — precedente de `D-53`, ausência declarada nunca
-disfarçada. A frase genérica de hoje (`p.criterio` + *"Sugerimos alta — ajuste se…"`) **sai
-da tela**; ela é a descrição do nível, não do caso.
+disfarçada.
+
+🚨 **Sai UMA frase, não duas — achado do `/analyze`.** A dica de hoje é
+`{p.criterio}. Sugerimos alta — ajuste se não bate com o seu caso.` e as duas metades fazem
+trabalhos diferentes:
+
+| Metade | Responde | Destino |
+|---|---|---|
+| `p.criterio` (do nível **selecionado**) | *o que é Alta?* | **fica** — é o que informa quem está editando o seletor, e ele já foi movido para fora do `select` porque truncava lá dentro |
+| *"Sugerimos alta — ajuste se…"* | nada; **finge** justificar | **sai**, e o motivo ocupa o lugar |
+
+⚠️ **E quando a pessoa escolhe outro nível, o motivo é ATRIBUÍDO** (`FR-2b`/`SC-2b`): *"a
+sugestão era alta, porque …"*. Mostrá-lo cru ao lado de `normal` seria a tela justificando um
+nível que ninguém escolheu — o defeito de `SC-2` na direção que nenhum cenário cobria. É a
+forma que a tela **já** usa hoje (*"A sugestão era alta."*), agora com o porquê. Daí
+`prioridadeSugerida` na resposta: sem ela o cliente não sabe de quem é o motivo.
+
+⚠️ **`tests/rf18-recibo-confirmacao.test.ts` afirma `'Sugerimos alta'` e o critério** (linha
+~100). O critério **continua** verdadeiro; a outra asserção muda para o motivo. Apagar o caso
+inteiro devolveria o furo que ele fecha (o critério ilegível dentro do `select`).
 
 ### 3.6 `FR-6` — a prosa cala nível e prazo
 
@@ -310,21 +328,35 @@ número de versão a subir, e o custo por requisição continua em ≤ 2 idas (`
 **Tipos** (`agent/estado.ts`, `ia/tipos.ts`):
 
 ```ts
-// PropostaChamado (persistida, vigente) — ganha o motivo, porque ele é exibido com ela.
-readonly motivoPrioridade: string | null
+// PropostaChamado (persistida, vigente) — NÃO ganha o motivo. Ver o achado abaixo.
 
 // PropostaSugerida (o que a IA devolve) — ganha motivo e campos por RÓTULO.
 readonly motivoPrioridade: string | null
 readonly campos: readonly { readonly rotulo: string; readonly valor: string }[]
 
-// PropostaDaIa (base de merge, nova) = PropostaChamado + campos já por fieldId
-readonly campos: Readonly<Record<string, string>>
+// PropostaDaIa (base de merge, nova) = PropostaChamado
+//   + motivoPrioridade: string | null
+//   + campos: Readonly<Record<string /* fieldId */, string>>
 ```
 
-⚠️ **Compatibilidade de leitura:** linha antiga não tem `motivoPrioridade` no JSON —
-`JSON.parse` devolve `undefined`, e o normalizador de `estado.ts` o converte para `null`,
-que é o caminho de `FR-5`. Conversa em andamento no momento do deploy não quebra: ela cai na
-declaração de "sem motivo" e volta a ter motivo no turno seguinte.
+🚨 **O motivo mora na base da IA, NUNCA na proposta vigente — achado do `/analyze`.**
+`validarProposta` (`rotas.ts:2513`) é allowlist **por construção**: ele lê as chaves que
+conhece e **descarta o resto**, e o `PUT /proposta` sobrescreve o `proposta_json` inteiro. Com
+o motivo na vigente, a pessoa mudar a prioridade — o gesto que `RF-16` existe para permitir —
+**apagaria o motivo em silêncio**, sem erro, sem teste vermelho, e o cartão passaria a mostrar
+a declaração de `FR-5` sobre uma sugestão que veio justificada. Na base, o `PUT` não tem como
+alcançá-lo. Bônus: é onde ele **pertence** — o motivo justifica a decisão *da IA*, e é isso que
+`FR-2b`/`SC-2b` mandam dizer quando a pessoa escolhe outro nível.
+
+⚠️ **Compatibilidade de leitura:** `proposta_ia_json` nasce `NULL` para toda conversa
+anterior ao deploy. Conversa em andamento cai na declaração de `FR-5` e volta a ter motivo no
+turno seguinte, quando a rederivação escreve a base pela primeira vez.
+
+⚠️ **`motivoPrioridade` entra no diff, mas não conta como "ajustada por argumentação"**
+(`FR-23`, `ScC-9`): reescrever só a redação do motivo, sem mudar campo nenhum, inflaria a
+resposta de *"quantas propostas foram ajustadas"*. `proposta_ajustada` só é registrada quando
+`alterados` tem ao menos um campo **que não seja** o motivo; o motivo sozinho vai à tela e
+para a base, e não vira evento.
 
 **Nada muda** em `submissoes`, `vinculos`, `anexos_*` nem no caminho de criação.
 
@@ -337,7 +369,8 @@ declaração de "sem motivo" e volta a ter motivo no turno seguinte.
   texto, bloqueado, bloqueioPendente, regraBloqueio, verificacoes,
   podeConfirmar, analisesAnexo, proposta, tipoNome, tetoCustoAtingido,   // hoje
   // novos:
-  motivoPrioridade: string | null,          // FR-1/FR-5 — já validado pelo servidor
+  motivoPrioridade: string | null,          // FR-1/FR-5 — já validado; vem da BASE, não da proposta
+  prioridadeSugerida: 'critica'|'alta'|'normal' | null,  // FR-2b — de quem é o motivo
   camposSugeridos: Record<string, string>,  // FR-11 — fieldId → valor, já traduzido
   alterados: readonly CampoDaProposta[],    // RN-13 — o que a IA mudou nesta volta
   recusasDeAjuste: readonly {               // FR-13/FR-14 — texto pronto, em PT

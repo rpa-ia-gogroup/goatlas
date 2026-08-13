@@ -4,7 +4,7 @@ feature: "cartao-negociavel"
 id: "008"
 status: clarified
 created: "2026-08-13"
-spec_version: 4
+spec_version: 5
 ---
 
 # Spec: O cartão é negociável, e a prioridade vem com motivo
@@ -122,6 +122,19 @@ digitado campos do formulário do tipo de chamado e/ou mexido no seletor de prio
   - **When** o cartão é desenhado
   - **Then** o motivo exibido é o que acompanhou **essa** decisão, e não há nenhuma outra
     frase na tela afirmando um nível de prioridade diferente.
+
+- **SC-2b** (US-1) — a pessoa muda a prioridade à mão, e o motivo não passa a justificar a
+  escolha dela
+  - **Given** o cartão com a sugestão `alta` e o motivo que acompanhou essa decisão
+  - **When** a pessoa muda o seletor para `normal`
+  - **Then** o motivo continua legível, **atribuído à sugestão** (*"a sugestão era alta,
+    porque…"*), o critério do nível que ela escolheu aparece como sempre, e nada na tela
+    afirma que o motivo justifica `normal` — nem julga a escolha dela.
+    > 🚨 **Lacuna achada pelo `/analyze`.** `SC-2` proíbe motivo e nível de discordarem, e
+    > `SC-8` só cobria o caso inverso (a IA muda). Sem este cenário, o caminho mais comum de
+    > `RF-16` — a pessoa discordar e corrigir — produzia a tela afirmando uma justificativa de
+    > um nível que ninguém escolheu. A forma escolhida é a que a tela **já** usa hoje para a
+    > mesma situação (*"A sugestão era alta."*), agora com o porquê.
 
 - **SC-3** (US-1) — a prosa do agente não promete nível nem prazo
   - **Given** qualquer turno em que uma proposta é montada
@@ -271,7 +284,17 @@ digitado campos do formulário do tipo de chamado e/ou mexido no seletor de prio
 - **FR-1** — WHEN a decisão de prioridade é produzida, THE SYSTEM SHALL produzir junto um
   **motivo** dessa decisão, na mesma operação que escolheu o nível. **(novo — RF-68)**
 - **FR-2** — THE SYSTEM SHALL exibir esse motivo no resumo de confirmação, junto do seletor
-  de prioridade, substituindo a descrição genérica do nível. **(refina RF-16, RF-18)**
+  de prioridade, no lugar da frase que **finge justificar** a sugestão (*"Sugerimos alta —
+  ajuste se não bate com o seu caso"*). **(refina RF-16, RF-18)**
+  > 🚨 **Corrigido pelo `/analyze`:** a redação anterior dizia "substituindo a descrição
+  > genérica do nível", e isso apagaria **duas** coisas diferentes. O **critério** do nível
+  > selecionado (*"funcionalidade comprometida, com contorno temporário"*) responde **o que é
+  > Alta** — é o que informa quem está *editando* o seletor, e ele foi movido para fora do
+  > `select` justamente porque truncava lá dentro. O **motivo** responde **por que Alta neste
+  > caso**. São perguntas diferentes; as duas ficam, e nenhuma delas é a frase que sai.
+- **FR-2b** — WHEN a prioridade exibida for diferente da que a IA sugeriu, THE SYSTEM SHALL
+  apresentar o motivo **atribuído à sugestão**, nunca como justificativa do nível escolhido —
+  e não afirmar nada sobre a escolha da pessoa. **(refina RF-16; fecha a lacuna de SC-2)**
 - **FR-3** — THE SYSTEM SHALL limitar o motivo a **duas frases**.
 - **FR-4** — THE SYSTEM SHALL escrever o motivo em português com acentuação, sem identificador
   interno de campo, de tipo ou de configuração (regra 4, **RNF-30**).
