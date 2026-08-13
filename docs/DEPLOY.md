@@ -95,7 +95,7 @@ GOATLAS_CANAL_NOTIFICACAO = nenhum
 LLM_BASE_URL              = https://ai-proxy.gogroupbr.com/v1
 LLM_MODEL                 = gpt-5.4-mini
 
-# spec 007 / `D-63` — leitura de PDF do anexo. QUINTA credencial do sistema.
+# spec 007 / `D-64` — leitura de PDF do anexo. QUINTA credencial do sistema.
 # ⚠️ É o MESMO worker que o godocs usa em produção: rotacionar por causa de um quebra o
 # outro, e aqui quebra em silêncio (a leitura é fail-open — o anexo continua no chamado).
 OCR_WORKER_URL            = https://ocr-worker.kaique-rpa.workers.dev/

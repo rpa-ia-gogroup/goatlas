@@ -7286,6 +7286,22 @@ var MAX_NOS = 2e4;
 var MAX_DESCARTES = 64;
 var MAX_SPAN_CELULA = 64;
 var IMAGEM_EXTERNA_PERMITIDA = false;
+var ENTIDADES_SIMBOLO_EXATO = {
+  larr: "\u2190",
+  rarr: "\u2192",
+  harr: "\u2194",
+  uarr: "\u2191",
+  darr: "\u2193",
+  lArr: "\u21D0",
+  rArr: "\u21D2",
+  hArr: "\u21D4",
+  uArr: "\u21D1",
+  dArr: "\u21D3",
+  dagger: "\u2020",
+  Dagger: "\u2021",
+  prime: "\u2032",
+  Prime: "\u2033"
+};
 var ENTIDADES_SIMBOLO = {
   amp: "&",
   lt: "<",
@@ -7304,20 +7320,40 @@ var ENTIDADES_SIMBOLO = {
   rsquo: "\u2019",
   ldquo: "\u201C",
   rdquo: "\u201D",
+  sbquo: "\u201A",
+  bdquo: "\u201E",
+  lsaquo: "\u2039",
+  rsaquo: "\u203A",
   copy: "\xA9",
   reg: "\xAE",
   trade: "\u2122",
   deg: "\xB0",
+  ordm: "\xBA",
+  ordf: "\xAA",
   plusmn: "\xB1",
+  minus: "\u2212",
   times: "\xD7",
   divide: "\xF7",
+  frac12: "\xBD",
+  frac14: "\xBC",
+  frac34: "\xBE",
+  sup1: "\xB9",
+  sup2: "\xB2",
+  sup3: "\xB3",
+  micro: "\xB5",
+  ne: "\u2260",
+  le: "\u2264",
+  ge: "\u2265",
+  asymp: "\u2248",
+  infin: "\u221E",
+  permil: "\u2030",
   euro: "\u20AC",
   pound: "\xA3",
+  yen: "\xA5",
+  cent: "\xA2",
+  curren: "\xA4",
   sect: "\xA7",
   para: "\xB6",
-  larr: "\u2190",
-  rarr: "\u2192",
-  harr: "\u2194",
   check: "\u2713"
 };
 var LETRAS_MINUSCULAS = {
@@ -7362,7 +7398,7 @@ var ENTIDADES_LETRA = Object.freeze(
   ])
 );
 function letraOuSimbolo(nome) {
-  return ENTIDADES_LETRA[nome] ?? ENTIDADES_SIMBOLO[nome.toLowerCase()];
+  return ENTIDADES_LETRA[nome] ?? ENTIDADES_SIMBOLO_EXATO[nome] ?? ENTIDADES_SIMBOLO[nome.toLowerCase()];
 }
 function decodificarEntidades(entrada) {
   if (!entrada.includes("&")) return entrada;
@@ -7727,6 +7763,10 @@ var ATRIBUTOS_PERMITIDOS = {
   "ac:adf-node": ["type"],
   "ac:adf-attribute": ["key"],
   "ac:image": ["ac:alt"],
+  // ⚠️ São CONTEÚDO, não configuração: é neles que mora o emoji que a pessoa digitou.
+  // Ver `converterEmoticon` — sem estes dois o emoji some e sobra o espaço à frente.
+  "ac:emoticon": ["ac:emoji-fallback", "ac:emoji-id"],
+  "time": ["datetime"],
   "ri:attachment": ["ri:filename"],
   "ri:url": ["ri:value"],
   "ri:page": ["ri:content-title", "ri:space-key"]
@@ -7815,7 +7855,13 @@ function converter(bruto, coletor) {
     }
     case "ul":
     case "ol":
-      return [converterListaHtml(bruto, nome === "ol", coletor)];
+      return converterListaHtml(bruto, nome === "ol", coletor);
+    case "ac:task-list":
+      return converterTarefas(bruto, coletor);
+    case "ac:task-id":
+    case "ac:task-uuid":
+    case "ac:task-status":
+      return [];
     case "li": {
       const dentro = filhos();
       return dentro.length === 0 ? [] : [{ tipo: "paragrafo", filhos: dentro }];
@@ -7840,6 +7886,9 @@ function converter(bruto, coletor) {
     case "ac:adf-parameter":
       return [];
     case "ac:emoticon":
+      return converterEmoticon(bruto);
+    case "time":
+      return converterData(bruto);
     case "ac:placeholder":
       return [];
     default:
@@ -7879,7 +7928,38 @@ function converterListaHtml(bruto, ordenada, coletor) {
     if (ultimo === void 0) itens.push(convertido);
     else ultimo.push(...convertido);
   }
-  return { tipo: "lista", ordenada, itens: itens.filter((i) => i.length > 0) };
+  const comConteudo = itens.filter((i) => i.length > 0);
+  return comConteudo.length === 0 ? [] : [{ tipo: "lista", ordenada, itens: comConteudo }];
+}
+function converterEmoticon(bruto) {
+  const pronto = atributo(bruto, "ac:emoji-fallback");
+  if (pronto !== null && pronto.trim() !== "") return [{ tipo: "texto", texto: pronto }];
+  const id = atributo(bruto, "ac:emoji-id");
+  if (id === null || !/^[0-9a-fA-F]{4,6}$/.test(id)) return [];
+  const ponto = Number.parseInt(id, 16);
+  if (!Number.isFinite(ponto) || ponto < 32 || ponto > 1114111) return [];
+  return [{ tipo: "texto", texto: String.fromCodePoint(ponto) }];
+}
+function converterData(bruto) {
+  const iso = atributo(bruto, "datetime");
+  const casou = iso === null ? null : /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (casou !== null) return [{ tipo: "texto", texto: `${casou[3]}/${casou[2]}/${casou[1]}` }];
+  const proprio = textoBrutoDe(bruto).trim();
+  return proprio === "" ? [] : [{ tipo: "texto", texto: proprio }];
+}
+function converterTarefas(bruto, coletor) {
+  const itens = [];
+  for (const filho of bruto.filhos) {
+    if (filho.tipo !== "elemento" || filho.nome !== "ac:task") continue;
+    conferirAtributos(filho, coletor);
+    const status = primeiroFilho(filho, "ac:task-status");
+    const concluida = status !== null && textoBrutoDe(status).trim().toLowerCase() === "complete";
+    const corpo = primeiroFilho(filho, "ac:task-body");
+    const dentro = corpo === null ? [] : converterLista(corpo.filhos, coletor);
+    if (dentro.length === 0) continue;
+    itens.push({ concluida, filhos: dentro });
+  }
+  return itens.length === 0 ? [] : [{ tipo: "tarefas", itens }];
 }
 function converterTabela(bruto, coletor) {
   const linhas = [];
@@ -8132,6 +8212,12 @@ function textoDe2(nos) {
         break;
       case "lista":
         for (const item of no.itens) saida += `${textoDe2(item)}
+`;
+        break;
+      // Só o texto da tarefa. O estado NÃO entra: este texto vira trecho de busca e
+      // resumo, e um "Concluído" que a pessoa não escreveu casaria com a busca dela.
+      case "tarefas":
+        for (const item of no.itens) saida += `${textoDe2(item.filhos)}
 `;
         break;
       case "tabela":
