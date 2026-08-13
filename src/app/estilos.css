@@ -1958,3 +1958,121 @@
     outline-style: solid;
   }
 }
+
+/* ---------- spec 007: leitura do anexo e visualização rápida ---------------- */
+
+/*
+ * O registro de leitura NÃO é fala do agente: fundo neutro, nome do arquivo à frente e a
+ * frase depois. Vestir de mensagem faria a pessoa achar que o agente escreveu aquilo — o
+ * mesmo cuidado de `D-43` na versão arquivo.
+ */
+.leitura-anexos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.leitura-anexo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid color-mix(in srgb, var(--go-lime) 60%, transparent);
+  background: color-mix(in srgb, var(--go-blue) 4%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-small);
+}
+.leitura-arquivo {
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+}
+.leitura-frase {
+  color: var(--go-text-body);
+}
+/* Estado nunca só por cor (regra 9): a borda muda, e a FRASE já diz o que aconteceu. */
+.leitura-analisando,
+.leitura-tipo_nao_suportado,
+.leitura-sem_conteudo,
+.leitura-falhou {
+  border-left-color: color-mix(in srgb, var(--go-blue) 30%, transparent);
+}
+
+/* O nome do arquivo enviado vira botão quando esta aba pode pré-visualizá-lo. */
+.envio-nome-clicavel {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--go-blue);
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: left;
+}
+
+/*
+ * `<dialog>` nativo: o foco contido e o `Esc` vêm dele, e é por isso que não há JS de
+ * armadilha de foco aqui (`FR-13`).
+ */
+.visualizador {
+  width: min(92vw, 1000px);
+  max-height: 88vh;
+  border: none;
+  border-radius: var(--radius-lg);
+  padding: 0;
+  background: var(--go-surface);
+  color: var(--go-text-body);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 28%);
+}
+.visualizador::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+.visualizador-topo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+}
+.visualizador-nome {
+  overflow-wrap: anywhere;
+}
+.visualizador-corpo {
+  padding: var(--space-4);
+  overflow: auto;
+  max-height: calc(88vh - 84px);
+}
+.visualizador-corpo img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+.visualizador-corpo iframe {
+  width: 100%;
+  height: min(70vh, 800px);
+  border: none;
+}
+/* Markdown fica CRU (`D-62`): `pre`, nunca HTML renderizado de arquivo de terceiro. */
+.visualizador-texto {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .visualizador[open] {
+    animation: visualizador-entra 120ms ease-out;
+  }
+}
+@keyframes visualizador-entra {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
