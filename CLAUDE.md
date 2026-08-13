@@ -1274,8 +1274,11 @@ type expõe campo de anexo, então o anexo na criação funciona sem uma linha a
 **de verdade** com o `ATATT` validado, e o que impede efeito colateral é
 `GOATLAS_SOMENTE_LEITURA=1`, que recusa toda escrita no decorador do cliente.
 Config apontada para o real: `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"),
-tipos `70,134,108,68`, espaços **`GT,DTE,GN,DE,GI,datateam,Protheus`** (`D-29`, 10/08 —
-7 dos 31 espaços reais, conferidos ao vivo contra `/wiki/api/v2/spaces`).
+tipos `70,134,108,68`, espaços **`GT,DTE,GN`** (`D-61`, 13/08 — os 7 de `D-29` voltaram a 3
+por instrução repassada: o critério passou de *"é documentação técnica?"* para *"o usuário
+comum deveria poder consultar?"*, e `DE`/`GI`/`datateam`/`Protheus` caem por aí. A medição
+ao vivo das 31 chaves reais do `D-29` continua válida — é ela que faz esta escolha ser entre
+nomes já conferidos).
 ⚠️ **`Config` resolve `CONFIG_PADRAO` → env → BANCO, e o banco vence.** Mudar
 `GOATLAS_ESPACOS_CONFLUENCE` só tem efeito se ninguém tiver gravado `espacos_confluence` na
 tabela `config` pelo console — senão é no-op **silencioso**. O valor efetivo não é legível de

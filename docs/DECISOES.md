@@ -3607,6 +3607,45 @@ de ser *"Quanto a IA pode gastar"* — o "pode" era o teto — e virou *"Quanto 
 
 ---
 
+### D-61 · A allowlist de espaços volta a `GT,DTE,GN` — o critério mudou, não a medição
+
+**Data:** 13/08/2026 · **Decisão de:** Kaique, repassando instrução recebida ·
+**Contexto:** `Q5`, `RN-06`, `RNF-07`, `D-29`, `D-01`
+
+**Aplicado agora** (`setAppSecret`, prod `9c47f42f` e staging `3936ca2d`, 13/08 12:16):
+`GOATLAS_ESPACOS_CONFLUENCE=GT,DTE,GN`. Saem os quatro que o `D-29` havia acrescentado —
+**`DE`** (Devops), **`GI`** (GO INFRA), **`datateam`** (GO Data) e **`Protheus`**.
+
+**O que mudou é o CRITÉRIO.** O `D-29` escolheu por *"isto é documentação técnica?"*, e por
+esse critério os quatro passavam. A instrução repassada é outra pergunta, mais estreita:
+*"o usuário comum deveria poder consultar este espaço?"* — e por ela os quatro caem, porque
+descrevem infraestrutura, dado e ERP, cujo público não é quem abre chamado. A **medição** do
+`D-29` continua válida e é o que torna esta decisão barata: as 31 chaves reais estão
+conferidas ao vivo, então voltar atrás é escolher entre nomes já verificados, não medir de
+novo.
+
+**Por que estreitar é seguro, e alargar não seria:** `RN-06` nega por padrão, então espaço
+fora da allowlist simplesmente deixa de aparecer — sem erro, sem 403, sem oráculo (`D-12`).
+O custo é de **produto**, não de segurança: menos página para defletir, e o zero da busca
+passa a poder ser *"está escrito, mas fora do escopo"*. ⚠️ E isso **não** é lacuna de
+documentação: zero por escopo ≠ zero por documentação (`D-30`), e `RF-42` não registra o
+primeiro.
+
+🚨 **O env pode ser no-op, e a verificação é a mesma de `D-29`.** `Config` resolve
+`CONFIG_PADRAO` → env → **BANCO**, e o banco vence: se `espacos_confluence` já estiver
+gravado na tabela `config` por alguém salvando no console, esta gravação não muda nada e
+**nada dá erro**. Não há como ler o valor efetivo de fora (`listAppSecrets` devolve só nomes;
+`/api/admin/config` está atrás do OAuth do edge). **Confere-se abrindo o console de admin** —
+e se o campo mostrar algo diferente de `GT, DTE, GN`, é lá que a mudança tem de ser salva,
+porque é esse valor que vale.
+
+⚠️ **Fica registrado o que motivou a pergunta:** o mantenedor lembrava de ter deixado a
+allowlist com dois espaços em prod, e o histórico do secret mostra **um único** update
+(10/08 13:45, o `D-29`) sobre a criação de 07/08. As duas coisas só são compatíveis se o
+valor efetivo vier do **banco** — mais uma razão para a verificação acima não ser opcional.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
@@ -3618,7 +3657,7 @@ implementado antes da resposta.
 | Q2 | Qual campo do Jira delimita "mesmo tipo de ticket" para a Regra 2 — label, componente ou tipo de issue? | João + time de tech | RF-10, RF-11 (o agrupamento do `check_jira_history`) |
 | Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | ✂️ **CORTADA em `D-60`, 13/08/2026: a Regra 2 fica desligada por decisão.** O campo saiu do console — caixa vazia na tela cobra um trabalho que ninguém vai fazer. `RF-14` continua descrito e `regra2Disponivel` continua sendo o predicado; a tool `check_jira_history` continua rodando e **se declarando indisponível**, que é o que `RF-08` exige. Reabrir é preencher a chave por `PUT /api/admin/config` (sem deploy) e reabrir `D-60` para devolver a tela |
 | Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | ✅ **RESPONDIDA pela medição — `D-36`, 11/08/2026.** Não existe um campo "Solicitante": o que existe é um par **`customfield_10089` (Nome do Colaborador)** + **`customfield_10091` (E-mail)**, obrigatórios, **só no request type 108**. 🚨 E o mesmo id significa outra coisa em outro tipo (`10092`: cargo no 108, sistema do bug no 70), então `campo_solicitante_id` — um id **global** — tinha a forma errada: sai da config e vira mapeamento **por request type**, fixo no código. RF-21, RNF-21 (reconciliação) |
-| Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | **Lista autoritativa em mãos (`D-23`): 32 espaços, com nome e tipo.** ⚠️ O `TECH` que circulava **nunca existiu**, e a recomendação do `D-22` estava furada: **`GO` é "Go Shopify"**, não engenharia. Candidatos reais: `GT` (GO Tecnologia, `knowledge_base`), `DTE`, `GN`, `DE` (Devops), `GI` (GO INFRA), `dicas`, `GLPI`. **Parcialmente aplicada:** o secret existe desde 07/08 17:35 e o `CLAUDE.md` registra `GT,DTE,GN` (3 de 31 espaços reais). ⚠️ **O que resta é conflito, não ausência** — a sugestão do João inclui `GO`/`PROD` e a `D-23` §7 diz que `GO` não é engenharia. Ver `D-29` |
+| Q5 | Quais espaços do Confluence entram na allowlist inicial? | João | **Lista autoritativa em mãos (`D-23`): 32 espaços, com nome e tipo.** ⚠️ O `TECH` que circulava **nunca existiu**, e a recomendação do `D-22` estava furada: **`GO` é "Go Shopify"**, não engenharia. Candidatos reais: `GT` (GO Tecnologia, `knowledge_base`), `DTE`, `GN`, `DE` (Devops), `GI` (GO INFRA), `dicas`, `GLPI`. ✅ **FECHADA em `D-61`, 13/08/2026: `GT,DTE,GN`.** O `D-29` a havia ampliado para 7 pelo critério *"é documentação técnica?"*; a instrução repassada usa outro — *"o usuário comum deveria poder consultar?"* — e por ele `DE`/`GI`/`datateam`/`Protheus` saem. ⚠️ **O valor efetivo depende do banco, não do secret** (ver a ressalva de `D-61`). Histórico: o secret existe desde 07/08 17:35 e teve **um** update (10/08 13:45). ⚠️ **O que restava era conflito, não ausência** — a sugestão do João inclui `GO`/`PROD` e a `D-23` §7 diz que `GO` não é engenharia. Ver `D-29` |
 | Q6 | ~~Qual API de IA?~~ Resta: qual a **política de retenção/treinamento** do provedor atrás do proxy corporativo? | João | **Provedor decidido — ver D-05.** O que resta bloqueia o *rollout* (conformidade **RNF-34**), não a arquitetura |
 | Q7 | Quais domínios de e-mail além de `@gocase.com` são válidos? | João | RF-01, RF-05 (allowlist de domínio no servidor) |
 | Q8 | Qual o custo unitário real por produto Atlassian hoje? | João / financeiro | ✅ **Respondida em `D-23`**: 73 assentos (5 JSM · 35 Jira · 33 Confluence), e a curva do JSM é **escalonada** — faixa 1–100 medida em USD 9,05 e 6,70. 🚨 **E isso quebra o `custo.ts`**, que multiplica contagem × custo fixo: o preço por assento **sobe** quando se corta, então a economia projetada está **superestimada** — justo o número que recomenda rebaixar. Vira **T-134**. O **valor** se preenche no console desde `D-25`, sem deploy; a **curva** por faixa entra em `curva_preco_por_produto`, e sem ela a economia sai marcada como teto |
