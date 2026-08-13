@@ -3803,14 +3803,79 @@ mudança de template e apaga a distinção entre o que a página diz e o que o a
 registrado aqui, fora do PR. Pelo mesmo motivo não se tocou nas mensagens de erro em inglês
 citadas em "Mapeamento | Erros v4" — ali o inglês **é** a informação.
 
-**Testes** (`tests/qa-documentacao-13-08.test.ts`, 22 casos): as duas palavras de status e o
-id fora da tela · `incomplete` não contando como concluída · status desconhecido caindo em *a
-fazer* · tarefa sem corpo descartada · metadado solto (marcação torta) · o estado ausente do
-texto puro · as entidades novas · **`&lArr;` ≠ `&larr;` e `&Dagger;` ≠ `&dagger;`** · o
+#### `D-63b` — a segunda passada, depois de *"faça todas as correções"*
+
+Com o padrão do `ac:task-list` na mão — **tag desconhecida é desembrulhada, e o que ela
+carregava no atributo evapora** — a mesma varredura foi refeita procurando os outros casos
+dessa família. Saíram mais quatro.
+
+**5. 🚨 O emoji do título era jogado fora, e sobrava o espaço.** **69 títulos** de `DTE` e
+`GN` começavam com um espaço: `" Data"`, `" Instruções"`, `" Objetivos"`, `" Problema"`,
+`" Solução"`. O emoji que os abre (`🗓 Data`, `🗒 Instruções`) chega como `ac:emoticon`, e
+este arquivo o descartava inteiro desde sempre. Nos modelos de base de conhecimento do JSM o
+emoji é a **âncora visual de toda seção** — sem ele a página perde a varredura que o autor
+desenhou, e ninguém percebe que perdeu, porque o que sobra é um título perfeitamente normal.
+
+O emoji vem em dois lugares e os dois são lidos: `ac:emoji-fallback` (o caractere pronto) e,
+na falta dele, `ac:emoji-id` (o ponto de código em hexa). ⚠️ **Só decodifica hexa de
+verdade:** o id de emoji personalizado da Atlassian é texto (`atlassian-blue_star`), e um
+`parseInt` dele produziria um caractere qualquer em silêncio. ⚠️ E o intervalo é conferido
+antes de `String.fromCodePoint`, que **lança** — isto roda sobre conteúdo que qualquer pessoa
+edita (`R-07`), e um id malformado não pode derrubar a leitura da página inteira. ⚠️
+`ac:name` fica de fora: é o apelido interno (`blue-star`), e imprimi-lo trocaria um emoji
+perdido por jargão em inglês — o defeito que `D-63` acabou de fechar nos blocos.
+
+**6. A data do editor novo desaparecia.** `<time datetime="2026-08-13"/>` é tag **vazia**,
+com a informação inteira no atributo: desembrulhada, não sobra nada. É o que deixa a seção
+"Data" das notas de reunião com o título e o vazio embaixo. ⚠️ **O formato é montado por
+fatia de string, nunca por `Date`:** `new Date('2026-01-01')` é meia-noite **UTC**, e num
+fuso a oeste `toLocaleDateString` devolve `31/12/2025` — a data da reunião andaria um dia
+sozinha. O storage traz a data civil que o autor escolheu, e ela é reordenada como está.
+
+**7. `<ul></ul>` virava uma lista vazia na tela.** Invisível, mas com o `gap` da coluna: um
+buraco no meio do texto que se lê como *"faltou alguma coisa aqui"*. Uma ocorrência medida
+("Notas de Reunião"). Mesmo raciocínio de `status` com `title` vazio e de tarefa sem corpo:
+moldura vazia anuncia conteúdo que não existe.
+
+**8. 🚨 `toc` era o único bloco cuja frase de placeholder era FALSA.** Ela diz *"a página não
+guarda texto dele, então não há o que trazer para cá"* — e o texto do índice são exatamente
+os títulos que já estão na tela, na árvore que acabou de ser renderizada. Mesmo erro que
+`status` cometia em `D-34`: acusar limitação nossa sobre conteúdo que estava a uma função de
+distância. Aparecia em 4 páginas, sempre no topo.
+
+O índice passou a ser montado de verdade, e ele é **da mesma família de `livesearch`**: não
+há nada a reproduzir (nenhuma chamada de rede, nenhuma verificação de restrição a mais —
+`R-02`, `RN-06`), só uma função pura sobre a árvore. ⚠️ **Fica no envelope, não em
+`renderizarNos`:** `ConteudoConfluence` é o único lugar que sabe que os nós são uma página
+inteira; quem chama `renderizarNos` direto está desenhando um **trecho de busca**, e âncora
+de trecho aponta para título que não está na tela. ⚠️ **A âncora é chaveada pelo NÓ, não por
+posição** — títulos aparecem dentro de painel e de célula, e casar por índice exigiria
+percorrer duas árvores na mesma ordem em dois lugares; divergir ali é silencioso, do jeito de
+`urlDeLeituraNoApp`/`entradaDaUrl`. ⚠️ **Texto igual não gera âncora igual**: "Instruções"
+aparece duas vezes em página de processo, e duas âncoras iguais fazem o segundo link levar ao
+primeiro título — pior que não ter índice. O número de ordem resolve por construção. ⚠️
+Índice vazio **volta ao placeholder**, e ali a frase antiga passa a ser verdadeira.
+
+**9. `adf:extension` genérico** ganhou nome — é macro de um app instalado no Confluence. O
+nome do app é parâmetro (`RNF-30`), então a frase diz de onde o bloco veio, que é a única
+coisa acionável.
+
+**O que foi olhado e NÃO é bug:** os `true`/`false`/`null` soltos são valores dentro de código
+inline (conteúdo) · as vírgulas soltas são texto de parágrafo desembrulhado · as linhas de
+tabela totalmente vazias são as do próprio autor, e apagá-las mudaria a tabela que ele fez ·
+os dois links colados na home do `GN` estão colados **no storage**, num parágrafo só.
+
+**Testes** (`tests/qa-documentacao-13-08.test.ts`, **40 casos**): as duas palavras de status e
+o id fora da tela · `incomplete` não contando como concluída · status desconhecido caindo em
+*a fazer* · tarefa sem corpo descartada · metadado solto (marcação torta) · o estado ausente
+do texto puro · as entidades novas · **`&lArr;` ≠ `&larr;` e `&Dagger;` ≠ `&dagger;`** · o
 caminho tolerante ainda tolerante · entidade fora da tabela ainda saindo crua · a frase da
-página vazia e a garantia de que ela **não** aparece em página com texto · os dois blocos
-nomeados e o contraste com um bloco de verdade desconhecido, que **continua** mostrando o
-nome.
+página vazia e a garantia de que ela **não** aparece em página com texto · os blocos nomeados
+e o contraste com um bloco de verdade desconhecido, que **continua** mostrando o nome · o
+emoji pelas duas fontes, o id não-hexa que não vira lixo e o fora-de-intervalo que não derruba
+a página · a data sem `Date` · a lista vazia · e, para o `toc`, **o link e o `id` sendo a mesma
+âncora**, âncoras distintas para títulos homônimos, o placeholder de volta quando não há
+título, e o placeholder mantido no trecho de busca.
 
 ---
 

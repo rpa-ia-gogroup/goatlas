@@ -896,6 +896,10 @@ const ATRIBUTOS_PERMITIDOS: Readonly<Record<string, readonly string[]>> = {
   'ac:adf-node': ['type'],
   'ac:adf-attribute': ['key'],
   'ac:image': ['ac:alt'],
+  // ⚠️ São CONTEÚDO, não configuração: é neles que mora o emoji que a pessoa digitou.
+  // Ver `converterEmoticon` — sem estes dois o emoji some e sobra o espaço à frente.
+  'ac:emoticon': ['ac:emoji-fallback', 'ac:emoji-id'],
+  'time': ['datetime'],
   'ri:attachment': ['ri:filename'],
   'ri:url': ['ri:value'],
   'ri:page': ['ri:content-title', 'ri:space-key'],
@@ -1014,7 +1018,7 @@ function converter(bruto: NoBruto, coletor: Coletor): No[] {
     }
     case 'ul':
     case 'ol':
-      return [converterListaHtml(bruto, nome === 'ol', coletor)]
+      return converterListaHtml(bruto, nome === 'ol', coletor)
     case 'ac:task-list':
       return converterTarefas(bruto, coletor)
     case 'ac:task-id':
@@ -1056,6 +1060,9 @@ function converter(bruto: NoBruto, coletor: Coletor): No[] {
       // visível — a página mostraria `1f5d1 custom #c9372c` antes do painel.
       return []
     case 'ac:emoticon':
+      return converterEmoticon(bruto)
+    case 'time':
+      return converterData(bruto)
     case 'ac:placeholder':
       return []
     default:
@@ -1088,7 +1095,16 @@ function atributoCru(bruto: ElementoBruto, nome: string): string | null {
   return bruto.atributos.get(nome) ?? null
 }
 
-function converterListaHtml(bruto: ElementoBruto, ordenada: boolean, coletor: Coletor): No {
+/**
+ * ⚠️ **Lista sem item nenhum devolve NADA, não uma lista vazia.**
+ *
+ * `<ul></ul>` chegava como `{ tipo: 'lista', itens: [] }`, e o renderizador desenhava um
+ * `<ul>` sem filhos: invisível, mas com o `gap` da coluna — um buraco no meio do texto que se
+ * lê como "faltou alguma coisa aqui". Uma ocorrência medida em 13/08/2026 ("Notas de
+ * Reunião"), e é o mesmo raciocínio de `status` com `title` vazio e de tarefa sem corpo:
+ * moldura vazia anuncia conteúdo que não existe.
+ */
+function converterListaHtml(bruto: ElementoBruto, ordenada: boolean, coletor: Coletor): No[] {
   const itens: No[][] = []
   for (const filho of bruto.filhos) {
     if (filho.tipo === 'elemento' && filho.nome === 'li') {
@@ -1103,7 +1119,63 @@ function converterListaHtml(bruto: ElementoBruto, ordenada: boolean, coletor: Co
     if (ultimo === undefined) itens.push(convertido)
     else ultimo.push(...convertido)
   }
-  return { tipo: 'lista', ordenada, itens: itens.filter((i) => i.length > 0) }
+  const comConteudo = itens.filter((i) => i.length > 0)
+  return comConteudo.length === 0 ? [] : [{ tipo: 'lista', ordenada, itens: comConteudo }]
+}
+
+/**
+ * 🚨 **O emoji do título era descartado, e sobrava o espaço.**
+ *
+ * Medido no app real em 13/08/2026: **69 títulos** de `DTE` e `GN` começavam com um espaço —
+ * `" Data"`, `" Instruções"`, `" Objetivos"`. O emoji que os abre no Confluence
+ * (`🗓 Data`, `🗒 Instruções`) vem como `ac:emoticon`, que este arquivo descartava inteiro.
+ * Nos modelos de base de conhecimento do JSM o emoji é a âncora visual de **toda** seção:
+ * sem ele a página perde a varredura que o autor desenhou, e ninguém percebe que perdeu.
+ *
+ * O emoji chega em dois lugares, e os dois são lidos:
+ *
+ * - `ac:emoji-fallback` — o caractere pronto (`📅`). É o caminho normal.
+ * - `ac:emoji-id` — o ponto de código em hexa (`1f4c5`). Usado quando o `fallback` não vem.
+ *   ⚠️ **Só decodifica se for hexa de verdade:** o id de emoji personalizado da Atlassian é
+ *   texto (`atlassian-blue_star`), e `parseInt` dele devolveria lixo silencioso.
+ *
+ * ⚠️ **Sem nenhum dos dois continua descartando**, como antes. `ac:name` fica de fora de
+ * propósito: ele é o apelido interno (`blue-star`), e imprimi-lo trocaria um emoji perdido
+ * por jargão em inglês na tela — o defeito que `D-63` acabou de fechar nos blocos.
+ */
+function converterEmoticon(bruto: ElementoBruto): No[] {
+  const pronto = atributo(bruto, 'ac:emoji-fallback')
+  if (pronto !== null && pronto.trim() !== '') return [{ tipo: 'texto', texto: pronto }]
+
+  const id = atributo(bruto, 'ac:emoji-id')
+  if (id === null || !/^[0-9a-fA-F]{4,6}$/.test(id)) return []
+  const ponto = Number.parseInt(id, 16)
+  // `String.fromCodePoint` **lança** fora do intervalo, e isto roda sobre conteúdo que
+  // qualquer pessoa edita: um id malformado não pode derrubar a leitura da página inteira.
+  if (!Number.isFinite(ponto) || ponto < 0x20 || ponto > 0x10ffff) return []
+  return [{ tipo: 'texto', texto: String.fromCodePoint(ponto) }]
+}
+
+/**
+ * A macro de data do editor novo é `<time datetime="2026-08-13"/>` — tag **vazia**, com a
+ * informação inteira no atributo. Desconhecida, ela era desembrulhada e não sobrava nada:
+ * a seção "Data" das notas de reunião ficava com o título e o vazio embaixo.
+ *
+ * ⚠️ **O formato é `dd/mm/aaaa`, montado por fatia de string, não por `Date`.** `new
+ * Date('2026-08-13')` é meia-noite **UTC**, e num fuso a oeste `toLocaleDateString` devolve o
+ * dia **anterior** — a data da reunião mudaria de dia sozinha. Aqui não há fuso envolvido:
+ * o storage traz a data civil que o autor escolheu, e ela é reordenada como está.
+ *
+ * Sem `datetime` utilizável sobra o texto do próprio elemento, e sem ele não sobra nada —
+ * que é o comportamento de antes.
+ */
+function converterData(bruto: ElementoBruto): No[] {
+  const iso = atributo(bruto, 'datetime')
+  const casou = iso === null ? null : /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
+  if (casou !== null) return [{ tipo: 'texto', texto: `${casou[3]}/${casou[2]}/${casou[1]}` }]
+
+  const proprio = textoBrutoDe(bruto).trim()
+  return proprio === '' ? [] : [{ tipo: 'texto', texto: proprio }]
 }
 
 /**

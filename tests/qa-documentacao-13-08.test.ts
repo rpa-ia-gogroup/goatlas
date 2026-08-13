@@ -32,7 +32,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { sanitizarStorage, textoDe } from '@/lib/confluence/sanitizar'
-import { ConteudoConfluence, renderizarNos } from '@/lib/confluence/renderizar'
+import { ConteudoConfluence, montarIndice, renderizarNos } from '@/lib/confluence/renderizar'
 
 const OPCOES_RENDER = {
   urlDeAnexo: (nome: string) => `/api/confluence/anexo/p1/${encodeURIComponent(nome)}`,
@@ -42,6 +42,12 @@ const OPCOES_RENDER = {
 function markup(storage: string): string {
   const { nos } = sanitizarStorage(storage)
   return renderToStaticMarkup(renderizarNos(nos, OPCOES_RENDER))
+}
+
+/** A leitura de uma página inteira — é ela que tem índice, ao contrário do trecho de busca. */
+function pagina(storage: string): string {
+  const { nos, truncado } = sanitizarStorage(storage)
+  return renderToStaticMarkup(ConteudoConfluence({ nos, truncado, opcoes: OPCOES_RENDER }))
 }
 
 /**
@@ -260,5 +266,157 @@ describe('QA 13/08 — blocos que imprimiam o nome técnico em inglês', () => {
 
     expect(html).toContain('ainda não sabe mostrar')
     expect(html).toContain('macro-que-ninguem-viu')
+  })
+
+  it('`adf:extension` é nomeado, e diz que veio de um aplicativo', () => {
+    const html = markup('<ac:adf-extension><ac:adf-node type="extension"/></ac:adf-extension>')
+
+    expect(html).toContain('Bloco de um aplicativo do Confluence')
+    expect(html).not.toContain('adf:extension')
+  })
+})
+
+describe('QA 13/08 — o emoji do título era jogado fora', () => {
+  it('usa `ac:emoji-fallback` — o caractere que a pessoa digitou', () => {
+    const html = markup('<h2><ac:emoticon ac:name="calendar" ac:emoji-fallback="🗓"/> Data</h2>')
+
+    // Eram 69 títulos assim (`" Data"`, `" Instruções"`): sobrava só o espaço da frente.
+    expect(html).toContain('🗓 Data')
+  })
+
+  it('sem `fallback`, decodifica `ac:emoji-id` (ponto de código em hexa)', () => {
+    const html = markup('<h2><ac:emoticon ac:name="dart" ac:emoji-id="1f3af"/> Objetivos</h2>')
+
+    expect(html).toContain('🎯 Objetivos')
+  })
+
+  it('🚨 id que NÃO é hexa não vira lixo — some, como antes', () => {
+    // O emoji personalizado da Atlassian tem id em texto (`atlassian-blue_star`), e um
+    // `parseInt` dele devolveria um caractere qualquer, em silêncio.
+    const html = markup('<h2><ac:emoticon ac:emoji-id="atlassian-blue_star"/> Seção</h2>')
+
+    expect(html).toContain('Seção')
+    expect(html).not.toContain('atlassian')
+  })
+
+  it('id hexa fora do intervalo de Unicode não derruba a leitura da página', () => {
+    // Isto roda sobre conteúdo que qualquer pessoa edita: `String.fromCodePoint` lança.
+    const html = markup('<p>Antes<ac:emoticon ac:emoji-id="ffffff"/>Depois</p>')
+
+    expect(html).toContain('Antes')
+    expect(html).toContain('Depois')
+  })
+
+  it('sem nenhum dos dois atributos continua descartando, e o nome interno não vaza', () => {
+    const html = markup('<p>Oi <ac:emoticon ac:name="blue-star"/> tchau</p>')
+
+    // `ac:name` é apelido interno em inglês: imprimi-lo trocaria emoji perdido por jargão.
+    expect(html).not.toContain('blue-star')
+    expect(html).toContain('Oi')
+  })
+})
+
+describe('QA 13/08 — a data do editor novo desaparecia', () => {
+  it('`<time datetime>` vira data em `dd/mm/aaaa`', () => {
+    const html = markup('<p>Reunião de <time datetime="2026-08-13"/></p>')
+
+    expect(html).toContain('13/08/2026')
+  })
+
+  it('🚨 a data NÃO passa por `Date` — não pode andar um dia por causa de fuso', () => {
+    // `new Date('2026-01-01')` é meia-noite UTC; num fuso a oeste, formatar devolveria
+    // `31/12/2025`. A data civil do storage é reordenada como está.
+    expect(markup('<p><time datetime="2026-01-01"/></p>')).toContain('01/01/2026')
+  })
+
+  it('sem `datetime` utilizável sobra o texto do próprio elemento', () => {
+    expect(markup('<p><time>ontem</time></p>')).toContain('ontem')
+  })
+})
+
+describe('QA 13/08 — lista sem item nenhum', () => {
+  it('não vira `<ul>` vazio', () => {
+    const { nos } = sanitizarStorage('<p>Antes</p><ul></ul><p>Depois</p>')
+
+    // O `<ul>` vazio é invisível mas carrega o `gap` da coluna: um buraco que se lê como
+    // "faltou alguma coisa aqui".
+    expect(nos.some((n) => n.tipo === 'lista')).toBe(false)
+    expect(markup('<p>Antes</p><ul></ul><p>Depois</p>')).not.toContain('<ul>')
+  })
+
+  it('lista com item continua sendo lista', () => {
+    expect(markup('<ul><li>Um</li></ul>')).toContain('<ul><li>Um</li></ul>')
+  })
+})
+
+describe('QA 13/08 — `toc` dizia que não havia o que trazer, e havia', () => {
+  const COM_TITULOS =
+    '<ac:structured-macro ac:name="toc"/>' +
+    '<h2>Objetivos</h2><p>a</p><h3>Detalhe</h3><p>b</p><h2>Rotinas</h2><p>c</p>'
+
+  it('vira o índice de verdade, com um link por título', () => {
+    const html = pagina(COM_TITULOS)
+
+    expect(html).toContain('Nesta página')
+    expect(html).toContain('>Objetivos</a>')
+    expect(html).toContain('>Detalhe</a>')
+    expect(html).toContain('>Rotinas</a>')
+    // A frase antiga era FALSA aqui: o texto do índice são os títulos que estão na tela.
+    expect(html).not.toContain('não há o que trazer')
+  })
+
+  it('o link do índice e o `id` do título são a MESMA âncora', () => {
+    const html = pagina(COM_TITULOS)
+    const ancora = /href="#([^"]+)"/.exec(html)?.[1]
+
+    expect(ancora).toBeDefined()
+    // Divergir aqui é silencioso: o link continua bonito e não leva a lugar nenhum — mesma
+    // classe de bug de `urlDeLeituraNoApp`/`entradaDaUrl`.
+    expect(html).toContain(`id="${ancora}"`)
+  })
+
+  it('🚨 títulos com o MESMO texto ganham âncoras diferentes', () => {
+    const indice = montarIndice(sanitizarStorage('<h2>Instruções</h2><h2>Instruções</h2>').nos)
+
+    // Âncoras iguais fazem o segundo link levar ao primeiro título — pior que não ter índice.
+    expect(indice.itens).toHaveLength(2)
+    expect(indice.itens[0]?.ancora).not.toBe(indice.itens[1]?.ancora)
+  })
+
+  it('página sem título nenhum volta ao placeholder — ali a frase é verdadeira', () => {
+    const html = pagina('<ac:structured-macro ac:name="toc"/><p>Só texto corrido.</p>')
+
+    expect(html).toContain('não há o que trazer')
+    expect(html).not.toContain('Nesta página')
+  })
+
+  it('no trecho de BUSCA continua placeholder — não há página para ancorar', () => {
+    const html = markup(COM_TITULOS)
+
+    // `renderizarNos` desenha um pedaço; âncora de pedaço aponta para título fora da tela.
+    expect(html).toContain('não há o que trazer')
+    expect(html).not.toContain('href="#')
+  })
+
+  it('o índice ignora os parâmetros da macro (`RNF-30`)', () => {
+    const html = pagina(
+      '<ac:structured-macro ac:name="toc"><ac:parameter ac:name="maxLevel">2</ac:parameter>' +
+        '</ac:structured-macro><h2>Um</h2><h3>Dois</h3>',
+    )
+
+    // `maxLevel` é preferência de quem editou a página; respeitá-lo pediria levar parâmetro
+    // de macro para a decisão de tela. Todos os níveis aparecem, recuados.
+    expect(html).toContain('>Um</a>')
+    expect(html).toContain('>Dois</a>')
+    expect(html).not.toContain('maxLevel')
+  })
+
+  it('título dentro de painel também entra no índice', () => {
+    const html = pagina(
+      '<ac:structured-macro ac:name="info"><ac:rich-text-body><h2>Dentro</h2>' +
+        '</ac:rich-text-body></ac:structured-macro><ac:structured-macro ac:name="toc"/>',
+    )
+
+    expect(html).toContain('>Dentro</a>')
   })
 })

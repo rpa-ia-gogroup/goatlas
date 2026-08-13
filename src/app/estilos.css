@@ -1022,6 +1022,49 @@
   white-space: nowrap;
 }
 
+/* Índice da página (bloco `toc` do Confluence, resolvido no renderizador).
+ *
+ * Fundo branco e sem tracejado de propósito: o tracejado é o vocabulário de "não foi
+ * possível" (`.doc-macro`), e aqui deu certo — reaproveitá-lo diria o contrário do que a
+ * caixa é. O recuo por nível vem de `data-recuo`, calculado a partir do menor nível da
+ * página: título que começa em `<h2>` não fica recuado só por não existir `<h1>`. */
+.doc-indice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--go-white);
+  border-left: 4px solid var(--go-lime);
+}
+.doc-indice-rotulo {
+  font-size: 0.6875rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--go-text-heading);
+}
+.doc-indice ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-left: 0;
+  list-style: none;
+}
+.doc-indice li {
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+.doc-indice li[data-recuo='1'] {
+  padding-left: var(--space-4);
+}
+.doc-indice li[data-recuo='2'] {
+  padding-left: var(--space-6);
+}
+.doc-indice li[data-recuo='3'] {
+  padding-left: var(--space-8);
+}
+
 
 /* Código: a única exceção a "Poppins e nada mais" (§2 da identidade). Não é
    escolha estética — alinhamento de coluna é o que faz código ser legível. A

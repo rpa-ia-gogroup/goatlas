@@ -29,8 +29,8 @@
  */
 
 import { useState, type ReactNode } from 'react'
-import type { CelulaTabela, LinhaTabela, No, VariantePainel } from './sanitizar'
-import { urlSegura } from './sanitizar'
+import type { CelulaTabela, LinhaTabela, NivelTitulo, No, VariantePainel } from './sanitizar'
+import { textoDe, urlSegura } from './sanitizar'
 
 export interface OpcoesRender {
   /**
@@ -56,7 +56,88 @@ export interface OpcoesRender {
    * está é a tela, que leu a página por um caminho já verificado (`RN-06`).
    */
   readonly aoBuscarNoEspaco?: (termo: string) => void
+  /**
+   * O índice da página, quando ela é lida inteira — é o que faz o bloco `toc` do Confluence
+   * virar navegação de verdade em vez de placeholder.
+   *
+   * ## Por que é opcional, pela mesma razão de `aoBuscarNoEspaco`
+   *
+   * Este renderizador também desenha **trecho de resultado de busca**, e ali não existe
+   * "esta página" para indexar: as âncoras apontariam para títulos que não estão na tela.
+   * Ausente = `toc` continua sendo o placeholder de `RF-43`; presente = vira a lista.
+   */
+  readonly indice?: IndiceDaPagina
 }
+
+/** Um título da página, com a âncora que o `id` do `<h*>` e o link do índice compartilham. */
+export interface ItemDoIndice {
+  readonly nivel: NivelTitulo
+  readonly texto: string
+  readonly ancora: string
+}
+
+export interface IndiceDaPagina {
+  readonly itens: readonly ItemDoIndice[]
+  /**
+   * ⚠️ **Chaveado pelo NÓ, não por posição.** O `toc` é montado antes de renderizar e os
+   * títulos aparecem em qualquer profundidade (dentro de painel, de célula). Casar por
+   * índice exigiria percorrer as duas árvores na mesma ordem em dois lugares — e o dia em
+   * que uma delas mudasse, a âncora passaria a apontar para o título errado, em silêncio.
+   */
+  readonly ancoras: ReadonlyMap<No, string>
+}
+
+/**
+ * Percorre a árvore na ordem do documento e nomeia cada título.
+ *
+ * ⚠️ **A âncora é derivada do texto E do número de ordem.** Só o texto colide — "Instruções"
+ * aparece duas vezes em página de processo —, e duas âncoras iguais fazem o segundo link do
+ * índice levar ao primeiro título, que é pior que não ter índice. O número resolve por
+ * construção, sem precisar de um `Set` de já-usados.
+ */
+export function montarIndice(nos: readonly No[]): IndiceDaPagina {
+  const itens: ItemDoIndice[] = []
+  const ancoras = new Map<No, string>()
+
+  const andar = (lista: readonly No[]): void => {
+    for (const no of lista) {
+      if (no.tipo === 'titulo') {
+        const texto = textoDe(no.filhos).trim()
+        if (texto !== '') {
+          const ancora = `doc-${itens.length + 1}-${apelido(texto)}`
+          itens.push({ nivel: no.nivel, texto, ancora })
+          ancoras.set(no, ancora)
+        }
+        continue
+      }
+      if ('filhos' in no) andar(no.filhos)
+      else if (no.tipo === 'lista') for (const item of no.itens) andar(item)
+      else if (no.tipo === 'tarefas') for (const item of no.itens) andar(item.filhos)
+      else if (no.tipo === 'tabela') {
+        for (const linha of no.linhas) for (const celula of linha.celulas) andar(celula.filhos)
+      }
+    }
+  }
+  andar(nos)
+
+  return { itens, ancoras }
+}
+
+/**
+ * Texto → pedaço de `id` seguro. O acento cai porque `id` com acento funciona no navegador e
+ * quebra no fragmento da URL de alguns clientes; o que sobra fora de `[a-z0-9-]` vira hífen.
+ * O número de ordem já garante a unicidade, então este pedaço pode até ficar vazio.
+ */
+function apelido(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+}
+
 
 const ROTULO_PAINEL: Readonly<Record<VariantePainel, string>> = {
   info: 'Informação',
@@ -101,19 +182,22 @@ function Fragmento({ no, opcoes }: { no: No; opcoes: OpcoesRender }): ReactNode 
 
     case 'titulo': {
       const filhos = renderizarNos(no.filhos, opcoes)
+      // O `id` só existe quando há índice: sem ele não há para onde o link apontar, e um
+      // `id` órfão num trecho de busca poderia colidir com o de outro trecho na mesma tela.
+      const id = opcoes.indice?.ancoras.get(no)
       switch (no.nivel) {
         case 1:
-          return <h1>{filhos}</h1>
+          return <h1 id={id}>{filhos}</h1>
         case 2:
-          return <h2>{filhos}</h2>
+          return <h2 id={id}>{filhos}</h2>
         case 3:
-          return <h3>{filhos}</h3>
+          return <h3 id={id}>{filhos}</h3>
         case 4:
-          return <h4>{filhos}</h4>
+          return <h4 id={id}>{filhos}</h4>
         case 5:
-          return <h5>{filhos}</h5>
+          return <h5 id={id}>{filhos}</h5>
         case 6:
-          return <h6>{filhos}</h6>
+          return <h6 id={id}>{filhos}</h6>
       }
     }
 
@@ -201,11 +285,17 @@ function Fragmento({ no, opcoes }: { no: No; opcoes: OpcoesRender }): ReactNode 
       // tratando `livesearch` como macro não suportada, e é de propósito: ela é a camada
       // de segurança, e "esta macro virou um formulário" é decisão de apresentação. Mexer
       // no sanitizador para isto misturaria as duas camadas que `RNF-06` mantém separadas.
-      return no.nome === 'livesearch' && opcoes.aoBuscarNoEspaco !== undefined ? (
-        <BuscaDoEspaco aoBuscar={opcoes.aoBuscarNoEspaco} />
-      ) : (
-        <MacroNaoSuportada nome={no.nome} />
-      )
+      if (no.nome === 'livesearch' && opcoes.aoBuscarNoEspaco !== undefined) {
+        return <BuscaDoEspaco aoBuscar={opcoes.aoBuscarNoEspaco} />
+      }
+      // 🚨 `toc` era o único bloco cuja frase de placeholder era FALSA: ela diz "a página não
+      // guarda texto dele, então não há o que trazer para cá", e o texto do índice é
+      // exatamente os títulos que já estão na tela. Mesmo erro que `status` cometia (`D-34`),
+      // e a correção é a mesma — o conteúdo estava a uma função de distância.
+      if (no.nome === 'toc' && opcoes.indice !== undefined && opcoes.indice.itens.length > 0) {
+        return <IndiceDaPaginaLido indice={opcoes.indice} />
+      }
+      return <MacroNaoSuportada nome={no.nome} />
   }
 }
 
@@ -395,6 +485,11 @@ const BLOCOS_CONHECIDOS: Readonly<Record<string, { nome: string; natureza: Natur
   viewpdf: { nome: 'Pré-visualização de um PDF anexado', natureza: 'arquivo' },
   'adf:decision-list': { nome: 'Decisões registradas nesta página', natureza: 'dinamico' },
   'adf:task-list': { nome: 'Lista de tarefas', natureza: 'dinamico' },
+  // `extension` no ADF é macro de um app instalado no Confluence. O nome do app **não** vem
+  // no nó (é parâmetro, `RNF-30`), então a frase é a genérica — mas em português, e dizendo
+  // de onde o bloco veio, que é a única coisa acionável para quem lê.
+  'adf:extension': { nome: 'Bloco de um aplicativo do Confluence', natureza: 'dinamico' },
+  'adf:bodied-extension': { nome: 'Bloco de um aplicativo do Confluence', natureza: 'dinamico' },
   include: { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
   'excerpt-include': { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
   // `excerpt` tem o próprio corpo no storage, então o sanitizador já o renderiza. Fica aqui
@@ -469,6 +564,39 @@ function BuscaDoEspaco({ aoBuscar }: { aoBuscar: (termo: string) => void }): Rea
   )
 }
 
+/**
+ * O bloco `toc`, **funcionando** — mesma família de `BuscaDoEspaco`.
+ *
+ * Não há nada a reproduzir aqui: os títulos já vieram na árvore, e montar a lista é uma
+ * função pura sobre ela — nenhuma chamada de rede, nenhuma verificação de restrição a mais
+ * (`R-02`, `RN-06`). É a diferença entre este bloco e `recently-updated`, que exigiria refazer
+ * a consulta do Confluence e conferir cada item.
+ *
+ * ⚠️ **Os parâmetros da macro são ignorados** (`RNF-30`), como em toda macro: `maxLevel`,
+ * `style` e `outline` descrevem a preferência de quem editou a página, e respeitá-los pediria
+ * ler parâmetro para a tela. Mostram-se todos os níveis, recuados.
+ *
+ * ⚠️ **Índice vazio cai no placeholder**, e ali a frase antiga passa a ser verdadeira: página
+ * sem título nenhum de fato não tem o que trazer.
+ */
+function IndiceDaPaginaLido({ indice }: { indice: IndiceDaPagina }): ReactNode {
+  const minimo = Math.min(...indice.itens.map((i) => i.nivel))
+  return (
+    <nav className="doc-indice" aria-label="Índice desta página">
+      <p className="doc-indice-rotulo">Nesta página</p>
+      <ol>
+        {indice.itens.map((item) => (
+          <li key={item.ancora} data-recuo={Math.min(item.nivel - minimo, 3)}>
+            <a className="doc-link" href={`#${item.ancora}`}>
+              {item.texto}
+            </a>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  )
+}
+
 function MacroNaoSuportada({ nome }: { nome: string }): ReactNode {
   const conhecido = BLOCOS_CONHECIDOS[nome]
   const natureza: NaturezaDoBloco = conhecido?.natureza ?? 'desconhecido'
@@ -538,6 +666,11 @@ function PaginaSemTexto(): ReactNode {
  *
  * Separado de `renderizarNos` porque a rota de busca também renderiza trechos sem
  * envelope — o mesmo conteúdo, sem a moldura de "estou lendo uma página".
+ *
+ * ⚠️ **O índice é montado AQUI, e é isso que o mantém fora do trecho de busca.** Este
+ * envelope é o único lugar que sabe que os nós recebidos são uma página inteira; quem chama
+ * `renderizarNos` direto está desenhando um pedaço, e âncora de pedaço aponta para título
+ * que não está na tela. Mesma razão de `aoBuscarNoEspaco` ser opcional.
  */
 export function ConteudoConfluence({
   nos,
@@ -549,10 +682,11 @@ export function ConteudoConfluence({
   /** `true` quando a sanitização cortou a página por limite de tamanho. */
   truncado?: boolean
 }): ReactNode {
+  const comIndice: OpcoesRender = { ...opcoes, indice: opcoes.indice ?? montarIndice(nos) }
   return (
     <article className="doc">
       {nos.length === 0 && <PaginaSemTexto />}
-      {renderizarNos(nos, opcoes)}
+      {renderizarNos(nos, comIndice)}
       {truncado && (
         <p className="doc-truncado">
           Esta página é longa e foi cortada aqui. O começo está completo; o fim não
