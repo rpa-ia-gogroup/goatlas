@@ -262,5 +262,9 @@ export function semearIaDemo(fake: ClienteIAFake): void {
     prioridade: 'alta',
     tipoChamadoId: TIPO_CHAMADO_DEMO,
     area: null,
+    // `FR-1` — a demonstração mostra o motivo, que é metade do que o cartão passou a dizer.
+    motivoPrioridade:
+      'O relatório de vendas do dia não carregou e há contorno manual. Nenhuma parada de venda foi relatada.',
+    campos: [],
   }
 }

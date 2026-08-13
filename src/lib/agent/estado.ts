@@ -29,6 +29,29 @@ export interface PropostaChamado {
   readonly componente: string | null
 }
 
+/**
+ * A última proposta que **a IA** produziu — a base do merge de três pontas (`RN-13`).
+ *
+ * 🚨 **É outra coisa que `PropostaChamado`, e a diferença é a razão de existir.** A
+ * `proposta` é a **vigente**: ela carrega as edições da pessoa (`PUT /proposta`, `RF-16`).
+ * Diffar a proposta nova contra a vigente atropelaria a escolha dela em silêncio — a pessoa
+ * baixa a prioridade para `normal`, a IA devolve `alta` de novo sem ter mudado de opinião, o
+ * diff diz "a IA mudou a prioridade" e a tela adota `alta`. `SC-7` proíbe exatamente isso, e
+ * o sintoma seria zero: nenhum erro, nenhum teste vermelho, uma feature "funcionando".
+ *
+ * 🚨 **E é aqui que o MOTIVO mora, nunca na vigente.** `validarProposta` é allowlist por
+ * construção (lê as chaves que conhece e descarta o resto) e o `PUT` sobrescreve o JSON
+ * inteiro: com o motivo na vigente, editar a prioridade o **apagaria**, e o cartão passaria a
+ * declarar "sem justificativa" (`FR-5`) sobre uma sugestão que veio justificada. Além do
+ * mais, é aqui que ele pertence — o motivo justifica a decisão *da IA*, que é o que `FR-2b`
+ * manda dizer quando a pessoa escolhe outro nível.
+ */
+export interface PropostaDaIa extends PropostaChamado {
+  readonly motivoPrioridade: string | null
+  /** Valores sugeridos para os campos do formulário, **já** por `fieldId` (`FR-11`). */
+  readonly campos: Readonly<Record<string, string>>
+}
+
 export interface Conversa {
   readonly id: string
   readonly solicitanteEmail: string
@@ -46,6 +69,13 @@ export interface Conversa {
   /** RF-17: só o usuário produz este carimbo, por rota própria. */
   readonly confirmadoEm: string | null
   readonly proposta: PropostaChamado | null
+  /**
+   * A base do merge (`RN-13`) — `null` até a primeira rederivação escrever.
+   *
+   * ⚠️ Conversa anterior ao deploy tem `NULL` aqui: ela cai na declaração de `FR-5` e volta
+   * a ter motivo no turno seguinte. Nada quebra, e nada finge.
+   */
+  readonly propostaDaIa: PropostaDaIa | null
   readonly custoUsd: number
 }
 
@@ -59,18 +89,23 @@ interface LinhaConversa {
   historico_falhou: number
   confirmado_em: string | null
   proposta_json: string | null
+  proposta_ia_json: string | null
   custo_usd: number
 }
 
-function daLinha(l: LinhaConversa): Conversa {
-  let proposta: PropostaChamado | null = null
-  if (l.proposta_json) {
-    try {
-      proposta = JSON.parse(l.proposta_json) as PropostaChamado
-    } catch {
-      proposta = null
-    }
+/** JSON gravado por nós, mas lido de volta como entrada: corrompido vira `null`, nunca lança. */
+function propostaDoJson<T>(json: string | null): T | null {
+  if (!json) return null
+  try {
+    return JSON.parse(json) as T
+  } catch {
+    return null
   }
+}
+
+function daLinha(l: LinhaConversa): Conversa {
+  const proposta = propostaDoJson<PropostaChamado>(l.proposta_json)
+  const daIa = propostaDoJson<PropostaDaIa>(l.proposta_ia_json)
   return {
     id: l.id,
     solicitanteEmail: l.solicitante_email,
@@ -81,6 +116,11 @@ function daLinha(l: LinhaConversa): Conversa {
     historicoFalhou: l.historico_falhou === 1,
     confirmadoEm: l.confirmado_em,
     proposta,
+    // ⚠️ Base sem `campos` (linha gravada antes de a coluna existir, ou JSON de outra
+    // versão) vira objeto com `campos: {}` — o merge trata "não sugeriu campo nenhum",
+    // que é o mesmo que a ausência significa. `undefined` ali obrigaria todo consumidor a
+    // testar, e o primeiro que esquecesse leria `Cannot read properties of undefined`.
+    propostaDaIa: daIa ? { ...daIa, campos: daIa.campos ?? {} } : null,
     custoUsd: l.custo_usd,
   }
 }
@@ -106,7 +146,8 @@ export class RepositorioConversas {
   async obter(id: string): Promise<Conversa | null> {
     const r = await this.db.query(
       `SELECT id, solicitante_email, estado, confluence_verificado, historico_verificado,
-              confluence_falhou, historico_falhou, confirmado_em, proposta_json, custo_usd
+              confluence_falhou, historico_falhou, confirmado_em, proposta_json,
+              proposta_ia_json, custo_usd
          FROM conversas WHERE id = ?`,
       [id],
     )
@@ -157,6 +198,24 @@ export class RepositorioConversas {
     await this.db.exec(
       `UPDATE conversas SET proposta_json = ?, atualizado_em = ? WHERE id = ?`,
       [JSON.stringify(proposta), this.agora(), id],
+    )
+  }
+
+  /**
+   * Grava a proposta da IA — a **vigente** e a **base** do merge, na mesma escrita (`RN-13`).
+   *
+   * ⚠️ São duas colunas e **uma** operação de propósito: gravar só uma delas produziria um
+   * estado em que o diff do turno seguinte compara contra a proposta errada, e o sintoma
+   * (`SC-7` violado) apareceria três turnos depois, longe da causa. Quem edita à mão continua
+   * chamando `definirProposta`, que **não** toca a base — é essa assimetria que faz
+   * `alterados` significar *a IA mudou de opinião*, e não *algo mudou*.
+   */
+  async definirPropostaDaIa(id: string, proposta: PropostaDaIa): Promise<void> {
+    const { motivoPrioridade: _motivo, campos: _campos, ...vigente } = proposta
+    await this.db.exec(
+      `UPDATE conversas SET proposta_json = ?, proposta_ia_json = ?, atualizado_em = ?
+        WHERE id = ?`,
+      [JSON.stringify(vigente), JSON.stringify(proposta), this.agora(), id],
     )
   }
 

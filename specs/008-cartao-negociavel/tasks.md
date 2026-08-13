@@ -33,68 +33,68 @@ created: "2026-08-13"
 
 ## Phase 2 — Contratos e migração (nada de lógica ainda)
 
-- [ ] **T-702** `ia/tipos.ts`: `PropostaSugerida` ganha `motivoPrioridade: string | null` e
+- [x] **T-702** `ia/tipos.ts`: `PropostaSugerida` ganha `motivoPrioridade: string | null` e
       `campos: readonly {rotulo, valor}[]`; `ParametrosExtracao` ganha os **descritores por
       rótulo** do assunto vigente (`readonly {rotulo, tipo, opcoes: readonly string[]}[]`).
       ⚠️ Nenhum `fieldId` neste contrato — é o que impede o id de vazar ao prompt (`RNF-30`).
       _Requirements: FR-1, FR-11_
-- [ ] **T-703** `agent/estado.ts`: novo tipo `PropostaDaIa` (proposta + `motivoPrioridade` +
+- [x] **T-703** `agent/estado.ts`: novo tipo `PropostaDaIa` (proposta + `motivoPrioridade` +
       `campos: Record<fieldId, valor>`), com `definirPropostaDaIa` e a leitura da base.
       🚨 **`PropostaChamado` NÃO ganha o motivo** (achado do `/analyze`): `validarProposta` é
       allowlist por construção e o `PUT /proposta` sobrescreve o JSON inteiro — o motivo na
       vigente **evaporaria** quando a pessoa edita a prioridade, sem erro e sem teste vermelho.
       ⚠️ Base `NULL` (conversa anterior ao deploy) cai em `FR-5` e volta a ter motivo no turno
       seguinte. _Requirements: FR-1, FR-2b, FR-9, RN-13_
-- [ ] **T-704** `db/schema.ts`: `ALTER TABLE conversas ADD COLUMN proposta_ia_json TEXT` no
+- [x] **T-704** `db/schema.ts`: `ALTER TABLE conversas ADD COLUMN proposta_ia_json TEXT` no
       bloco de ALTERs. ⚠️ Sem número de versão a subir — a marca é derivada do texto do schema
       (`D-35`) — e o teto de `RNF-36` (≤ 2 idas no boot) continua valendo.
       _Requirements: RN-13_
-- [ ] **T-705** [P] `audit/index.ts`: quatro ações novas na união fechada —
+- [x] **T-705** [P] `audit/index.ts`: quatro ações novas na união fechada —
       `proposta_ajustada`, `ajuste_recusado`, `aviso_negociacao`, `prosa_afirmou_prazo`. Sem
       elas o registro **não compila** (é o gate que `FAMILIA` usa em `config/validar.ts`).
       _Requirements: FR-6, FR-13, FR-14, FR-23_
-- [ ] **T-706** [P] `app/api.ts`: tipos da resposta de `enviarMensagem` com
+- [x] **T-706** [P] `app/api.ts`: tipos da resposta de `enviarMensagem` com
       `motivoPrioridade`, `camposSugeridos`, `alterados`, `recusasDeAjuste`; cliente da rota
       nova `avisoDeNegociacao`. _Requirements: FR-1, FR-8, FR-13, FR-18_
 
 ## Phase 3 — Os módulos puros, teste primeiro
 
-- [ ] **T-710** `tests/008-motivo-da-prioridade.test.ts` (Red): três frases **recusa** · vazio
+- [x] **T-710** `tests/008-motivo-da-prioridade.test.ts` (Red): três frases **recusa** · vazio
       recusa · `customfield_10071` no texto recusa (`RNF-30`) · inglês declarado recusa ·
       🚨 **"o PC desliga sozinho" (português sem um acento) PASSA** — é o motivo mais comum do
       app, e um detector "de português" o reprovaria. _Requirements: FR-3, FR-4, FR-5_
-- [ ] **T-711** `src/lib/tickets/motivo-da-prioridade.ts` até o verde. Teto por terminador de
+- [x] **T-711** `src/lib/tickets/motivo-da-prioridade.ts` até o verde. Teto por terminador de
       frase; detector de idioma **conservador e de mão única** (procura palavra-função inglesa
       com fronteira; nunca tenta provar que é português). _Requirements: FR-3, FR-4, FR-5_
-- [ ] **T-712** [P] `tests/008-negociacao.test.ts` (Red) — o **diff**: campo igual não entra
+- [x] **T-712** [P] `tests/008-negociacao.test.ts` (Red) — o **diff**: campo igual não entra
       em `alterados`; campo mudado entra; `motivoPrioridade` é campo como os outros; campo de
       formulário sai como `campo:<fieldId>`. _Requirements: RN-13, FR-8, FR-23_
-- [ ] **T-713** `src/lib/tickets/diff-de-proposta.ts` até o verde. **Um** produtor de
+- [x] **T-713** `src/lib/tickets/diff-de-proposta.ts` até o verde. **Um** produtor de
       `alterados`, dois consumidores (resposta HTTP e auditoria) — calcular no cliente faria a
       tela mesclar por um critério e a auditoria contar por outro (`D-52`, `D-70`).
       ⚠️ **Motivo sozinho não é ajuste:** `motivoPrioridade` entra em `alterados` (a tela
       precisa dele), mas `proposta_ajustada` só é registrada quando há ao menos um campo que
       **não** seja o motivo — senão uma redação nova infla a resposta de `ScC-9`.
       _Requirements: RN-13, FR-23_
-- [ ] **T-714** `tests/008-negociacao.test.ts` (Red) — o **merge de três pontas**: campo em
+- [x] **T-714** `tests/008-negociacao.test.ts` (Red) — o **merge de três pontas**: campo em
       `alterados` vence o da tela · campo fora dele **preserva o da pessoa, inclusive a
       prioridade baixada à mão** (`SC-7`) · 🚨 **base = a última proposta da IA, nunca a
       vigente**: com a vigente, a pessoa baixa para `normal`, a IA repete `alta` sem mudar de
       opinião e a tela atropela a escolha dela sem sintoma nenhum · assunto mudou → campos do
       anterior descartados. _Requirements: FR-8, FR-9, FR-10, RN-13_
-- [ ] **T-715** `src/app/negociacao.ts` até o verde — `mesclarNaTela({valoresNaTela,
+- [x] **T-715** `src/app/negociacao.ts` até o verde — `mesclarNaTela({valoresNaTela,
       proposta, camposSugeridos, alterados})`. Função pura, sem React. _Requirements: FR-8,
       FR-9, FR-10_
-- [ ] **T-716** `tests/008-ajuste-por-rotulo.test.ts` (Red): rótulo exato casa · rótulo
+- [x] **T-716** `tests/008-ajuste-por-rotulo.test.ts` (Red): rótulo exato casa · rótulo
       inexistente devolve recusa `campo_inexistente` **sem gravar** · valor fora das opções
       devolve `opcao_inexistente` **com os rótulos** (nunca id, `RNF-30`) · o que viaja é o
       **id do schema**, como em `D-39`/`D-48` · seleção múltipla continua `[{id}]` ·
       schema ilegível ajusta **zero** campos (`D-27`, fail-open). _Requirements: FR-11, FR-13,
       FR-14, ScC-6_
-- [ ] **T-717** `src/lib/tickets/ajuste-por-rotulo.ts` até o verde. Reusa
+- [x] **T-717** `src/lib/tickets/ajuste-por-rotulo.ts` até o verde. Reusa
       `valores-de-campo.ts` para a forma final do valor — reescrever a tradução por tipo faria
       a segunda regra que `D-39` proíbe. _Requirements: FR-11, FR-13, FR-14, ScC-6_
-- [ ] **T-718** [P] Teste **estrutural** (`tests/008-ajuste-por-rotulo.test.ts`): o tradutor
+- [x] **T-718** [P] Teste **estrutural** (`tests/008-ajuste-por-rotulo.test.ts`): o tradutor
       não conhece a palavra "área" nem os campos de identidade do solicitante — mesma forma do
       teste de `D-37`, porque aqui o caminho errado **funcionaria** e o sintoma seria a área
       adivinhada indo para o vínculo. _Requirements: FR-15_

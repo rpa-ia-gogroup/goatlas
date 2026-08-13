@@ -97,6 +97,54 @@ export type AcaoAuditada =
    */
   | 'area_nao_encontrada'
   | 'area_indisponivel'
+  /**
+   * Spec 008 — a IA **mudou** a proposta depois de a pessoa argumentar (`FR-23`, `ScC-9`).
+   *
+   * ⚠️ **O detalhe carrega QUAIS campos mudaram, nunca os valores** (`RN-10`, `RNF-30`): o
+   * admin lê esta tabela, e título e descrição são o relato da pessoa. `{campos: ['prioridade']}`
+   * responde "em quais campos a argumentação pega?" sem expor uma linha do que ela escreveu.
+   *
+   * ⚠️ **Motivo reescrito sozinho NÃO entra aqui.** O motivo muda de redação a cada
+   * rederivação; contá-lo faria toda mensagem virar "proposta ajustada" e a resposta de
+   * `ScC-9` perderia sentido — mede-se argumentação que mudou o chamado, não variação de
+   * texto.
+   */
+  | 'proposta_ajustada'
+  /**
+   * Spec 008 — um ajuste pedido em texto **não foi aplicado** (`FR-13`, `FR-14`).
+   *
+   * ⚠️ Registrado porque as duas causas são invisíveis na tela depois do fato e pedem
+   * trabalho oposto: `campo_inexistente` em volume significa que as pessoas esperam um campo
+   * que aquele request type não tem (é assunto de formulário no Jira); `opcao_inexistente`
+   * significa que o vocabulário da opção não é o que a pessoa usa. Mesma família de
+   * `area_nao_encontrada` × `area_indisponivel`.
+   *
+   * O detalhe leva o **rótulo** — texto que já está na tela dela —, nunca `fieldId`.
+   */
+  | 'ajuste_recusado'
+  /**
+   * Spec 008 — o aviso de que conversar pode reescrever o formulário (`FR-18`, `FR-23`).
+   *
+   * ⚠️ O desfecho é o dado que importa: muita gente **voltando ao formulário** significa que
+   * o aviso está assustando quem só queria conversar, e aí o texto dele é que está errado —
+   * não as pessoas. Sem o registro, a única evidência de um aviso mal escrito seria alguém
+   * reclamando (mesmo raciocínio de `declaracao_anexo_ausente`).
+   */
+  | 'aviso_negociacao'
+  /**
+   * Spec 008 / `FR-6` — a prosa do agente afirmou nível de prioridade ou prazo em horas.
+   *
+   * 🚨 **Isto MEDE, não impede** — e a escolha é deliberada (`plan.md` §3.6). Quem previne é o
+   * prompt; recortar a frase de um texto gerado estraga o parágrafo e o defeito volta com
+   * outra redação. `FR-6` é qualidade de produto, não gate de segurança: quem "burla" produz
+   * uma frase feia no próprio chamado — nenhuma exposição, nenhum chamado perdido (a mesma
+   * distinção de `D-27`). Se a medição mostrar vazamento recorrente, a escalada é recortar, e
+   * aí com dado.
+   *
+   * ⚠️ O detalhe diz **o que** foi achado (`nivel` · `horas`), nunca a frase: ela contém o
+   * relato da pessoa.
+   */
+  | 'prosa_afirmou_prazo'
   /** Coleta diária da Organizations API (RF-51, RF-52, T-124) — toca a Atlassian,
    * então é auditada mesmo quando falha. */
   | 'inventario_coletado'

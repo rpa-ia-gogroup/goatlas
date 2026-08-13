@@ -494,6 +494,8 @@ const PROPOSTA = {
   prioridade: 'normal' as const,
   area: null,
   componente: null,
+  motivoPrioridade: 'O reprocessamento falha e existe contorno. Nenhuma operação parada.',
+  campos: [],
 }
 
 /**

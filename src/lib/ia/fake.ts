@@ -143,6 +143,18 @@ export class ClienteIAFake implements ClienteIA {
     prioridade: 'alta',
     tipoChamadoId: 'rt-1',
     area: null,
+    /**
+     * ⚠️ **O default vem COM motivo, e isso é escolha de dublê** (`FR-1`): o caminho comum de
+     * produção tem motivo, então um fake sem ele faria todo teste de tela exercitar o caminho
+     * de exceção (`FR-5`) sem ninguém notar. Quem testa a ausência a escreve explicitamente.
+     *
+     * 🚨 **E nenhum caso prova comportamento pelo que sai daqui** (`D-47`, cinco ocorrências):
+     * motivo válido é o que `motivo-da-prioridade.ts` diz, e campo ajustado é o que
+     * `ajuste-por-rotulo.ts` casa contra o schema. Aqui é roteiro, não evidência.
+     */
+    motivoPrioridade:
+      'O relatório diário está sem os dados de ontem, com contorno manual disponível. Nenhuma venda parada foi relatada.',
+    campos: [],
   }
   readonly extracoesRecebidas: ParametrosExtracao[] = []
 

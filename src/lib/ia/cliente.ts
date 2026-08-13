@@ -429,7 +429,41 @@ export function interpretarProposta(
     prioridade,
     tipoChamadoId,
     area: typeof v.area === 'string' && v.area.trim().length > 0 ? v.area.trim() : null,
+    /**
+     * ⚠️ **Aqui só se LÊ; quem julga é `tickets/motivo-da-prioridade.ts`** (`FR-3`/`FR-4`).
+     * Motivo comprido, em inglês ou com `customfield_…` chega até esta camada — texto do
+     * modelo não fica confiável por ter vindo tipado —, e é a validação de servidor que o
+     * transforma na declaração de `FR-5`. Interpretar e validar no mesmo lugar faria a regra
+     * de exibição morar dentro do parser do provedor, onde nenhuma tela olha.
+     */
+    motivoPrioridade:
+      typeof v.motivoPrioridade === 'string' && v.motivoPrioridade.trim().length > 0
+        ? v.motivoPrioridade.trim()
+        : null,
+    campos: camposPedidos(v.campos),
   }
+}
+
+/**
+ * Os ajustes de campo pedidos em texto, como o modelo os devolveu — `FR-11`.
+ *
+ * ⚠️ **Por rótulo, e nada mais é aceito.** Item sem `rotulo` ou sem `valor` é descartado em
+ * silêncio aqui e a recusa nasce depois, em `ajuste-por-rotulo.ts`, contra o schema real: este
+ * ponto não conhece o assunto vigente, então "existe este campo?" é pergunta que ele **não tem
+ * como** responder. Formato inesperado devolve lista vazia — nunca lança: o pior caso é o
+ * turno não ajustar campo (`RNF-18`), jamais a proposta inteira se perder.
+ */
+function camposPedidos(bruto: unknown): readonly { rotulo: string; valor: string }[] {
+  if (!Array.isArray(bruto)) return []
+  const itens: { rotulo: string; valor: string }[] = []
+  for (const item of bruto) {
+    if (!item || typeof item !== 'object') continue
+    const o = item as Record<string, unknown>
+    const rotulo = typeof o.rotulo === 'string' ? o.rotulo.trim() : ''
+    const valor = typeof o.valor === 'string' ? o.valor.trim() : ''
+    if (rotulo.length > 0 && valor.length > 0) itens.push({ rotulo, valor })
+  }
+  return itens
 }
 
 /**
