@@ -976,6 +976,18 @@ destes reabre um vazamento que já foi fechado.
   disparar aos 683px e dispara só quando a tabela excede a largura toda — o celular, onde
   `RNF-28` a torna obrigatória. ⚠️ `row-gap`, nunca `gap`: com duas colunas, `gap` abriria
   espaço horizontal e a tabela deixaria de encostar na borda.
+- 🚨 **Coluna de ETIQUETAS é centralizada; coluna de texto, NUNCA** (`D-66`,
+  `renderizar.tsx#colunasDeEtiqueta`). Em "Versões" a coluna `Status` tem 451px porque as cinco
+  pílulas a exigem — medido: `width: max-content` dá o mesmo tamanho, então não é sobra mal
+  distribuída — e o rótulo de seis letras ficava encostado à esquerda com um vão até o cabeçalho
+  seguinte. ⚠️ **`th { text-align: center }` global foi MEDIDO e recusado**: no "Glossário de
+  Sistemas" os cabeçalhos **coincidem** com o começo dos dados (`Cloud` sobre `k8s`), e
+  centralizá-los jogaria `Repositório` para o meio de 372px — consertaria uma tabela e estragaria
+  as outras. A condição é **estrutural** (toda célula não vazia da coluna tem `etiqueta`), nunca
+  sobre o texto do rótulo. ⚠️ Centraliza **cabeçalho e dados** — só o rótulo mudaria o vão de
+  lugar. ⚠️ **Célula vazia não desqualifica** (três das cinco em "Versões" são vazias), **uma
+  linha de texto desqualifica**, e **`colspan` desliga a análise inteira** — com célula mesclada
+  o índice deixa de ser a coluna, e centralizar por ele acerta a errada em silêncio.
 - ⚠️ **`.doc-etiqueta` tem `margin-inline`, e não é respiro estético** (`D-65`). No storage a
   etiqueta vem **colada** ao texto, e a tela mostrava `O que fazer agora?DEFINIR STATUS`. O
   Confluence resolve na folha dele; aqui é essa margem.
@@ -1518,7 +1530,7 @@ STATUS` vinha grudado. Agora cada tela tem caminho próprio (`app/rotas.ts`, sem
 router), `.doc` é grade de duas colunas e a etiqueta tem margem. ✅ **Histórico medido no
 navegador**: ← de `/avisos` até a lista de categorias, e de `?pagina=` de volta às categorias.
 
-**1392 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1400 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

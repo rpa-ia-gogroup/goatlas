@@ -377,6 +377,49 @@ function Codigo({ linguagem, conteudo }: { linguagem: string | null; conteudo: s
   )
 }
 
+/**
+ * 🚨 **Coluna de ETIQUETAS é centralizada; coluna de texto, nunca.**
+ *
+ * Relato do mantenedor sobre a tabela "Versões" (`DTE:11632894`): *"centralize Status entre
+ * Escopo e Data de finalização, ele ficou todo pra esquerda"*. A coluna `Status` tem **451px**
+ * porque as cinco pílulas de estado a exigem — não é sobra de largura mal distribuída
+ * (medido: `width: max-content` dá exatamente o mesmo tamanho). O que sobra é um rótulo de
+ * seis letras encostado à esquerda de meio metro de coluna, com um vão até o cabeçalho
+ * seguinte.
+ *
+ * ⚠️ **`th { text-align: center }` global foi MEDIDO e recusado.** No "Glossário de Sistemas"
+ * (26 linhas, colunas de 372px de link) os cabeçalhos hoje **coincidem** com o começo dos
+ * dados — `Cloud` exatamente sobre `k8s`. Centralizar todos jogaria `Repositório` para o meio
+ * de 372px, longe dos links que ele nomeia: consertaria uma tabela e estragaria as outras.
+ *
+ * A condição é **estrutural**, nunca sobre o texto: uma coluna é de etiquetas quando **toda**
+ * célula de corpo dela ou está vazia ou contém uma `etiqueta` — e há ao menos uma. É a mesma
+ * disciplina de `ScC-4` (o tipo do campo decide, não o `fieldId`) e de `D-63` (nada de
+ * heurística sobre conteúdo de terceiro).
+ *
+ * ⚠️ **`colspan`/`rowspan` desligam a análise inteira.** Com célula mesclada, a posição no
+ * array deixa de ser o índice da coluna, e centralizar pelo índice acertaria a coluna errada
+ * — silenciosamente. Alinhamento errado é pior que alinhamento antigo.
+ */
+function colunasDeEtiqueta(corpo: readonly LinhaTabela[]): ReadonlySet<number> {
+  const temEtiqueta = (nos: readonly No[]): boolean =>
+    nos.some((no) => {
+      if (no.tipo === 'etiqueta') return true
+      if ('filhos' in no) return temEtiqueta(no.filhos)
+      return false
+    })
+
+  const candidatas = new Map<number, boolean>()
+  for (const linha of corpo) {
+    for (const [i, celula] of linha.celulas.entries()) {
+      if (celula.colunas > 1 || celula.linhas > 1) return new Set()
+      if (celula.filhos.length === 0) continue
+      candidatas.set(i, (candidatas.get(i) ?? true) && temEtiqueta(celula.filhos))
+    }
+  }
+  return new Set([...candidatas].filter(([, so]) => so).map(([i]) => i))
+}
+
 function Tabela({
   linhas,
   opcoes,
@@ -386,11 +429,12 @@ function Tabela({
 }): ReactNode {
   const cabecalho = linhas.filter((l) => l.cabecalho)
   const corpo = linhas.filter((l) => !l.cabecalho)
+  const centradas = colunasDeEtiqueta(corpo)
 
   const renderizarLinha = (linha: LinhaTabela, i: number) => (
     <tr key={i}>
       {linha.celulas.map((celula, j) => (
-        <Celula key={j} celula={celula} opcoes={opcoes} />
+        <Celula key={j} celula={celula} opcoes={opcoes} centrada={centradas.has(j)} />
       ))}
     </tr>
   )
@@ -407,11 +451,22 @@ function Tabela({
   )
 }
 
-function Celula({ celula, opcoes }: { celula: CelulaTabela; opcoes: OpcoesRender }): ReactNode {
+function Celula({
+  celula,
+  opcoes,
+  centrada = false,
+}: {
+  celula: CelulaTabela
+  opcoes: OpcoesRender
+  /** Coluna de etiquetas — ver `colunasDeEtiqueta`. Vale para o cabeçalho E para os dados:
+      centralizar só o rótulo o desalinharia do conteúdo que ele nomeia. */
+  centrada?: boolean
+}): ReactNode {
   const conteudo = renderizarNos(celula.filhos, opcoes)
   const span = {
     ...(celula.colunas > 1 ? { colSpan: celula.colunas } : {}),
     ...(celula.linhas > 1 ? { rowSpan: celula.linhas } : {}),
+    ...(centrada ? { 'data-centrada': 'sim' } : {}),
   }
   return celula.cabecalho ? (
     <th scope="col" {...span}>
