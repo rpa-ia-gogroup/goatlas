@@ -119,7 +119,7 @@ export class AnalisesDeAnexo {
     solicitanteEmail: string
     nomeArquivo: string
   }): Promise<boolean> {
-    const antes = await this.db.query<{ n: number }>(
+    const antes = await this.db.query(
       `SELECT COUNT(*) AS n FROM analises_anexo WHERE conversa_id = ? AND nome_arquivo = ?`,
       [dados.conversaId, dados.nomeArquivo],
     )
@@ -181,7 +181,7 @@ export class AnalisesDeAnexo {
     conversaId: string,
     solicitanteEmail: string,
   ): Promise<readonly AnaliseDeAnexo[]> {
-    const r = await this.db.query<LinhaAnalise>(
+    const r = await this.db.query(
       `SELECT id, nome_arquivo, estado, descricao, criado_em, concluido_em
          FROM analises_anexo
         WHERE conversa_id = ? AND solicitante_email = ?
@@ -205,7 +205,7 @@ export class AnalisesDeAnexo {
    * escrito aqui divergiria no dia em que o teto mudasse, e em silêncio.
    */
   async contarDaConversa(conversaId: string): Promise<number> {
-    const r = await this.db.query<{ n: number }>(
+    const r = await this.db.query(
       `SELECT COUNT(*) AS n FROM analises_anexo WHERE conversa_id = ?`,
       [conversaId],
     )
