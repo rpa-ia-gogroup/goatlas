@@ -30,11 +30,15 @@ import {
   type ParametrosExtracao,
   type ResultadoExtracao,
   type PropostaSugerida,
+  type ParametrosDescricaoArquivo,
+  type ResultadoDescricaoArquivo,
 } from './tipos'
 import {
   PROMPT_CLASSIFICACAO_RESOLUCAO,
+  PROMPT_DESCRICAO_ARQUIVO,
   PROMPT_EXTRACAO,
   montarPromptClassificacao,
+  montarPromptDescricaoArquivo,
   montarPromptExtracao,
 } from './prompts'
 
@@ -244,6 +248,67 @@ export class ClienteIAHttp implements ClienteIA {
     return { classe, justificativa, custoEstimadoUsd: custo }
   }
 
+  /**
+   * `FR-3` — descreve o anexo e julga relevância. O "agente auxiliar" da spec 007.
+   *
+   * 🚨 **A imagem viaja como parte `image_url` com data URL** — formato OpenAI, que é o que o
+   * proxy corporativo fala. Texto (inclusive o que veio do OCR de um PDF) viaja como texto,
+   * já delimitado por `montarPromptDescricaoArquivo`.
+   *
+   * ⚠️ **O teste que vale afirma sobre o CORPO entregue ao `fetchImpl`**, não sobre o que o
+   * fake devolveu (`D-47`, quatro ocorrências da mesma família). Um campo que cruza a
+   * fronteira e só é conferido contra o dublê **não está verificado**.
+   *
+   * ⚠️ O custo **é somado** em `_custoAcumuladoUsd`: o painel de custo de IA do console
+   * (`D-60b`) mede o gasto do app, e análise é gasto do app. O que `FR-5c` decide é outra
+   * coisa — que ela **não desconta do teto por conversa** —, e esse teto é aplicado em
+   * `orquestrador.ts`, não aqui.
+   */
+  async descreverArquivo(
+    params: ParametrosDescricaoArquivo,
+  ): Promise<ResultadoDescricaoArquivo> {
+    const conteudo = params.conteudo
+    const parteDeTexto = {
+      type: 'text',
+      text: montarPromptDescricaoArquivo(
+        params.nomeArquivo,
+        conteudo.tipo === 'texto' ? conteudo.texto : null,
+      ),
+    }
+    const partes =
+      conteudo.tipo === 'imagem'
+        ? [
+            parteDeTexto,
+            {
+              type: 'image_url',
+              image_url: { url: `data:${conteudo.midia};base64,${conteudo.base64}` },
+            },
+          ]
+        : [parteDeTexto]
+
+    const dados = await this.chamar(
+      {
+        messages: [
+          { role: 'system', content: PROMPT_DESCRICAO_ARQUIVO },
+          { role: 'user', content: partes },
+        ],
+        response_format: { type: 'json_object' },
+      },
+      'descricao_arquivo',
+    )
+
+    const custo = this.estimarCusto(
+      Number(dados.usage?.prompt_tokens ?? 0),
+      Number(dados.usage?.completion_tokens ?? 0),
+    )
+    this._custoAcumuladoUsd += custo
+
+    return {
+      ...interpretarDescricaoArquivo(dados.choices?.[0]?.message?.content),
+      custoEstimadoUsd: custo,
+    }
+  }
+
   async extrairProposta(params: ParametrosExtracao): Promise<ResultadoExtracao> {
     const dados = await this.chamar(
       {
@@ -364,5 +429,35 @@ export function interpretarProposta(
     prioridade,
     tipoChamadoId,
     area: typeof v.area === 'string' && v.area.trim().length > 0 ? v.area.trim() : null,
+  }
+}
+
+/**
+ * Lê `{relevante, descricao}` da resposta do analisador — spec 007, `FR-3`.
+ *
+ * ⚠️ **Resposta ilegível vira `relevante: false` com descrição própria, nunca exceção.** Quem
+ * chama está no meio de um upload que não pode cair por causa de leitura (`FR-8`), e um
+ * `throw` aqui viraria arquivo perdido. Mesmo raciocínio de `interpretarClassificacao`, que
+ * cai em `indeterminado`.
+ *
+ * ⚠️ E `relevante` só é `true` quando vem **exatamente** `true`: um `"sim"` ou um `1` do
+ * modelo não bastam. Coagir aqui faria a tela falar sobre a foto do crachá de alguém.
+ */
+export function interpretarDescricaoArquivo(bruto: unknown): {
+  relevante: boolean
+  descricao: string
+} {
+  if (typeof bruto !== 'string' || bruto.trim().length === 0) {
+    return { relevante: false, descricao: 'o leitor de arquivo devolveu resposta vazia' }
+  }
+  try {
+    const v = JSON.parse(bruto) as { relevante?: unknown; descricao?: unknown }
+    const descricao =
+      typeof v.descricao === 'string' && v.descricao.trim().length > 0
+        ? v.descricao.trim()
+        : 'sem descrição'
+    return { relevante: v.relevante === true, descricao }
+  } catch {
+    return { relevante: false, descricao: 'a resposta do leitor de arquivo não era JSON válido' }
   }
 }

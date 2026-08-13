@@ -1,5 +1,5 @@
 /**
- * Cada tela tem URL, e o ← do navegador volta um passo — `D-64`.
+ * Cada tela tem URL, e o ← do navegador volta um passo — `D-65`.
  *
  * Relato do mantenedor usando o app publicado: *"não dá pra voltar pra lista de categorias
  * apenas dando ← no navegador"*. Tudo morava em `/`, e o único registro de estado na URL era
@@ -11,7 +11,7 @@
  * deflexão. É o mesmo desenho de `ROTULOS_ENVIO` e `LinhaDePessoa`: extrair a regra para
  * função pura é o que a torna testável sem DOM.
  *
- * _Requirements: RF-12, RF-13, RF-40, R-07_
+ * _Requirements: RF-67, RF-12, RF-13, R-07_
  */
 
 import { describe, expect, it } from 'vitest'
@@ -32,7 +32,7 @@ const TELAS: readonly Tela[] = [
   { nome: 'detalhe', issueKey: 'GN-6903' },
 ]
 
-describe('D-64 — caminho ↔ tela', () => {
+describe('D-65 — caminho ↔ tela', () => {
   it('toda tela tem caminho, e o caminho volta para a MESMA tela', () => {
     // Ida e volta é o que impede o par de divergir: um caminho novo sem leitura
     // correspondente abriria a conversa em vez da tela, sem erro nenhum.
@@ -84,7 +84,7 @@ describe('D-64 — caminho ↔ tela', () => {
   })
 })
 
-describe('D-64 — o contrato do link de deflexão tem TRÊS pontas', () => {
+describe('D-65 — o contrato do link de deflexão tem TRÊS pontas', () => {
   it('`urlDeLeituraNoApp` escreve o caminho da aba, não a raiz', () => {
     // Em `/` o app abre a conversa: a leitura só aparecia porque `?pagina=` a desviava, e
     // por isso o ← saía do app em vez de devolver a lista de categorias.

@@ -67,12 +67,37 @@ const ROTULO_TOOL: Readonly<Record<NomeTool, string>> = {
   check_jira_history: 'consultou o histórico de chamados',
 }
 
+/**
+ * A mensagem que carrega a leitura do anexo (spec 007) tem rótulo próprio.
+ *
+ * ⚠️ **O conteúdo dela continua fora do diálogo**, como todo `tool` (`D-54`) — mas por outra
+ * razão: aqui não é conteúdo de terceiro, é a leitura do arquivo da própria pessoa, e ela
+ * aparece **inteira** na seção "Arquivos anexados". Repetir nos dois lugares faria a
+ * transcrição dizer a mesma coisa duas vezes, em formatos diferentes.
+ */
+const ROTULO_LEITURA_DE_ANEXO = 'leu os arquivos anexados'
+
 export interface DadosDaTranscricao {
   readonly conversaId: string
   readonly solicitanteEmail: string
   readonly issueKey: string
   /** Carimbo ISO de quando o arquivo foi gerado. */
   readonly geradoEm: string
+  /**
+   * O que a IA leu de cada anexo — spec 007, `SC-13` (`Q7-3`, respondida em 13/08/2026).
+   *
+   * 🚨 **Inclui a análise que a TELA não mostrou.** `irrelevante` fica calada para a pessoa
+   * (`FR-5b`) e **vem** para cá: quem trabalha o chamado precisa saber que o arquivo foi
+   * olhado e não acrescentava nada — senão abre o anexo por nada, que é justamente o custo
+   * que `US-4` quer evitar. Esta é a única superfície onde a descrição irrelevante existe.
+   *
+   * Vazio = conversa sem anexo, e a seção não aparece.
+   */
+  readonly analises?: readonly {
+    readonly nomeArquivo: string
+    readonly estado: string
+    readonly descricao: string | null
+  }[]
 }
 
 function rotuloDoPapel(m: MensagemIA): string | null {
@@ -117,9 +142,24 @@ export function montarTranscricao(
   ].join('\n')
 
   const corpo: string[] = []
+
+  // A seção vem ANTES do diálogo: quem abre o chamado quer saber o que havia nos arquivos
+  // antes de ler a conversa inteira — é a ordem em que um agente de tech trabalha.
+  const secaoDeAnexos = montarSecaoDeAnexos(dados.analises ?? [])
+  if (secaoDeAnexos) corpo.push(secaoDeAnexos)
+
   for (const m of mensagens) {
     if (m.papel === 'tool') {
-      const rotulo = m.toolNome ? ROTULO_TOOL[m.toolNome] : undefined
+      // ⚠️ O `as string` é necessário: `toolNome` é tipado como `NomeTool`, e `anexo_lido`
+      // **não é uma tool** — é a mensagem que carrega a leitura do anexo (spec 007). Alargar
+      // `NomeTool` para incluí-la seria pior: ela apareceria em `toolsPermitidas` e no gate.
+      const nome = m.toolNome as string | undefined
+      const rotulo =
+        nome === 'anexo_lido'
+          ? ROTULO_LEITURA_DE_ANEXO
+          : nome
+            ? ROTULO_TOOL[nome as NomeTool]
+            : undefined
       corpo.push(`_(o agente ${rotulo ?? 'usou uma ferramenta de verificação'})_`, '')
       continue
     }
@@ -135,6 +175,42 @@ export function montarTranscricao(
   }
 
   return recortar(cabecalho + corpo.join('\n'))
+}
+
+/**
+ * "Arquivos anexados e o que foi lido deles" — `SC-13`.
+ *
+ * ⚠️ Cada linha diz o **nome** e o que se sabe, e os estados sem descrição ganham frase
+ * própria: para quem trabalha o chamado, "não sei ler este formato" e "não consegui ler agora"
+ * mudam o que ele faz com o arquivo (abrir na mão × pedir de novo).
+ */
+function montarSecaoDeAnexos(
+  analises: readonly {
+    readonly nomeArquivo: string
+    readonly estado: string
+    readonly descricao: string | null
+  }[],
+): string | null {
+  if (analises.length === 0) return null
+  const linhas = analises.map((a) => {
+    const temDescricao = a.descricao && (a.estado === 'pronta' || a.estado === 'irrelevante')
+    const detalhe = temDescricao
+      ? a.descricao
+      : (FRASE_DO_ESTADO[a.estado] ?? 'não foi possível ler este arquivo')
+    // `irrelevante` é marcado: o agente sabe que alguém olhou e não achou nada, o que é
+    // diferente de ninguém ter olhado.
+    const marca = a.estado === 'irrelevante' ? ' _(sem conteúdo útil para o caso)_' : ''
+    return `- **${a.nomeArquivo}** — ${detalhe}${marca}`
+  })
+  return ['## Arquivos anexados e o que foi lido deles', '', ...linhas, ''].join('\n')
+}
+
+/** As frases dos estados sem descrição. Espelham as da tela, e por isso são curtas. */
+const FRASE_DO_ESTADO: Readonly<Record<string, string>> = {
+  analisando: 'a leitura não havia terminado quando o chamado foi aberto',
+  tipo_nao_suportado: 'o goatlas não lê este formato de arquivo',
+  sem_conteudo: 'não havia texto ou imagem legível neste arquivo',
+  falhou: 'a leitura falhou — o arquivo não foi analisado',
 }
 
 function recortar(texto: string): string {
@@ -178,6 +254,17 @@ export interface DependenciasTranscricao {
       via: 'transcricao'
     }): Promise<void>
   }
+  /**
+   * spec 007, `SC-13` — o que a IA leu de cada anexo. Opcional pelo mesmo motivo de
+   * `anexosEnviados`: os testes antigos montam estas dependências à mão, e um campo
+   * obrigatório novo os quebraria sem que nada de comportamento tivesse mudado.
+   */
+  readonly analisesAnexo?: {
+    listarDaConversa(
+      conversaId: string,
+      solicitanteEmail: string,
+    ): Promise<readonly { nomeArquivo: string; estado: string; descricao: string | null }[]>
+  }
   readonly agora: () => string
 }
 
@@ -219,11 +306,20 @@ export async function anexarTranscricaoDoChamado(
 
   try {
     const mensagens = await deps.conversas.listarMensagens(dados.conversaId)
+    // spec 007, `SC-13` — as análises vêm do repositório, não das mensagens: a `irrelevante`
+    // nunca virou mensagem (ela não vai ao modelo, `FR-5b`) e é justamente uma das que o
+    // agente de tech precisa ver. Sem repositório injetado, a seção simplesmente não aparece.
+    const analises = deps.analisesAnexo
+      ? await deps.analisesAnexo
+          .listarDaConversa(dados.conversaId, dados.solicitanteEmail)
+          .catch(() => [])
+      : []
     const texto = montarTranscricao(mensagens, {
       conversaId: dados.conversaId,
       solicitanteEmail: dados.solicitanteEmail,
       issueKey: dados.issueKey,
       geradoEm: deps.agora(),
+      analises,
     })
     const bytes = new TextEncoder().encode(texto)
     const nome = nomeDoArquivo(dados.issueKey)

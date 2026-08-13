@@ -72,6 +72,10 @@ import type {
   ResultadoArea,
 } from './contrato'
 import { rotuloDaFalha } from './contrato'
+import {
+  prepararCredencialDeCabecalho,
+  type CredencialDeCabecalho,
+} from '../credencial-de-cabecalho'
 
 const BASE = 'https://api.teamguide.app'
 /** A base muda devagar; 10 min é o mesmo TTL que o godocs usa, pelo mesmo motivo. */
@@ -107,7 +111,7 @@ export class ClienteTeamGuideHttp implements ClienteTeamGuide {
   private readonly cache: CacheDaBase
   private readonly agora: () => number
   private readonly fetchImpl: typeof fetch
-  private readonly credencial: Credencial
+  private readonly credencial: CredencialDeCabecalho
 
   // ⚠️ O `token` **não** fica guardado cru: o que sobrevive ao construtor é a `Credencial`
   // já aparada e verificada. Um segundo lugar lendo `opcoes.token` reabriria o caminho que
@@ -121,7 +125,7 @@ export class ClienteTeamGuideHttp implements ClienteTeamGuide {
     // conexão. Os outros quatro clientes HTTP do app já faziam isto desde 07/08/2026; este
     // nasceu depois e sem a linha. `tests/rf19-area-teamguide.test.ts` encena o receptor.
     this.fetchImpl = opcoes.fetchImpl ?? fetch.bind(globalThis)
-    this.credencial = prepararCredencial(opcoes.token)
+    this.credencial = prepararCredencialDeCabecalho(opcoes.token)
   }
 
   async areaDe(email: string): Promise<ResultadoArea> {
@@ -226,43 +230,13 @@ export class ClienteTeamGuideHttp implements ClienteTeamGuide {
 }
 
 /**
- * O token pronto para ir num cabeçalho, e o que precisou ser feito com ele — `D-50`.
+ * O token pronto para ir num cabeçalho vem de `credencial-de-cabecalho.ts` — `D-50`.
  *
- * ⚠️ Nada aqui carrega o valor, nem pedaço dele, nem o tamanho (`RNF-01`). O que sai são
- * dois rótulos: *precisou de saneamento* e *o que sobrou de inválido*.
+ * 🚨 **Isto morava AQUI e foi extraído**, quando `ocr/http.ts` (a quinta credencial) precisou
+ * da mesma coisa. Copiar era o caminho curto e o errado: duas implementações de saneamento
+ * divergem na primeira correção, e a que não foi corrigida falha **em silêncio**, com a
+ * credencial certa e o host no ar. Mesmo raciocínio de "secrets em um lugar só" (`RNF-01`).
  */
-interface Credencial {
-  readonly valor: string
-  /** `true` quando o valor bruto tinha espaço ou quebra de linha nas pontas. */
-  readonly saneada: boolean
-  /** Rótulo do que impede o valor de ir num cabeçalho, ou `null` se ele está pronto. */
-  readonly invalida: string | null
-}
-
-/**
- * Saneia nas **pontas** e verifica o resto.
- *
- * O secret é colado à mão no console do GoDeploy, e um `\n` no fim é invisível em qualquer
- * inspeção — mas basta para o runtime recusar o cabeçalho. Aparar as pontas é higiene de
- * fronteira, não adivinhação: token nenhum tem espaço em branco na borda de propósito.
- * ⚠️ O que **não** dá para consertar (controle no meio, caractere fora do ASCII imprimível)
- * é recusado com nome próprio — coagir ali seria inventar uma credencial.
- */
-function prepararCredencial(bruto: string): Credencial {
-  const cru = bruto ?? ''
-  const valor = cru.trim()
-  return { valor, saneada: valor !== cru, invalida: problemaEmCabecalho(valor) }
-}
-
-function problemaEmCabecalho(valor: string): string | null {
-  if (!valor) return 'vazia'
-  for (const caractere of valor) {
-    const ponto = caractere.codePointAt(0)!
-    if (ponto < 0x20 || ponto === 0x7f) return 'caractere_de_controle'
-    if (ponto > 0x7e) return 'caractere_nao_ascii'
-  }
-  return null
-}
 
 /** E-mail (minúsculo) → time folha. Função pura: **não lança**, para não virar `promessa`. */
 function indexarPorEmail(pessoas: readonly PessoaTeamGuide[]): ReadonlyMap<string, string> {

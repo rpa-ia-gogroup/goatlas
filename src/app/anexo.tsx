@@ -26,7 +26,7 @@
  * detalhe possível de errar.
  */
 
-import { useRef, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { api, ErroApi } from './api'
 
 /**
@@ -49,6 +49,16 @@ interface Envio {
   readonly nome: string
   readonly estado: EstadoEnvio
   readonly motivo?: string
+  /**
+   * `blob:` do arquivo que ESTA aba enviou — spec 007, `FR-11` (achado `F1` do `/analyze`).
+   *
+   * ⚠️ Antes de o chamado existir **não há rota** que sirva o anexo (`urlDoAnexoNoApp` exige
+   * `issueKey` + vínculo), e o servidor não guarda os bytes (`D-26`). Então a pré-visualização
+   * na conversa só é possível a partir do `File` local. Recarregar a página perde o blob, e aí
+   * o item deixa de ser clicável — nunca uma janela vazia (`FR-12`).
+   */
+  readonly url?: string
+  readonly tipo?: string
 }
 
 /**
@@ -133,6 +143,7 @@ export function PerguntaDeAnexo({
 }) {
   const [envios, setEnvios] = useState<readonly Envio[]>([])
   const entrada = useRef<HTMLInputElement>(null)
+
 
   async function enviar(arquivos: readonly File[]) {
     for (const arquivo of arquivos) {
@@ -342,6 +353,7 @@ export function ResultadoDoAnexo({
 export function useAnexoNaConversa({
   garantirConversa,
   maximo,
+  aoVerArquivo,
 }: {
   /**
    * 🚨 **Resolve o id, e CRIA a conversa se ela ainda não existir.**
@@ -358,9 +370,21 @@ export function useAnexoNaConversa({
    */
   garantirConversa: () => Promise<string>
   maximo: number
+  /** Abre a visualização rápida do arquivo local — spec 007, `FR-11`. */
+  aoVerArquivo?: (anexo: { nome: string; tipo: string | null; url: string; local: true }) => void
 }): { readonly enviar: (arquivos: readonly File[]) => Promise<void>; readonly elemento: ReactElement } {
   const [envios, setEnvios] = useState<readonly Envio[]>([])
   const entrada = useRef<HTMLInputElement>(null)
+  // ⚠️ `revokeObjectURL` ao desmontar: sem isto cada print colado vaza memória na aba. O
+  // `ref` guarda as URLs porque o cleanup não vê o estado atual.
+  const urlsVivas = useRef<string[]>([])
+  useEffect(
+    () => () => {
+      for (const url of urlsVivas.current) URL.revokeObjectURL(url)
+      urlsVivas.current = []
+    },
+    [],
+  )
 
   const enviados = envios.filter((e) => e.estado !== 'falhou').length
   const cheio = enviados >= maximo
@@ -406,8 +430,16 @@ export function useAnexoNaConversa({
       ])
       try {
         await api.anexarAntesDoChamado({ via: 'conversa', conversaId }, arquivo)
+        // A URL local nasce só no sucesso: oferecer pré-visualização de arquivo que não subiu
+        // diria que ele está no chamado.
+        const url = URL.createObjectURL(arquivo)
+        urlsVivas.current.push(url)
         setEnvios((atuais) =>
-          atuais.map((e) => (e.nome === arquivo.name ? { nome: e.nome, estado: 'enviado' } : e)),
+          atuais.map((e) =>
+            e.nome === arquivo.name
+              ? { nome: e.nome, estado: 'enviado', url, tipo: arquivo.type }
+              : e,
+          ),
         )
       } catch (erro) {
         const motivo =
@@ -469,7 +501,19 @@ export function useAnexoNaConversa({
                   <span aria-hidden="true">{ROTULOS_ENVIO[e.estado].simbolo}</span>{' '}
                   {ROTULOS_ENVIO[e.estado].palavra}
                 </span>
-                <span className="envio-nome">{e.nome}</span>
+                {/* `FR-11`/`FR-12` — clicável **só** quando esta aba tem o arquivo. Sem o
+                    blob (página recarregada), fica texto: nunca uma janela vazia. */}
+                {e.url && aoVerArquivo ? (
+                  <button
+                    type="button"
+                    className="envio-nome envio-nome-clicavel"
+                    onClick={() => aoVerArquivo({ nome: e.nome, tipo: e.tipo ?? null, url: e.url!, local: true })}
+                  >
+                    {e.nome}
+                  </button>
+                ) : (
+                  <span className="envio-nome">{e.nome}</span>
+                )}
                 {e.motivo && <span className="dica">{e.motivo}</span>}
               </li>
             ))}

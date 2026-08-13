@@ -82,6 +82,11 @@ import {
   MAX_ENVIOS_PENDENTES_POR_JANELA,
   TTL_ANEXO_PENDENTE_HORAS,
 } from '../tickets/anexos-pendentes'
+// spec 007 — a leitura do anexo (no upload) e a espera do turno por ela.
+import { analisarAnexoDaConversa } from './analise-no-upload'
+import { esperarAnalises, montarContextoDeAnalises } from '../agent/espera-de-analises'
+import { rotuloDaFalhaOcr } from '../ocr/contrato'
+import { analiseVaiParaConversa, type AnaliseDeAnexo } from '../tickets/analises-anexo'
 import {
   materializarAnexosDoChamado,
   type ResultadoAnexoNaCriacao,
@@ -230,6 +235,40 @@ async function rotear(
       recurso: conversa.id,
       resultado: 'sucesso',
     })
+
+    /**
+     * 🚨 **O agente não responde antes de a leitura do anexo terminar** — `FR-1b`.
+     *
+     * A espera é do **turno** e tem teto de 8 s; no caso comum (colar o print e escrever em
+     * seguida) a análise já acabou e isto custa **uma** leitura do banco.
+     *
+     * ⚠️ **A descrição entra como mensagem de `tool`, não como texto da pessoa.** Duas razões
+     * que valem sozinhas: guardá-la como mensagem `user` afirmaria que ela escreveu aquilo, e
+     * o caminho de `tool` já é o que a camada de IA rotula como **dado** (`chat()` prefixa
+     * `[resultado de …]`, `RNF-08`) — o mesmo tratamento do resultado da busca no Confluence.
+     *
+     * ⚠️ E entra **antes** de `processarMensagem`, que é quem grava a mensagem da pessoa: o
+     * modelo lê "isto é o que o arquivo mostra" e depois a pergunta dela, que é a ordem em que
+     * as duas coisas aconteceram.
+     */
+    const espera = await esperarAnalises({
+      analises: ctx.analisesAnexo,
+      conversaId: conversa.id,
+      solicitanteEmail: eu.email,
+      agoraMs: () => Date.parse(ctx.agora()),
+      dormir: (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)),
+    })
+    const contextoDeAnexos = montarContextoDeAnalises(espera)
+    if (contextoDeAnexos) {
+      await ctx.conversas.adicionarMensagem(
+        ctx.novoId(),
+        conversa.id,
+        'tool',
+        contextoDeAnexos,
+        'anexo_lido',
+      )
+    }
+
     const r = await ctx.orquestrador.processarMensagem(conversa, texto, ctx.valores)
     const depois = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email)
     return json({
@@ -245,6 +284,13 @@ async function rotear(
         historico: estadoVerificacao(depois?.historicoVerificado, depois?.historicoFalhou),
       },
       podeConfirmar: Boolean(depois?.proposta),
+      // `FR-5`/`FR-5b` — só o que é `pronta` chega à tela; `irrelevante` segue calada para o
+      // chamado, e o que não deu para ler é dito com o NOME do arquivo, nunca em silêncio.
+      analisesAnexo: espera.analises.map((a: AnaliseDeAnexo) => ({
+        nomeArquivo: a.nomeArquivo,
+        estado: a.estado,
+        descricao: analiseVaiParaConversa(a) ? a.descricao : null,
+      })),
       // `D-52` — a área exibida no cartão é a que vai ao vínculo. Resolvida **uma vez**,
       // quando a proposta passa a existir; nas mensagens seguintes o campo já está lá e
       // nada é reconsultado.
@@ -1006,6 +1052,35 @@ async function rotear(
       resultado: 'sucesso',
       detalhe: { etapa: 'temporario', nome: validado.nome, duplicado },
     })
+
+    /**
+     * 🚨 **A análise roda AQUI, nesta requisição** — spec 007, `FR-1`, e achado `F2` do
+     * `/analyze`.
+     *
+     * Esta é a **única** requisição que tem os bytes: o `D-26` manda o arquivo ao Jira e não
+     * guarda conteúdo, e `temporaryAttachmentId` não devolve bytes. Depois daqui, o arquivo só
+     * volta a ser legível **após** a criação do chamado, pelo proxy — tarde demais.
+     *
+     * ⚠️ **Não é `ctx.waitUntil`**: aquele mecanismo não tem um único consumidor neste app
+     * (o hook existe em `worker.ts` e nada o usa), então nada prova que a plataforma não corta
+     * a promessa — e o fallback seria impossível, por falta de bytes. O custo aceito é o
+     * upload responder mais devagar, numa requisição que **ninguém está esperando**: a pessoa
+     * está digitando, e a tela já mostra "enviando" por arquivo (`D-59`).
+     *
+     * ⚠️ **Só na conversa.** No formulário direto (`D-04`) não há agente para receber a
+     * descrição, e ler o arquivo ali seria pagar por um resultado que ninguém lê.
+     */
+    if (conversaId !== null && !duplicado) {
+      await analisarAnexoDaConversa(ctx, {
+        conversaId,
+        solicitanteEmail: eu.email,
+        nome: validado.nome,
+        tipo: validado.tipo,
+        // O upload guarda `ArrayBuffer` (é o que o multipart consome) e o analisador fala em
+        // bytes. A view não copia o conteúdo.
+        bytes: new Uint8Array(validado.bytes),
+      })
+    }
 
     // Duplo clique responde 201 de propósito (`SC-09`): não é erro da pessoa, e a
     // constraint já garantiu que existe uma linha só.
@@ -2478,6 +2553,23 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
     // Fonte não configurada é estado válido (`FR-13`), não avaria.
     ctx.teamguide?.verificarSaude() ?? Promise.resolve({ ok: true, detalhe: 'não configurada' }),
   ])
+
+  /**
+   * spec 007, `T-662` — a leitura de PDF, sondada pelo **mesmo caminho** que ela usa.
+   *
+   * ⚠️ Sonda com um PDF mínimo de verdade (`%PDF-1.4` + `%%EOF`), não com bytes aleatórios:
+   * sonda que exercita outro caminho responde sobre o caminho que ninguém usa — a lição de
+   * `D-40` para a TeamGuide. O worker pode legitimamente não achar texto nisto, e
+   * `sem_conteudo` **é** resposta: significa que a conexão saiu e o serviço respondeu.
+   */
+  const pdfDeSonda = new TextEncoder().encode('%PDF-1.4\n%%EOF\n')
+  const leituraDePdf = await ctx.lerPdf(pdfDeSonda).then(
+    (r) =>
+      r.estado === 'falhou'
+        ? { ok: false, detalhe: rotuloDaFalhaOcr(r) }
+        : { ok: true, detalhe: r.estado === 'lido' ? 'ok' : 'ok · sem texto na sonda' },
+    () => ({ ok: false, detalhe: 'erro_inesperado' }),
+  )
   let banco = { ok: true, detalhe: 'ok' }
   try {
     await ctx.db.query('SELECT 1 AS ok', [])
@@ -2488,6 +2580,9 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
   // (`D-37`, `RNF-18`): com a fonte no chão os chamados continuam abrindo, então um 503
   // aqui diria "o app caiu" sobre um app inteiro de pé — e ensinaria o time a ignorar o
   // health check, que é o custo que nenhum alarme falso paga.
+  // ⚠️ **`leituraDePdf` fica fora pela MESMA razão** (spec 007): sem ela a conversa segue,
+  // o anexo continua no chamado e a tela diz que não leu (`FR-7`). Um 503 por causa da
+  // leitura de um formato de arquivo é alarme falso sobre o app inteiro.
   const ok = atlassian.ok && ia.ok && banco.ok
   return json(
     {
@@ -2500,6 +2595,8 @@ async function tratarHealth(ctx: Contexto): Promise<Response> {
         ia,
         banco,
         teamguide,
+        // spec 007 — a quinta credencial tem sonda própria, fora do `ok` agregado.
+        leituraDePdf,
         sso: { ok: true, detalhe: 'edge GoDeploy' },
       },
     },

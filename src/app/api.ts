@@ -44,6 +44,19 @@ export interface RespostaTurno {
     readonly historico: EstadoVerificacao
   }
   readonly podeConfirmar: boolean
+  /**
+   * O que a IA leu de cada anexo desta conversa — spec 007, `FR-5`/`FR-5b`/`FR-7`.
+   *
+   * ⚠️ `descricao` vem `null` quando a análise foi **irrelevante**: a descrição existe e vai ao
+   * chamado no fim, mas a tela **não diz nada** sobre a foto do crachá de alguém. `estado` é o
+   * que distingue "ainda estou lendo" de "não sei ler este formato" — três frases diferentes,
+   * porque pedem ações diferentes.
+   */
+  readonly analisesAnexo?: readonly {
+    readonly nomeArquivo: string
+    readonly estado: string
+    readonly descricao: string | null
+  }[]
   readonly proposta: Proposta | null
   /**
    * `RF-18` — o **nome** do assunto, resolvido pelo servidor (`D-53`).

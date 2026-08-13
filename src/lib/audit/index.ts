@@ -60,6 +60,22 @@ export type AcaoAuditada =
    */
   | 'declaracao_anexo_ausente'
   /**
+   * Spec 007 — o que aconteceu com a leitura de um anexo da conversa (`FR-10`).
+   *
+   * São **três**, derivadas dos seis estados por `acaoDeAuditoriaDaAnalise` (achado `F3` do
+   * `/analyze`), e as três são perguntas diferentes para quem investiga: *leu* ·
+   * *não sei ler este formato / o serviço caiu* · *não deu para saber*. Uma ação só com
+   * `motivo` no detalhe faria a contagem que importa — "quantos anexos o app conseguiu
+   * ler?" — exigir ler o detalhe linha por linha.
+   *
+   * ⚠️ **Nenhuma delas carrega a descrição nem o nome do arquivo:** o admin lê esta tabela, e
+   * o arquivo é conteúdo pessoal de quem o enviou (`RNF-01`, `RNF-30`) — o mesmo raciocínio
+   * que mantém o nome fora de `anexo_servido`.
+   */
+  | 'anexo_analisado'
+  | 'anexo_nao_lido'
+  | 'anexo_leitura_indefinida'
+  /**
    * T-404 / SC-05b — o schema do request type não pôde ser lido, então a pergunta de
    * `RF-62` não foi feita e o chamado abriu (fail-open declarado em `plan.md` §9).
    *
