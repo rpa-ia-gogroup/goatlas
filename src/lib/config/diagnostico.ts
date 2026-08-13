@@ -176,6 +176,10 @@ function diagnosticarInterrupcao(v: ConfigValores): Capacidade {
   // A Regra 1 depende da MESMA allowlist da busca: sem página para oferecer, não
   // há deflexão possível — mesmo com o threshold configurado.
   const regra1 = buscaConfigurada(v.espacos_confluence)
+  // Continua sendo o predicado de `rules/`, nunca uma condição escrita aqui — o que
+  // mudou em `D-60` é só a FRASE: sem campo na tela (a Regra 2 está desligada por
+  // decisão), "sem exemplos reais" descreveria uma pendência a resolver e mandaria
+  // a pessoa procurar um controle que não existe.
   const regra2 = regra2Disponivel(v.regra2_exemplos_ajuste_operacional)
   // Só o CRITÉRIO, sem o sujeito — quem chama põe o sujeito uma vez. Guardar a
   // frase inteira aqui produzia "Só o histórico interrompe — o histórico
@@ -188,7 +192,7 @@ function diagnosticarInterrupcao(v: ConfigValores): Capacidade {
       ...base,
       estado: 'desligado',
       consequencia:
-        'O agente não interrompe ninguém: sem espaço do Confluence não há página a oferecer, e sem exemplos reais a verificação de histórico não roda.',
+        'O agente não interrompe ninguém: sem espaço do Confluence não há página a oferecer, e a verificação de histórico está desligada por decisão.',
     }
   }
   if (!regra1) {
@@ -202,7 +206,7 @@ function diagnosticarInterrupcao(v: ConfigValores): Capacidade {
     return {
       ...base,
       estado: 'parcial',
-      consequencia: `Só a documentação interrompe, ${criterio1}. Sem exemplos reais da Gocase, a verificação de histórico não roda.`,
+      consequencia: `Só a documentação interrompe, ${criterio1}. A verificação de histórico está desligada por decisão, e não tem campo nesta tela.`,
     }
   }
   return {
