@@ -28,20 +28,35 @@
  */
 
 /**
- * Tipos exibidos inline. Curta de propósito: cada tipo aqui é um formato que o
- * navegador renderiza no nosso domínio, então entrar nesta lista é uma decisão de
- * segurança, não de conveniência.
+ * Tipos exibidos inline, **e o que o app afirma para cada um**. Curta de propósito: cada
+ * tipo aqui é um formato que o navegador renderiza no nosso domínio, então entrar nesta
+ * lista é uma decisão de segurança, não de conveniência.
+ *
+ * ⚠️ **É mapa, não conjunto** (`D-62`): para texto, o tipo que sai **não** é o que a
+ * Atlassian declarou. `text/markdown` faz o navegador baixar em vez de mostrar, e
+ * `text/plain` sem `charset` renderiza acento quebrado — que viola a regra 4 na única
+ * superfície feita para ler. Continua valendo o princípio de `D-11`: o app **afirma** o
+ * tipo, e a igualdade com o declarado, quando existe, é resultado da allowlist.
  */
-const TIPOS_INLINE = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'image/avif',
-  'image/bmp',
+const TIPOS_INLINE = new Map<string, string>([
+  ['image/png', 'image/png'],
+  ['image/jpeg', 'image/jpeg'],
+  ['image/gif', 'image/gif'],
+  ['image/webp', 'image/webp'],
+  ['image/avif', 'image/avif'],
+  ['image/bmp', 'image/bmp'],
   // PDF é o formato de procedimento anexado — exibir inline é metade do valor do
   // proxy. Ele roda no visualizador do navegador, não no DOM da página.
-  'application/pdf',
+  ['application/pdf', 'application/pdf'],
+  // 🚨 **Texto entra por causa da transcrição** (`D-54`, `text/markdown`): ela é o anexo
+  // que TODO chamado tem, e era o único que a pessoa não conseguia abrir — clicar baixava
+  // um `.md`. Renderizar como `text/plain` é seguro por três razões que valem juntas:
+  // o navegador não executa `text/plain`, `nosniff` o impede de adivinhar `text/html` a
+  // partir do conteúdo, e o CSP `sandbox` continua sem script, sem origem e sem rede.
+  // ⚠️ **`text/html` fica FORA**, e não é esquecimento: HTML no nosso domínio é o vetor
+  // que `D-11` existe para fechar. Markdown vira texto **cru**, nunca HTML renderizado.
+  ['text/markdown', 'text/plain; charset=utf-8'],
+  ['text/plain', 'text/plain; charset=utf-8'],
 ])
 
 /** Tipo de saída de tudo que não é exibível: opaco, sem palpite. */
@@ -69,10 +84,13 @@ export function decidirEntrega(tipoDeclarado: string | null): Entrega {
   // `image/png; charset=binary` → `image/png`. Parâmetro de mídia não interessa e
   // seria mais superfície para injeção.
   const base = (tipoDeclarado ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
-  if (!TOKEN_MIDIA.test(base) || !TIPOS_INLINE.has(base)) {
+  const afirmado = TIPOS_INLINE.get(base)
+  // A grade de token é conferida no **declarado**, não no afirmado: é o declarado que vem
+  // de fora, e é ele que poderia trazer `\r\n` para dentro de um cabeçalho.
+  if (!TOKEN_MIDIA.test(base) || afirmado === undefined) {
     return { contentType: TIPO_OPACO, disposicao: 'attachment' }
   }
-  return { contentType: base, disposicao: 'inline' }
+  return { contentType: afirmado, disposicao: 'inline' }
 }
 
 /** Teto do nome no cabeçalho. Nome de 100 KB não é caso de uso; é carga. */

@@ -1923,6 +1923,27 @@
   opacity: 0.6;
 }
 
+/*
+ * `D-62` — a frase que diz que dá para colar.
+ *
+ * Fica embaixo do clipe, com teto de largura para não empurrar o botão de enviar na mesma
+ * linha do compositor. O `kbd` é desenhado como tecla porque "Ctrl+V" escrito corrido no
+ * meio de uma frase se lê como texto qualquer.
+ */
+.dica-anexo {
+  max-width: 34ch;
+  line-height: 1.35;
+}
+.dica-anexo kbd {
+  font-family: inherit;
+  font-size: 0.9em;
+  font-weight: var(--fw-semibold);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 22%, transparent);
+  background: color-mix(in srgb, var(--go-blue) 6%, transparent);
+}
+
 .anexo-conversa-lista {
   list-style: none;
   margin: 0;

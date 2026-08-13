@@ -52,6 +52,60 @@ interface Envio {
 }
 
 /**
+ * Os arquivos de um `paste` — `D-62`.
+ *
+ * 🚨 **`files` NÃO é a única fonte, e era a única lida.** Dependendo de como a imagem
+ * entrou no clipboard (ferramenta de captura do Windows, "copiar imagem" de uma página,
+ * arquivo copiado do Explorer), o Chrome expõe o mesmo print em `items[]` com
+ * `kind === 'file'` e **`files` vazio**. Ler só `files` fazia o Ctrl+V não colar nada, sem
+ * erro nenhum na tela — o relato que abriu o `D-62`.
+ *
+ * ⚠️ **Uma fonte OU a outra, nunca as duas:** quando as duas estão preenchidas elas
+ * descrevem o mesmo arquivo, e somar produziria o anexo em dobro — que não tem caminho de
+ * volta (`RF-63`).
+ *
+ * ⚠️ Só arquivo. Colar **texto** continua colando texto: interceptar todo `paste` para
+ * checar arquivo é o defeito oposto, e pior, porque atinge quem só quer escrever.
+ */
+export function arquivosDoColar(dados: DataTransfer | null | undefined): readonly File[] {
+  if (!dados) return []
+  const doFiles = Array.from(dados.files ?? [])
+  if (doFiles.length > 0) return doFiles
+  const dosItens: File[] = []
+  for (const item of Array.from(dados.items ?? [])) {
+    if (item.kind !== 'file') continue
+    const arquivo = item.getAsFile()
+    if (arquivo) dosItens.push(arquivo)
+  }
+  return dosItens
+}
+
+/**
+ * Um nome que não colide com o que já subiu — `D-62`.
+ *
+ * 🚨 **Todo print colado do clipboard chega como `image.png`.** A lista de envios era
+ * indexada por **nome**, então o segundo print substituía a linha do primeiro: a tela ficava
+ * idêntica e a leitura natural era *"não inseriu nada"* — enquanto o arquivo **subia**. Dois
+ * anexos, uma linha; o pior par possível num app que existe para a evidência chegar.
+ *
+ * O sufixo é ` (2)`, antes da extensão, como o navegador faz na pasta de downloads — e o
+ * nome novo é o que vai ao Jira, onde três `image.png` também seriam indistinguíveis.
+ */
+export function nomeUnicoDeAnexo(nome: string, jaUsados: readonly string[]): string {
+  if (!jaUsados.includes(nome)) return nome
+  const ponto = nome.lastIndexOf('.')
+  const base = ponto > 0 ? nome.slice(0, ponto) : nome
+  const extensao = ponto > 0 ? nome.slice(ponto) : ''
+  for (let n = 2; n < 100; n++) {
+    const tentativa = `${base} (${n})${extensao}`
+    if (!jaUsados.includes(tentativa)) return tentativa
+  }
+  // Teto para não girar: 99 arquivos com o mesmo nome não é caso de uso, e o teto de
+  // `MAX_ANEXOS_POR_CHAMADO` recusa muito antes.
+  return `${base} (${jaUsados.length + 1})${extensao}`
+}
+
+/**
  * Símbolo **e** palavra para cada estado — exportado para haver o que testar.
  *
  * O estado do envio só existe depois de uma interação, então nenhuma renderização estática
@@ -311,11 +365,22 @@ export function useAnexoNaConversa({
   const enviados = envios.filter((e) => e.estado !== 'falhou').length
   const cheio = enviados >= maximo
 
-  async function enviar(arquivos: readonly File[]) {
+  async function enviar(recebidos: readonly File[]) {
     // O teto é do servidor também (`SC-08`); aqui ele existe para a recusa não custar
     // uma ida de rede — e a mensagem dele continua sendo a que vale.
-    const cabem = arquivos.slice(0, Math.max(0, maximo - enviados))
-    if (cabem.length === 0) return
+    const naFila = recebidos.slice(0, Math.max(0, maximo - enviados))
+    if (naFila.length === 0) return
+    // `D-62` — nome que já está na lista ganha sufixo ANTES de subir. Sem isto, dois
+    // prints colados (os dois `image.png`) ocupam a mesma linha e o segundo parece não
+    // ter acontecido, apesar de existir no chamado.
+    const usados = envios.map((e) => e.nome)
+    const cabem = naFila.map((arquivo) => {
+      const nome = nomeUnicoDeAnexo(arquivo.name, usados)
+      usados.push(nome)
+      // ⚠️ Renomear é criar um `File` novo: `name` é somente-leitura. O tipo e o conteúdo
+      // são os mesmos — é só o rótulo que a pessoa e o time de tech vão ler.
+      return nome === arquivo.name ? arquivo : new File([arquivo], nome, { type: arquivo.type })
+    })
 
     let conversaId: string
     try {
@@ -385,6 +450,16 @@ export function useAnexoNaConversa({
           <span aria-hidden="true">📎</span>
           {cheio ? `Máximo de ${maximo} arquivos` : 'Anexar arquivo'}
         </label>
+
+        {/* `D-62` — o Ctrl+V é o caminho mais usado (print nasce no clipboard) e era
+            **invisível**: quem não soubesse do atalho só tinha o clipe. A frase diz os dois,
+            e diz o teto, porque a recusa em cima da hora é pior que o número anunciado. */}
+        {!cheio && (
+          <span className="dica dica-anexo">
+            Clique para escolher, ou cole com <kbd>Ctrl</kbd>+<kbd>V</kbd> — o print do
+            clipboard entra direto. Até {maximo} arquivos.
+          </span>
+        )}
 
         {envios.length > 0 && (
           <ul className="anexo-conversa-lista">
