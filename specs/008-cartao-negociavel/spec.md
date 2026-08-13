@@ -4,7 +4,7 @@ feature: "cartao-negociavel"
 id: "008"
 status: clarified
 created: "2026-08-13"
-spec_version: 2
+spec_version: 3
 ---
 
 # Spec: O cartão é negociável, e a prioridade vem com motivo
@@ -255,8 +255,9 @@ digitado campos do formulário do tipo de chamado e/ou mexido no seletor de prio
 ## 6. Functional Requirements (EARS)
 
 > Refina **RF-15**, **RF-16**, **RF-18**, **RF-27** e **RF-28**. Os itens marcados **(novo)**
-> não têm ID em `docs/REQUISITOS.md` e o documento precisa ser emendado **antes** de `/tasks`
-> (Princípio VII). IDs livres verificados: `RF-68`, `RF-69`, `RF-70`, `RF-71`, `RN-13`.
+> ganharam ID em `docs/REQUISITOS.md` em 13/08/2026 — **RF-68**, **RF-69**, **RF-70**, **RF-71**
+> (seção M2) e **RN-13** (seção 7) —, então a rastreabilidade do Princípio VII está fechada e
+> `/plan` está liberado. O mapa FR → ID completo está no checklist, no fim deste arquivo.
 
 ### O motivo
 
@@ -421,6 +422,14 @@ Todas resolvidas — nenhuma pendente para `/plan`.
 - [x] Success Criteria são mensuráveis
 - [x] Non-Goals / Out of Scope explícitos
 - [x] Nenhum detalhe de implementação (HOW) vazou para a spec
-- [ ] **Pendência de rastreabilidade (Princípio VII):** cinco comportamentos novos não têm ID
-      em `docs/REQUISITOS.md`. Emendar o documento (`RF-68`, `RF-69`, `RF-70`, `RF-71`,
-      `RN-13`) **antes** de `/tasks`.
+- [x] **Rastreabilidade (Princípio VII) — fechada em 13/08/2026.** Os cinco comportamentos novos
+      têm ID em `docs/REQUISITOS.md`: **RF-68** (o motivo, e a prosa que não afirma nível nem
+      prazo) · **RF-69** (o cartão que sai da tela e volta remontado) · **RF-70** (o aviso, uma
+      vez por conversa) · **RF-71** (a IA ajustando a pedido) na seção **M2**, e **RN-13** (o
+      merge por campo, com o assunto como exceção) na seção **7**. Os FR desta spec passam a
+      citá-los, e `/plan` já pode rastrear.
+
+> **Mapa FR → ID** (para `/tasks` não ter de reconstruí-lo): FR-1/FR-3/FR-4/FR-5/FR-6 → `RF-68`
+> (FR-2 refina `RF-16`/`RF-18`) · FR-7/FR-8 → `RF-69` · FR-9 → `RN-13` · FR-10 → `RN-13` +
+> refina `RF-27` · FR-11 a FR-17 → `RF-71` (FR-12 aplica `RF-28`; FR-13 aplica `D-39`; FR-17
+> aplica `R-04`/`RF-16`) · FR-18 a FR-22 → `RF-70` · FR-23 → `RN-10` + `RNF-30`.
