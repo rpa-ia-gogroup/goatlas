@@ -4094,6 +4094,45 @@ parágrafo continuando a contar, que é a forma mais comum no storage.
 
 ---
 
+### D-67 · A conversa deixa de ser a raiz e ganha `/chat`
+
+**Data:** 13/08/2026 · **Origem:** pedido do mantenedor — *"faça o 'falar com o agente' ter uma
+página dele também `/chat`, tudo tem que ser paginado"* · **Contexto:** `D-65`, `D-56`,
+`RF-13`, Princípio V
+
+O `D-65` deu caminho próprio a seis telas e deixou a sétima — a conversa — morando em `/`. Não
+era esquecimento: a tela de entrada **era** a raiz. Mas o efeito prático é que a tela mais usada
+do app era a única sem endereço: não havia como mandar alguém direto para ela, e ela não aparecia
+na barra como as outras.
+
+**O que mudou:** `CAMINHO_CONVERSA = '/chat'`, e ao abrir em `/` o app **reescreve** a URL.
+
+🚨 **`replaceState`, nunca `push`.** Empilhar na abertura poria duas entradas na mesma tela, e o
+primeiro ← da sessão pareceria travado — voltaria de `/chat` para `/`, que é a mesma tela, e só o
+segundo sairia do app. É o mesmo raciocínio que o `D-65` já registrou para o campo de busca:
+empilha o que é *um passo*, substitui a *correção do estado atual*.
+
+⚠️ **As duas metades valem, e a segunda é a que protege.** `/chat` é o endereço novo; **`/`
+continua caindo na conversa**. Só a primeira metade quebraria o link que as pessoas têm salvo
+e o `?pagina=` antigo (`D-56`: `urlDeLeituraNoApp` escrevia `/?pagina=` antes do `D-65`) — e
+esse link vem da **mensagem de bloqueio da Regra 1**, ou seja, quebrá-lo derrubaria a deflexão
+de `RF-13` num caminho que ninguém revisita.
+
+⚠️ **A reescrita é condicional**, e as três condições existem cada uma por um caso: só quando o
+destino é a conversa (senão sobrescreveria a tela que o caminho pediu), só quando **não** há
+`?pagina=`/`?q=` (senão apagaria o deep link **e** contradiria a tela aberta — a URL voltaria a
+mentir, que é o defeito que `D-65` desfez), e só quando o caminho ainda não é `/chat` (senão
+seria trabalho à toa em toda abertura).
+
+⚠️ **A leitura continua exata por segmento**: `/chat-antigo` e `/chatbot` **não** são `/chat`, e
+caem na conversa como qualquer desconhecido — nunca numa tela de erro, que num app de sete telas
+seria pior que chegar a algum lugar útil.
+
+**Teste:** `tests/rotas-e-historico.test.ts` afirma o par ida-e-volta, que `/` continua caindo na
+conversa, que **nenhuma** tela mora em `/` (é o pedido, escrito como asserção) e a leitura exata.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

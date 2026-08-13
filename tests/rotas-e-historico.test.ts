@@ -57,6 +57,37 @@ describe('D-65 — caminho ↔ tela', () => {
     expect(telaDoCaminho('')).toEqual({ nome: 'conversa' })
   })
 
+  /**
+   * `D-67` — a conversa deixou de ser a raiz e ganhou `/chat`.
+   *
+   * ⚠️ **As duas metades valem**: `/chat` é o endereço dela, e `/` continua caindo nela. Só a
+   * primeira faria o link salvo de todo mundo (e o `?pagina=` antigo) cair em lugar nenhum;
+   * só a segunda deixaria a tela de entrada sem endereço — que é o que o pedido corrige.
+   */
+  describe('D-67 — a conversa tem endereço próprio', () => {
+    it('`caminhoDaTela` escreve `/chat`, e `/chat` volta para a conversa', () => {
+      expect(caminhoDaTela({ nome: 'conversa' })).toBe('/chat')
+      expect(telaDoCaminho('/chat')).toEqual({ nome: 'conversa' })
+    })
+
+    it('🚨 `/` CONTINUA caindo na conversa — é o link que as pessoas têm salvo', () => {
+      expect(telaDoCaminho('/')).toEqual({ nome: 'conversa' })
+    })
+
+    it('nenhuma tela mora na raiz — toda tela tem caminho seu (o pedido)', () => {
+      for (const tela of TELAS) {
+        expect(caminhoDaTela(tela), JSON.stringify(tela)).not.toBe('/')
+      }
+    })
+
+    it('a leitura é exata: `/chat-antigo` não é `/chat`', () => {
+      // Mesmo cuidado do `/documentacao-antiga`: `startsWith` abriria a aba errada sem
+      // nada na tela dizendo.
+      expect(telaDoCaminho('/chat-antigo')).toEqual({ nome: 'conversa' })
+      expect(telaDoCaminho('/chatbot')).toEqual({ nome: 'conversa' })
+    })
+  })
+
   it('caminho desconhecido cai na conversa, nunca em erro', () => {
     // URL digitada errada, link velho e caminho de uma versão futura são a mesma coisa
     // para quem lê: chegar em algum lugar útil é melhor que uma tela de "rota não

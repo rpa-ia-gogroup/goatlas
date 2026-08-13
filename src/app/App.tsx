@@ -14,7 +14,13 @@ import { TelaConversa, TelaDetalhe, TelaFormulario, TelaMeusChamados } from './t
 import { TelaAdmin } from './admin'
 import { TelaAvisos } from './avisos'
 import { entradaDaUrl, TelaDocumentacao, type EntradaDocumentacao } from './confluence'
-import { caminhoDaTela, irPara, telaDoCaminho, type Tela } from './rotas'
+import {
+  CAMINHO_CONVERSA,
+  caminhoDaTela,
+  irPara,
+  telaDoCaminho,
+  type Tela,
+} from './rotas'
 
 // A ORDEM é recomendação: ler a documentação vem antes de acompanhar chamado, e muito
 // antes de abrir um direto. É a mesma sequência que a Regra 1 impõe na conversa.
@@ -59,6 +65,29 @@ export function App() {
     setTela(destino)
     irPara(caminhoDaTela(destino))
   }
+
+  /**
+   * Quem chega em `/` passa a ver `/chat` — pedido do mantenedor ("tudo tem que ser
+   * paginado").
+   *
+   * 🚨 **`substituir`, nunca `empilhar`.** Empilhar aqui poria duas entradas na mesma tela na
+   * abertura, e o primeiro ← da sessão pareceria travado: voltaria de `/chat` para `/`, que é
+   * a mesma tela, e só o segundo sairia do app.
+   *
+   * ⚠️ **Só quando o destino é a conversa E não há deep link de documentação.** Um link
+   * antigo (`/?pagina=X`, escrito por `urlDeLeituraNoApp` antes do `D-65`) abre a
+   * Documentação, e reescrever para `/chat` ali apagaria o parâmetro **e** contradiria a tela
+   * que está aberta — a URL passaria a mentir, que é exatamente o defeito que `D-65` desfez.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (tela.nome !== 'conversa') return
+    if (entrada.pagina || entrada.termo) return
+    if (window.location.pathname === CAMINHO_CONVERSA) return
+    irPara(CAMINHO_CONVERSA, 'substituir')
+    // Só na abertura: depois disso quem escreve a URL é `navegar`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     api
