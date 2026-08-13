@@ -5,7 +5,14 @@
  * meus chamados, detalhe do chamado e o formulário sem IA (D-04).
  */
 
-import { useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactElement,
+} from 'react'
 import {
   api,
   ErroApi,
@@ -30,6 +37,12 @@ import {
   resolverCamposDoSolicitante,
 } from '@/lib/tickets/campos-do-solicitante'
 import { CODIGO_CRIACAO_NAO_CONCLUIDA } from '@/lib/http/respostas'
+import {
+  frasesDaEspera,
+  FRASE_PARA_LEITOR_DE_TELA,
+  MS_POR_FRASE,
+  type ContextoDaEspera,
+} from './frases-de-espera'
 import {
   Aviso,
   Selo,
@@ -360,9 +373,15 @@ function ConversaEmCurso({
           <EntradaConversa key={i} fala={f} />
         ))}
         {enviando && (
-          <p className="carregando" aria-live="polite">
-            Verificando antes de responder…
-          </p>
+          <EsperaDoTurno
+            contexto={{
+              lendoAnexo: (analises ?? []).some((a) => a.estado === 'analisando'),
+              quantosAnexos: (analises ?? []).length,
+              documentacaoVerificada: confluence === 'ok',
+              historicoVerificado: historico === 'ok',
+              primeiraMensagem: falas.filter((f) => f.de === 'usuario').length <= 1,
+            }}
+          />
         )}
         {arrastando && (
           <p className="conversa-soltar-aviso" aria-hidden="true">
@@ -479,14 +498,42 @@ export function Compositor({
           value={valor}
           onChange={(e) => aoMudar(e.target.value)}
           placeholder="Ex.: o relatório de vendas de ontem não atualizou"
+          // `D-68` — três linhas, não cinco: fixo no rodapé, cada linha do campo é altura
+          // que a conversa perde para sempre.
+          rows={3}
           disabled={enviando || justificando}
-          aria-describedby={justificando ? 'mensagem-pausada' : undefined}
+          aria-describedby={justificando ? 'mensagem-pausada' : 'mensagem-atalho'}
+          /**
+           * `D-68` — **Enter envia; Shift+Enter e Alt+Enter pulam linha.**
+           *
+           * É o gesto que qualquer pessoa traz de outro chat, e o `textarea` cru fazia o
+           * oposto: obrigava a levar a mão ao botão a cada mensagem.
+           *
+           * 🚨 **`isComposing` é obrigatório, e não é detalhe de i18n.** Em português se
+           * escreve `ção` com tecla morta, e o navegador dispara `keydown` com `Enter`
+           * durante a composição do caractere — sem esta guarda, confirmar um acento
+           * **enviaria a mensagem no meio da palavra**. O defeito só apareceria para quem
+           * digita acento, que aqui é todo mundo (regra 4).
+           */
+          onKeyDown={(e) => {
+            if (!deveEnviarComEnter(e)) return
+            e.preventDefault()
+            // O mesmo caminho do botão: o `form` decide se há texto e se já está enviando.
+            e.currentTarget.form?.requestSubmit()
+          }}
           // 🚨 **O `onPaste` NÃO mora aqui** (`D-62`). Colar é o caminho que mais importa —
           // print nasce no clipboard —, e por isso ele passou para um listener no
           // `document`, em `TelaConversa`: com o handler no campo, colar com o foco em
           // qualquer outro lugar da tela não fazia nada. Devolvê-lo para cá **sem** remover
           // o de lá sobe o mesmo arquivo duas vezes: o evento borbulha até o documento.
         />
+        {/* O atalho é DITO: gesto que não se anuncia é gesto que metade das pessoas não
+            descobre — e quem não descobrir continua clicando no botão, que segue lá. */}
+        {!justificando && (
+          <span className="dica dica-atalho" id="mensagem-atalho">
+            <kbd>Enter</kbd> envia · <kbd>Shift</kbd>+<kbd>Enter</kbd> pula linha
+          </span>
+        )}
         {justificando && (
           <span className="dica" id="mensagem-pausada">
             Termine a justificativa acima — ou use "Voltar" — para escrever aqui de novo.
@@ -1913,8 +1960,23 @@ export function LeituraDosAnexos({
     <ul className="leitura-anexos">
       {visiveis.map((a) => (
         <li key={a.nomeArquivo} className={`leitura-anexo leitura-${a.estado}`}>
-          <span className="leitura-arquivo">{a.nomeArquivo}</span>
-          <span className="leitura-frase">{fraseDaLeitura(a.estado, a.descricao)}</span>
+          {/*
+            🚨 **Fechado por padrão** — pedido do mantenedor. A descrição de um print tem duas
+            a três frases, e três anexos empurravam a conversa inteira para fora da tela.
+            ⚠️ `<details>`/`<summary>` nativos: teclado, `aria-expanded` e o estado de aberto
+            vêm do navegador. Reimplementar com `useState` custaria os três — o mesmo
+            raciocínio de `<dialog>` no visualizador (`D-64`).
+            ⚠️ O `summary` carrega o **nome do arquivo e o estado em palavra**: fechado, ele
+            precisa dizer sozinho o que aconteceu (`RNF-28`), senão a pessoa abre um por um
+            para descobrir qual não foi lido.
+          */}
+          <details>
+            <summary>
+              <span className="leitura-arquivo">{a.nomeArquivo}</span>
+              <span className="leitura-selo">{seloDaLeitura(a.estado)}</span>
+            </summary>
+            <span className="leitura-frase">{fraseDaLeitura(a.estado, a.descricao)}</span>
+          </details>
         </li>
       ))}
     </ul>
@@ -1930,4 +1992,86 @@ export function fraseDaLeitura(estado: string, descricao: string | null): string
   if (estado === 'falhou') return 'não consegui ler este arquivo agora — ele foi anexado ao chamado de qualquer forma'
   // `pronta` sem descrição: dizer "li" sem dizer o que seria pior que não dizer nada.
   return 'este arquivo foi anexado ao chamado'
+}
+
+/**
+ * A espera do turno, com frase que muda — pedido do mantenedor ("um loading mais
+ * interessante").
+ *
+ * 🚨 **A rotação é VISUAL; quem fala com o leitor de tela é uma frase estável.** Uma região
+ * `aria-live` trocando de texto a cada 2,6 s vira interrupção a cada 2,6 s — o oposto de
+ * acessível. Por isso são dois elementos: o visível (`aria-hidden`) que gira, e o anunciado
+ * (recortado por `clip-path`, como o estado das tarefas em `D-63`) que não muda.
+ *
+ * ⚠️ **`prefers-reduced-motion` desliga a troca**, mostrando a primeira frase e parando.
+ * Texto que muda sozinho é movimento, e o piso de a11y (regra 9) não abre exceção para texto.
+ *
+ * ⚠️ **As frases vêm do contexto** (`frasesDaEspera`), nunca de uma lista fixa: dizer "lendo seu
+ * arquivo" numa conversa sem arquivo é o app afirmando o que não aconteceu — a família de
+ * `D-33`/`D-41`/`RF-43`.
+ */
+export function EsperaDoTurno({ contexto }: { contexto: ContextoDaEspera }): ReactElement {
+  const frases = useMemo(() => frasesDaEspera(contexto), [contexto])
+  const [indice, setIndice] = useState(0)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const paradoPorPreferencia = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (paradoPorPreferencia || frases.length <= 1) return
+    const t = setInterval(() => {
+      // Para na última: ciclar faria a espera longa (o turno real leva 15–40 s) parecer laço.
+      setIndice((i) => Math.min(i + 1, frases.length - 1))
+    }, MS_POR_FRASE)
+    return () => clearInterval(t)
+  }, [frases])
+
+  return (
+    <p className="carregando espera-do-turno">
+      <span className="espera-pontos" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+      <span className="espera-frase" aria-hidden="true">
+        {frases[Math.min(indice, frases.length - 1)]}
+      </span>
+      {/* Uma frase, estável, para quem ouve a tela. */}
+      <span className="apenas-leitor-de-tela" aria-live="polite">
+        {FRASE_PARA_LEITOR_DE_TELA}
+      </span>
+    </p>
+  )
+}
+
+/**
+ * A palavra que o cartão fechado mostra. **Nunca só cor** (regra 9) e nunca só ícone: fechado,
+ * o cartão é a única coisa que a pessoa lê sobre aquele arquivo.
+ */
+export function seloDaLeitura(estado: string): string {
+  if (estado === 'pronta') return 'lido'
+  if (estado === 'analisando') return 'lendo…'
+  return 'não lido'
+}
+
+/**
+ * Enter envia? — `D-68`. Puro, para haver o que testar (a suíte roda sem DOM).
+ *
+ * ⚠️ **Três guardas, cada uma com um caso real:** `Shift`/`Alt` pulam linha (é o gesto que
+ * substitui o Enter antigo, e sem eles não há como escrever parágrafo) · `Ctrl`/`Meta`+Enter
+ * **não** enviam, porque em vários apps essa é justamente a combinação de enviar e aqui
+ * duplicaria o gesto · e `isComposing` protege o acento, que em português é a maioria das
+ * palavras.
+ */
+export function deveEnviarComEnter(e: {
+  readonly key: string
+  readonly shiftKey: boolean
+  readonly altKey: boolean
+  readonly ctrlKey: boolean
+  readonly metaKey: boolean
+  readonly nativeEvent?: { readonly isComposing?: boolean }
+}): boolean {
+  if (e.key !== 'Enter') return false
+  if (e.nativeEvent?.isComposing) return false
+  if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return false
+  return true
 }

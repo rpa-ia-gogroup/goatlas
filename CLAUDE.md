@@ -949,6 +949,28 @@ destes reabre um vazamento que já foi fechado.
   `float: left` + `width: 100%`: o float tira o elemento daquela categoria e, num container
   flex, é ignorado — sobra um item de flex comum, que respeita padding e gap. Não trocar o
   `fieldset`/`legend` por `div`: são eles que nomeiam o grupo de rádio para leitor de tela.
+- 🚨 **O compositor é FIXO, e o fixo tem um custo que precisa ser medido** (`D-68`). `sticky`
+  com **fundo explícito** — sem ele a conversa passa por baixo do campo (o defeito de fundo
+  transparente de `D-64`). ⚠️ E pinar criou problema novo: o compositor virou **39% da tela**
+  (346 px de 898). Compactado para 32% cortando o campo para 3 linhas, pondo clipe e dica na
+  mesma linha e reduzindo a explicação do Ctrl+V a uma linha — **o atalho continua dito, a
+  explicação saiu**. Quem acrescentar linha ali está tirando altura da conversa para sempre.
+- 🚨 **`Enter` envia, e `isComposing` é obrigatório** (`D-68`). Em português se escreve `ção`
+  com tecla morta, e o `keydown` de `Enter` dispara **durante a composição**: sem a guarda,
+  confirmar o acento manda a mensagem no meio da palavra — para todo mundo, não para um caso de
+  borda. ⚠️ `Shift`/`Alt`+`Enter` pulam linha; `Ctrl`/`Cmd`+`Enter` **não** enviam (em outros
+  apps essa é a combinação de enviar, e aceitá-la duplicaria o gesto). O botão **fica**.
+- 🚨 **A frase de espera é FUNÇÃO do que está rodando, nunca uma lista fixa** (`D-68`,
+  `app/frases-de-espera.ts`). "Analisando sua imagem…" sem imagem é o app afirmando o que não
+  aconteceu — família de `D-33`/`D-41`/`RF-43` —, e há teste afirmando que nenhuma frase fala de
+  arquivo quando não há anexo. ⚠️ **A rotação é visual; o `aria-live` recebe UMA frase estável**
+  (trocar texto a cada 2,6 s vira interrupção a cada 2,6 s), e ela tem de ser verdadeira durante
+  a espera inteira. ⚠️ **Para na última, não cicla** — o turno leva 15–40 s, e ciclar parece
+  laço. `prefers-reduced-motion` desliga a troca e o pulsar.
+- ⚠️ **A leitura do anexo é `<details>` fechado** (`D-68`): 22 px fechado × 53 px aberto, e o
+  `summary` carrega **nome + estado em palavra** (`lido`/`lendo…`/`não lido`) — fechado ele é a
+  única coisa que a pessoa lê daquele arquivo. Nativo pelo mesmo motivo do `<dialog>` em `D-64`:
+  teclado e estado vêm do navegador.
 - 🚨 **Toda tela tem caminho — inclusive a conversa, em `/chat`** (`D-67`). Ela era a única
   ainda morando em `/`, e a tela mais usada do app era a única sem endereço. ⚠️ **`/` continua
   caindo nela**, e isso protege duas coisas: o link que as pessoas têm salvo e o `?pagina=`
