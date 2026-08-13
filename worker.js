@@ -10029,7 +10029,7 @@ async function rotear(req, ctx, eu, caminho, url) {
       validada.proposta.tipoChamadoId,
       schema,
       corpo?.declarouAnexo,
-      // `D-68` — mesma regra no formulário: quem já subiu arquivo por esta chave não é
+      // `D-69` — mesma regra no formulário: quem já subiu arquivo por esta chave não é
       // perguntado de novo. Chave ausente gerou um id novo acima, e aí não há anexo a casar.
       chave
     );

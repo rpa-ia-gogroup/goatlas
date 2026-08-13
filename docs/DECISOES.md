@@ -4133,7 +4133,74 @@ conversa, que **nenhuma** tela mora em `/` (é o pedido, escrito como asserção
 
 ---
 
-### D-68 · O assunto era escolhido entre números, e a pergunta do anexo ignorava o anexo
+### D-68 · O compositor fixo, o Enter que envia, a espera que fala e o anexo em cartão
+
+**Data:** 13/08/2026 · **Origem:** quatro pedidos do mantenedor no mesmo lote ·
+**Contexto:** `RNF-12`, `RNF-28`, `D-64`, `D-67`, regra 4, regra 9
+
+**1. O compositor é fixo no rodapé da conversa.** *"Caso ela suba pra ler o histórico, deve
+continuar podendo falar algo."* `position: sticky` em vez de `fixed`: ele continua no fluxo do
+painel, então não cobre o fim da página nem exige `padding` compensatório. ⚠️ **O fundo é
+obrigatório, não decoração** — sem ele o texto da conversa passa **por baixo** do campo
+enquanto rola, que é o mesmo defeito de fundo transparente que o `D-64` mediu no visualizador.
+
+🚨 **E o fixo criou um problema novo, medido no navegador: o compositor virou 39% da tela.**
+Rótulo, campo de cinco linhas, duas dicas, clipe e lista de envio — 346 px de móvel permanente
+num painel de 898 px. Enquanto ele rolava com a conversa isso era invisível; pinado, é um terço
+da leitura. Compactado para **270 px (32%)**: campo com três linhas, clipe e dica na mesma
+linha, e a explicação do Ctrl+V reduzida de três linhas para uma. ⚠️ **O atalho continua
+dito** — o que saiu foi a explicação, não a informação.
+
+**2. `Enter` envia; `Shift+Enter` e `Alt+Enter` pulam linha.** É o gesto que qualquer pessoa
+traz de outro chat, e o `textarea` cru fazia o oposto — obrigava a levar a mão ao botão em cada
+mensagem. 🚨 **`isComposing` é obrigatório, e não é detalhe de internacionalização:** em
+português se escreve `ção` com tecla morta, e o navegador dispara `keydown` de `Enter` durante a
+composição do caractere. Sem essa guarda, confirmar um acento **enviaria a mensagem no meio da
+palavra** — defeito que só apareceria para quem digita acento, ou seja, todo mundo (regra 4).
+⚠️ `Ctrl`/`Cmd`+`Enter` **não** enviam: em vários apps essa é justamente a combinação de
+enviar, e aceitá-la aqui duplicaria o gesto sem ninguém pedir. E o botão **fica** — atalho não
+descoberto não pode custar o caminho óbvio.
+
+**3. A espera do turno diz o que está acontecendo — e só o que está.** Até dez frases curtas,
+girando a cada 2,6 s.
+
+🚨 **A lista é FUNÇÃO do contexto, nunca fixa.** "Analisando sua imagem…" numa conversa sem
+imagem é o app afirmando o que não aconteceu — a mesma família de `D-33` (o prompt prometia
+verificações que a instalação não tinha), `D-41` (`lacunaDocumentacao` para termo que ninguém
+deixou de documentar) e `RF-43` (*"o resto do conteúdo está completo"* impresso sobre conteúdo
+faltando). Então: frase de arquivo só com arquivo em leitura, frase de documentação só se a
+busca ainda não rodou, "entendendo o que você descreveu" só na primeira mensagem. Há teste
+afirmando que **nenhuma** frase fala de arquivo quando não há anexo.
+
+⚠️ **A rotação é VISUAL; o leitor de tela recebe UMA frase estável.** Região `aria-live`
+trocando de texto a cada 2,6 s vira interrupção a cada 2,6 s. São dois elementos: o visível
+(`aria-hidden`) que gira e o anunciado (recortado por `clip-path`, como o estado das tarefas em
+`D-63`) que não muda — e ele precisa ser verdadeiro durante a espera inteira, por isso é
+*"Verificando antes de responder…"*, nunca *"lendo o arquivo"*.
+
+⚠️ **`prefers-reduced-motion` desliga a troca e o pulsar dos pontos**, e a primeira frase fica.
+Texto que muda sozinho é movimento, e o piso de a11y não abre exceção para texto (regra 9).
+⚠️ **Para na última frase, não cicla:** o turno real leva 15–40 s (medido em 13/08), e voltar
+ao começo faria a espera longa parecer laço infinito justamente quando a pessoa está mais
+desconfiada.
+
+**4. A leitura do anexo virou cartão fechado.** *"Não deve ocupar tanto espaço."* A descrição
+de um print tem duas a três frases, e três anexos empurravam a conversa para fora da tela.
+`<details>`/`<summary>` nativos: teclado, `aria-expanded` e o estado aberto vêm do navegador —
+reimplementar com `useState` custaria os três, o mesmo raciocínio do `<dialog>` em `D-64`.
+Medido: **22 px fechado, 53 px aberto**. ⚠️ **O `summary` carrega o nome do arquivo E o estado
+em palavra** (`lido` · `lendo…` · `não lido`): fechado, ele é a única coisa que a pessoa lê
+sobre aquele arquivo, e sem o selo ela abriria um por um para descobrir qual falhou (`RNF-28`).
+
+⚠️ **Uma asserção antiga estreitou, e o motivo fica registrado:**
+`rn07-caminho-override.test.ts` afirmava `not.toContain('aria-describedby')` como proxy de
+*"o compositor não explica que está pausado"*. A dica do atalho é um `describedby` legítimo, e o
+proxy largo reprovou. Hoje o caso afirma o alvo: **sem** `mensagem-pausada`, **com**
+`mensagem-atalho`.
+
+---
+
+### D-69 · O assunto era escolhido entre números, e a pergunta do anexo ignorava o anexo
 
 **Data:** 13/08/2026 · **Origem:** teste do chat pelo mantenedor · **Contexto:** `D-53`, `D-59`,
 `D-62`, `D-47`, `RF-15`, `RF-18`, `RF-28`, `RF-62`, `RN-11`
@@ -4243,9 +4310,9 @@ anexou 2 arquivos"* com os dois nomes e *"Ainda cabem 1 de 3"* · terceiro anexo
 abertura sem declarar nada → `GOATLAS-1` com *"✓ Anexado: image.png, print-do-erro.png,
 terceiro.png"* · e a tela do formulário intacta, com os dois rádios e a frase composta de `D-46`.
 
-**Testes:** `tests/d68-assunto-com-nome.test.ts` (10 casos — o que atravessa a fronteira, o
+**Testes:** `tests/d69-assunto-com-nome.test.ts` (10 casos — o que atravessa a fronteira, o
 filtro de desk, a indisponibilidade que não cai para os ids) e
-`tests/d68-anexo-ja-enviado.test.ts` (18 — a rota e o que ela não expõe, o isolamento por
+`tests/d69-anexo-ja-enviado.test.ts` (18 — a rota e o que ela não expõe, o isolamento por
 e-mail, o fato vencendo a resposta, `RN-11` intacta para quem não anexou, e a lista que fica no
 teto). `ClienteAtlassianFake` ganhou falha injetável em `listarTiposChamado`: era a única
 operação sem uma, e sem ela o caminho de degradação não tinha como ser encenado.

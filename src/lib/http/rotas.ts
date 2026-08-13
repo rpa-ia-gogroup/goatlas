@@ -362,7 +362,7 @@ async function rotear(
   }
 
   /**
-   * O que esta conversa já tem anexado — `D-68`, `RF-61`, `RF-63`.
+   * O que esta conversa já tem anexado — `D-69`, `RF-61`, `RF-63`.
    *
    * 🚨 **Existe porque a tela não tinha como saber.** `PerguntaDeAnexo` contava os envios
    * em estado **local**, que nasce vazio: quem colou dois prints na conversa e chegou ao
@@ -428,7 +428,7 @@ async function rotear(
     // pela mesma função que a rota de upload usa (T-409b) — se as duas divergirem, o
     // anexo não casa com o chamado e ninguém vê erro nenhum.
     //
-    // ⚠️ Ela é lida **antes** do gate de `RF-62` (`D-68`): é por esta chave que o servidor
+    // ⚠️ Ela é lida **antes** do gate de `RF-62` (`D-69`): é por esta chave que o servidor
     // sabe se a pessoa já anexou, e a pergunta cuja resposta ele já tem não é feita.
     const chaveDaConversa = normalizarChaveIdempotencia({
       via: 'conversa',
@@ -617,7 +617,7 @@ async function rotear(
       validada.proposta.tipoChamadoId,
       schema,
       corpo?.declarouAnexo,
-      // `D-68` — mesma regra no formulário: quem já subiu arquivo por esta chave não é
+      // `D-69` — mesma regra no formulário: quem já subiu arquivo por esta chave não é
       // perguntado de novo. Chave ausente gerou um id novo acima, e aí não há anexo a casar.
       chave,
     )
@@ -1808,7 +1808,7 @@ async function rotear(
     // ⚠️ A regra completa (allowlist + desk + negação por padrão) mora em
     // `tiposOferecidos`, porque a **extração da proposta** precisa exatamente da mesma
     // resposta — e enquanto ela tinha regra própria o modelo escolhia entre ids sem nome
-    // (`D-68`). Três leitores, uma regra.
+    // (`D-69`). Três leitores, uma regra.
     return json({ itens: await tiposOferecidos(ctx.atlassian, ctx.valores) })
   }
 
@@ -2469,7 +2469,7 @@ async function autorizarDeclaracaoDeAnexo(
   chaveIdempotencia: string,
 ): Promise<{ readonly declarouAnexo: boolean | null } | { readonly recusa: Response }> {
   /**
-   * 🚨 **Arquivo JÁ ENVIADO responde a pergunta, e o FATO ganha da resposta** (`D-68`).
+   * 🚨 **Arquivo JÁ ENVIADO responde a pergunta, e o FATO ganha da resposta** (`D-69`).
    *
    * Relato de 13/08/2026: a pessoa colou dois prints na conversa e o cartão perguntou se
    * ela tinha evidência para anexar, *"como se eu já não tivesse enviado duas"*. A pergunta

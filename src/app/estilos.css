@@ -696,6 +696,84 @@
   margin-top: auto;
   padding-top: var(--space-4);
   border-top: 2px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+
+  /*
+   * 🚨 **FIXO no rodapé da conversa** (`D-68`) — pedido: subir para ler o histórico não pode
+   * custar a caixa de escrever. `position: sticky` em vez de `fixed` de propósito: ele
+   * continua no fluxo do painel, então não cobre o conteúdo do fim da página e não precisa de
+   * `padding` compensatório em nada.
+   * ⚠️ **O fundo é obrigatório, não decoração.** Sem ele o texto da conversa passa POR BAIXO
+   * do campo enquanto rola — foi exatamente o defeito de fundo transparente que o `D-64`
+   * mediu no visualizador. `--go-bg-page`, que é o creme do painel; token inventado aqui não
+   * pinta e ninguém percebe até rolar.
+   * ⚠️ E o `padding-bottom` existe porque o teclado do celular sobe junto: sem folga, o
+   * botão de enviar fica encostado na borda inferior da área visível.
+   */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--go-bg-page);
+  padding-bottom: var(--space-3);
+}
+
+/* ---------- a espera do turno (`D-68`) --------------------------------- */
+
+.espera-do-turno {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/*
+ * Três pontos que pulsam. O movimento é o único sinal de "está vivo" quando a resposta leva
+ * 15–40 s (medido em 13/08) — e ele **desliga** em `prefers-reduced-motion`, deixando os
+ * pontos parados: quem pediu menos movimento continua vendo que há algo em curso.
+ */
+.espera-pontos {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.espera-pontos span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--go-blue);
+  opacity: 0.35;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .espera-pontos span {
+    animation: espera-pulsa 1.2s ease-in-out infinite;
+  }
+  .espera-pontos span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .espera-pontos span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+}
+@keyframes espera-pulsa {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+/* A frase não pisca nem desliza: ela troca. Movimento aqui competiria com a leitura. */
+.espera-frase {
+  font-style: italic;
+}
+
+/* Recorta do layout mas mantém no leitor de tela — mesmo recurso do estado das tarefas. */
+.apenas-leitor-de-tela {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* ---------- selos de estado (nunca só cor) ---------------------------- */
@@ -2016,10 +2094,16 @@
 }
 
 .anexo-conversa {
+  /* `D-68` — clipe e dica na MESMA linha: em coluna eles somavam três alturas dentro de um
+     compositor que agora é fixo. A lista de envios continua embaixo, que é onde ela pertence. */
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
   margin-right: auto;
+}
+.anexo-conversa-lista {
+  flex-basis: 100%;
 }
 
 /*
@@ -2055,10 +2139,14 @@
  * meio de uma frase se lê como texto qualquer.
  */
 .dica-anexo {
-  max-width: 34ch;
   line-height: 1.35;
 }
-.dica-anexo kbd {
+/* O atalho fica junto ao campo, discreto: quem já sabe não precisa lê-lo duas vezes. */
+.dica-atalho {
+  align-self: flex-start;
+}
+.dica-anexo kbd,
+.dica-atalho kbd {
   font-family: inherit;
   font-size: 0.9em;
   font-weight: var(--fw-semibold);
@@ -2099,10 +2187,8 @@
   gap: var(--space-2);
 }
 .leitura-anexo {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: baseline;
+  /* `D-68` — fechado por padrão: `<details>` cuida do resto. O item deixou de ser `flex`
+     porque agora o filho é um `details`, e o `summary` é que organiza a linha. */
   padding: var(--space-2) var(--space-3);
   border-left: 3px solid color-mix(in srgb, var(--go-lime) 60%, transparent);
   background: color-mix(in srgb, var(--go-blue) 4%, transparent);
@@ -2213,4 +2299,32 @@
     opacity: 0;
     transform: translateY(4px);
   }
+}
+
+/* ---------- o cartão de leitura, fechado por padrão (`D-68`) ----------- */
+
+.leitura-anexo summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  cursor: pointer;
+  /* O marcador nativo fica: ele é a única affordance de "isto abre", e trocá-lo por um
+     ícone próprio custaria o estado aberto/fechado que o navegador já desenha. */
+}
+.leitura-anexo summary:hover .leitura-arquivo {
+  text-decoration: underline;
+}
+/* Palavra, nunca só cor (regra 9): fechado, o selo é tudo o que a pessoa lê do arquivo. */
+.leitura-selo {
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-blue);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--go-blue) 8%, transparent);
+}
+.leitura-anexo details[open] .leitura-frase {
+  display: block;
+  margin-top: var(--space-2);
 }

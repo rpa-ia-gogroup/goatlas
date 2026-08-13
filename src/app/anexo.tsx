@@ -135,7 +135,7 @@ export const ROTULOS_ENVIO: Record<
 /**
  * A pergunta de `RF-62`/`RN-11` — e o que fazer quando ela já foi respondida por ato.
  *
- * 🚨 **Arquivo já enviado NÃO é perguntado de novo** (`D-68`). Relato de 13/08/2026: a
+ * 🚨 **Arquivo já enviado NÃO é perguntado de novo** (`D-69`). Relato de 13/08/2026: a
  * pessoa colou dois prints na conversa e o cartão perguntou se ela tinha material para
  * anexar, *"como se eu já não tivesse enviado duas"* — e a nota dizia *"Até 3 arquivos"*,
  * com dois já gastos e nenhum na tela. Duas causas somadas:
@@ -162,7 +162,7 @@ export function PerguntaDeAnexo({
   alvo: AlvoDoAnexo
   declarou: Declaracao
   aoDeclarar: (valor: boolean) => void
-  /** `D-68` — nomes que o SERVIDOR já tem para esta chave. Vazio = nada enviado ainda. */
+  /** `D-69` — nomes que o SERVIDOR já tem para esta chave. Vazio = nada enviado ainda. */
   jaEnviados?: readonly string[]
   teto: number
 }) {
@@ -175,7 +175,7 @@ export function PerguntaDeAnexo({
     ...envios.filter((e) => e.estado !== 'falhou').map((e) => e.nome),
   ]
   const cabem = Math.max(0, teto - nomesOcupados.length)
-  /** `D-68` — já anexou: a pergunta foi respondida pelo ato, e o servidor concorda. */
+  /** `D-69` — já anexou: a pergunta foi respondida pelo ato, e o servidor concorda. */
   const jaRespondeuAnexando = jaEnviados.length > 0
 
   async function enviar(recebidos: readonly File[]) {
@@ -216,14 +216,14 @@ export function PerguntaDeAnexo({
   }
 
   /**
-   * `D-68` — sem pergunta, porque ela já foi respondida.
+   * `D-69` — sem pergunta, porque ela já foi respondida.
    *
    * ⚠️ Continua sendo `fieldset`/`legend`: é ele que nomeia o grupo para leitor de tela, e
    * o bloco segue sendo "a evidência deste chamado". Sem os rádios não há o que declarar.
    */
   if (jaRespondeuAnexando) {
     /**
-     * 🚨 **UMA lista, sempre desenhada — e o contador conta as duas origens** (`D-68`,
+     * 🚨 **UMA lista, sempre desenhada — e o contador conta as duas origens** (`D-69`,
      * medido no navegador em 13/08).
      *
      * A primeira versão tinha duas listas: `jaEnviados` fora, e os envios desta tela
@@ -605,9 +605,14 @@ export function useAnexoNaConversa({
             **invisível**: quem não soubesse do atalho só tinha o clipe. A frase diz os dois,
             e diz o teto, porque a recusa em cima da hora é pior que o número anunciado. */}
         {!cheio && (
+          /*
+           * ⚠️ **Uma linha, e curta** (`D-68`). A frase original tinha três linhas e explicava
+           * o Ctrl+V com calma — certo enquanto o compositor rolava com a conversa, e caro
+           * depois de ele virar fixo: medido em 13/08, o compositor ocupava **39% da tela**, e
+           * 49px eram só desta dica. O atalho continua dito; o que saiu foi a explicação.
+           */
           <span className="dica dica-anexo">
-            Clique para escolher, ou cole com <kbd>Ctrl</kbd>+<kbd>V</kbd> — o print do
-            clipboard entra direto. Até {maximo} arquivos.
+            ou cole com <kbd>Ctrl</kbd>+<kbd>V</kbd> · até {maximo} arquivos
           </span>
         )}
 

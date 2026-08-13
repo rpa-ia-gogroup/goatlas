@@ -52,7 +52,7 @@ beforeEach(async () => {
   await config.definir('espacos_confluence', ['TECH'], ANA, AGORA)
   await config.definir('regra2_exemplos_ajuste_operacional', ['Rodei manualmente'], ANA, AGORA)
 
-  // ⚠️ O tipo tem de EXISTIR na Atlassian, não só na allowlist (`D-68`). A extração da
+  // ⚠️ O tipo tem de EXISTIR na Atlassian, não só na allowlist (`D-69`). A extração da
   // proposta escolhe pelo **nome**, e nome vem de `listarTiposChamado` — um `rt-1`
   // configurado que o site não conhece é um assunto que não dá para abrir.
   atlassian = new ClienteAtlassianFake({

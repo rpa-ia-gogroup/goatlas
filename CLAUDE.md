@@ -226,7 +226,7 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   **atravessando** a caixa; `var()` sem valor simplesmente não pinta, então build, teste e
   typecheck passam. Os cartões usam `--go-white`. No mesmo lote: `<dialog>` precisa de
   `margin: auto` **explícito**, porque o reset do app zera a margem que o UA usa para centralizar.
-- 🚨 **O modelo escolhia o ASSUNTO entre números** (`D-68`, `tickets/tipos-oferecidos.ts`). A
+- 🚨 **O modelo escolhia o ASSUNTO entre números** (`D-69`, `tickets/tipos-oferecidos.ts`). A
   extração recebia `tipos_chamado_permitidos.map((id) => ({ id, nome: id }))`, então o prompt
   listava `- 92: 92` e a fila do chamado era sorteada entre quinze ids. Medido em 13/08:
   *"meu PC desliga sozinho"* saiu como **"Problema com Nota Fiscal específica ou grupo de
@@ -245,7 +245,7 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   desiste e volta para "não tenho" abre o chamado. E a copy da opção negativa é "não tenho
   material para anexar" — **nunca "pular"**, que diria que anexar era o dever e faria a
   resposta honesta virar a que ninguém escolhe.
-- 🚨 **Quem JÁ anexou não é perguntado, e o FATO ganha da resposta** (`D-68`). Relato: dois
+- 🚨 **Quem JÁ anexou não é perguntado, e o FATO ganha da resposta** (`D-69`). Relato: dois
   prints colados na conversa e o cartão perguntando *"você tem algo para anexar?"* — a
   pendência olhava `declarou === null` e nunca o que subiu, e `PerguntaDeAnexo` contava os
   envios em estado **local**, que nasce vazio (os prints entram pelo compositor, componente
@@ -979,6 +979,28 @@ destes reabre um vazamento que já foi fechado.
   `float: left` + `width: 100%`: o float tira o elemento daquela categoria e, num container
   flex, é ignorado — sobra um item de flex comum, que respeita padding e gap. Não trocar o
   `fieldset`/`legend` por `div`: são eles que nomeiam o grupo de rádio para leitor de tela.
+- 🚨 **O compositor é FIXO, e o fixo tem um custo que precisa ser medido** (`D-68`). `sticky`
+  com **fundo explícito** — sem ele a conversa passa por baixo do campo (o defeito de fundo
+  transparente de `D-64`). ⚠️ E pinar criou problema novo: o compositor virou **39% da tela**
+  (346 px de 898). Compactado para 32% cortando o campo para 3 linhas, pondo clipe e dica na
+  mesma linha e reduzindo a explicação do Ctrl+V a uma linha — **o atalho continua dito, a
+  explicação saiu**. Quem acrescentar linha ali está tirando altura da conversa para sempre.
+- 🚨 **`Enter` envia, e `isComposing` é obrigatório** (`D-68`). Em português se escreve `ção`
+  com tecla morta, e o `keydown` de `Enter` dispara **durante a composição**: sem a guarda,
+  confirmar o acento manda a mensagem no meio da palavra — para todo mundo, não para um caso de
+  borda. ⚠️ `Shift`/`Alt`+`Enter` pulam linha; `Ctrl`/`Cmd`+`Enter` **não** enviam (em outros
+  apps essa é a combinação de enviar, e aceitá-la duplicaria o gesto). O botão **fica**.
+- 🚨 **A frase de espera é FUNÇÃO do que está rodando, nunca uma lista fixa** (`D-68`,
+  `app/frases-de-espera.ts`). "Analisando sua imagem…" sem imagem é o app afirmando o que não
+  aconteceu — família de `D-33`/`D-41`/`RF-43` —, e há teste afirmando que nenhuma frase fala de
+  arquivo quando não há anexo. ⚠️ **A rotação é visual; o `aria-live` recebe UMA frase estável**
+  (trocar texto a cada 2,6 s vira interrupção a cada 2,6 s), e ela tem de ser verdadeira durante
+  a espera inteira. ⚠️ **Para na última, não cicla** — o turno leva 15–40 s, e ciclar parece
+  laço. `prefers-reduced-motion` desliga a troca e o pulsar.
+- ⚠️ **A leitura do anexo é `<details>` fechado** (`D-68`): 22 px fechado × 53 px aberto, e o
+  `summary` carrega **nome + estado em palavra** (`lido`/`lendo…`/`não lido`) — fechado ele é a
+  única coisa que a pessoa lê daquele arquivo. Nativo pelo mesmo motivo do `<dialog>` em `D-64`:
+  teclado e estado vêm do navegador.
 - 🚨 **Toda tela tem caminho — inclusive a conversa, em `/chat`** (`D-67`). Ela era a única
   ainda morando em `/`, e a tela mais usada do app era a única sem endereço. ⚠️ **`/` continua
   caindo nela**, e isso protege duas coisas: o link que as pessoas têm salvo e o `?pagina=`
@@ -1566,7 +1588,7 @@ STATUS` vinha grudado. Agora cada tela tem caminho próprio (`app/rotas.ts`, sem
 router), `.doc` é grade de duas colunas e a etiqueta tem margem. ✅ **Histórico medido no
 navegador**: ← de `/avisos` até a lista de categorias, e de `?pagina=` de volta às categorias.
 
-🚨 **O assunto do chamado era sorteado, e a pergunta do anexo ignorava o anexo** (`D-68`,
+🚨 **O assunto do chamado era sorteado, e a pergunta do anexo ignorava o anexo** (`D-69`,
 13/08/2026). Dois defeitos num relato de uso real: *"meu PC desliga sozinho de pouco em pouco
 tempo"* virou o tipo **`92` — "Problema com Nota Fiscal específica ou grupo de Notas"**, porque a
 extração recebia os tipos **sem nome** (`- 92: 92`); e o cartão perguntou *"você tem algo para
@@ -1578,7 +1600,7 @@ anexo somando para 3, e `GOATLAS-1` aberto com os três anexados sem declarar na
 do tipo por um modelo REAL não foi medida** — em `npm run dev` a IA é o fake, que propõe `rt-dev`
 fixo; o que a suíte garante é que os nomes atravessam a fronteira.
 
-**1427 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1442 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em
