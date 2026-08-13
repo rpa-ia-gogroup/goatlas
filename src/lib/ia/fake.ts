@@ -18,6 +18,8 @@ import {
   type ParametrosExtracao,
   type ResultadoExtracao,
   type PropostaSugerida,
+  type ParametrosDescricaoArquivo,
+  type ResultadoDescricaoArquivo,
 } from './tipos'
 
 export interface TurnoRoteirizado {
@@ -98,6 +100,37 @@ export class ClienteIAFake implements ClienteIA {
       justificativa: 'fake',
       custoEstimadoUsd: 0.0005,
     }
+  }
+
+  /* ---------- análise de anexo (spec 007) --------------------------------- */
+
+  readonly descricoesRecebidas: ParametrosDescricaoArquivo[] = []
+  /**
+   * O que o analisador devolve. Roteirizável **por nome de arquivo** porque um teste realista
+   * tem dois anexos com destinos diferentes: um relevante, um não.
+   */
+  readonly descricaoPorArquivo = new Map<string, { relevante: boolean; descricao: string }>()
+  descricaoPadrao: { relevante: boolean; descricao: string } = {
+    relevante: true,
+    descricao: 'fake: a imagem mostra a mensagem de erro "PIPELINE_TIMEOUT" na tela de vendas',
+  }
+  falharDescricao = false
+  /** Atrasa a resposta, para exercitar a espera do turno (`FR-1b`) sem relógio de parede. */
+  atrasoDescricao: Promise<void> | null = null
+
+  async descreverArquivo(
+    params: ParametrosDescricaoArquivo,
+  ): Promise<ResultadoDescricaoArquivo> {
+    this.descricoesRecebidas.push(params)
+    if (this.atrasoDescricao) await this.atrasoDescricao
+    if (this.falharDescricao) {
+      throw new ErroIA('fake: leitura de arquivo indisponível', {
+        transitorio: true,
+        etapa: 'descricao_arquivo',
+      })
+    }
+    const escolhido = this.descricaoPorArquivo.get(params.nomeArquivo) ?? this.descricaoPadrao
+    return { ...escolhido, custoEstimadoUsd: 0.0009 }
   }
 
   /**

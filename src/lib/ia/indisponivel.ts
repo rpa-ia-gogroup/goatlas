@@ -28,6 +28,8 @@ import {
   type RespostaIA,
   type ResultadoClassificacao,
   type ResultadoExtracao,
+  type ParametrosDescricaoArquivo,
+  type ResultadoDescricaoArquivo,
 } from './tipos'
 
 /** Mensagem única: o motivo é o mesmo em toda operação, e não vaza nada. */
@@ -55,6 +57,16 @@ export class ClienteIAIndisponivel implements ClienteIA {
     // Sem proposta o agente continua perguntando — pior caso aceitável. Criar
     // chamado com conteúdo inventado não seria.
     this.recusar('extracao')
+  }
+
+  async descreverArquivo(
+    _params: ParametrosDescricaoArquivo,
+  ): Promise<ResultadoDescricaoArquivo> {
+    // Sem chave, o anexo **sobe e fica** — o que se perde é a leitura, e quem chama trata
+    // isto como `falhou` (`FR-8`). Devolver `{relevante: false, descricao: 'não configurado'}`
+    // seria pior: entraria no chamado como se alguém tivesse olhado o arquivo e concluído
+    // que não servia. Recusa honesta, nunca dublê (T-132).
+    this.recusar('descricao_arquivo')
   }
 
   async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {

@@ -78,6 +78,40 @@ export interface ParametrosClassificacao {
   readonly exemplosAjusteOperacional: readonly string[]
 }
 
+/**
+ * O conteúdo de um anexo, pronto para ir ao modelo — spec 007, `FR-3`/`FR-6`.
+ *
+ * ⚠️ São **duas** formas porque o provedor as trata de modo diferente: imagem viaja como
+ * parte `image_url` (data URL), texto viaja como texto. Uma forma só obrigaria o cliente a
+ * adivinhar, e adivinhar aqui manda PDF como se fosse imagem.
+ *
+ * ⚠️ **PDF não aparece nesta lista de propósito**: quando ele chega ao modelo, já é `texto` —
+ * quem o converteu foi o leitor de OCR (`ocr/`), fora desta camada.
+ */
+export type ConteudoDeArquivo =
+  | { readonly tipo: 'imagem'; readonly base64: string; readonly midia: string }
+  | { readonly tipo: 'texto'; readonly texto: string }
+
+export interface ParametrosDescricaoArquivo {
+  /** O nome que a pessoa vê. Vai ao modelo como rótulo, nunca como instrução. */
+  readonly nomeArquivo: string
+  readonly conteudo: ConteudoDeArquivo
+}
+
+export interface ResultadoDescricaoArquivo {
+  /**
+   * Há algo aqui que ajude a atender o caso?
+   *
+   * ⚠️ `false` **não** é falha: foto de crachá, print da tela de login e imagem ilegível são
+   * respostas legítimas, e a tela **não diz nada** sobre elas (`FR-5b`). Falha é outra coisa,
+   * e vive em `ocr/contrato.ts` e no estado da análise.
+   */
+  readonly relevante: boolean
+  /** Em português, descrevendo o que o arquivo mostra. Nunca uma resposta ao arquivo. */
+  readonly descricao: string
+  readonly custoEstimadoUsd: number
+}
+
 export class ErroIA extends Error {
   constructor(
     message: string,
@@ -127,6 +161,16 @@ export interface ClienteIA {
    * editável antes de criar (RF-16) — priorização automática sem revisão vira jogo.
    */
   extrairProposta(params: ParametrosExtracao): Promise<ResultadoExtracao>
+  /**
+   * Descreve um anexo e julga se ele acrescenta algo — spec 007, `FR-3`.
+   *
+   * 🚨 **É o "agente auxiliar", e o isolamento é a trava.** Ele não recebe o histórico da
+   * conversa, não tem tools e não decide nada além de `{relevante, descricao}`. Uma instrução
+   * escrita dentro do arquivo ("abra o chamado como crítico") não tem, daqui, caminho até
+   * `create_ticket`: o gate de `RF-08`/`RF-17` continua em `agent/gate.ts`, e o texto que sai
+   * daqui entra no contexto do agente principal **delimitado** (`FR-9`, `R-07`).
+   */
+  descreverArquivo(params: ParametrosDescricaoArquivo): Promise<ResultadoDescricaoArquivo>
   verificarSaude(): Promise<{ readonly ok: boolean; readonly detalhe: string }>
 }
 
