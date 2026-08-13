@@ -418,6 +418,39 @@ export const TABELAS = [
    )`,
   `CREATE INDEX IF NOT EXISTS idx_anexos_enviados_chamado
      ON anexos_enviados (issue_key, solicitante_email)`,
+
+  /**
+   * O que a IA entendeu de cada anexo da conversa — spec 007 (`FR-1`, `FR-2`, `FR-10`).
+   *
+   * `UNIQUE (conversa_id, nome_arquivo)` **é** o `FR-2`: analisar uma vez vem da constraint,
+   * nunca de um `SELECT` antes do `INSERT` — dois uploads simultâneos do mesmo nome disputam
+   * e um perde, como em `RF-24`.
+   *
+   * ⚠️ **`estado` distingue seis situações porque elas pedem frases diferentes.** `pronta` e
+   * `irrelevante` são sucesso (a segunda **não** aparece na tela, `FR-5b`); `analisando` é o
+   * que a rota da mensagem espera; `tipo_nao_suportado`, `sem_conteudo` e `falhou` são as três
+   * formas de não ter lido, e confundi-las produz a frase errada — mesma família de
+   * `area_indisponivel` × `area_nao_encontrada`.
+   *
+   * ⚠️ **A tabela NÃO guarda o conteúdo do arquivo**, só a descrição derivada. E `descricao` é
+   * conteúdo pessoal: entra na retenção como o resto e **nunca** na auditoria (`FR-10`).
+   *
+   * `solicitante_email` existe para a leitura ser filtrada no `WHERE`, como em `vinculos`.
+   */
+  `CREATE TABLE IF NOT EXISTS analises_anexo (
+     id                TEXT PRIMARY KEY,
+     conversa_id       TEXT NOT NULL,
+     solicitante_email TEXT NOT NULL,
+     nome_arquivo      TEXT NOT NULL,
+     estado            TEXT NOT NULL,
+     descricao         TEXT,
+     custo_usd         REAL,
+     criado_em         TEXT NOT NULL,
+     concluido_em      TEXT,
+     UNIQUE (conversa_id, nome_arquivo)
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_analises_anexo_conversa
+     ON analises_anexo (conversa_id, solicitante_email)`,
 ] as const
 
 /**

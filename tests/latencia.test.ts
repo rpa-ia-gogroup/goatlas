@@ -543,6 +543,15 @@ class IaQueExigeSobreposicao implements ClienteIA {
     return { classe: 'resolucao_real', justificativa: 'teste', custoEstimadoUsd: 0.0001 }
   }
 
+  /**
+   * Não participa da sobreposição que este arquivo mede (spec 007): a análise de anexo roda
+   * na requisição de **upload**, não no turno. Está aqui só para o dublê satisfazer o
+   * contrato — e o `throw` denuncia se algum dia o turno passar a chamá-la sem querer.
+   */
+  async descreverArquivo(): Promise<never> {
+    throw new Error('o turno não deve descrever arquivo — a análise roda no upload')
+  }
+
   async verificarSaude() {
     return { ok: true, detalhe: 'teste' }
   }

@@ -23,6 +23,7 @@ import {
   type ResultadoCriacao,
   type TipoChamado,
   type TransicaoDisponivel,
+  type RespostaTurno,
 } from './api'
 import {
   camposPreenchidosPeloApp,
@@ -38,6 +39,7 @@ import {
   TrilhaVerificacao,
   Vazio,
 } from './componentes'
+import { Visualizador, type AnexoParaVer } from './visualizador'
 import {
   arquivosDoColar,
   PerguntaDeAnexo,
@@ -168,6 +170,10 @@ function ConversaEmCurso({
   // `D-53` — o nome do assunto acompanha a proposta, mas não faz parte dela.
   const [tipoNome, setTipoNome] = useState<string | null>(null)
   const [criado, setCriado] = useState<ResultadoCriacao | null>(null)
+  // spec 007 — o que a IA leu de cada anexo, como veio do último turno (`FR-5`).
+  const [analises, setAnalises] = useState<RespostaTurno['analisesAnexo']>(undefined)
+  /** Anexo aberto na visualização rápida — `FR-11`. */
+  const [vendo, setVendo] = useState<AnexoParaVer | null>(null)
   // `D-59` — só o **realce** do arrasto. O upload em si é do hook abaixo.
   const [arrastando, setArrastando] = useState(false)
   const fim = useRef<HTMLDivElement>(null)
@@ -180,6 +186,7 @@ function ConversaEmCurso({
   const anexo = useAnexoNaConversa({
     garantirConversa,
     maximo: MAX_ANEXOS_POR_CHAMADO,
+    aoVerArquivo: setVendo,
   })
 
   useEffect(() => {
@@ -268,6 +275,7 @@ function ConversaEmCurso({
       setBloqueado(r.bloqueioPendente)
       setProposta(r.proposta)
       setTipoNome(r.tipoNome ?? null)
+      setAnalises(r.analisesAnexo)
       setFalas((f) => [...f, { de: 'agente', texto: r.texto }])
     } catch (e) {
       setErro(e instanceof ErroApi ? e.message : 'Não conseguimos enviar sua mensagem. Tente de novo.')
@@ -386,6 +394,8 @@ function ConversaEmCurso({
 
       {erro && <Aviso atencao>{erro}</Aviso>}
 
+      <LeituraDosAnexos itens={analises} />
+
       <Compositor
         valor={rascunho}
         aoMudar={setRascunho}
@@ -394,6 +404,8 @@ function ConversaEmCurso({
         justificando={justificando}
         anexo={anexo.elemento}
       />
+
+      <Visualizador anexo={vendo} aoFechar={() => setVendo(null)} />
     </div>
   )
 }
@@ -1101,6 +1113,8 @@ function rotuloStatus(status: string): string {
 
 export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar: () => void }) {
   const [dados, setDados] = useState<DetalheChamado | null>(null)
+  /** spec 007, `FR-11` — anexo aberto na visualização rápida, sem sair do chamado. */
+  const [vendoAnexo, setVendoAnexo] = useState<AnexoParaVer | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [comentario, setComentario] = useState('')
   const [enviando, setEnviando] = useState(false)
@@ -1269,7 +1283,9 @@ export function TelaDetalhe({ issueKey, aoVoltar }: { issueKey: string; aoVoltar
         <ArquivosDoChamado
           itens={dados.anexos}
           indisponiveis={dados.anexosIndisponiveis}
+          aoVer={setVendoAnexo}
         />
+        <Visualizador anexo={vendoAnexo} aoFechar={() => setVendoAnexo(null)} />
 
         <form className="zona-anexo" onSubmit={anexar}>
           {/* `D-46` aplicado à segunda superfície: o `input[type=file]` sai da tela por
@@ -1409,9 +1425,11 @@ function extensaoLegivel(nomeArquivo: string): string | null {
 function ArquivosDoChamado({
   itens,
   indisponiveis,
+  aoVer,
 }: {
   itens: readonly AnexoDoChamado[]
   indisponiveis: boolean
+  aoVer?: (anexo: AnexoParaVer) => void
 }) {
   // ⚠️ **A dúvida deixou de esconder a lista** (`D-51`). Enquanto a única fonte era a
   // Atlassian, `indisponiveis` significava "não sei de nada" e devolver só a frase era
@@ -1466,13 +1484,22 @@ function ArquivosDoChamado({
                   qualquer forma, e aí a aba nova se fecha sozinha.
                   ⚠️ Abre em **outra aba** de propósito, como o link de página do agente: a
                   conversa vive em estado de React, e navegar na mesma aba destruiria a tela. */}
-              <a className="arquivo" href={a.url} target="_blank" rel="noopener noreferrer">
+              {/* spec 007, `FR-11` — abre **sobre** a tela, sem sair do chamado. Aqui a
+                  fonte é o proxy que já existe (`D-11`/`D-62`); na conversa é o blob local
+                  (achado `F1` do `/analyze`). O download vive dentro da visualização. */}
+              <button
+                type="button"
+                className="arquivo"
+                onClick={() =>
+                  aoVer?.({ nome: a.nomeArquivo, tipo: a.tipoDeclarado, url: a.url })
+                }
+              >
                 <span className="arquivo-nome">{a.nomeArquivo}</span>
                 {detalhes && <span className="dica">{detalhes}</span>}
                 <span className="arquivo-seta" aria-hidden="true">
-                  ↗
+                  ⤢
                 </span>
-              </a>
+              </button>
             </li>
           )
         })}
@@ -1858,4 +1885,49 @@ function CampoDinamico({
       )}
     </div>
   )
+}
+
+/**
+ * O que a IA leu dos anexos — spec 007, `FR-5`, `FR-5b`, `FR-7`.
+ *
+ * ⚠️ **Três frases diferentes, porque pedem três ações diferentes.** "Estou lendo" pede
+ * esperar; "não sei ler este formato" pede outro arquivo; "não consegui agora" pede tentar de
+ * novo. Uma frase só para os três seria a indistinção que `area_indisponivel` ×
+ * `area_nao_encontrada` já ensinou a evitar.
+ *
+ * ⚠️ **Análise irrelevante NÃO aparece** (`FR-5b`): a descrição existe e vai ao chamado no
+ * fim, mas a tela não fala sobre a foto do crachá de alguém. O servidor manda `descricao: null`
+ * nesse caso, e é por isso que a decisão não é tomada aqui.
+ *
+ * ⚠️ E isto **não** é fala do agente: é registro de leitura, com o nome do arquivo à frente.
+ * Vestir de mensagem faria a pessoa achar que ele escreveu aquilo.
+ */
+export function LeituraDosAnexos({
+  itens,
+}: {
+  itens: RespostaTurno['analisesAnexo']
+}): ReactElement | null {
+  const visiveis = (itens ?? []).filter((a) => a.estado !== 'irrelevante')
+  if (visiveis.length === 0) return null
+  return (
+    <ul className="leitura-anexos">
+      {visiveis.map((a) => (
+        <li key={a.nomeArquivo} className={`leitura-anexo leitura-${a.estado}`}>
+          <span className="leitura-arquivo">{a.nomeArquivo}</span>
+          <span className="leitura-frase">{fraseDaLeitura(a.estado, a.descricao)}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** A frase por estado. Exportada porque é o que o teste afirma (sem DOM). */
+export function fraseDaLeitura(estado: string, descricao: string | null): string {
+  if (estado === 'pronta' && descricao) return descricao
+  if (estado === 'analisando') return 'estou lendo este arquivo…'
+  if (estado === 'tipo_nao_suportado') return 'não sei ler este formato de arquivo — ele foi anexado ao chamado de qualquer forma'
+  if (estado === 'sem_conteudo') return 'não consegui ler nada deste arquivo — ele foi anexado ao chamado de qualquer forma'
+  if (estado === 'falhou') return 'não consegui ler este arquivo agora — ele foi anexado ao chamado de qualquer forma'
+  // `pronta` sem descrição: dizer "li" sem dizer o que seria pior que não dizer nada.
+  return 'este arquivo foi anexado ao chamado'
 }

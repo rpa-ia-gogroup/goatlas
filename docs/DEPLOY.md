@@ -94,6 +94,12 @@ GOATLAS_BASE_PUBLICA      = https://goatlas.devgogroup.com
 GOATLAS_CANAL_NOTIFICACAO = nenhum
 LLM_BASE_URL              = https://ai-proxy.gogroupbr.com/v1
 LLM_MODEL                 = gpt-5.4-mini
+
+# spec 007 / `D-64` — leitura de PDF do anexo. QUINTA credencial do sistema.
+# ⚠️ É o MESMO worker que o godocs usa em produção: rotacionar por causa de um quebra o
+# outro, e aqui quebra em silêncio (a leitura é fail-open — o anexo continua no chamado).
+OCR_WORKER_URL            = https://ocr-worker.kaique-rpa.workers.dev/
+OCR_WORKER_TOKEN          = (secret)
 ```
 
 ⚠️ **Como descobrir o `/v1` sem chave, se um dia o proxy mudar:** `curl -o /dev/null -w
