@@ -974,10 +974,52 @@
 }
 
 .doc-imagem-ausente,
-.doc-truncado {
+.doc-truncado,
+.doc-vazia {
   font-size: var(--fs-small);
   font-style: italic;
   color: color-mix(in srgb, var(--go-text-primary) 65%, transparent);
+}
+
+/* Checklist do Confluence (`ac:task-list`).
+ *
+ * `list-style: none` porque o marcador É a caixinha: bolinha de `<ul>` mais caixinha são
+ * dois marcadores para o mesmo item. O `grid` de duas colunas alinha o texto de linhas
+ * longas com o da primeira — com `flex` a segunda linha voltava para baixo da caixinha.
+ *
+ * ⚠️ **`.doc-tarefa-estado` sai da tela, mas NUNCA do documento.** Ela é a palavra que o
+ * leitor de tela lê ("Concluída:" / "A fazer:"); `display: none` a tiraria da árvore de
+ * acessibilidade e o estado passaria a existir só como forma — o piso de a11y do projeto
+ * não aceita isso. O recorte é o mesmo de `.entrada-arquivo` (`D-46`). */
+.doc-tarefas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: 0;
+  list-style: none;
+}
+.doc-tarefa {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2);
+  align-items: baseline;
+  line-height: 1.6;
+}
+.doc-tarefa-marca {
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--go-text-heading);
+}
+.doc-tarefa[data-concluida='sim'] .doc-tarefa-texto {
+  color: color-mix(in srgb, var(--go-text-primary) 62%, transparent);
+}
+.doc-tarefa-estado {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 

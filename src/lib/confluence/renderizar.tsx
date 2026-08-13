@@ -138,6 +138,24 @@ function Fragmento({ no, opcoes }: { no: No; opcoes: OpcoesRender }): ReactNode 
       return no.ordenada ? <ol>{itens}</ol> : <ul>{itens}</ul>
     }
 
+    case 'tarefas':
+      // O estado vai em DUAS formas: a caixinha (aria-hidden, é desenho) e a palavra, que é
+      // o que um leitor de tela lê. Marcador sozinho comunicaria "feito" só por forma, e o
+      // piso de a11y do projeto não aceita isso — mesma razão de `etiqueta` não levar cor.
+      return (
+        <ul className="doc-tarefas">
+          {no.itens.map((item, i) => (
+            <li key={i} className="doc-tarefa" data-concluida={item.concluida ? 'sim' : 'nao'}>
+              <span aria-hidden="true" className="doc-tarefa-marca">
+                {item.concluida ? '☑' : '☐'}
+              </span>
+              <span className="doc-tarefa-estado">{item.concluida ? 'Concluída:' : 'A fazer:'}</span>
+              <span className="doc-tarefa-texto">{renderizarNos(item.filhos, opcoes)}</span>
+            </li>
+          ))}
+        </ul>
+      )
+
     case 'citacao':
       return <blockquote>{renderizarNos(no.filhos, opcoes)}</blockquote>
 
@@ -347,7 +365,7 @@ function Celula({ celula, opcoes }: { celula: CelulaTabela; opcoes: OpcoesRender
  * conhecemos. As três situações pedem três frases, porque levam a três ações diferentes de
  * quem lê.
  */
-type NaturezaDoBloco = 'dinamico' | 'deOutraPagina' | 'jaNaTela' | 'desconhecido'
+type NaturezaDoBloco = 'dinamico' | 'deOutraPagina' | 'jaNaTela' | 'arquivo' | 'desconhecido'
 
 const BLOCOS_CONHECIDOS: Readonly<Record<string, { nome: string; natureza: NaturezaDoBloco }>> = {
   livesearch: { nome: 'Busca dentro deste espaço', natureza: 'dinamico' },
@@ -366,6 +384,17 @@ const BLOCOS_CONHECIDOS: Readonly<Record<string, { nome: string; natureza: Natur
   toc: { nome: 'Índice desta página', natureza: 'dinamico' },
   jira: { nome: 'Lista de chamados do Jira', natureza: 'dinamico' },
   jirachart: { nome: 'Gráfico de chamados do Jira', natureza: 'dinamico' },
+  /**
+   * Os quatro abaixo entraram por medição no app real (13/08/2026): todos caíam em
+   * `desconhecido`, e o texto de lá **imprime o nome técnico** — `view-file`,
+   * `adf:decision-list` — em inglês, numa tela cuja regra 4 é PT-BR. O nome técnico existe
+   * para o caso em que ele é a única pista; quando se sabe o que o bloco é, dizer o nome é
+   * despejar jargão da Atlassian em cima de quem só quer resolver um problema.
+   */
+  'view-file': { nome: 'Pré-visualização de um arquivo anexado', natureza: 'arquivo' },
+  viewpdf: { nome: 'Pré-visualização de um PDF anexado', natureza: 'arquivo' },
+  'adf:decision-list': { nome: 'Decisões registradas nesta página', natureza: 'dinamico' },
+  'adf:task-list': { nome: 'Lista de tarefas', natureza: 'dinamico' },
   include: { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
   'excerpt-include': { nome: 'Trecho de outra página', natureza: 'deOutraPagina' },
   // `excerpt` tem o próprio corpo no storage, então o sanitizador já o renderiza. Fica aqui
@@ -462,6 +491,14 @@ function MacroNaoSuportada({ nome }: { nome: string }): ReactNode {
           <>Este bloco mostra texto de outra página. Abra a página de origem para ler.</>
         ) : natureza === 'jaNaTela' ? (
           <>As páginas abaixo desta já aparecem listadas no fim da leitura.</>
+        ) : natureza === 'arquivo' ? (
+          // ⚠️ A quarta natureza existe porque as outras três davam o conselho errado: não é
+          // dinâmico (o arquivo existe), não é de outra página, e não está na tela. O nome do
+          // arquivo fica de fora — é parâmetro de macro (`RNF-30`), e a frase funciona sem ele.
+          <>
+            Este bloco mostra um arquivo anexado à página. O goatlas ainda não desenha essa
+            pré-visualização — se houver um link para o arquivo no texto, ele funciona.
+          </>
         ) : (
           <>
             O goatlas ainda não sabe mostrar este bloco (
@@ -470,6 +507,29 @@ function MacroNaoSuportada({ nome }: { nome: string }): ReactNode {
         )}
       </p>
     </div>
+  )
+}
+
+/**
+ * 🚨 **Página sem texto nenhum: a tela dizia isso com o VAZIO, que não diz nada.**
+ *
+ * Medido no app real em 13/08/2026: cinco páginas do `DTE` (`Agendor`, `Gateways
+ * financeiros`, `Engine Prisma`…) abriam com título, data e **um retângulo em branco**.
+ * "Está vazia no Confluence" e "o app não conseguiu carregar" são frases opostas, e o vazio
+ * é indistinguível das duas — quem lê tenta de novo, desiste e abre chamado, que é o
+ * contrário do que a aba existe para fazer. Mesmo par de `comentariosIndisponiveis` e de
+ * `CargaEspacos`, na tela que mais gente abre.
+ *
+ * ⚠️ **Isto NÃO é o placeholder de `RF-43`.** Lá falta um bloco no meio de um texto; aqui
+ * não há texto nenhum, e o problema é de quem escreve, não do goatlas. A frase diz de quem
+ * é o trabalho sem acusar o app de estar quebrado.
+ */
+function PaginaSemTexto(): ReactNode {
+  return (
+    <p className="doc-vazia">
+      Esta página ainda não tem conteúdo escrito no Confluence — o título existe, o texto não.
+      Se você esperava encontrar algo aqui, vale abrir chamado pedindo que ela seja escrita.
+    </p>
   )
 }
 
@@ -491,6 +551,7 @@ export function ConteudoConfluence({
 }): ReactNode {
   return (
     <article className="doc">
+      {nos.length === 0 && <PaginaSemTexto />}
       {renderizarNos(nos, opcoes)}
       {truncado && (
         <p className="doc-truncado">

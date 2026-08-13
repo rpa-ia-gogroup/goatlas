@@ -84,12 +84,39 @@ export interface LinhaTabela {
   readonly celulas: readonly CelulaTabela[]
 }
 
+/**
+ * Um item da lista de tarefas do Confluence (`ac:task`) — o checklist inline.
+ *
+ * `concluida` sai de `ac:task-status`, que no storage vale `complete`/`incomplete`. Ele é
+ * traduzido **aqui**, e não levado adiante como string: a palavra do storage é inglesa, e
+ * qualquer coisa que a carregue até a tela reabre o bug que este tipo existe para fechar.
+ */
+export interface ItemDeTarefa {
+  readonly concluida: boolean
+  readonly filhos: readonly No[]
+}
+
 export type No =
   | { readonly tipo: 'texto'; readonly texto: string }
   | { readonly tipo: 'paragrafo'; readonly filhos: readonly No[] }
   | { readonly tipo: 'titulo'; readonly nivel: NivelTitulo; readonly filhos: readonly No[] }
   | { readonly tipo: 'enfase'; readonly variante: VarianteEnfase; readonly filhos: readonly No[] }
   | { readonly tipo: 'lista'; readonly ordenada: boolean; readonly itens: readonly (readonly No[])[] }
+  /**
+   * 🚨 **Checklist do Confluence (`ac:task-list`) — e ele NÃO é uma `lista` comum.**
+   *
+   * Medido no app real em 13/08/2026: as três tags do checklist eram desconhecidas, e tag
+   * desconhecida é **desembrulhada**. Então cada tarefa chegava à tela como três textos
+   * soltos e colados — `1incompleteO que fazer agora?` na página "Documentação do projeto
+   * mestre" — com o **id interno** na frente (`RNF-30`) e a palavra `incomplete` no meio,
+   * em inglês (regra 4), sem caixinha nenhuma. Eram **130 nós soltos em 15 páginas**: o
+   * maior emissor de texto sem sentido da aba Documentação.
+   *
+   * ⚠️ **Reaproveitar `lista` não serviria:** o estado de cada item é a metade da
+   * informação — um checklist onde não se distingue feito de por fazer é uma lista de
+   * frases. O tipo próprio é o que obriga o renderizador a desenhar o estado.
+   */
+  | { readonly tipo: 'tarefas'; readonly itens: readonly ItemDeTarefa[] }
   | { readonly tipo: 'citacao'; readonly filhos: readonly No[] }
   | { readonly tipo: 'tabela'; readonly linhas: readonly LinhaTabela[] }
   | { readonly tipo: 'link'; readonly destino: DestinoLink; readonly filhos: readonly No[] }
@@ -170,8 +197,47 @@ const IMAGEM_EXTERNA_PERMITIDA: boolean = false
 /* ---------------------------------------------------------------------- */
 
 /**
+ * Símbolos cuja caixa **muda o significado** — busca EXATA, como as letras.
+ *
+ * ## Por que esta tabela nasceu junto com `ordm`/`minus`
+ *
+ * `ENTIDADES_SIMBOLO` é consultada com `toLowerCase()`, e isso é certo para `&COPY;`/`&copy;`.
+ * Mas há pares em que a maiúscula é **outro caractere**: `&larr;` é `←` e `&lArr;` é `⇐`;
+ * `&dagger;` é `†` e `&Dagger;` é `‡`. As três setas já estavam na tabela tolerante, então
+ * `&lArr;` já saía como `←` — errado em silêncio, do mesmo jeito que `&Eacute;` → `é` era.
+ *
+ * Acrescentar `dagger` e as setas verticais sem esta tabela **espalharia** esse defeito em vez
+ * de contê-lo. Ela é consultada antes da tolerante, e é o único lugar onde a caixa importa
+ * para símbolo.
+ */
+const ENTIDADES_SIMBOLO_EXATO: Readonly<Record<string, string>> = {
+  larr: '←',
+  rarr: '→',
+  harr: '↔',
+  uarr: '↑',
+  darr: '↓',
+  lArr: '⇐',
+  rArr: '⇒',
+  hArr: '⇔',
+  uArr: '⇑',
+  dArr: '⇓',
+  dagger: '†',
+  Dagger: '‡',
+  prime: '′',
+  Prime: '″',
+}
+
+/**
  * Símbolos — o lookup **ignora a caixa**, e aqui isso é correto: `&COPY;` e `&copy;` são o
  * mesmo `©`, e o HTML tolera as duas formas.
+ *
+ * ⚠️ **Entrada nova só entra AQUI se a maiúscula significar o MESMO caractere.** Quando não
+ * significa, o lugar dela é `ENTIDADES_SIMBOLO_EXATO`, logo acima — senão a tabela tolerante
+ * devolve o símbolo errado sem nada quebrar.
+ *
+ * Medido no app real em 13/08/2026: `15&ordm; dia` e `&minus;` apareciam **literais** na aba
+ * Documentação, em três páginas. `ordm`/`ordf` são os que mais custam em português (`1º`,
+ * `1ª`), e faltavam desde sempre — mesma família do `&eacute;` de `version 22`.
  */
 const ENTIDADES_SIMBOLO: Readonly<Record<string, string>> = {
   amp: '&',
@@ -191,20 +257,40 @@ const ENTIDADES_SIMBOLO: Readonly<Record<string, string>> = {
   rsquo: '’',
   ldquo: '“',
   rdquo: '”',
+  sbquo: '‚',
+  bdquo: '„',
+  lsaquo: '‹',
+  rsaquo: '›',
   copy: '©',
   reg: '®',
   trade: '™',
   deg: '°',
+  ordm: 'º',
+  ordf: 'ª',
   plusmn: '±',
+  minus: '−',
   times: '×',
   divide: '÷',
+  frac12: '½',
+  frac14: '¼',
+  frac34: '¾',
+  sup1: '¹',
+  sup2: '²',
+  sup3: '³',
+  micro: 'µ',
+  ne: '≠',
+  le: '≤',
+  ge: '≥',
+  asymp: '≈',
+  infin: '∞',
+  permil: '‰',
   euro: '€',
   pound: '£',
+  yen: '¥',
+  cent: '¢',
+  curren: '¤',
   sect: '§',
   para: '¶',
-  larr: '←',
-  rarr: '→',
-  harr: '↔',
   check: '✓',
 }
 
@@ -270,14 +356,17 @@ const ENTIDADES_LETRA: Readonly<Record<string, string>> = Object.freeze(
 )
 
 /**
- * Resolve o nome da entidade — **letra por busca EXATA, símbolo por caixa livre**.
+ * Resolve o nome da entidade — **exato primeiro, caixa livre por último**.
  *
- * A exatidão na letra é o conserto; o `toLowerCase()` sobrevive só no caminho do símbolo,
- * onde é o comportamento certo. Trocar a ordem ou aplicar `toLowerCase()` antes reabre o
- * bug de caixa, e ele volta **sem quebrar nada visível**.
+ * A ordem É a correção: letra (`&Eacute;` ≠ `&eacute;`), depois símbolo de caixa
+ * significativa (`&lArr;` ≠ `&larr;`), e só então a tabela tolerante, onde `toLowerCase()`
+ * é o comportamento certo. Mover o `toLowerCase()` para cima reabre o bug de caixa nas duas
+ * famílias, e ele volta **sem quebrar nada visível**.
  */
 function letraOuSimbolo(nome: string): string | undefined {
-  return ENTIDADES_LETRA[nome] ?? ENTIDADES_SIMBOLO[nome.toLowerCase()]
+  return (
+    ENTIDADES_LETRA[nome] ?? ENTIDADES_SIMBOLO_EXATO[nome] ?? ENTIDADES_SIMBOLO[nome.toLowerCase()]
+  )
 }
 
 /**
@@ -926,6 +1015,16 @@ function converter(bruto: NoBruto, coletor: Coletor): No[] {
     case 'ul':
     case 'ol':
       return [converterListaHtml(bruto, nome === 'ol', coletor)]
+    case 'ac:task-list':
+      return converterTarefas(bruto, coletor)
+    case 'ac:task-id':
+    case 'ac:task-uuid':
+    case 'ac:task-status':
+      // Metadado da tarefa, nunca conteúdo — e é a razão de existirem estes três `case`.
+      // Desembrulhados, o id vira número solto na tela (`RNF-30`) e o status vira a palavra
+      // `incomplete`, em inglês, no meio da frase da pessoa. `converterTarefas` já os lê do
+      // bruto; chegando aqui soltos (marcação torta, `ac:task` sem lista em volta), somem.
+      return []
     case 'li': {
       // `<li>` fora de lista: melhor um parágrafo que texto solto colado no anterior.
       const dentro = filhos()
@@ -1005,6 +1104,46 @@ function converterListaHtml(bruto: ElementoBruto, ordenada: boolean, coletor: Co
     else ultimo.push(...convertido)
   }
   return { tipo: 'lista', ordenada, itens: itens.filter((i) => i.length > 0) }
+}
+
+/**
+ * `ac:task-list` → `tarefas`. A forma no storage é:
+ *
+ * ```xml
+ * <ac:task-list>
+ *   <ac:task>
+ *     <ac:task-id>1</ac:task-id>
+ *     <ac:task-status>incomplete</ac:task-status>
+ *     <ac:task-body>Teste unitários</ac:task-body>
+ *   </ac:task>
+ * </ac:task-list>
+ * ```
+ *
+ * ⚠️ **`complete` é a única palavra que marca "feito", e a comparação é exata.** O storage
+ * usa `complete`/`incomplete`, e `incomplete` **contém** `complete`: um `includes` daria
+ * checklist inteiro marcado como concluído — errado de um jeito que ninguém confere item a
+ * item. Qualquer outro valor cai em "a fazer", que é o fail-closed certo aqui: dizer que
+ * está pronto o que não se sabe é a única das duas leituras que engana.
+ *
+ * ⚠️ **Tarefa sem corpo é DESCARTADA, não vira item vazio.** Uma linha só com a caixinha
+ * anuncia conteúdo que não existe — o mesmo raciocínio de `title` vazio em `status`.
+ */
+function converterTarefas(bruto: ElementoBruto, coletor: Coletor): No[] {
+  const itens: ItemDeTarefa[] = []
+  for (const filho of bruto.filhos) {
+    if (filho.tipo !== 'elemento' || filho.nome !== 'ac:task') continue
+    conferirAtributos(filho, coletor)
+
+    const status = primeiroFilho(filho, 'ac:task-status')
+    const concluida = status !== null && textoBrutoDe(status).trim().toLowerCase() === 'complete'
+
+    const corpo = primeiroFilho(filho, 'ac:task-body')
+    const dentro = corpo === null ? [] : converterLista(corpo.filhos, coletor)
+    if (dentro.length === 0) continue
+
+    itens.push({ concluida, filhos: dentro })
+  }
+  return itens.length === 0 ? [] : [{ tipo: 'tarefas', itens }]
 }
 
 function converterTabela(bruto: ElementoBruto, coletor: Coletor): No[] {
@@ -1417,6 +1556,11 @@ export function textoDe(nos: readonly No[]): string {
         break
       case 'lista':
         for (const item of no.itens) saida += `${textoDe(item)}\n`
+        break
+      // Só o texto da tarefa. O estado NÃO entra: este texto vira trecho de busca e
+      // resumo, e um "Concluído" que a pessoa não escreveu casaria com a busca dela.
+      case 'tarefas':
+        for (const item of no.itens) saida += `${textoDe(item.filhos)}\n`
         break
       case 'tabela':
         for (const linha of no.linhas) {

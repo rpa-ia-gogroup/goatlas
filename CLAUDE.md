@@ -1019,6 +1019,36 @@ destes reabre um vazamento que já foi fechado.
   todo o resto. É a diferença entre "não sei desenhar esta moldura" (a moldura se perde, o
   texto aparece) e "não posso mostrar este conteúdo". O `anotar` continua acontecendo: a
   auditoria de `RF-43` é o que diz qual macro vale implementar de verdade um dia.
+- 🚨 **O checklist do Confluence é `tarefas`, e `incomplete` CONTÉM `complete`** (`D-63`,
+  `ac:task-list`). As quatro tags do checklist eram desconhecidas — e desconhecida é
+  **desembrulhada** —, então cada tarefa chegava à tela como três textos colados:
+  `1incompleteO que fazer agora?`. Id interno (`RNF-30`), inglês (regra 4) e nenhuma caixinha,
+  em **130 nós soltos de 15 páginas**: o maior emissor de texto sem sentido da aba, e invisível
+  para a suíte porque nenhum teste partia de storage com checklist. ⚠️ **Reaproveitar `lista`
+  não serve**: o estado é metade da informação, e o tipo próprio é o que obriga o renderizador
+  a desenhá-lo. ⚠️ **A comparação com `complete` é EXATA** — um `includes` marca o checklist
+  inteiro como concluído, e ninguém confere item a item para descobrir; qualquer outro valor
+  cai em *a fazer*, que é o fail-closed certo. ⚠️ O estado vai em **duas** formas (caixinha
+  `aria-hidden` + palavra em PT, recortada por `clip-path`) e **não** entra em `textoDe`: um
+  "Concluída" que ninguém escreveu casaria com a busca de quem procura essa palavra.
+- 🚨 **`&lArr;` NÃO é `&larr;`, e a tabela tolerante já respondia errado** (`D-63`). O lookup
+  de símbolo usa `toLowerCase()` — certo para `&COPY;`/`&copy;`, e **falso** para os pares em
+  que a maiúscula é outro caractere (`⇐`×`←`, `‡`×`†`, `″`×`′`). Por isso existe
+  `ENTIDADES_SIMBOLO_EXATO`, e a ordem de `letraOuSimbolo` é **exato → exato → tolerante**;
+  mover o `toLowerCase()` para cima reabre as duas famílias de uma vez. ⚠️ **Entrada nova em
+  `ENTIDADES_SIMBOLO` só entra se a maiúscula significar o MESMO caractere** — senão o lugar
+  dela é a tabela exata. Entraram `ordm`/`ordf`/`minus` porque saíam **literais** no app real
+  (`15&ordm; dia`, três páginas).
+- ⚠️ **Página com `nos: []` DIZ que está vazia** (`D-63`). Cinco páginas do `DTE` abriam com
+  título, data e um retângulo em branco — e "está vazia no Confluence" × "não carregou" são
+  frases opostas que o vazio não distingue (mesmo par de `comentariosIndisponiveis`). ⚠️ A
+  frase **não** é o placeholder de `RF-43`: ali falta um bloco dentro de um texto que existe,
+  aqui o trabalho é de quem escreve, e acusar o app seria acusá-lo de um defeito que não é dele.
+- ⚠️ **O inglês das páginas iniciais de espaço é CONTEÚDO, e não se traduz na renderização**
+  (`D-63`). As três homes de `GT`/`DTE`/`GN` são o template padrão da Atlassian, intocado —
+  `Description`, `In a sentence or two…`, `🗑 Remove this panel…`. Traduzir ali seria reescrever
+  conteúdo que qualquer pessoa edita (`R-07`) e apagar a distinção entre o que a página diz e o
+  que o app diz. O conserto é editar as páginas no Confluence — trabalho do time de tech.
 - 🚨 **Anexo que não é imagem também é link, e o `ri:page` dele mora no PAI** (`D-57`,
   `T-142`). `converterAcLink` tratava só `ri:page` e `ri:url`: link para PDF ou planilha
   anexada virava **texto puro**, sem link e sem nada dizendo que havia arquivo ali — a
@@ -1377,7 +1407,15 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1267 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+🚨 **A aba Documentação passou por uma bateria de QA nas 115 páginas** (`D-63`, 13/08/2026).
+Quatro defeitos de tela, nenhum deles com erro, log ou teste vermelho: o **checklist do
+Confluence** chegando desmontado (`1incompleteO que fazer agora?` — 130 nós soltos em 15
+páginas) · `&ordm;`/`&minus;` **literais** · página vazia abrindo **em branco** · `view-file` e
+`adf:decision-list` imprimindo o nome técnico em inglês. Os quatro estão corrigidos em código
+com 22 casos novos. ⚠️ **Falta medir na staging** — as correções são de renderização e a
+verificação é abrir uma página com checklist (`DTE:11632894`) e uma vazia (`DTE:29949953`).
+
+**1300 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em
