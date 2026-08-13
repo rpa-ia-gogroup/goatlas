@@ -4,7 +4,7 @@ feature: "cartao-negociavel"
 id: "008"
 status: clarified
 created: "2026-08-13"
-spec_version: 3
+spec_version: 4
 ---
 
 # Spec: O cartão é negociável, e a prioridade vem com motivo
@@ -22,12 +22,15 @@ palavras que produzem "Crítica". Hoje as duas metades existem só na forma:
    temporária. Sugerimos alta — ajuste se não bate com o seu caso."* Ela vale para qualquer
    chamado alto que já existiu. Sem saber *por que aqui*, revisar é palpite contra palpite —
    e quem discorda não tem com o que discordar.
-2. **Discordar não tem efeito visível.** Medido em 13/08/2026: com o cartão na tela, mandar
-   outra mensagem faz a IA repensar e regravar a proposta, e **a tela continua mostrando a
-   anterior**. O seletor de prioridade guarda o valor da primeira montagem, e o cartão não é
-   remontado. Ou seja: argumentar funciona no servidor e falha na tela — a pessoa conclui que
-   o agente a ignorou. Mesma família de `D-46` (*recomeçar é remontar, nunca uma sequência de
-   `setState`*).
+2. **Discordar não tem efeito nenhum — e não é só na tela.** 🚨 Corrigido em 13/08/2026 pelo
+   `/plan`, lendo o código: a proposta é extraída **uma vez só**. `orquestrador.ts` exige
+   `!atual.proposta` nas duas portas de extração, então argumentar **não faz a IA repensar**;
+   a rota devolve a mesma proposta persistida em todo turno, e o seletor da tela guarda o
+   valor da primeira montagem. Depois que o cartão existe, a única coisa que muda a proposta
+   é a mão da pessoa (`PUT /proposta`). São **duas** metades quebradas: o servidor não
+   rederiva e a tela não remonta (esta segunda, família de `D-46` — *recomeçar é remontar,
+   nunca uma sequência de `setState`*). Consertar só a tela seria pior que hoje: ela ficaria
+   fielmente sincronizada com uma decisão congelada, com cara de funcionar.
 3. **O cartão antigo fica na tela enquanto a IA pensa**, então existe uma janela em que a
    pessoa lê um formulário que já não é o que vai ser aberto.
 4. **Ajustar exige digitar.** O chamado montado só muda pela mão da pessoa, campo por campo.
@@ -191,15 +194,19 @@ digitado campos do formulário do tipo de chamado e/ou mexido no seletor de prio
 - **SC-12** (US-5) — pedido para um campo que não existe naquele assunto
   - **Given** o cartão na tela, num assunto cujo formulário não tem campo de recorrência
   - **When** a pessoa manda "marca como recorrente"
-  - **Then** nenhum campo é inventado, o cartão volta sem esse dado, e a resposta do agente
-    diz que aquele assunto não tem esse campo — a informação não é engolida em silêncio.
+  - **Then** nenhum campo é inventado, o cartão volta sem esse dado, e **a tela diz, junto do
+    cartão**, que aquele assunto não tem esse campo — a informação não é engolida em silêncio.
+    > **Corrigido pelo `/plan`:** era *"a resposta do agente diz"*, e isso é impossível sem
+    > serializar as duas chamadas (Non-Goal): a prosa é escrita **antes** de a decisão voltar,
+    > pela mesma razão que `FR-6` a proíbe de afirmar nível e prazo. Junto do cartão é melhor
+    > — fica ao lado do campo de que fala, e não depende de o modelo obedecer.
 
 - **SC-13** (US-5) — pedido com valor fora das opções do campo
   - **Given** um campo de seleção cujas opções são "Produção" e "Homologação"
   - **When** a pessoa pede um valor que não está entre elas
-  - **Then** o campo **não** recebe o valor, a criação não é posta em risco, e a resposta do
-    agente diz quais são as opções daquele campo — pelos rótulos, nunca por identificador
-    (`RNF-30`, mesmo tratamento de `D-39`).
+  - **Then** o campo **não** recebe o valor, a criação não é posta em risco, e **a tela lista,
+    junto do cartão**, as opções daquele campo — pelos rótulos, nunca por identificador
+    (`RNF-30`, mesmo tratamento de `D-39`). Mesma correção de `SC-12`.
 
 - **SC-14** (US-5) — pedido para mexer na identidade ou na área
   - **Given** o cartão na tela
@@ -296,9 +303,14 @@ digitado campos do formulário do tipo de chamado e/ou mexido no seletor de prio
 - **FR-12** — THE SYSTEM SHALL restringir o assunto ao conjunto que a instalação oferece
   (**RF-28**, `D-70`); pedido por um assunto fora dele não muda o assunto.
 - **FR-13** — IF um valor pedido não existir entre as opções do campo, THEN THE SYSTEM SHALL
-  não gravá-lo e informar as opções válidas pelos **rótulos** (`D-39`, **RNF-30**).
+  não gravá-lo e informar, **junto do resumo de confirmação**, as opções válidas pelos
+  **rótulos** (`D-39`, **RNF-30**).
 - **FR-14** — IF a pessoa pedir um campo que o assunto vigente não tem, THEN THE SYSTEM SHALL
-  não inventar campo e informar que aquele assunto não o tem.
+  não inventar campo e informar, **junto do resumo de confirmação**, que aquele assunto não o
+  tem.
+  > Os dois diziam "a resposta do agente informa". A prosa não pode: ela é escrita antes de a
+  > decisão voltar (as duas chamadas são paralelas, `D-32`), e é por isso que `FR-6` a proíbe
+  > de afirmar nível e prazo. Serializar é Non-Goal.
 - **FR-15** — THE SYSTEM SHALL não alterar por pedido em texto: os campos de identidade do
   solicitante (spec 006) e a área (`D-52`).
 - **FR-16** — WHEN o assunto muda no mesmo pedido, THE SYSTEM SHALL não preencher campos do
@@ -332,9 +344,15 @@ digitado campos do formulário do tipo de chamado e/ou mexido no seletor de prio
 
 ## 7. Non-Functional Requirements
 
-- **Performance:** nenhuma ida adicional ao provedor de IA por turno em relação a hoje — o
-  motivo e os ajustes viajam com a decisão que já existia (**RNF-12**, `D-32`). Nenhuma
-  chamada nova à Atlassian por turno além do schema que a tela já lê (**R-02**).
+- **Performance:** nenhuma ida adicional **em série** ao provedor de IA, e nenhum aumento de
+  tempo de parede por turno (**RNF-12**, `D-32`). 🚨 **Corrigido pelo `/plan`:** o texto dizia
+  "nenhuma ida adicional", o que é impossível — rederivar a proposta *é* uma chamada de
+  extração, e nos turnos em que o cartão já existe ela **não existe hoje** (aqueles turnos
+  fazem uma ida só). O que se promete é o que se pode cumprir: a ida nova arranca **em
+  paralelo** com o `chat` do turno, a série continua em 1, e turno sem proposta segue
+  idêntico. O custo em dinheiro sobe com o volume de negociação — quem o mede é **RNF-16**, e
+  o teto por conversa continua encerrando laço. Nenhuma chamada nova à Atlassian por turno
+  além do schema do assunto, que já é cacheado por isolate (**R-02**, **RNF-13**).
 - **Security / Privacy:** o motivo e os valores ajustados são texto gerado sobre o que a
   pessoa escreveu; não podem conter identificador interno (**RNF-30**) nem conteúdo de
   terceiros trazido por tool (`R-07`).
@@ -371,7 +389,8 @@ digitado campos do formulário do tipo de chamado e/ou mexido no seletor de prio
 - **ScC-2** — Não existe, na tela, nenhuma frase do agente afirmando nível de prioridade ou
   número de horas de prazo (verificável sobre o prompt e sobre a saída).
 - **ScC-3** — Depois de um turno que muda a prioridade, o valor lido na tela é igual ao valor
-  que a criação usaria — sempre. (Hoje é falso: a tela mostra o valor da primeira montagem.)
+  que a criação usaria — sempre. (Hoje é falso nas **duas** camadas: nenhum turno muda a
+  prioridade, porque o servidor não rederiva, e a tela mostra o valor da primeira montagem.)
 - **ScC-4** — Depois de um turno que **não** muda um campo preenchido pela pessoa, o valor
   dela continua na tela — sempre.
 - **ScC-5** — Um pedido em texto que nomeia um campo do assunto vigente e um valor válido
@@ -380,8 +399,11 @@ digitado campos do formulário do tipo de chamado e/ou mexido no seletor de prio
   ou opção inexistente (os dois caminhos de `D-38`/`D-39` continuam cobertos).
 - **ScC-7** — O aviso aparece exatamente uma vez por conversa e não é pré-requisito de nenhuma
   outra ação.
-- **ScC-8** — A contagem de idas ao provedor de IA por turno não aumenta (teste de contagem de
-  chamadas, como `tests/latencia.test.ts` já faz).
+- **ScC-8** — A contagem de idas ao provedor de IA **em série** por turno não aumenta, e a
+  extração se **sobrepõe** ao `chat` do turno (teste de contagem e de simultaneidade, como
+  `tests/latencia.test.ts` faz — e falhando por **deadlock**, nunca por relógio, que é a
+  correção de `D-57`). O total por turno com cartão sobe de 1 para 2, deliberadamente: ver
+  §7 Performance.
 - **ScC-9** — A auditoria responde "quantas propostas foram ajustadas por argumentação, e em
   quais campos?" sem ler o banco à mão.
 
@@ -413,6 +435,13 @@ Todas resolvidas — nenhuma pendente para `/plan`.
 - Preencher campos do assunto novo no mesmo turno em que o assunto muda (FR-16).
 - Persistir rascunho do formulário entre recarregamentos.
 - Negociação depois de o chamado existir — isso é comentário no chamado (`RF-32`).
+- ⚠️ **Fazer a leitura do anexo alcançar a proposta.** Achado pelo `/plan`:
+  `montarPromptExtracao` filtra o histórico para `user`/`assistant`, e a descrição do arquivo
+  (spec 007) entra como papel **`tool`** — então **o que o print mostrava nunca chegou à
+  proposta**, nem antes nem depois desta feature. O motivo de `FR-1` não pode citar a imagem,
+  e um pedido escrito *dentro* de um arquivo continua sem caminho até a proposta, que é o lado
+  bom (`RN-12`). Incluir `tool` na extração muda a superfície de injeção: precisa de spec
+  própria, com teste de burla.
 
 ---
 ## Requirement Completeness — checklist (gate antes do /plan)
