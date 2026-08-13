@@ -949,12 +949,40 @@ destes reabre um vazamento que já foi fechado.
   `float: left` + `width: 100%`: o float tira o elemento daquela categoria e, num container
   flex, é ignorado — sobra um item de flex comum, que respeita padding e gap. Não trocar o
   `fieldset`/`legend` por `div`: são eles que nomeiam o grupo de rádio para leitor de tela.
-- **A tela de documentação lê `?q=` e `?pagina=` no boot — e isso NÃO é um router.**
-  `App.tsx` continua navegando por estado (Princípio V); o deep link existe por dois
+- 🚨 **Toda tela tem caminho, e o histórico EMPILHA** (`app/rotas.ts`, `D-65`). Antes tudo
+  morava em `/` e a URL era escrita com `replaceState` — que **substitui** a entrada atual:
+  cinco páginas abertas deixavam **uma** entrada no histórico, e o ← saía do app. Continua
+  **sem lib de router** (sete telas, Princípio V); o que existe é uma tabela caminho ↔ tela.
+  ⚠️ **`push` × `replace` é a decisão**: empilha o que é *um passo* (abrir página, buscar,
+  trocar de aba), substitui a correção do estado atual — apagar o campo de busca empilhado
+  faria o ← devolver a busca que a pessoa acabou de descartar. ⚠️ **`pushState` sem ouvir
+  `popstate` é pior que nada**: a URL volta e a tela não, e as duas passam a discordar. A aba
+  Documentação **remonta por `key`** no voltar, pelo motivo de `D-46`. ⚠️ **O parâmetro ganha
+  do caminho na entrada** — link antigo é `/?pagina=…` sem caminho, e mandá-lo à conversa
+  derruba a deflexão de `RF-13`.
+- 🚨 **O contrato do link de deflexão tem TRÊS pontas** (`D-65`). `urlDeLeituraNoApp` escreve
+  `/documentacao?pagina=…`, `entradaDaUrl` lê, e a terceira é a **allowlist de forma** de
+  `TextoDoAgente` (`R-07`), que casa o caminho **exato**. Esquecer a terceira faz o link
+  continuar **aparecendo** e deixar de ser clicável — mensagem de `RF-12` inteira, clique
+  morrendo em silêncio. A suíte pega as duas primeiras; a terceira só ganhou teste em `D-65`.
+- ⚠️ **`not_found_handling: "single-page-application"` virou requisito** (`D-65`). É ele que
+  faz recarregar em `/documentacao` servir o `index.html`; sem ele tudo fora da raiz dá 404 —
+  e **não aparece em `npm run dev`**, onde o Vite já faz o fallback sozinho.
+- 🚨 **A medida do texto é uma COLUNA da grade, não o teto do bloco** (`estilos.css`, `.doc`,
+  `D-65`). `max-width: 68ch` no bloco inteiro prendia a **tabela** à medida da prosa: ela
+  ficava cortada, com barra de rolagem própria e 320px de creme vazio ao lado — arrastar
+  dentro de uma caixa para ler uma coluna que cabia na tela. Hoje `.doc` é grade de duas
+  colunas (medida + sangria) e a tabela pede a linha inteira. ⚠️ **A rolagem FICA**: deixou de
+  disparar aos 683px e dispara só quando a tabela excede a largura toda — o celular, onde
+  `RNF-28` a torna obrigatória. ⚠️ `row-gap`, nunca `gap`: com duas colunas, `gap` abriria
+  espaço horizontal e a tabela deixaria de encostar na borda.
+- ⚠️ **`.doc-etiqueta` tem `margin-inline`, e não é respiro estético** (`D-65`). No storage a
+  etiqueta vem **colada** ao texto, e a tela mostrava `O que fazer agora?DEFINIR STATUS`. O
+  Confluence resolve na folha dele; aqui é essa margem.
+- **A tela de documentação lê `?q=` e `?pagina=` no boot.** O deep link existe por dois
   motivos concretos: link de página compartilhável entre colegas, e o link `ri:page` do
   próprio Confluence funcionando (ele dá **título**, não id, então cai na busca pelo
-  título). T-115 trouxe a árvore e o deep link continuou suficiente: navegar é clicar em
-  nó, e cada nó já tem URL própria (`?pagina=`).
+  título). ⚠️ Desde `D-65` ele convive com o caminho da aba: `/documentacao?pagina=<id>`.
 - **A árvore desce UM nível por vez, e o `pai` é verificado como qualquer página**
   (`RF-41`). A árvore inteira custaria uma consulta de restrição por página — um clique
   viraria dezenas de chamadas (`R-02`); espaço e label vão no CQL (`parent = "id"`), a
@@ -1482,7 +1510,15 @@ o único placeholder cuja frase era **falsa**, agora índice de verdade. Os nove
 com 40 casos novos. ⚠️ **Falta medir na staging** — abrir `DTE:11632894` (checklist + emoji),
 `DTE:124911617` (`&ordm;` + `toc`) e `DTE:29949953` (vazia).
 
-**1318 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+🚨 **O ← do navegador saía do app, e a tabela rolava dentro de uma caixa** (`D-65`,
+13/08/2026). Três relatos lendo `DTE:11632894`: todas as telas moravam em `/` com
+`replaceState`, então o histórico tinha **uma** entrada · a tabela de "Versões" ficava presa
+aos 68ch da prosa, cortada, com 320px de creme vazio ao lado · e `O que fazer agora?DEFINIR
+STATUS` vinha grudado. Agora cada tela tem caminho próprio (`app/rotas.ts`, sem lib de
+router), `.doc` é grade de duas colunas e a etiqueta tem margem. ✅ **Histórico medido no
+navegador**: ← de `/avisos` até a lista de categorias, e de `?pagina=` de volta às categorias.
+
+**1392 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

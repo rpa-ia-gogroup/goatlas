@@ -141,6 +141,12 @@ npm run test && npm run build && npm run build:worker
 #      assetConfig → { "not_found_handling": "single-page-application" }
 ```
 
+🚨 **`not_found_handling: "single-page-application"` deixou de ser conveniência e virou
+requisito** (`D-65`). Desde que as telas ganharam caminho próprio (`/documentacao`,
+`/meus-chamados/<chave>`…), é ele que faz um **recarregar** ou um link colado fora da raiz
+servirem o `index.html` em vez de **404**. Omiti-lo num `updateApp` quebra tudo que não seja
+`/` — e o sintoma **não aparece em `npm run dev`**, onde o Vite já faz esse fallback sozinho.
+
 **Armadilhas — as duas primeiras já morderam neste app:**
 
 - **⚠️ O nome do campo no upload é o CAMINHO SERVIDO, e não pode ter o prefixo

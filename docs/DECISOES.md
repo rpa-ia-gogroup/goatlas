@@ -3971,6 +3971,82 @@ fail-open, e um 503 por causa dela diria "o app caiu" sobre um app de pé.
 
 ---
 
+### D-65 · O ← do navegador saía do app, e a tabela rolava dentro de uma caixa
+
+**Data:** 13/08/2026 · **Origem:** três relatos do mantenedor lendo a página
+`DTE:11632894` no app publicado · **Contexto:** `RF-12`, `RF-13`, `RF-39`, `RF-40`,
+`RNF-28`, `R-07`, `D-46`, `D-63`
+
+**1. 🚨 O histórico tinha UMA entrada, porque tudo era `replaceState`.** Relato: *"não dá
+pra voltar pra lista de categorias apenas dando ← no navegador"*. Todas as telas moravam em
+`/`, e o único registro de estado na URL (`?q=`, `?pagina=`) era escrito com
+`replaceState` — que por definição **substitui** a entrada atual. Abrir cinco páginas do
+Confluence em sequência deixava o histórico do jeito que estava antes de entrar no app, e o
+← levava para fora.
+
+O comentário do próprio código já previa o momento: *"um router de verdade entra com T-115,
+quando houver árvore e breadcrumb para navegar"*. Os dois existem desde a `T-115`; o que
+faltava era o histórico. **Não entrou lib de router** — são sete telas sem parâmetro além do
+`issueKey`, a navegação continua sendo estado de React (Princípio V), e o custo é
+`src/app/rotas.ts`, uma tabela de caminhos com ida e volta.
+
+Cada tela ganhou caminho em português (`/documentacao`, `/meus-chamados`,
+`/meus-chamados/<chave>`, `/abrir-chamado`, `/avisos`, `/administracao`; a conversa é a raiz).
+
+⚠️ **`push` × `replace` é a decisão, não um detalhe de implementação.** Empilha o que a
+pessoa reconhece como *um passo* (abrir página, buscar, trocar de aba); **substitui** a
+correção do estado atual — apagar o campo de busca não é um passo para trás, e empilhá-lo
+obrigaria a apertar ← duas vezes para sair de onde já se estava.
+
+⚠️ **`pushState` sem ouvir `popstate` é pior que não ter histórico:** a URL voltaria e a tela
+ficaria onde estava, e as duas passariam a discordar. O ouvinte **remonta** a aba Documentação
+por `key` — ela guarda página, busca e termo em estado próprio, e voltar para
+`?pagina=X` tem de reabrir `X`. Remontar é o mecanismo de `D-46`: uma sequência de `setState`
+funciona hoje e esquece um campo no próximo estado que a tela ganhar.
+
+⚠️ **O parâmetro ganha do caminho na entrada.** Link antigo é `/?pagina=…`, sem caminho
+nenhum; mandá-lo para a conversa faria a deflexão de `RF-13` cair na tela errada.
+
+🚨 **E o contrato do link de deflexão tem TRÊS pontas, não duas.** `urlDeLeituraNoApp`
+passou a escrever `/documentacao?pagina=…`, `entradaDaUrl` continua lendo a query — e a
+terceira é a **allowlist de forma** de `TextoDoAgente` (`R-07`), que aceitava exatamente
+`/?pagina=…`. Esquecê-la faria o link continuar **aparecendo** na conversa e deixar de ser
+clicável: a mensagem de `RF-12` inteira, e o clique morrendo em silêncio. A suíte pegou as
+duas primeiras (cinco casos vermelhos) e **não pegaria a terceira** — ela ganhou teste agora.
+
+⚠️ **`not_found_handling: "single-page-application"` deixou de ser conveniência.** É ele que
+faz recarregar em `/documentacao` servir o `index.html`; sem ele, tudo fora da raiz vira 404 —
+e o sintoma **não aparece em `npm run dev`**, onde o Vite já faz o fallback. Registrado em
+`docs/DEPLOY.md`.
+
+**2. A tabela era cortada com barra de rolagem própria, com 320px de creme vazio ao lado.**
+Medido: a coluna de leitura tem `max-width: 68ch` (683px) dentro de um container de
+**1004px**, e a tabela de "Versões" (725px naturais) ficava presa aos 683 — a pessoa
+arrastava dentro de uma caixa para ler uma coluna que cabia na tela.
+
+A causa é que a **medida do texto** estava aplicada ao bloco inteiro. Medida é do texto: 68ch
+é onde a linha para de cansar, e uma tabela não tem nada a ver com isso. `.doc` virou uma
+**grade de duas colunas** — a medida é a primeira, a sangria é a segunda —, a prosa continua
+exatamente onde estava e a tabela pede a linha inteira. ⚠️ **A rolagem fica:** ela deixou de
+disparar aos 683px e passa a disparar só quando a tabela excede a largura toda, que é o caso
+do celular, onde `RNF-28` a torna obrigatória. ⚠️ `row-gap`, nunca `gap`: com duas colunas,
+`gap` abriria espaço horizontal e a tabela deixaria de encostar na borda que ganhou.
+
+**3. `O que fazer agora?DEFINIR STATUS`.** No storage a etiqueta vem **colada** ao texto
+(`<ac:structured-macro ac:name="status">` logo depois do `?`), e o Confluence resolve isso na
+folha dele. Aqui é um `margin-inline` em `.doc-etiqueta`.
+
+**Testes** (`tests/rotas-e-historico.test.ts`, 11 casos): ida e volta caminho ↔ tela para as
+sete telas · caminhos distintos, em português e fora de `/api` · raiz = conversa ·
+desconhecido caindo na conversa em vez de erro · **leitura exata por segmento**
+(`/documentacao-antiga` ≠ `/documentacao`) · detalhe dentro de `meus-chamados` e chave com
+caractere especial sobrevivendo · e as **três pontas** do contrato do link, incluindo a burla
+que prova que o caminho antigo deixou de ser aceito. ⚠️ São afirmações sobre **decisão**: a
+suíte roda em `environment: 'node'`, sem `window` nem clique — o histórico de verdade foi
+medido no navegador, com ← de `/avisos` até a lista de categorias.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

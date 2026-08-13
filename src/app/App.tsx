@@ -1,10 +1,10 @@
 /**
  * Casca do app.
  *
- * Navegação por estado, sem lib de router: são quatro telas e nenhuma precisa de
- * URL profunda na Fase 1. Instalar TanStack Router antes de existir rota que o
- * exija seria abstração prematura (Princípio V) — quando a Fase 2 trouxer
- * Confluence e o console de governança, entra.
+ * Navegação por **estado**, com a URL acompanhando: cada tela tem caminho próprio
+ * (`rotas.ts`) e cada passo empilha uma entrada no histórico, então o ← do navegador volta
+ * um passo em vez de sair do app. Continua sem lib de router — são sete telas, e o custo é
+ * uma tabela de caminhos (Princípio V).
  */
 
 import { useEffect, useState } from 'react'
@@ -14,15 +14,7 @@ import { TelaConversa, TelaDetalhe, TelaFormulario, TelaMeusChamados } from './t
 import { TelaAdmin } from './admin'
 import { TelaAvisos } from './avisos'
 import { entradaDaUrl, TelaDocumentacao, type EntradaDocumentacao } from './confluence'
-
-type Tela =
-  | { nome: 'conversa' }
-  | { nome: 'documentacao' }
-  | { nome: 'chamados' }
-  | { nome: 'formulario' }
-  | { nome: 'avisos' }
-  | { nome: 'admin' }
-  | { nome: 'detalhe'; issueKey: string }
+import { caminhoDaTela, irPara, telaDoCaminho, type Tela } from './rotas'
 
 // A ORDEM é recomendação: ler a documentação vem antes de acompanhar chamado, e muito
 // antes de abrir um direto. É a mesma sequência que a Regra 1 impõe na conversa.
@@ -43,15 +35,30 @@ const ABAS: readonly { nome: Tela['nome']; rotulo: string; soAdmin?: boolean }[]
 export function App() {
   // A URL pode pedir a documentação direto (`?q=` ou `?pagina=`): é como um colega
   // compartilha uma página, e é como o link `ri:page` do próprio Confluence chega.
-  // Não é router — é leitura única no boot, ver `confluence.tsx`.
   const [entrada] = useState<EntradaDocumentacao>(() =>
     typeof window === 'undefined' ? {} : entradaDaUrl(window.location.search),
   )
-  const [tela, setTela] = useState<Tela>(() =>
-    entrada.pagina || entrada.termo ? { nome: 'documentacao' } : { nome: 'conversa' },
-  )
+  // ⚠️ O parâmetro GANHA do caminho na entrada: um link antigo é `/?pagina=…`, sem caminho
+  // nenhum, e mandá-lo para a conversa faria a deflexão de `RF-13` cair na tela errada. O
+  // par `urlDeLeituraNoApp`/`entradaDaUrl` continua sendo o contrato.
+  const [tela, setTela] = useState<Tela>(() => {
+    if (entrada.pagina || entrada.termo) return { nome: 'documentacao' }
+    return typeof window === 'undefined'
+      ? { nome: 'conversa' }
+      : telaDoCaminho(window.location.pathname)
+  })
   const [eu, setEu] = useState<Identidade | null>(null)
   const [erroAuth, setErroAuth] = useState<string | null>(null)
+
+  /**
+   * Troca de tela **e** empilha a entrada. Todo caminho de navegação passa por aqui — um
+   * `setTela` solto voltaria a deixar a URL mentindo sobre onde a pessoa está, que é
+   * exatamente o estado que este PR desfaz.
+   */
+  function navegar(destino: Tela) {
+    setTela(destino)
+    irPara(caminhoDaTela(destino))
+  }
 
   useEffect(() => {
     api
@@ -62,6 +69,32 @@ export function App() {
           e instanceof ErroApi ? e.message : 'Não conseguimos identificar sua conta.',
         ),
       )
+  }, [])
+
+  /**
+   * O ← do navegador. Sem este ouvinte o `pushState` só enfeitaria a barra de endereço: a
+   * URL voltaria e a tela ficaria onde estava — pior que não ter histórico, porque as duas
+   * passariam a discordar.
+   *
+   * ⚠️ A aba Documentação se remonta pela `key`, e é de propósito: ela guarda página aberta,
+   * busca e termo em estado próprio, e voltar para `/documentacao?pagina=X` tem de reabrir
+   * `X`. Remontar é o mesmo mecanismo de `D-46` — uma sequência de `setState` funcionaria
+   * hoje e esqueceria um campo no próximo estado que a tela ganhar.
+   */
+  const [entradaAtual, setEntradaAtual] = useState<EntradaDocumentacao>(entrada)
+  const [geracao, setGeracao] = useState(0)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const aoVoltar = () => {
+      const doCaminho = telaDoCaminho(window.location.pathname)
+      const daQuery = entradaDaUrl(window.location.search)
+      setEntradaAtual(daQuery)
+      setGeracao((g) => g + 1)
+      setTela(daQuery.pagina || daQuery.termo ? { nome: 'documentacao' } : doCaminho)
+    }
+    window.addEventListener('popstate', aoVoltar)
+    return () => window.removeEventListener('popstate', aoVoltar)
   }, [])
 
   return (
@@ -115,7 +148,7 @@ export function App() {
                     type="button"
                     className="aba"
                     aria-current={tela.nome === a.nome ? 'page' : undefined}
-                    onClick={() => setTela({ nome: a.nome } as Tela)}
+                    onClick={() => navegar({ nome: a.nome } as Tela)}
                   >
                     {a.rotulo}
                   </button>
@@ -126,18 +159,19 @@ export function App() {
             {/* ⚠️ `eu &&` pelo mesmo motivo do formulário: sem identidade não há com que
                 preencher os campos do solicitante (`RF-21`). */}
             {tela.nome === 'conversa' && eu && (
-              <TelaConversa eu={eu} aoAbrirChamado={() => setTela({ nome: 'chamados' })} />
+              <TelaConversa eu={eu} aoAbrirChamado={() => navegar({ nome: 'chamados' })} />
             )}
             {tela.nome === 'documentacao' && (
               <TelaDocumentacao
-                inicial={entrada}
-                aoConversar={() => setTela({ nome: 'conversa' })}
+                key={geracao}
+                inicial={entradaAtual}
+                aoConversar={() => navegar({ nome: 'conversa' })}
               />
             )}
             {tela.nome === 'chamados' && (
               <TelaMeusChamados
-                aoAbrirDetalhe={(issueKey) => setTela({ nome: 'detalhe', issueKey })}
-                aoConversar={() => setTela({ nome: 'conversa' })}
+                aoAbrirDetalhe={(issueKey) => navegar({ nome: 'detalhe', issueKey })}
+                aoConversar={() => navegar({ nome: 'conversa' })}
               />
             )}
             {/* ⚠️ `eu &&` não é defensividade à toa: sem identidade o formulário não teria
@@ -146,14 +180,14 @@ export function App() {
                 identidade carrega, a aba fica sem conteúdo — que é o mesmo instante em que
                 a tela inteira ainda não sabe quem é a pessoa. */}
             {tela.nome === 'formulario' && eu && (
-              <TelaFormulario eu={eu} aoAbrirChamado={() => setTela({ nome: 'chamados' })} />
+              <TelaFormulario eu={eu} aoAbrirChamado={() => navegar({ nome: 'chamados' })} />
             )}
             {tela.nome === 'avisos' && <TelaAvisos />}
             {tela.nome === 'admin' && <TelaAdmin />}
             {tela.nome === 'detalhe' && (
               <TelaDetalhe
                 issueKey={tela.issueKey}
-                aoVoltar={() => setTela({ nome: 'chamados' })}
+                aoVoltar={() => navegar({ nome: 'chamados' })}
               />
             )}
           </>

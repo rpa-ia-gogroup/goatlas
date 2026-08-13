@@ -141,7 +141,12 @@ export function avaliarRegra2(
  * segunda superfície consumindo a mensagem; hoje seria indireção sem consumidor.
  */
 export function urlDeLeituraNoApp(idPagina: string): string {
-  return `/?pagina=${encodeURIComponent(idPagina)}`
+  // ⚠️ O caminho é o da ABA, não a raiz: em `/` o app abre a conversa, e a leitura só
+  // aparecia porque `?pagina=` a desviava. Com `/documentacao` o ← do navegador devolve a
+  // lista de categorias em vez de sair do app. `rules/` não importa de `app/` (a camada de
+  // regras roda no servidor), então a string é repetida aqui — e o teste que gera com esta
+  // função e lê com `entradaDaUrl` é o que impede as duas de divergirem.
+  return `/documentacao?pagina=${encodeURIComponent(idPagina)}`
 }
 
 /**
