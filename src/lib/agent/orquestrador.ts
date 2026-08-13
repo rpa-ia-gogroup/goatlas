@@ -53,7 +53,7 @@ export class Orquestrador {
     private readonly auditoria: Auditoria,
     private readonly novoId: () => string,
     /**
-     * 🚨 Está aqui **só** para nomear os assuntos na extração da proposta (`D-69`).
+     * 🚨 Está aqui **só** para nomear os assuntos na extração da proposta (`D-70`).
      *
      * Nada nesta classe chama a Atlassian de outra forma — quem executa tool é o
      * `ExecutorTools`, e é assim que se mantém. Sem esta fonte o prompt de extração
@@ -340,7 +340,7 @@ export class Orquestrador {
     if (config.tipos_chamado_permitidos.length === 0) return 0
     try {
       /**
-       * 🚨 **Os tipos vão COM NOME, e sem nome não se propõe** (`D-69`).
+       * 🚨 **Os tipos vão COM NOME, e sem nome não se propõe** (`D-70`).
        *
        * Antes daqui saía `config.tipos_chamado_permitidos.map((id) => ({ id, nome: id }))`,
        * e o prompt de extração listava `- 92: 92`: o modelo escolhia a fila do chamado

@@ -1,5 +1,5 @@
 /**
- * Arquivo já enviado responde a pergunta — `D-69`.
+ * Arquivo já enviado responde a pergunta — `D-70`.
  *
  * ## O relato
  *

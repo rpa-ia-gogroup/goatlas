@@ -1,5 +1,5 @@
 /**
- * O assunto do chamado é escolhido pelo NOME — `D-69`.
+ * O assunto do chamado é escolhido pelo NOME — `D-70`.
  *
  * ## O que este arquivo existe para reprovar
  *
@@ -108,7 +108,7 @@ beforeEach(async () => {
   conversas = new RepositorioConversas(db, () => AGORA)
 })
 
-describe('D-69 — a extração escolhe o assunto pelo nome, não por um número', () => {
+describe('D-70 — a extração escolhe o assunto pelo nome, não por um número', () => {
   it('🚨 cada tipo chega à camada de IA COM NOME — nunca o id no lugar dele', async () => {
     montar([GENERICO, NOTA_FISCAL])
     const c = await conversas.criar('c1', ANA)

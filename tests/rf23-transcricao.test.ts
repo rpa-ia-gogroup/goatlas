@@ -289,7 +289,7 @@ describe('pela rota real: confirmar a conversa leva a transcrição ao chamado',
     await config.definir('espacos_confluence', ['TECH'], ANA, AGORA)
     await config.definir('regra2_exemplos_ajuste_operacional', ['Rodei manualmente'], ANA, AGORA)
 
-    // ⚠️ `D-69` — a extração escolhe o assunto pelo **nome**, e o nome vem de
+    // ⚠️ `D-70` — a extração escolhe o assunto pelo **nome**, e o nome vem de
     // `listarTiposChamado`. Sem o tipo registrado no fake não nasce proposta, e sem
     // proposta não há confirmação para levar transcrição a chamado nenhum.
     atlassian = new ClienteAtlassianFake({

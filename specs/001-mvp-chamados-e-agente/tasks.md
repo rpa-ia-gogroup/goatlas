@@ -193,7 +193,7 @@ created: "2026-08-03"
 
 ## Phase 4 — Criação de chamado
 
-- [x] **T-059** *(13/08/2026, `D-69`)* A extração recebe os tipos **com nome** e limitados ao
+- [x] **T-059** *(13/08/2026, `D-70`)* A extração recebe os tipos **com nome** e limitados ao
       service desk configurado — `tickets/tipos-oferecidos.ts`, uma regra para os três leitores
       (rota do formulário, cartão de `D-53`, extração). Antes ia
       `map((id) => ({ id, nome: id }))`, e o modelo escolhia a fila do chamado entre números:

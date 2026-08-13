@@ -161,7 +161,7 @@ exatamente o tipo de "simplificação" que alguém tentaria de novo.
 
 **Uma tarefa bloqueada (T-425), e é de verificação.** O resto não depende de `Q1`.
 
-### Emenda de 13/08/2026 — `D-69`, a pergunta que o servidor já sabia responder
+### Emenda de 13/08/2026 — `D-70`, a pergunta que o servidor já sabia responder
 
 - [x] **T-426** — `GET /api/conversas/:id/anexos` (nome e teto; nunca o `temporaryAttachmentId`,
       isolado por e-mail) e o cartão deixando de perguntar quando a conversa já tem anexo.
@@ -176,9 +176,9 @@ lugar onde se anexava; `D-59` abriu o clipe/colar na conversa e transformou a pe
 para declarar o que a pessoa já tinha feito. O texto de `RN-11` foi emendado, não reescrito: a
 trava continua sendo **responder**, e continua valendo para quem não anexou nada.
 
-⚠️ **O terceiro defeito de `D-69` é desta spec, e só o navegador o pegou:** a lista de envios da
+⚠️ **O terceiro defeito de `D-70` é desta spec, e só o navegador o pegou:** a lista de envios da
 tela vivia dentro de `{cabem > 0 && …}`, então o terceiro arquivo zerava `cabem` e apagava a
 própria linha que acabara de aparecer — arquivo no chamado, nada na tela, que é o `D-62` de novo.
 
-**1442 testes** com os 28 casos novos (`tests/d69-anexo-ja-enviado.test.ts`,
-`tests/d69-assunto-com-nome.test.ts`).
+**1453 testes** com os 28 casos novos (`tests/d70-anexo-ja-enviado.test.ts`,
+`tests/d70-assunto-com-nome.test.ts`).

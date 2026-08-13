@@ -205,7 +205,7 @@ export interface EstadoFake {
     /** Falha própria: o diagnóstico cai sem derrubar o formulário, e vice-versa. */
     obterSchemaDoTipo: ModoFalha
     /**
-     * `D-69` — sem esta lista não há **nome** de assunto, e a extração da proposta não
+     * `D-70` — sem esta lista não há **nome** de assunto, e a extração da proposta não
      * roda. O caminho de degradação (não propor, jamais cair para os ids) não tinha como
      * ser encenado enquanto esta operação era a única do fake sem falha injetável.
      */

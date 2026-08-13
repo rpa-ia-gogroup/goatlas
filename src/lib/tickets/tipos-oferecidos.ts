@@ -1,5 +1,5 @@
 /**
- * Quais assuntos esta instalação oferece, e como eles se chamam — `RF-28`, `D-53`, `D-69`.
+ * Quais assuntos esta instalação oferece, e como eles se chamam — `RF-28`, `D-53`, `D-70`.
  *
  * ## O bug que este módulo existe para não acontecer
  *

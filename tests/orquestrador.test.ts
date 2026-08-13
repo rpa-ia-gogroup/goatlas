@@ -275,7 +275,7 @@ describe('RF-13 / RN-07 — bloqueio é orientação, não parede', () => {
     // `rt-1` é o tipo que o fake propõe; sem ele na allowlist a proposta seria
     // descartada por RF-28 e o teste passaria a medir a coisa errada.
     //
-    // ⚠️ E `service_desk_id` entra junto (`D-69`): a extração só oferece ao modelo tipo
+    // ⚠️ E `service_desk_id` entra junto (`D-70`): a extração só oferece ao modelo tipo
     // que EXISTE no desk configurado, porque tipo de outro desk falharia só na criação.
     const configComTipo: ConfigValores = {
       ...CONFIG,

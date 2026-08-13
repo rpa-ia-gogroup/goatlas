@@ -480,7 +480,7 @@ const CONFIG: ConfigValores = {
   dominios_permitidos: ['gocase.com'],
   espacos_confluence: ['TECH'],
   tipos_chamado_permitidos: ['70'],
-  // `D-69` — a extração só oferece tipo que existe no desk configurado.
+  // `D-70` — a extração só oferece tipo que existe no desk configurado.
   service_desk_id: 'sd-1',
   // Alto de propósito: o assunto aqui é latência, não bloqueio.
   regra1_threshold_score: 0.99,
@@ -600,7 +600,7 @@ describe('turno do agente: a proposta não espera a resposta do modelo', () => {
     const atlassian = new ClienteAtlassianFake({
       paginas: [pagina()],
       historico: [ticket()],
-      // `D-69` — sem o tipo aqui a extração não sai, e o teste mediria a ausência dela.
+      // `D-70` — sem o tipo aqui a extração não sai, e o teste mediria a ausência dela.
       tiposChamado: [
         { id: '70', serviceDeskId: 'sd-1', nome: 'Relatar um bug', descricao: null },
       ],

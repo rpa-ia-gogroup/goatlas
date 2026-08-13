@@ -4200,7 +4200,67 @@ proxy largo reprovou. Hoje o caso afirma o alvo: **sem** `mensagem-pausada`, **c
 
 ---
 
-### D-69 · O assunto era escolhido entre números, e a pergunta do anexo ignorava o anexo
+### D-69 · A conversa acompanha o fim só quando a pessoa já está no fim
+
+**Data:** 13/08/2026 · **Origem:** relato do mantenedor sobre o `D-68` no ar ·
+**Contexto:** `D-68`, `RNF-12`, `RNF-28`
+
+*"Ao enviar mensagem, a tela dá uma subida (o scroll do chat), sendo que eu fico com a
+visualização na borda inferior."* Duas regras pedidas: no fim da página, a conversa sobe ao
+enviar ou receber; lendo o histórico, a página **não desce** a cada mensagem.
+
+**Eram duas causas somadas, e a segunda só existia por causa do `D-68`.** O efeito rolava
+**incondicionalmente**, e o alvo era `fim.scrollIntoView({ block: 'end' })` — um sentinela que
+mora **antes** do compositor. Alinhar o sentinela ao rodapé da janela para a página ~270 px
+acima do fim real (a altura do compositor fixo), e nessa posição o compositor `sticky` é puxado
+para cima e **cobre a mensagem que acabou de chegar**. Medido: última fala 34 px atrás do campo.
+⚠️ Antes de pinar o compositor, o alvo errado não custava nada — este é o **segundo** custo do
+fixo, depois do terço de tela de `D-68`.
+
+Agora o alvo é o fim do **documento** (`window.scrollTo(scrollHeight)`), e a rolagem só acontece
+se `estaNoFim` — com tolerância de 80 px, porque zoom fracionário e teclado de celular produzem
+sobra de subpixel, e tolerância zero desligaria o acompanhamento sozinho.
+
+🚨 **A segunda regra foi aplicada ao pé da letra, inclusive para a mensagem que a própria pessoa
+manda** — e por isso precisou de um caminho de volta. Sem ele, escrever enquanto se lê o
+histórico não teria efeito visível nenhum: o texto e a linha de espera nascem fora da tela. O
+atalho **"↓ Ir para a última mensagem"** vive dentro do compositor (que já é `sticky`, então não
+precisa de `fixed` próprio nem de cálculo contra uma altura que muda com a lista de anexos),
+aparece só quando **as duas** condições valem — longe do fim **e** com novidade não vista —, e
+**apaga sozinho** quando a pessoa volta rolando. ⚠️ Ele **não existe** quando não há para onde
+ir: botão desabilitado seria móvel permanente no espaço mais caro da tela.
+
+⚠️ **A conversa cresce DEPOIS do alvo.** Rolar no efeito de `falas` não basta: naquele instante o
+cartão de leitura do anexo e a linha de espera ainda mudam de altura, e a página ficava 200 px
+curta. Quem mantém o fim colado é um `ResizeObserver` no `body`, que corrige enquanto
+`grudadoNoFim` valer.
+
+🚨 **E rolar dispara `scroll`, o que desligava o próprio acompanhamento.** No caminho até o fim a
+posição passa longe do fim, então o evento de cada quadro chegava como se a pessoa tivesse
+subido para ler. Daí `ehRolagemNossa`: eventos dentro de 800 ms de uma rolagem nossa são
+ignorados.
+
+⚠️ **A rolagem é instantânea, e a justificativa é o que se consegue provar.** Suave é animada,
+então depende de quadros: em aba sem quadros (fora de foco, `rAF` pausado) ela **não sai do
+lugar** — medido, `scrollY` parado em 0 depois de 1,2 s com `prefers-reduced-motion` desligado,
+enquanto `auto` foi ao fim na hora. Em aba em foco a suave funciona; o que não cabe é *depender*
+de animação para **chegar**, quando chegar é a correção.
+
+🚨 **A mesma medição desmentiu o instrumento**: `scroll` não dispara e `smooth` não anda pela
+**mesma** causa — a aba fora de foco não gera quadros. Duas conclusões erradas nasceriam de
+tratá-las como fatos separados (*"smooth é quebrado neste Chrome"*, *"o listener não funciona"*),
+a mesma armadilha de `D-40`. Por isso a verificação das duas regras é feita posicionando a página
+e **disparando o `scroll`** que um gesto real dispararia: o listener lê a posição do DOM, nunca o
+evento.
+
+**Medido no navegador:** no fim, quatro turnos seguidos com distância **0** e a última fala acima
+do campo · lendo em 200 px, mensagem enviada **não moveu** a página (200 → 200), atalho aceso,
+compositor no rodapé e usável · clique no atalho volta ao fim e o turno seguinte volta a
+acompanhar · voltar **rolando** apaga o atalho sem clique.
+
+---
+
+### D-70 · O assunto era escolhido entre números, e a pergunta do anexo ignorava o anexo
 
 **Data:** 13/08/2026 · **Origem:** teste do chat pelo mantenedor · **Contexto:** `D-53`, `D-59`,
 `D-62`, `D-47`, `RF-15`, `RF-18`, `RF-28`, `RF-62`, `RN-11`
@@ -4310,9 +4370,9 @@ anexou 2 arquivos"* com os dois nomes e *"Ainda cabem 1 de 3"* · terceiro anexo
 abertura sem declarar nada → `GOATLAS-1` com *"✓ Anexado: image.png, print-do-erro.png,
 terceiro.png"* · e a tela do formulário intacta, com os dois rádios e a frase composta de `D-46`.
 
-**Testes:** `tests/d69-assunto-com-nome.test.ts` (10 casos — o que atravessa a fronteira, o
+**Testes:** `tests/d70-assunto-com-nome.test.ts` (10 casos — o que atravessa a fronteira, o
 filtro de desk, a indisponibilidade que não cai para os ids) e
-`tests/d69-anexo-ja-enviado.test.ts` (18 — a rota e o que ela não expõe, o isolamento por
+`tests/d70-anexo-ja-enviado.test.ts` (18 — a rota e o que ela não expõe, o isolamento por
 e-mail, o fato vencendo a resposta, `RN-11` intacta para quem não anexou, e a lista que fica no
 teto). `ClienteAtlassianFake` ganhou falha injetável em `listarTiposChamado`: era a única
 operação sem uma, e sem ela o caminho de degradação não tinha como ser encenado.
