@@ -66,18 +66,34 @@ created: "2026-08-13"
 - [ ] **T-633** Auditoria: `anexo_analisado` com as três situações de `FR-10` e **sem** o
       conteúdo do arquivo; varredura em `tests/rnf01-vazamento-credenciais.test.ts` cobrindo a
       descrição. _Requirements: FR-10, ScC-7_
+- [ ] **T-634** O mapa **6 estados → 3 ações de auditoria** numa função só, com teste que
+      afirma o mapa inteiro (achado `F3`: tela e auditoria contando histórias diferentes sobre o
+      mesmo arquivo). _Requirements: FR-10_
+- [ ] **T-635** O teto de análises **importa** `MAX_ANEXOS_POR_CHAMADO`; teste estrutural
+      afirmando que não existe um `3` escrito à parte (achado `F5`). _Requirements: FR-5c, ScC-9_
+- [ ] **T-636** Caso de `FR-2` pelo lado observável (achado `F4`, `ScC-2`): duas mensagens
+      seguidas com o mesmo anexo produzem **uma** análise. _Requirements: FR-2, ScC-2_
 
 ## Phase 5 — Quando o turno espera
 
+> 🚨 Fase reescrita pelo achado **F2** do `/analyze`: a análise roda **dentro da requisição de
+> upload**, não em `ctx.waitUntil` (mecanismo sem um único consumidor neste app, e cujo
+> fallback era impossível por falta de bytes).
+
 - [ ] **T-640** `tests/espera-de-analises.test.ts` (Red), com **relógio injetado**: o teto de
       8 s é **do turno** (três anexos não viram 24 s); análise já concluída custa **zero**
-      espera; pendente reivindicada por outra requisição é relida, não refeita.
-      _Requirements: FR-1b, ScC-8_
-- [ ] **T-641** `src/lib/agent/espera-de-analises.ts`. ⚠️ Teste afirma sobre **contagem de
-      leituras** e conclusão, nunca sobre milissegundos (`D-57`). _Requirements: FR-1b_
-- [ ] **T-642** Rota de upload: `INSERT` da análise + `ctx.waitUntil(analisar(...))` com os
-      bytes que **só ali** existem (`plan.md` §3.4). A resposta continua `{ok, nome}` — o
-      `temporaryAttachmentId` nunca vai ao navegador. _Requirements: FR-1_
+      espera; linha `analisando` **velha** (upload que morreu) vira `sem_conteudo` e não trava a
+      conversa. _Requirements: FR-1b, FR-7, ScC-8_
+- [ ] **T-641** `src/lib/agent/espera-de-analises.ts` — apenas **espera e relê**; não analisa
+      nada por conta própria. ⚠️ Teste afirma sobre **contagem de leituras** e conclusão, nunca
+      sobre milissegundos (`D-57`). _Requirements: FR-1b_
+- [ ] **T-642** Rota de upload: `INSERT` com `estado='analisando'` **antes** da chamada de rede
+      (senão a rota da mensagem conclui "nada pendente" e responde sem o arquivo), análise
+      **na própria requisição** com os bytes que só ali existem, `UPDATE` do estado final. A
+      resposta continua `{ok, nome}` — o `temporaryAttachmentId` nunca vai ao navegador.
+      _Requirements: FR-1, ScC-1_
+- [ ] **T-642b** Caso de teste: o upload **responde** mesmo quando a análise falha — leitura de
+      arquivo nunca derruba o envio do anexo (`RNF-18`). _Requirements: FR-8, ScC-4_
 - [ ] **T-643** Rota de mensagem: esperar (T-641), injetar no contexto do turno as descrições
       **relevantes** delimitadas, e dizer ao modelo, como fato, que há arquivo **ainda sendo
       lido** quando houver. _Requirements: FR-1b, FR-4, FR-9_
@@ -94,12 +110,16 @@ created: "2026-08-13"
       em leitura tem estado próprio. _Requirements: FR-5, FR-7, RNF-28_
 - [ ] **T-651** `tests/visualizador.test.ts` (Red): descritor por tipo (imagem, PDF, texto,
       não exibível) e os estados — sem DOM, como `tela-admin.test.ts`.
-      _Requirements: FR-11, FR-12_
+      _Requirements: FR-11, FR-12, ScC-6_
 - [ ] **T-652** `src/app/visualizador.tsx` com `<dialog>` nativo (`showModal`): foco contido,
       `Esc` fecha, foco devolvido à origem, `prefers-reduced-motion` respeitado.
       _Requirements: FR-11, FR-13_
-- [ ] **T-653** Ligar o clique nas duas listas de anexo (conversa e detalhe do chamado) ao
-      visualizador, mantendo o download disponível. _Requirements: FR-11, FR-12_
+- [ ] **T-653** Ligar o clique nas **duas** listas, com as **duas fontes** do achado `F1`:
+      detalhe do chamado → o proxy que já existe; conversa → `createObjectURL` do `File` que
+      esta aba enviou, com `revokeObjectURL` no fechamento. Download segue disponível nos dois.
+      _Requirements: FR-11, FR-12, SC-9b_
+- [ ] **T-653b** Sem blob (página recarregada antes de o chamado existir), o item **não é
+      clicável** — nunca uma janela vazia. _Requirements: FR-12, SC-9b_
 - [ ] **T-654** [P] `estilos.css` — a camada, seguindo `identidade_visual_gogroup.md`; skill
       `frontend-design` antes de codar (regra 9). _Requirements: FR-11_
 
@@ -128,6 +148,17 @@ created: "2026-08-13"
       _Requirements: ScC-3, ScC-8_
 
 ---
+## Achados do `/analyze` (13/08/2026) — todos endereçados antes do código
+
+| # | Sev | Achado | Onde foi corrigido |
+|---|---|---|---|
+| **F1** | 🚨 | Visualização na conversa apontaria para uma rota que **não existe** (anexo pendente não tem proxy, e o servidor não guarda bytes) → 404 no print da própria pessoa | `spec` `SC-9b` · `plan` §3.6 · `T-653`/`T-653b` |
+| **F2** | 🚨 | O desenho dependia de `ctx.waitUntil`, **sem nenhum consumidor** neste app, e com fallback impossível por falta de bytes | `plan` §3.1/§3.2/§7 · `T-640`…`T-642b` |
+| **F3** | ⚠️ | `FR-10` pede 3 ações de auditoria; o plano define 6 estados, sem mapa | `plan` §4 · `T-634` |
+| **F4** | Baixo | `ScC-1`/`2`/`4`/`6` sem tarefa | `T-642`/`T-636`/`T-642b`/`T-651` |
+| **F5** | Baixo | "3 anexos" repetido em texto em vez de importar a constante | `plan` §4 · `T-635` |
+| **F6** | ✅ | Nenhum vazamento de implementação na spec, nenhum `[NEEDS CLARIFICATION]` | — |
+
 ## Coverage check (gate antes do /implement)
 - [x] Todo FR da spec aparece em ao menos uma tarefa (FR-1 T-642 · FR-1b T-640/641/643 ·
       FR-2 T-620/621 · FR-3 T-610/612/613 · FR-4 T-643 · FR-5 T-650 · FR-5b T-644/660 ·

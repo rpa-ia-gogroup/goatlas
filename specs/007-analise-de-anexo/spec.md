@@ -143,6 +143,14 @@ valendo (`D-60b`).
   - **Then** a imagem aparece sobre a tela atual, sem navegar para fora, com o nome do arquivo
     e um caminho explícito para fechar e para baixar
 
+- **SC-9b** (US-3) — na conversa, só o que esta aba enviou
+  - **Given** uma conversa cujo anexo foi enviado **nesta** aba, e o chamado ainda não existe
+  - **When** a pessoa clica no anexo
+  - **Then** o arquivo é exibido
+  - **E Given** a mesma conversa **depois de recarregar a página**
+  - **Then** aquele anexo **não é clicável**, e a tela não promete uma visualização que não tem
+    (achado `F1` do `/analyze`: antes de o chamado existir não há de onde servir o arquivo)
+
 - **SC-10** (US-3) — visualização rápida de PDF e de texto
   - **Given** um anexo em PDF, ou a transcrição da conversa (`D-54`)
   - **When** a pessoa clica no anexo

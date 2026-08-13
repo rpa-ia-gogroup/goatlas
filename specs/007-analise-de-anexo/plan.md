@@ -57,19 +57,35 @@ created: "2026-08-13"
 
 ### 3.1 Quem faz o quê
 
+🚨 **Revisado pelo `/analyze` (achado F2), antes de uma linha de código.** A primeira versão
+punha a análise em `ctx.waitUntil` e deixava a rota da mensagem "reivindicar" o que sobrasse.
+Dois furos: `waitUntil` **nunca foi exercitado neste app** (o hook está em `worker.ts:19` e não
+tem um único consumidor em `src/`, então nada prova que a plataforma não corta a promessa), e o
+fallback era **impossível** — sem bytes não há o que analisar (§3.4). O desenho abaixo não
+depende de nenhum dos dois.
+
 ```
 upload do anexo (POST /api/anexos-pendentes)
   ├─ grava anexos_pendentes (já existe)
-  ├─ INSERT analises_anexo (estado='pendente')            ← FR-1
-  └─ ctx.waitUntil( analisar(...) )   ← devolve {ok,nome} sem esperar
+  ├─ INSERT analises_anexo (estado='analisando')           ← FR-1
+  ├─ analisa AQUI, na própria requisição  (bytes em mão)
+  ├─ UPDATE estado final + descricao + custo
+  └─ responde {ok, nome}   ← mais lento que hoje, e ninguém está esperando por ele
 
 mensagem (POST /api/conversas/:id/mensagens)
-  ├─ aguardarAnalises(conversaId, teto 8s)                ← FR-1b
-  │    ├─ reivindica pendente que ninguém pegou → analisa aqui
-  │    └─ pendente já reivindicado → relê a linha até terminar/estourar
+  ├─ aguardarAnalises(conversaId, teto 8s do TURNO)        ← FR-1b
+  │    └─ relê as linhas até nenhuma estar 'analisando' ou o teto estourar
   ├─ monta o contexto do turno COM as descrições prontas   ← FR-4
   └─ orquestrador (agente principal) responde
 ```
+
+**Por que o upload é o lugar certo:** ele é a única requisição que tem os bytes (§3.4), e é a
+única que a pessoa **não** está esperando — ela está digitando a mensagem. O `enviando…` por
+arquivo que a tela já mostra (`D-59`) passa a cobrir também a leitura, sem uma palavra nova.
+
+⚠️ **A espera da rota da mensagem continua existindo** e não é redundante: quem cola o print e
+manda a mensagem em dois segundos chega antes de o upload terminar. O que ela **não** faz é
+tentar analisar por conta própria.
 
 O "agente auxiliar" é `analisarAnexo()` em `src/lib/agent/analise-de-anexo.ts`: um prompt
 próprio, uma chamada ao provedor, saída estruturada `{ relevante, descricao }`. **Não** tem
@@ -77,19 +93,23 @@ tools, **não** vê o histórico da conversa e **não** decide nada além disso 
 mínima que satisfaz a spec, e o isolamento é o que impede que uma instrução dentro do arquivo
 alcance o gate.
 
-### 3.2 A espera, sem polling ingênuo
+### 3.2 A espera
 
-O Worker é stateless: a promessa iniciada no upload **não** é alcançável pela requisição da
-mensagem. Duas requisições, um estado compartilhado — o banco.
+O Worker é stateless: a requisição da mensagem não alcança a do upload. O estado compartilhado
+é o banco, e a espera é uma releitura curta: enquanto alguma linha da conversa estiver
+`analisando`, relê; para quando nenhuma estiver, ou quando o teto estourar.
 
-🚨 **A reivindicação é `UPDATE … WHERE estado='pendente'`, e vem ANTES da chamada de rede** —
-o mesmo lock de `anexos_pendentes.reivindicar`. Sem ele, upload e mensagem analisam o mesmo
-arquivo em paralelo: duas chamadas pagas, duas descrições, e a segunda sobrescrevendo a
-primeira.
+⚠️ **O teto é do TURNO, não por arquivo** — três anexos não viram 24 s.
 
-Quem não consegue reivindicar **não** refaz o trabalho: relê a linha em intervalos curtos até
-`estado != 'analisando'` ou até o teto de 8 s. ⚠️ O teto é **do turno**, não por arquivo:
-três anexos não viram 24 s.
+⚠️ **`INSERT` com `estado='analisando'` antes da chamada de rede** é o que torna a espera
+possível: uma linha que só aparecesse *depois* da análise faria a rota da mensagem concluir
+"não há nada pendente" e responder sem o arquivo — o defeito exato que a feature existe para
+consertar, na versão silenciosa.
+
+⚠️ E a espera **não** analisa nada por conta própria (achado F2). Se o upload morreu no meio, a
+linha fica `analisando` para sempre; por isso a espera trata linha **velha** (mais que o teto de
+um turno) como `sem_conteudo`, que cai em `FR-7` — informa, não bloqueia, e o anexo continua no
+chamado.
 
 ### 3.3 O que chega ao agente principal
 
@@ -110,15 +130,14 @@ O upload manda o arquivo ao Jira como anexo temporário e **não guarda os bytes
 `temporaryAttachmentId` não é recuperável como conteúdo. Então a análise precisa dos bytes
 **no momento do upload**, não depois.
 
-Consequência de desenho: o `ctx.waitUntil` do upload recebe os bytes **em memória**, e é o
-único caminho que os tem. Se a análise não acontecer ali, o arquivo só volta a ser legível
-**depois** da criação do chamado, pelo proxy de leitura — tarde demais para `FR-1`.
+Consequência de desenho: a **requisição de upload** é a única que tem os bytes. Se a análise
+não acontecer ali, o arquivo só volta a ser legível **depois** da criação do chamado, pelo proxy
+de leitura — tarde demais para `FR-1`.
 
 ⚠️ Isso torna `FR-1` (analisar ao anexar) **estrutural**, não uma escolha de latência: quem
-"simplificar" movendo a análise para o turno da mensagem descobre que não há mais arquivo
-para ler. A reivindicação da mensagem (§3.2) serve para o caso em que o `waitUntil` foi
-cortado pela plataforma — e nesse caso a análise falha por falta de bytes, com
-`estado='sem_conteudo'`, que é honesto e cai em `FR-7`.
+"simplificar" movendo a análise para o turno da mensagem descobre que não há mais arquivo para
+ler. É também o que descarta guardar os bytes numa tabela (§3.7) e o que faz a análise rodar
+**dentro** da requisição, não num fire-and-forget (§3.1, achado F2).
 
 ### 3.5 Por tipo
 
@@ -138,9 +157,29 @@ script, e ainda por cima como se fosse imagem.
 
 ### 3.6 A visualização rápida
 
-Componente novo na SPA (`src/app/visualizador.tsx`), aberto pelo clique no anexo nas duas
-telas (conversa e detalhe do chamado). Ele **não** busca conteúdo novo: aponta para as rotas
-que já servem o arquivo, com os cabeçalhos de `D-11`/`D-62`.
+🚨 **Corrigido pelo `/analyze` (achado F1): as duas telas têm FONTES DIFERENTES.** Na tela do
+chamado o arquivo vem do proxy (`/api/chamados/:key/anexos/:nome`); **na conversa não existe
+rota que o sirva** — `urlDoAnexoNoApp` exige `issueKey` + vínculo, e o chamado ainda não
+existe. Apontar o visualizador para lá na conversa daria **404 em cima do próprio print da
+pessoa**, que é o pior lugar possível para um link quebrado.
+
+| Superfície | Fonte do conteúdo |
+|---|---|
+| Detalhe do chamado | o proxy que já existe, com os cabeçalhos de `D-11`/`D-62` |
+| Conversa | **`URL.createObjectURL(File)` no próprio navegador** — o arquivo que aquela aba acabou de anexar |
+
+⚠️ **Isso não fura `RNF-02`**: o blob é o arquivo que a pessoa escolheu, e ele nunca sai do
+navegador dela — não há chamada à Atlassian nem à IA envolvida. E é o único caminho possível:
+o servidor **não guarda** os bytes (§3.4).
+
+⚠️ **Consequência aceita, e ela precisa estar na tela:** recarregar a página perde o blob. O
+anexo continua no chamado (o upload já aconteceu), mas a pré-visualização na **conversa** só
+existe na sessão que o enviou — depois de criado o chamado, a visualização da tela do chamado
+assume. Antes disso, sem blob, o clique não promete nada: o item simplesmente não é clicável, em
+vez de abrir uma janela vazia (`FR-12`). E `URL.revokeObjectURL` no fechamento, senão cada print
+colado vaza memória na aba.
+
+Componente novo na SPA (`src/app/visualizador.tsx`), aberto pelo clique nas duas telas:
 
 - Imagem → `<img src={url}>`
 - PDF → `<iframe src={url}>` (o `Content-Security-Policy: sandbox` da resposta continua
@@ -190,6 +229,12 @@ Invariantes:
 - `estado` distingue **três** falhas (`tipo_nao_suportado`, `sem_conteudo`, `falhou`) porque
   elas pedem frases diferentes na tela — mesma família de `area_indisponivel` ×
   `area_nao_encontrada`.
+- ⚠️ **O mapa dos 6 estados para as 3 ações de auditoria de `FR-10` é explícito** (achado F3),
+  e vive numa função só: `pronta`/`irrelevante` → **analisado** · `tipo_nao_suportado`/`falhou`
+  → **não foi possível ler** · `sem_conteudo`/`analisando` velho → **não deu para saber**. Sem
+  esse mapa, tela e auditoria contam histórias diferentes sobre o mesmo arquivo.
+- ⚠️ **O teto de análises vem de `MAX_ANEXOS_POR_CHAMADO`** (achado F5), importado — nunca um
+  `3` escrito de novo aqui: o dia em que o teto mudar, os dois números divergem em silêncio.
 - ⚠️ **A tabela NÃO guarda o conteúdo do arquivo**, só a descrição — e a descrição é derivada,
   não o dado. `descricao` é conteúdo pessoal: entra na retenção como o resto, e **nunca** na
   auditoria (`FR-10`).
@@ -246,11 +291,16 @@ fake devolveu só prova que o fake é consistente consigo mesmo.
 | Decisão | Princípio tensionado | Por que vale a pena |
 |---|---|---|
 | Quinta credencial (`OCR_WORKER_TOKEN`) | "quatro credenciais" (regra 5) | PDF é metade do pedido, e OCR local é impossível na plataforma. O worker já roda em produção no godocs |
+| Análise **dentro** da requisição de upload | "resposta rápida" | O upload é a única requisição com os bytes, e a única que ninguém está esperando. A alternativa (`waitUntil`) depende de um mecanismo **sem nenhum consumidor hoje** neste app — achado F2 |
+| Pré-visualização por blob na conversa | duas fontes para a mesma tela | Não existe rota para anexo pendente e o servidor não guarda bytes. Uma fonte só significaria 404 no print da própria pessoa — achado F1 |
 | Espera de até 8 s no turno | `RNF-12` (< 5 s no p95) | A espera só existe com anexo pendente, e `FR-1` a leva a ~zero no caso comum. O alternativo é o agente responder sobre um arquivo que não viu |
 | Análise gasta quando a pessoa anexa e nunca escreve | custo | É o preço da espera zero. Teto de 3 por chamado limita o desperdício |
 | `descricao` persistida | privacidade | É o que faz `FR-2` e `US-4` funcionarem. Entra na retenção como o resto; nunca na auditoria |
 
 ## 8. File / Build Order
+
+> ⚠️ Ordem revisada pelo `/analyze`: sem `espera-de-analises` como reivindicador, e com o
+> visualizador partido em duas fontes.
 
 1. `src/lib/ocr/http.ts` + fake — a borda HTTP, com as três armadilhas de `D-50`/`D-40`
    fechadas, **e o teste da varredura de `bind` rodando antes**.
