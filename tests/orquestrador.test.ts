@@ -167,7 +167,7 @@ describe('RF-09 / RF-12 — Regra 1 bloqueia e a mensagem substitui a resposta d
     expect(r.regraBloqueio).toBe('regra1_confluence')
     // T-118 — o link chega ao turno apontando para a leitura no app, o que só
     // funciona se o ID da página atravessar cliente → tool → veredito → mensagem.
-    expect(r.texto).toContain('/?pagina=p1')
+    expect(r.texto).toContain('/documentacao?pagina=p1')
     // A mensagem de bloqueio SUBSTITUI a resposta do modelo. Se o modelo pudesse
     // continuar depois do bloqueio, a regra seria retórica.
     expect(r.texto).not.toContain('NÃO DEVE APARECER')

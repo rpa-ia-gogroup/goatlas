@@ -42,6 +42,7 @@ import {
   type RespostaBusca,
 } from './api'
 import { Aviso, Vazio } from './componentes'
+import { CAMINHO_DOCUMENTACAO, irPara } from './rotas'
 import { ConteudoConfluence } from '../lib/confluence/renderizar'
 
 /* ---------------------------------------------------------------------- */
@@ -530,7 +531,9 @@ export function TelaDocumentacao({
                   // ressuscitaria a busca que a pessoa acabou de descartar.
                   if (ev.target.value.trim() === '') {
                     setErro(null)
-                    lembrarNaUrl({})
+                    // ⚠️ SUBSTITUI, não empilha: apagar o campo não é um passo para trás.
+                    // Empilhado, o ← devolveria a busca que a pessoa acabou de descartar.
+                    lembrarNaUrl({}, 'substituir')
                   }
                 }}
                 placeholder="reprocessar relatório de vendas"
@@ -589,14 +592,20 @@ function mensagemDe(erro: unknown, padrao: string): string {
  * entre colegas, e o link `ri:page` do próprio Confluence funcionando. Um router de
  * verdade entra com T-115, quando houver árvore e breadcrumb para navegar.
  */
-function lembrarNaUrl(params: { q?: string; pagina?: string }): void {
-  if (typeof window === 'undefined' || !window.history?.replaceState) return
+function lembrarNaUrl(
+  params: { q?: string; pagina?: string },
+  modo: 'empilhar' | 'substituir' = 'empilhar',
+): void {
+  if (typeof window === 'undefined' || !window.history?.pushState) return
   const url = new URL(window.location.href)
+  // O caminho da aba entra aqui porque a leitura pode ter começado por um link antigo
+  // (`/?pagina=…`): sem isto, o ← levaria à conversa em vez de à lista de categorias.
+  url.pathname = CAMINHO_DOCUMENTACAO
   url.searchParams.delete('q')
   url.searchParams.delete('pagina')
   if (params.pagina) url.searchParams.set('pagina', params.pagina)
   else if (params.q) url.searchParams.set('q', params.q)
-  window.history.replaceState(null, '', url.toString())
+  irPara(`${url.pathname}${url.search}`, modo)
 }
 
 /** Lê a entrada da URL uma vez, no boot. */

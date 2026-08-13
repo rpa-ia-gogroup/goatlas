@@ -208,7 +208,14 @@ export function TextoDoAgente({ texto }: { texto: string }) {
  * para onde o app manda um colega clicar. O id é aceito percent-encoded porque é
  * assim que `urlDeLeituraNoApp` o escreve.
  */
-const ROTA_DE_LEITURA = /^\/\?pagina=(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f]{2})+$/
+/**
+ * ⚠️ **O caminho entrou aqui junto com `rotas.ts`, e esquecer isto teria sido silencioso.**
+ * `urlDeLeituraNoApp` passou a escrever `/documentacao?pagina=…`; com o padrão preso a
+ * `/?pagina=…`, o link da deflexão continuaria **aparecendo** na conversa e deixaria de ser
+ * clicável — a mensagem inteira de `RF-12` intacta, e o clique morrendo. Terceira camada do
+ * mesmo contrato, ao lado de `urlDeLeituraNoApp` e `entradaDaUrl`.
+ */
+const ROTA_DE_LEITURA = /^\/documentacao\?pagina=(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f]{2})+$/
 
 function formatarInline(texto: string): ReactNode[] {
   const nós: ReactNode[] = []

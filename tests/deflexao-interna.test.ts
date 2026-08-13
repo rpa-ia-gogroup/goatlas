@@ -54,7 +54,7 @@ const markup = (texto: string) => renderToStaticMarkup(createElement(TextoDoAgen
 describe('RF-09 / RF-39 — o link da deflexão fica DENTRO do app', () => {
   it('a mensagem linka a rota de leitura, não o Confluence', async () => {
     const msg = mensagemDaRegra1([pagina({ id: '77' })])
-    expect(msg).toContain('/?pagina=77')
+    expect(msg).toContain('/documentacao?pagina=77')
     // O link para a Atlassian é uma parede para quem não tem assento.
     expect(msg).not.toContain('atlassian.net')
     // RF-12 continua inteiro: título, motivo legível e caminho de override.
@@ -73,7 +73,7 @@ describe('RF-09 / RF-39 — o link da deflexão fica DENTRO do app', () => {
   })
 
   it('id com caractere especial é codificado', async () => {
-    expect(urlDeLeituraNoApp('a b&c')).toBe('/?pagina=a%20b%26c')
+    expect(urlDeLeituraNoApp('a b&c')).toBe('/documentacao?pagina=a%20b%26c')
     const query = urlDeLeituraNoApp('a b&c')
     expect(entradaDaUrl(query.slice(query.indexOf('?')))).toEqual({ pagina: 'a b&c' })
   })
@@ -88,8 +88,8 @@ describe('RF-09 / RF-39 — o link da deflexão fica DENTRO do app', () => {
 
 describe('R-07 — link interno é allowlist, não "começa com barra"', () => {
   it('a rota de leitura vira link clicável, em OUTRA aba', async () => {
-    const html = markup('Veja [Reprocessar](/?pagina=77) antes de abrir.')
-    expect(html).toContain('href="/?pagina=77"')
+    const html = markup('Veja [Reprocessar](/documentacao?pagina=77) antes de abrir.')
+    expect(html).toContain('href="/documentacao?pagina=77"')
     expect(html).toContain('Reprocessar')
     // A conversa vive em estado de React: navegar na mesma aba a destrói, e a pessoa
     // perderia o botão de override (RF-13) exatamente por ter aceitado ler primeiro.
@@ -101,10 +101,13 @@ describe('R-07 — link interno é allowlist, não "começa com barra"', () => {
     // pessoa da empresa edita. Só a forma exata da rota de leitura é aceita.
     for (const alvo of [
       '/api/admin/config',
-      '/?pagina=77&admin=1',
+      '/documentacao?pagina=77&admin=1',
+      // O caminho ANTIGO deixou de ser aceito: o padrão é um só, e link velho
+      // colado pelo modelo não pode virar clique para uma tela que já não existe.
+      '/?pagina=77',
       '/../etc/passwd',
       '//exfiltra.exemplo/x',
-      '/?pagina=',
+      '/documentacao?pagina=',
       '/?q=qualquer',
       '/',
     ]) {

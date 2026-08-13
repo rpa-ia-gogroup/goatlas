@@ -235,6 +235,7 @@ Serve ao colaborador diretamente **e** ao agente, via `search_confluence`. É a 
 |---|---|---|
 | RF-37 | Busca full-text via CQL restrita aos espaços da allowlist, com trecho de contexto e **score de relevância** — o score é insumo da Regra 1 (**RF-09**), não só ordenação visual. ⚠️ `?espaco=` **estreita** a allowlist (interseção, nunca substituição — `D-30`), para o bloco de busca do Confluence funcionar. | P0 |
 | RF-38 | **Allowlist explícita de espaços** — nada exposto por padrão. Exclusão por label (ex.: `confidencial`) mesmo dentro de espaço liberado. | P0 |
+| RF-64 | Cada tela do app tem **URL própria** e o **voltar do navegador** desfaz um passo. Vem de três relatos de uso (`D-64`): tudo morava em `/` com `replaceState`, então o histórico tinha uma entrada só e o ← saía do app. ⚠️ Depende de `not_found_handling: "single-page-application"` no deploy. | P1 |
 | RF-39 | Renderizar a página com fidelidade razoável (títulos com o **emoji** que os abre, listas, **listas de tarefas**, **datas**, tabelas, código, imagens e anexos servidos pelo proxy). ⚠️ Os quatro em destaque entraram em `D-63`/`D-63b`, todos pela mesma causa: tag desconhecida é desembrulhada, e o que ela guardava em atributo evaporava. E página **sem conteúdo nenhum** diz que está vazia, em vez de abrir em branco. | P0 |
 | RF-40 | Respeitar page restrictions: página restrita não aparece na busca nem é acessível por URL direta, ainda que o espaço esteja liberado. | P0 |
 | RF-41 | Navegação pela árvore do espaço, com breadcrumbs. | P1 |

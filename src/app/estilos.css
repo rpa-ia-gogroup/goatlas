@@ -877,15 +877,38 @@
  * do Confluence são coisas diferentes — a segunda é `[data-variante='dica']`.)
  */
 
+/* A leitura é uma GRADE de duas colunas, não uma coluna com `max-width`.
+ *
+ * 🚨 O texto tem medida (68ch é onde a linha para de cansar), e a TABELA não tem nada a
+ * ver com isso: presa aos mesmos 68ch, ela era cortada e ganhava barra de rolagem
+ * horizontal **própria** com 320px de creme vazio à direita — a pessoa arrastava dentro de
+ * uma caixa para ler uma coluna que cabia na tela.
+ *
+ * Por isso a medida virou a primeira COLUNA da grade, e não o teto do bloco: a prosa
+ * continua exatamente onde estava, e quem precisa de largura pede a linha inteira
+ * (`grid-column: medida / -1`). `minmax(0, …)` nas duas colunas é o que impede conteúdo
+ * largo de empurrar a grade — sem ele, uma tabela de 20 colunas estoura o cartão.
+ *
+ * ⚠️ `row-gap`, nunca `gap`: com duas colunas, `gap` também abriria espaço horizontal
+ * entre elas e a tabela deixaria de encostar na borda que ela acabou de ganhar.
+ */
 .doc {
   --doc-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --doc-medida: 68ch;
 
-  max-width: 68ch;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
+  display: grid;
+  grid-template-columns: [medida] minmax(0, var(--doc-medida)) [sangria] minmax(0, 1fr);
+  row-gap: var(--space-4);
   padding-left: var(--space-4);
   border-left: 3px solid var(--go-lime);
+}
+.doc > * {
+  grid-column: medida / sangria;
+}
+/* ⚠️ A rolagem FICA: ela deixou de disparar aos 683px e passa a disparar só quando a
+   tabela excede a largura inteira — no celular, onde `RNF-28` diz que ela é obrigatória. */
+.doc > .doc-tabela-rolagem {
+  grid-column: medida / -1;
 }
 
 .doc h1,
@@ -1114,6 +1137,11 @@
    que "Concluído" não se leia como um trecho de código. */
 .doc-etiqueta {
   display: inline-block;
+  /* ⚠️ A margem lateral não é respiro estético: no storage a etiqueta vem **colada** ao
+     texto (`O que fazer agora?<ac:structured-macro ac:name="status">`), e sem ela a tela
+     mostrava `O que fazer agora?DEFINIR STATUS`, uma palavra grudada na outra. O Confluence
+     resolve isso na folha dele; aqui é este `margin-inline`. */
+  margin-inline: 0.3em;
   padding: 1px 10px;
   border-radius: var(--radius-pill);
   border: 1.5px solid var(--go-blue);

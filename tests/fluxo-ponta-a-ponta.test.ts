@@ -173,7 +173,7 @@ describe('Definição de Pronto — o fluxo completo pela conversa', () => {
     expect(t1.regraBloqueio).toBe('regra1_confluence')
     // T-118 — e o link leva à leitura DENTRO do app, que é o que quem não tem assento
     // consegue abrir. Ponta a ponta: o id sai do cliente e chega na mensagem.
-    expect(t1.texto).toContain('/?pagina=p1')
+    expect(t1.texto).toContain('/documentacao?pagina=p1')
     expect(t1.texto).not.toContain('atlassian.net')
     expect(t1.texto).toContain('Como reprocessar')
     // RNF-31 — soa como ajuda, não recusa.
