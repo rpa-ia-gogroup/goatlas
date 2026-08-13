@@ -1509,7 +1509,11 @@ tarefa aberta era **T-425** — ✅ **respondida em 11/08/2026**:
 type expõe campo de anexo, então o anexo na criação funciona sem uma linha a mudar.
 
 **No ar em SOMENTE LEITURA: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
-`version 20`, deploy de 07/08/2026). Login Google pelo edge, admin por allowlist.
+`version 41`, deploy de 13/08/2026 — staging `3936ca2d` na `version 20`, com o **mesmo bundle**,
+deployada e validada antes, conforme a regra 10). Login Google pelo edge, admin por allowlist.
+⚠️ **`updateApp` MESCLA assets**: o manifesto acumula todos os bundles hasheados dos deploys
+anteriores (33 entradas na staging). É inócuo — o `index.html` aponta para os novos —, mas quem
+for limpar precisa dos dois deploys de `assets: []` que o próprio `CLAUDE.md` descreve.
 ⚠️ **Já não é modo demonstração** (`GOATLAS_MODO_DEMO` saiu): o app lê Confluence e Jira
 **de verdade** com o `ATATT` validado, e o que impede efeito colateral é
 `GOATLAS_SOMENTE_LEITURA=1`, que recusa toda escrita no decorador do cliente.
@@ -1577,9 +1581,12 @@ fora do fake** — até 11/08 a TeamGuide só tinha sido chamada por `curl`, de 
 sem `bind` — `Illegal invocation` no runtime dos Workers, antes de abrir conexão. 🚨 **E a
 tabela de leitura do `D-40` apontava essa exata assinatura para "egress da plataforma", que
 estava errado**: o godocs roda a mesma chamada, no mesmo GoDeploy, contra o mesmo host, com o
-mesmo token, e funciona — foi esse contraexemplo que desfez a conclusão. ⚠️ **Falta medir na
-staging**: `dependencias.teamguide.detalhe` deve responder `ok` (ou `ok · credencial_saneada`,
-ou `http_401` — os três significam que a conexão passou a sair). Tabela revisada no `D-50`.
+mesmo token, e funciona — foi esse contraexemplo que desfez a conclusão. Tabela revisada no
+`D-50`. ✅ **MEDIDO na staging em 13/08/2026 (`version 20`), e a área chegou:** o cartão de uma
+conversa nova mostrou **`ÁREA: RPA`** — o mesmo valor que `D-37` cita como o da primeira pessoa
+medida, e que antes vinha `null` com `area_indisponivel {"motivo":"erro_de_rede"}`. O `bind` do
+`fetch` era a causa, e o caminho passou a sair do Worker. ⚠️ A sonda de `/api/health` continua
+sendo o instrumento; o que fecha esta pendência é o valor na tela, que é o que a pessoa vê.
 ⚠️ Nada foi paginado nem teve o timeout mexido: mudar comportamento no mesmo movimento em que
 se instala o instrumento estraga a medição.
 
@@ -1619,9 +1626,12 @@ anexar?"* depois de dois prints colados na conversa. Corrigidos com `tickets/tip
 (uma regra para os três leitores, com o filtro de desk que faltava) e
 `GET /api/conversas/:id/anexos` + o gate que deixou de pedir a resposta que já tinha. ✅ **Medido
 no navegador**: cartão sem rádio com *"Você já anexou 2 arquivos · Ainda cabem 1 de 3"*, terceiro
-anexo somando para 3, e `GOATLAS-1` aberto com os três anexados sem declarar nada. ⚠️ **A escolha
-do tipo por um modelo REAL não foi medida** — em `npm run dev` a IA é o fake, que propõe `rt-dev`
-fixo; o que a suíte garante é que os nomes atravessam a fronteira.
+anexo somando para 3, e `GOATLAS-1` aberto com os três anexados sem declarar nada.
+✅ **E MEDIDO COM MODELO REAL na staging** (13/08, `version 20`): o mesmo relato do defeito —
+*"meu pc desliga sozinho… e aparece uma tela azul"* + o código `KERNEL_SECURITY_CHECK_FAILURE` —
+saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de Nota Fiscal. É a
+medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
+criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
 **1453 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de

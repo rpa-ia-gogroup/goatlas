@@ -39,9 +39,15 @@ real, e o caminho que o pedido do mantenedor descreve — *"continuar argumentan
 ajustes"* — está quebrado justamente na parte que a pessoa vê.
 
 ⚠️ **Um defeito adjacente, resolvido aqui pela raiz:** o texto do agente afirma nível e prazo
-(*"eu sugeriria Crítica, com primeira resposta em 4h"*) enquanto o cartão grava outro valor,
-porque a mensagem e a decisão saem de **duas chamadas paralelas** ao modelo (`propostaEmVoo`,
-`D-32`) e a mensagem não vê a decisão. Quem explica passa a ser quem decidiu.
+enquanto o cartão grava outro valor, porque a mensagem e a decisão saem de **duas chamadas
+paralelas** ao modelo (`propostaEmVoo`, `D-32`) e a mensagem não vê a decisão. Quem explica passa
+a ser quem decidiu.
+
+> **Medido na staging em 13/08/2026, com modelo real.** Relato de tela azul; o agente escreveu:
+> *"o caso já parece de impacto **Alta** — ou seja, **primeira resposta em 12h**"*. Ali os dois
+> coincidiram com o cartão **por sorte** — no relato que abriu este pedido a mensagem dizia
+> Crítica/4h e o cartão marcou Alta/12h. A frase é a mesma em ambos os casos: o agente afirmando
+> duas coisas que ele não decide. É exatamente o que `FR-6` passa a proibir.
 
 ## 2. Goals / Non-Goals
 
