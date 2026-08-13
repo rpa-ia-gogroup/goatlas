@@ -3643,6 +3643,71 @@ porque é esse valor que vale.
 allowlist com dois espaços em prod, e o histórico do secret mostra **um único** update
 (10/08 13:45, o `D-29`) sobre a criação de 07/08. As duas coisas só são compatíveis se o
 valor efetivo vier do **banco** — mais uma razão para a verificação acima não ser opcional.
+---
+
+### D-62 · O Ctrl+V não colava, o segundo print sumia, e o anexo não abria
+
+**Data:** 13/08/2026 · **Origem:** três relatos do mantenedor usando o app publicado ·
+**Contexto:** `RF-31`, `RF-61`, `RF-63`, `RNF-06`, `RNF-28`, `D-11`, `D-54`, `D-59`
+
+O `D-59` entregou as três formas de anexar (clipe, soltar, colar) e **a que mais importa
+estava quebrada** — do jeito que nenhum teste da suíte alcança, porque não há `paste` em
+`environment: 'node'`.
+
+**1. Colar só funcionava com o foco fora do campo de texto — e às vezes nem lá.** Duas
+causas somadas:
+
+- **O `onPaste` morava no `textarea`.** Colar com o foco em qualquer outro lugar da tela não
+  tinha handler nenhum. Colar é gesto **da tela**, não de um campo: o listener passou para o
+  `document`, em `TelaConversa`. ⚠️ **Um listener só** — o evento do `textarea` borbulha até
+  o documento, e handler nos dois lugares subiria o mesmo arquivo **duas vezes**, que
+  `RF-63` não sabe desfazer.
+- 🚨 **`clipboardData.files` vem VAZIO para print de várias origens.** Ferramenta de captura
+  do Windows, "copiar imagem" de uma página: o arquivo está em `items[]` com
+  `kind === 'file'`, e `files` não tem nada. `arquivosDoColar` lê **`files`, e só no zero
+  cai para `items`** — nunca os dois, porque quando ambos vêm preenchidos descrevem o mesmo
+  arquivo e somar produz anexo em dobro.
+
+**2. 🚨 O segundo print parecia não acontecer — e acontecia.** Todo print colado chega como
+`image.png`, e a lista de envios era indexada por **nome**: o segundo substituía a linha do
+primeiro. A tela ficava idêntica, a leitura natural era *"não inseriu nada"*, e o arquivo
+**subia**. Dois anexos, uma linha — o pior par possível num app que existe para a evidência
+chegar. `nomeUnicoDeAnexo` põe ` (2)` antes da extensão **antes de subir**, então o nome novo
+é também o que o time de tech vê no Jira, onde três `image.png` seriam igualmente
+indistinguíveis.
+
+⚠️ **O teto de 3 arquivos por chamado é NOSSO, não da Atlassian** (`MAX_ANEXOS_POR_CHAMADO`).
+A pergunta veio junto com o relato ("só é um anexo por padrão?") e a resposta é: nunca foi um
+— era o bug acima fazendo o segundo desaparecer da tela. O teto continua 3, e agora está
+**escrito na tela** junto com o atalho.
+
+**3. Clicar no anexo baixava em vez de abrir.** O `<a download>` força salvar em disco
+**mesmo** nos tipos que o servidor já entrega `inline` (`D-11`). Saiu o atributo, entrou
+`target="_blank"` — tipo fora da allowlist desce como anexo de qualquer forma, e aí a aba
+nova se fecha sozinha. ⚠️ Abre em **outra aba** de propósito, pela razão do link de página:
+a conversa vive em estado de React.
+
+🚨 **E o `.md` da transcrição não era exibível por nenhum caminho** — justamente o anexo que
+**todo** chamado tem desde `D-54`. `TIPOS_INLINE` virou **mapa**: `text/markdown` e
+`text/plain` saem afirmados como `text/plain; charset=utf-8`. `text/markdown` faz o navegador
+baixar; sem `charset` o acento quebra na única superfície feita para ler (regra 4). O
+princípio de `D-11` fica intacto — o app **afirma** o tipo, nunca repassa o da Atlassian —, e
+a segurança se sustenta em três camadas que já existiam: o navegador não executa
+`text/plain`, `nosniff` o impede de adivinhar `text/html` pelo conteúdo, e o CSP `sandbox`
+segue sem script, sem origem e sem rede. ⚠️ **`text/html` fica FORA, e não é esquecimento:**
+markdown vira texto **cru**, nunca HTML renderizado — HTML servido do nosso domínio é o vetor
+que `D-11` existe para fechar, e `image/svg+xml` continua fora pelo mesmo motivo.
+
+**A frase que faltava.** O Ctrl+V era invisível: quem não soubesse do atalho só tinha o
+clipe. A dica embaixo do clipe diz as duas formas e o teto — recusa em cima da hora é pior
+que número anunciado.
+
+**Testes** (`tests/d62-colar-e-abrir-anexo.test.ts`, 10 casos): as duas fontes do clipboard e
+a garantia de que **não** se somam · texto continua sendo texto · o sufixo do nome repetido ·
+o que o servidor afirma por tipo, incluindo `text/html`/`svg` recusados e o
+`text/plain\r\nSet-Cookie:` que não vira cabeçalho. ⚠️ São afirmações sobre **decisão**, não
+sobre tela: extrair a regra para função pura é o que a torna testável sem DOM — mesmo desenho
+de `ROTULOS_ENVIO` e `LinhaDePessoa`.
 
 ---
 

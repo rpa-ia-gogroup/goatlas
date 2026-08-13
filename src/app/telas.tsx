@@ -39,6 +39,7 @@ import {
   Vazio,
 } from './componentes'
 import {
+  arquivosDoColar,
   PerguntaDeAnexo,
   ResultadoDoAnexo,
   useAnexoNaConversa,
@@ -184,6 +185,36 @@ function ConversaEmCurso({
   useEffect(() => {
     fim.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [falas, proposta, criado])
+
+  /**
+   * 🚨 **O Ctrl+V vale na tela inteira, não só onde o foco está** — `D-62`.
+   *
+   * O `onPaste` vivia **no `textarea`**, e o relato foi o oposto do esperado: *"só consigo
+   * enviar um anexo se clicar fora do campo de texto"*. Duas causas somadas, e a segunda é
+   * a que um handler no campo não alcança: `clipboardData.files` vem **vazio** para print
+   * de algumas origens (quem tem o arquivo é `items[]`, ver `arquivosDoColar`), e colar com
+   * o foco em qualquer outro lugar da página não tinha handler nenhum.
+   *
+   * Fica no `document` por isso: colar é gesto da **tela**, não de um campo. Um listener só
+   * — nunca os dois — porque o evento do `textarea` **borbulha** até aqui, e handler nos
+   * dois lugares subiria o mesmo arquivo duas vezes (`RF-63` não tem desfazer).
+   *
+   * ⚠️ A função vive num `ref`: `anexo.enviar` é recriada a cada render, e usá-la na
+   * dependência reinscreveria o listener em toda tecla digitada.
+   */
+  const enviarAnexo = useRef(anexo.enviar)
+  enviarAnexo.current = anexo.enviar
+  useEffect(() => {
+    function aoColar(evento: ClipboardEvent) {
+      const arquivos = arquivosDoColar(evento.clipboardData)
+      if (arquivos.length === 0) return
+      // Só quando há arquivo: colar texto continua sendo colar texto.
+      evento.preventDefault()
+      void enviarAnexo.current(arquivos)
+    }
+    document.addEventListener('paste', aoColar)
+    return () => document.removeEventListener('paste', aoColar)
+  }, [])
 
   /**
    * O id da conversa, criando-a se ainda não existir — `D-59b`.
@@ -362,7 +393,6 @@ function ConversaEmCurso({
         enviando={enviando}
         justificando={justificando}
         anexo={anexo.elemento}
-        aoColarArquivos={(arquivos) => void anexo.enviar(arquivos)}
       />
     </div>
   )
@@ -419,7 +449,6 @@ export function Compositor({
   enviando,
   justificando,
   anexo,
-  aoColarArquivos,
 }: {
   valor: string
   aoMudar: (v: string) => void
@@ -428,7 +457,6 @@ export function Compositor({
   justificando: boolean
   /** `D-59` — o clipe e a lista de enviados. `null` antes de a conversa existir. */
   anexo?: ReactElement | null
-  aoColarArquivos?: (arquivos: readonly File[]) => void
 }) {
   return (
     <form className="compositor" onSubmit={aoEnviar}>
@@ -441,18 +469,11 @@ export function Compositor({
           placeholder="Ex.: o relatório de vendas de ontem não atualizou"
           disabled={enviando || justificando}
           aria-describedby={justificando ? 'mensagem-pausada' : undefined}
-          // 🚨 **Colar é o caminho que mais importa** (`D-59`). "Print da tela" quase sempre
-          // nasce no clipboard, e obrigar a pessoa a salvar em disco antes é a fricção que
-          // faz a evidência não chegar — o problema inteiro que `RF-61` existe para
-          // resolver. ⚠️ Só intercepta quando há **arquivo**: colar texto continua colando
-          // texto, e quebrar isso seria trocar um defeito por outro pior.
-          onPaste={(e) => {
-            const arquivos = Array.from(e.clipboardData?.files ?? [])
-            if (arquivos.length > 0 && aoColarArquivos) {
-              e.preventDefault()
-              aoColarArquivos(arquivos)
-            }
-          }}
+          // 🚨 **O `onPaste` NÃO mora aqui** (`D-62`). Colar é o caminho que mais importa —
+          // print nasce no clipboard —, e por isso ele passou para um listener no
+          // `document`, em `TelaConversa`: com o handler no campo, colar com o foco em
+          // qualquer outro lugar da tela não fazia nada. Devolvê-lo para cá **sem** remover
+          // o de lá sobe o mesmo arquivo duas vezes: o evento borbulha até o documento.
         />
         {justificando && (
           <span className="dica" id="mensagem-pausada">
@@ -1437,14 +1458,19 @@ function ArquivosDoChamado({
             .join(' · ')
           return (
             <li key={a.nomeArquivo}>
-              {/* `download` sugere salvar; quem quiser ver na hora abre pelo navegador. O
-                  servidor decide inline × anexo por allowlist de tipo (`D-11`) — o
-                  atributo é preferência de uso, nunca a trava. */}
-              <a className="arquivo" href={a.url} download>
+              {/* 🚨 **O `download` SAIU** (`D-62`). Ele forçava "salvar em disco" mesmo nos
+                  tipos que o servidor já entrega `inline` (`D-11`: PNG, JPEG, WEBP, GIF,
+                  PDF e — a partir do `D-62` — o `.md` da transcrição), então clicar no
+                  próprio print baixava um arquivo em vez de mostrá-lo. Quem decide continua
+                  sendo o servidor, pela allowlist: tipo fora dela desce como anexo de
+                  qualquer forma, e aí a aba nova se fecha sozinha.
+                  ⚠️ Abre em **outra aba** de propósito, como o link de página do agente: a
+                  conversa vive em estado de React, e navegar na mesma aba destruiria a tela. */}
+              <a className="arquivo" href={a.url} target="_blank" rel="noopener noreferrer">
                 <span className="arquivo-nome">{a.nomeArquivo}</span>
                 {detalhes && <span className="dica">{detalhes}</span>}
                 <span className="arquivo-seta" aria-hidden="true">
-                  ↓
+                  ↗
                 </span>
               </a>
             </li>

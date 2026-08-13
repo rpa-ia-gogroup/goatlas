@@ -7874,25 +7874,35 @@ function ehTransitorio(erro2) {
 }
 
 // src/lib/confluence/anexo.ts
-var TIPOS_INLINE = /* @__PURE__ */ new Set([
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "image/avif",
-  "image/bmp",
+var TIPOS_INLINE = /* @__PURE__ */ new Map([
+  ["image/png", "image/png"],
+  ["image/jpeg", "image/jpeg"],
+  ["image/gif", "image/gif"],
+  ["image/webp", "image/webp"],
+  ["image/avif", "image/avif"],
+  ["image/bmp", "image/bmp"],
   // PDF é o formato de procedimento anexado — exibir inline é metade do valor do
   // proxy. Ele roda no visualizador do navegador, não no DOM da página.
-  "application/pdf"
+  ["application/pdf", "application/pdf"],
+  // 🚨 **Texto entra por causa da transcrição** (`D-54`, `text/markdown`): ela é o anexo
+  // que TODO chamado tem, e era o único que a pessoa não conseguia abrir — clicar baixava
+  // um `.md`. Renderizar como `text/plain` é seguro por três razões que valem juntas:
+  // o navegador não executa `text/plain`, `nosniff` o impede de adivinhar `text/html` a
+  // partir do conteúdo, e o CSP `sandbox` continua sem script, sem origem e sem rede.
+  // ⚠️ **`text/html` fica FORA**, e não é esquecimento: HTML no nosso domínio é o vetor
+  // que `D-11` existe para fechar. Markdown vira texto **cru**, nunca HTML renderizado.
+  ["text/markdown", "text/plain; charset=utf-8"],
+  ["text/plain", "text/plain; charset=utf-8"]
 ]);
 var TIPO_OPACO = "application/octet-stream";
 var TOKEN_MIDIA = /^[a-z0-9!#$%&'*+.^_`|~-]+\/[a-z0-9!#$%&'*+.^_`|~-]+$/;
 function decidirEntrega(tipoDeclarado) {
   const base = (tipoDeclarado ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-  if (!TOKEN_MIDIA.test(base) || !TIPOS_INLINE.has(base)) {
+  const afirmado = TIPOS_INLINE.get(base);
+  if (!TOKEN_MIDIA.test(base) || afirmado === void 0) {
     return { contentType: TIPO_OPACO, disposicao: "attachment" };
   }
-  return { contentType: base, disposicao: "inline" };
+  return { contentType: afirmado, disposicao: "inline" };
 }
 var MAX_NOME = 120;
 function cabecalhoContentDisposition(nomeArquivo, disposicao) {

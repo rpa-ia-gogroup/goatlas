@@ -160,6 +160,31 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   A promessa de `garantirConversa` é memoizada num `ref`, **não** o id no estado: dois
   disparos concorrentes criariam duas conversas, e o anexo da segunda subiria com `200` para
   uma conversa que nunca vira chamado.
+- 🚨 **Colar é gesto da TELA, e o print quase nunca está em `clipboardData.files`** (`D-62`,
+  `app/anexo.tsx#arquivosDoColar`). O `onPaste` morava no `textarea`, e o relato foi *"só
+  consigo enviar anexo se clicar fora do campo de texto"*: com o handler no campo, colar em
+  qualquer outro lugar não fazia nada — **e** `files` vem **vazio** para print de várias
+  origens (captura do Windows, "copiar imagem"), onde o arquivo está em `items[]` com
+  `kind === 'file'`. Lê `files`, e **só no zero** cai para `items`: as duas preenchidas
+  descrevem o mesmo arquivo, e somar produz anexo em dobro, que `RF-63` não desfaz. ⚠️ **Um
+  listener só, no `document`** — o evento do campo borbulha até lá, e handler nos dois lugares
+  sobe o arquivo duas vezes. ⚠️ E só intercepta quando há **arquivo**: colar texto continua
+  colando texto.
+- 🚨 **Todo print colado se chama `image.png`, e a lista era indexada por NOME** (`D-62`).
+  O segundo print substituía a linha do primeiro: tela idêntica, leitura natural *"não
+  inseriu nada"* — **e o arquivo subia**. Dois anexos, uma linha, num app que existe para a
+  evidência chegar. `nomeUnicoDeAnexo` sufixa ` (2)` **antes de subir**, então o Jira também
+  recebe nomes distinguíveis. ⚠️ **O teto de 3 é NOSSO** (`MAX_ANEXOS_POR_CHAMADO`), não da
+  Atlassian — e agora está escrito na tela, junto com o atalho do Ctrl+V, que antes era
+  invisível.
+- 🚨 **`download` no link do anexo IMPEDE abrir, mesmo no que o servidor entrega inline**
+  (`D-62`). Clicar no próprio print baixava um arquivo. Saiu o atributo, entrou
+  `target="_blank"`; quem decide continua sendo `decidirEntrega` (`D-11`). E `TIPOS_INLINE`
+  virou **mapa**: `text/markdown`/`text/plain` saem afirmados como `text/plain; charset=utf-8`
+  — a transcrição de `D-54` é o anexo que **todo** chamado tem e era o único impossível de
+  abrir; `text/markdown` faz o navegador baixar e sem `charset` o acento quebra (regra 4).
+  ⚠️ **`text/html` fica fora**, com `image/svg+xml`: markdown vira texto **cru**, nunca HTML
+  renderizado.
 - **A declaração de anexo trava RESPONDER, nunca ANEXAR** (`RN-11`). Quem diz "tenho",
   desiste e volta para "não tenho" abre o chamado. E a copy da opção negativa é "não tenho
   material para anexar" — **nunca "pular"**, que diria que anexar era o dever e faria a
