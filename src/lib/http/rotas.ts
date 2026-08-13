@@ -49,6 +49,7 @@ import { areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { resolverArea } from '../teamguide/area'
 import { garantirAreaNaProposta } from '../tickets/area-da-proposta'
 import { nomeDoTipo } from '../tickets/nome-do-tipo'
+import { tiposOferecidos } from '../tickets/tipos-oferecidos'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
 import { extrairCamposDinamicos, filtrarPeloSchema } from './campos-dinamicos'
@@ -360,6 +361,35 @@ async function rotear(
     })
   }
 
+  /**
+   * O que esta conversa já tem anexado — `D-68`, `RF-61`, `RF-63`.
+   *
+   * 🚨 **Existe porque a tela não tinha como saber.** `PerguntaDeAnexo` contava os envios
+   * em estado **local**, que nasce vazio: quem colou dois prints na conversa e chegou ao
+   * cartão via a pergunta "tem material para anexar?" e a nota *"Até 3 arquivos"* — dois já
+   * gastos e nenhum na tela. Recarregar a página produzia o mesmo, com o arquivo no
+   * servidor. O teto é do servidor (`MAX_ANEXOS_POR_CHAMADO`), então o número honesto é o
+   * dele.
+   *
+   * ⚠️ **Só o NOME sai daqui.** O `temporaryAttachmentId` nunca trafega pelo navegador
+   * (`RF-30` aplicado a arquivo): com ele, colar o anexo de outra pessoa no próprio chamado
+   * seria trivial. E a leitura é isolada pelo par (chave, e-mail) no `WHERE` da própria
+   * `listarNaoMaterializados` — conversa de outra pessoa devolve 404 antes disso.
+   */
+  const anexosDaConversa = caminho.match(/^\/api\/conversas\/([^/]+)\/anexos$/)
+  if (anexosDaConversa && req.method === 'GET') {
+    const conversa = await ctx.conversas.obterDoSolicitante(anexosDaConversa[1]!, eu.email)
+    if (!conversa) return ERROS.naoEncontrado()
+    const pendentes = await ctx.anexosPendentes.listarNaoMaterializados(
+      normalizarChaveIdempotencia({ via: 'conversa', conversaId: conversa.id }),
+      eu.email,
+    )
+    return json({
+      itens: pendentes.map((a) => ({ nome: a.nomeArquivo })),
+      teto: MAX_ANEXOS_POR_CHAMADO,
+    })
+  }
+
   // RF-17 / RN-02 — a ÚNICA transição que autoriza criar. Só o usuário chega aqui.
   const confirmar = caminho.match(/^\/api\/conversas\/([^/]+)\/confirmar$/)
   if (confirmar && req.method === 'POST') {
@@ -393,12 +423,25 @@ async function rotear(
       serviceDeskId,
       conversa.proposta.tipoChamadoId,
     )
+    // A chave de idempotência é derivada da CONVERSA, não gerada por requisição:
+    // é o que faz duplo clique e reenvio caírem na mesma submissão (RF-24). E é escrita
+    // pela mesma função que a rota de upload usa (T-409b) — se as duas divergirem, o
+    // anexo não casa com o chamado e ninguém vê erro nenhum.
+    //
+    // ⚠️ Ela é lida **antes** do gate de `RF-62` (`D-68`): é por esta chave que o servidor
+    // sabe se a pessoa já anexou, e a pergunta cuja resposta ele já tem não é feita.
+    const chaveDaConversa = normalizarChaveIdempotencia({
+      via: 'conversa',
+      conversaId: conversa.id,
+    })
+
     const declaracao = await autorizarDeclaracaoDeAnexo(
       ctx,
       eu.email,
       conversa.proposta.tipoChamadoId,
       schema,
       corpoConfirmacao?.declarouAnexo,
+      chaveDaConversa,
     )
     if ('recusa' in declaracao) return declaracao.recusa
 
@@ -452,15 +495,6 @@ async function rotear(
     })
 
     const atual = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email)
-
-    // A chave de idempotência é derivada da CONVERSA, não gerada por requisição:
-    // é o que faz duplo clique e reenvio caírem na mesma submissão (RF-24). E é escrita
-    // pela mesma função que a rota de upload usa (T-409b) — se as duas divergirem, o
-    // anexo não casa com o chamado e ninguém vê erro nenhum.
-    const chaveDaConversa = normalizarChaveIdempotencia({
-      via: 'conversa',
-      conversaId: conversa.id,
-    })
 
     // 🚨 **A área do vínculo é a que estava no cartão** (`D-52`). Resolver de novo aqui
     // funcionaria — e produziria, de vez em quando, um valor **diferente** do que a
@@ -583,6 +617,9 @@ async function rotear(
       validada.proposta.tipoChamadoId,
       schema,
       corpo?.declarouAnexo,
+      // `D-68` — mesma regra no formulário: quem já subiu arquivo por esta chave não é
+      // perguntado de novo. Chave ausente gerou um id novo acima, e aí não há anexo a casar.
+      chave,
     )
     if ('recusa' in declaracao) return declaracao.recusa
 
@@ -1762,22 +1799,17 @@ async function rotear(
 
   // --- tipos de chamado disponíveis (RF-28) ---------------------------------
   if (caminho === '/api/tipos-chamado' && req.method === 'GET') {
-    const permitidos = new Set(ctx.valores.tipos_chamado_permitidos)
-    const todos = await ctx.atlassian.listarTiposChamado()
-    const desk = ctx.valores.service_desk_id
     // 🐛 **`listarTiposChamado` varre TODOS os service desks do site**, não o
     // configurado (medido em 11/08/2026: com a allowlist ampliada voltaram tipos dos
     // desks 7, 8 e 9 ao lado dos do 4). A allowlist era a única coisa limitando — e ela
     // é lista de ids, então um id de outro desk passa por ela e por `validarProposta`
     // para **falhar só na criação**, quando o corpo leva `serviceDeskId` fixo da config.
-    // Filtrar aqui é o que faz a lista dizer a verdade sobre o que dá para abrir.
     //
-    // Sem desk configurado a lista é vazia, coerente com a rota de criação, que já
-    // recusa nesse estado — oferecer assunto que não se consegue abrir é pior que
-    // oferecer nenhum.
-    const doDesk = desk === null ? [] : todos.filter((t) => t.serviceDeskId === desk)
-    // Negação por padrão: allowlist vazia expõe ZERO tipos (RNF-07, RF-28).
-    return json({ itens: doDesk.filter((t) => permitidos.has(t.id)) })
+    // ⚠️ A regra completa (allowlist + desk + negação por padrão) mora em
+    // `tiposOferecidos`, porque a **extração da proposta** precisa exatamente da mesma
+    // resposta — e enquanto ela tinha regra própria o modelo escolhia entre ids sem nome
+    // (`D-68`). Três leitores, uma regra.
+    return json({ itens: await tiposOferecidos(ctx.atlassian, ctx.valores) })
   }
 
   // --- admin (RF-49, RF-50) -------------------------------------------------
@@ -2242,11 +2274,7 @@ async function nomeDoTipoDaProposta(
   tipoChamadoId: string,
 ): Promise<string | null> {
   try {
-    const permitidos = new Set(ctx.valores.tipos_chamado_permitidos)
-    const desk = ctx.valores.service_desk_id
-    const todos = await ctx.atlassian.listarTiposChamado()
-    const oferecidos = todos.filter((t) => t.serviceDeskId === desk && permitidos.has(t.id))
-    return nomeDoTipo(tipoChamadoId, oferecidos)
+    return nomeDoTipo(tipoChamadoId, await tiposOferecidos(ctx.atlassian, ctx.valores))
   } catch {
     return null
   }
@@ -2434,7 +2462,34 @@ async function autorizarDeclaracaoDeAnexo(
   tipoChamadoId: string,
   schema: SchemaDoTipo,
   bruto: unknown,
+  /**
+   * A chave onde o upload já gravou o que a pessoa mandou (`tickets/chave-idempotencia.ts`).
+   * É por ela que o **fato** entra na decisão — ver abaixo.
+   */
+  chaveIdempotencia: string,
 ): Promise<{ readonly declarouAnexo: boolean | null } | { readonly recusa: Response }> {
+  /**
+   * 🚨 **Arquivo JÁ ENVIADO responde a pergunta, e o FATO ganha da resposta** (`D-68`).
+   *
+   * Relato de 13/08/2026: a pessoa colou dois prints na conversa e o cartão perguntou se
+   * ela tinha evidência para anexar, *"como se eu já não tivesse enviado duas"*. A pergunta
+   * de `RF-62` nasceu quando o único caminho para anexar era o próprio cartão; desde `D-59`
+   * o anexo entra **durante** a conversa (clipe, soltar, colar), e desde então perguntar
+   * depois é pedir que ela declare o que já fez.
+   *
+   * ⚠️ **E `false` explícito não vence os arquivos.** A declaração mede *intenção*; a linha
+   * em `anexos_pendentes` é *fato*, e é ela que a materialização vai usar de qualquer forma
+   * (`materializarAnexosDoChamado` nunca consultou a declaração). Gravar `declarouNaoTer`
+   * com dois arquivos a caminho do chamado sujaria o indicador de `T-422` na direção que
+   * dói: "as pessoas não colaboram" sobre alguém que colaborou.
+   *
+   * ⚠️ Isto **não** afrouxa `RN-11`: quem não anexou nada continua tendo de responder, e a
+   * resposta negativa continua abrindo chamado. O que deixou de existir é a pergunta cuja
+   * resposta o servidor já tinha.
+   */
+  if ((await ctx.anexosPendentes.contarDaChave(chaveIdempotencia, atorEmail)) > 0) {
+    return { declarouAnexo: true }
+  }
   const r = validarDeclaracao(bruto, exigeDeclaracaoDeAnexo(schema))
   if (r.ok) return { declarouAnexo: r.declarouAnexo }
   await ctx.auditoria.registrar({

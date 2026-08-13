@@ -23,14 +23,17 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import { PerguntaDeAnexo, ResultadoDoAnexo, ROTULOS_ENVIO, type Declaracao } from '@/app/anexo'
 import { mensagemDePendencias, pendenciasParaAbrir } from '@/app/pendencias'
+import { MAX_ANEXOS_POR_CHAMADO } from '@/lib/tickets/anexos-pendentes'
 import type { ResultadoAnexo } from '@/app/api'
 
-function pergunta(declarou: Declaracao): string {
+function pergunta(declarou: Declaracao, jaEnviados: readonly string[] = []): string {
   return renderToStaticMarkup(
     createElement(PerguntaDeAnexo, {
       alvo: { via: 'formulario', chaveIdempotencia: 'k1' },
       declarou,
       aoDeclarar: () => {},
+      jaEnviados,
+      teto: MAX_ANEXOS_POR_CHAMADO,
     }),
   )
 }

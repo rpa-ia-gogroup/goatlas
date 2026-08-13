@@ -81,7 +81,7 @@ function montar(
   ia = new ClienteIAFake([...roteiro])
   ia.classePadrao = classe
   const executor = new ExecutorTools(atlassian, ia, db, auditoria, () => AGORA)
-  orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId)
+  orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId, atlassian)
 }
 
 /** Roteiro comum: o modelo pede o histórico e depois conclui. */
@@ -274,7 +274,17 @@ describe('RF-13 / RN-07 — bloqueio é orientação, não parede', () => {
     montar(ROTEIRO_BLOQUEIA_COM_TUDO_VERIFICADO)
     // `rt-1` é o tipo que o fake propõe; sem ele na allowlist a proposta seria
     // descartada por RF-28 e o teste passaria a medir a coisa errada.
-    const configComTipo: ConfigValores = { ...CONFIG, tipos_chamado_permitidos: ['rt-1'] }
+    //
+    // ⚠️ E `service_desk_id` entra junto (`D-68`): a extração só oferece ao modelo tipo
+    // que EXISTE no desk configurado, porque tipo de outro desk falharia só na criação.
+    const configComTipo: ConfigValores = {
+      ...CONFIG,
+      tipos_chamado_permitidos: ['rt-1'],
+      service_desk_id: 'sd-1',
+    }
+    atlassian.estado.tiposChamado = [
+      { id: 'rt-1', serviceDeskId: 'sd-1', nome: 'Suporte de tecnologia', descricao: null },
+    ]
     const c = await conversas.criar('c1', ANA)
     await orquestrador.processarMensagem(c, 'o pipeline não rodou', configComTipo)
 

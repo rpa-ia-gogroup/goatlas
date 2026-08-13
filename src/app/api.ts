@@ -687,6 +687,18 @@ export const api = {
     ),
 
   /**
+   * O que esta conversa já tem anexado — `D-68`.
+   *
+   * ⚠️ Só o **nome**: o `temporaryAttachmentId` nunca trafega pelo navegador (`RF-30`
+   * aplicado a arquivo). O `teto` vem do servidor pelo mesmo motivo — número escrito na
+   * tela divergiria dele em silêncio.
+   */
+  anexosDaConversa: (conversaId: string) =>
+    chamar<{ itens: { nome: string }[]; teto: number }>(
+      `/api/conversas/${encodeURIComponent(conversaId)}/anexos`,
+    ),
+
+  /**
    * RF-62 — `declarouAnexo` só vai quando o tipo aceita anexo. Mandar `false` num tipo
    * que não pergunta gravaria "disse que não tinha" para quem nunca foi perguntado.
    */

@@ -38,6 +38,7 @@ import { HEADER_EMAIL } from '@/lib/auth'
 import { ClienteAtlassianFake } from '@/lib/atlassian/fake'
 import { ChamadoAberto, TelaFormulario } from '@/app/telas'
 import { PerguntaDeAnexo } from '@/app/anexo'
+import { MAX_ANEXOS_POR_CHAMADO } from '@/lib/tickets/anexos-pendentes'
 import {
   faltaAlgumaCoisa,
   mensagemDePendencias,
@@ -254,6 +255,7 @@ describe('PerguntaDeAnexo — o controle de arquivo veste a identidade', () => {
         alvo: { via: 'formulario' as const, chaveIdempotencia: 'k1' },
         declarou: true,
         aoDeclarar: () => {},
+        teto: MAX_ANEXOS_POR_CHAMADO,
       }),
     )
 

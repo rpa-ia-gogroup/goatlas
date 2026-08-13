@@ -277,6 +277,9 @@ Regras:
   - \`alta\`: funcionalidade comprometida, existe contorno temporário.
   - \`normal\`: melhoria, ajuste pontual, dúvida, sugestão.
 - **tipoChamadoId**: escolha um id EXATAMENTE da lista fornecida. Nunca invente id.
+  - Leia o **nome** de cada tipo e escolha pelo assunto que ele descreve. Uma palavra em comum não é correspondência: um problema de hardware não é um problema de nota fiscal só porque os dois são "problema".
+  - Se nenhum tipo descrever o caso, escolha o mais **genérico** da lista — o de dúvidas ou outras questões. É melhor o chamado chegar na entrada geral do time do que numa fila especializada que não é dele: quem recebe encaminha, e a pessoa não fica esperando na fila errada.
+  - Se nem um genérico existir na lista, devolva \`pronto: false\`. Nunca escolha um tipo por eliminação.
 - **area**: a área do solicitante, se ela apareceu na conversa. Senão, null.`
 
 /** Monta o prompt de usuário da extração, com os tipos permitidos (RF-28). */
