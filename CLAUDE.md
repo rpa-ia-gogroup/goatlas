@@ -1019,6 +1019,59 @@ destes reabre um vazamento que já foi fechado.
   todo o resto. É a diferença entre "não sei desenhar esta moldura" (a moldura se perde, o
   texto aparece) e "não posso mostrar este conteúdo". O `anotar` continua acontecendo: a
   auditoria de `RF-43` é o que diz qual macro vale implementar de verdade um dia.
+- 🚨 **O checklist do Confluence é `tarefas`, e `incomplete` CONTÉM `complete`** (`D-63`,
+  `ac:task-list`). As quatro tags do checklist eram desconhecidas — e desconhecida é
+  **desembrulhada** —, então cada tarefa chegava à tela como três textos colados:
+  `1incompleteO que fazer agora?`. Id interno (`RNF-30`), inglês (regra 4) e nenhuma caixinha,
+  em **130 nós soltos de 15 páginas**: o maior emissor de texto sem sentido da aba, e invisível
+  para a suíte porque nenhum teste partia de storage com checklist. ⚠️ **Reaproveitar `lista`
+  não serve**: o estado é metade da informação, e o tipo próprio é o que obriga o renderizador
+  a desenhá-lo. ⚠️ **A comparação com `complete` é EXATA** — um `includes` marca o checklist
+  inteiro como concluído, e ninguém confere item a item para descobrir; qualquer outro valor
+  cai em *a fazer*, que é o fail-closed certo. ⚠️ O estado vai em **duas** formas (caixinha
+  `aria-hidden` + palavra em PT, recortada por `clip-path`) e **não** entra em `textoDe`: um
+  "Concluída" que ninguém escreveu casaria com a busca de quem procura essa palavra.
+- 🚨 **`&lArr;` NÃO é `&larr;`, e a tabela tolerante já respondia errado** (`D-63`). O lookup
+  de símbolo usa `toLowerCase()` — certo para `&COPY;`/`&copy;`, e **falso** para os pares em
+  que a maiúscula é outro caractere (`⇐`×`←`, `‡`×`†`, `″`×`′`). Por isso existe
+  `ENTIDADES_SIMBOLO_EXATO`, e a ordem de `letraOuSimbolo` é **exato → exato → tolerante**;
+  mover o `toLowerCase()` para cima reabre as duas famílias de uma vez. ⚠️ **Entrada nova em
+  `ENTIDADES_SIMBOLO` só entra se a maiúscula significar o MESMO caractere** — senão o lugar
+  dela é a tabela exata. Entraram `ordm`/`ordf`/`minus` porque saíam **literais** no app real
+  (`15&ordm; dia`, três páginas).
+- ⚠️ **Página com `nos: []` DIZ que está vazia** (`D-63`). Cinco páginas do `DTE` abriam com
+  título, data e um retângulo em branco — e "está vazia no Confluence" × "não carregou" são
+  frases opostas que o vazio não distingue (mesmo par de `comentariosIndisponiveis`). ⚠️ A
+  frase **não** é o placeholder de `RF-43`: ali falta um bloco dentro de um texto que existe,
+  aqui o trabalho é de quem escreve, e acusar o app seria acusá-lo de um defeito que não é dele.
+- 🚨 **O emoji do título vem em ATRIBUTO, e `ac:emoticon` o descartava** (`D-63b`). **69
+  títulos** de `DTE`/`GN` começavam com um espaço — `" Data"`, `" Instruções"` —, porque o
+  `🗓` que os abre é `ac:emoticon`, tag descartada inteira desde sempre. Nos modelos de base de
+  conhecimento do JSM o emoji é a âncora visual de **toda** seção. Lê `ac:emoji-fallback` e, na
+  falta dele, `ac:emoji-id`. ⚠️ **Só decodifica hexa de verdade** (id personalizado da Atlassian
+  é texto, `atlassian-blue_star`) e **confere o intervalo antes de `String.fromCodePoint`**, que
+  lança — isto roda sobre conteúdo que qualquer pessoa edita. ⚠️ `ac:name` fica fora: é apelido
+  interno em inglês, e imprimi-lo troca emoji perdido por jargão.
+- ⚠️ **A data de `<time datetime>` NÃO passa por `Date`** (`D-63b`). `new Date('2026-01-01')` é
+  meia-noite **UTC**: num fuso a oeste, formatar devolve `31/12/2025` e a data da reunião anda
+  um dia sozinha. O storage traz a data civil do autor, e ela é reordenada por fatia de string.
+- 🚨 **`toc` era o único placeholder cuja frase era FALSA, e virou índice de verdade**
+  (`D-63b`). Ela dizia *"a página não guarda texto dele"* sobre os títulos que estavam na tela
+  — mesmo erro de `status` em `D-34`. ⚠️ **Mora no envelope (`ConteudoConfluence`), nunca em
+  `renderizarNos`**: quem chama o segundo direto desenha **trecho de busca**, e âncora de
+  trecho aponta para título fora da tela — por isso `indice` é opcional, como
+  `aoBuscarNoEspaco`. ⚠️ **A âncora é chaveada pelo NÓ, não por posição** (título aparece
+  dentro de painel e de célula), e **texto igual não gera âncora igual** — "Instruções" aparece
+  duas vezes em página de processo, e o segundo link levaria ao primeiro título. Índice vazio
+  **volta ao placeholder**, e ali a frase antiga é verdadeira.
+- ⚠️ **Lista sem item devolve NADA, não `{ itens: [] }`** (`D-63b`). `<ul></ul>` desenhava um
+  `<ul>` invisível **com o `gap` da coluna** — um buraco no texto que se lê como "faltou algo
+  aqui". Mesmo raciocínio de `status` sem `title` e de tarefa sem corpo.
+- ⚠️ **O inglês das páginas iniciais de espaço é CONTEÚDO, e não se traduz na renderização**
+  (`D-63`). As três homes de `GT`/`DTE`/`GN` são o template padrão da Atlassian, intocado —
+  `Description`, `In a sentence or two…`, `🗑 Remove this panel…`. Traduzir ali seria reescrever
+  conteúdo que qualquer pessoa edita (`R-07`) e apagar a distinção entre o que a página diz e o
+  que o app diz. O conserto é editar as páginas no Confluence — trabalho do time de tech.
 - 🚨 **Anexo que não é imagem também é link, e o `ri:page` dele mora no PAI** (`D-57`,
   `T-142`). `converterAcLink` tratava só `ri:page` e `ri:url`: link para PDF ou planilha
   anexada virava **texto puro**, sem link e sem nada dizendo que havia arquivo ali — a
@@ -1377,7 +1430,18 @@ produz mesmo o comentário público que carrega o anexo: as duas se leem em
 `anexos`/`anexosIndisponiveis` no detalhe de `GN-6898`, e `anexosIndisponiveis: true` com o
 arquivo lá dentro é a resposta "não".
 
-**1267 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+🚨 **A aba Documentação passou por uma bateria de QA nas 115 páginas** (`D-63`, 13/08/2026).
+**Nove defeitos de tela**, nenhum deles com erro, log ou teste vermelho — todos da mesma
+família (*tag desconhecida é desembrulhada, e o que ela guardava no atributo evapora*): o
+**checklist** chegando desmontado (`1incompleteO que fazer agora?` — 130 nós soltos em 15
+páginas) · `&ordm;`/`&minus;` **literais** · página vazia abrindo **em branco** · `view-file`,
+`adf:decision-list` e `adf:extension` imprimindo o nome técnico em inglês · o **emoji de 69
+títulos** descartado · a **data** de `<time>` sumindo · `<ul></ul>` virando buraco · e o `toc`,
+o único placeholder cuja frase era **falsa**, agora índice de verdade. Os nove estão corrigidos
+com 40 casos novos. ⚠️ **Falta medir na staging** — abrir `DTE:11632894` (checklist + emoji),
+`DTE:124911617` (`&ordm;` + `toc`) e `DTE:29949953` (vazia).
+
+**1318 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

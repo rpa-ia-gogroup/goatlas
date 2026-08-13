@@ -3711,6 +3711,174 @@ de `ROTULOS_ENVIO` e `LinhaDePessoa`.
 
 ---
 
+### D-63 · A bateria de QA nas 115 páginas — `incomplete` era o texto mais lido da aba
+
+**Data:** 13/08/2026 · **Origem:** varredura das três categorias da aba Documentação no app
+publicado, a pedido do mantenedor · **Contexto:** `RF-39`, `RF-43`, `RNF-06`, `RNF-30`,
+`D-34`, `D-57`, `D-61`
+
+As **115 páginas** dos três espaços de `D-61` (`GT`, `DTE`, `GN`) foram lidas pela rota real
+e a árvore devolvida foi varrida à procura de texto que a pessoa lê e não deveria ver.
+Quatro defeitos saíram. Nenhum quebrava teste, derrubava rota ou aparecia em log: os quatro
+produziam **tela errada**, que é o único lugar onde `RF-39`/`RF-43` podem falhar — a mesma
+assinatura de `D-34` e `D-57`.
+
+**1. 🚨 O checklist do Confluence chegava desmontado, com o id e a palavra em inglês.**
+`ac:task-list`, `ac:task-id`, `ac:task-status` e `ac:task-body` eram todas desconhecidas, e
+tag desconhecida é **desembrulhada** (`converter`, ramo `default`). Cada tarefa virava três
+textos irmãos, sem nó de bloco em volta — e o renderizador os desenha colados:
+
+```
+1incompleteO que fazer agora?
+```
+
+Medido na página "Documentação do projeto mestre" (`DTE:11632894`), sob o título *Próximas
+etapas*. Eram **130 nós soltos em 15 páginas**: 67 ocorrências de `incomplete`/`complete` e o
+resto de **id interno** — um deles com 46 dígitos (`GN:12812347`). Três defeitos do projeto
+numa linha só: inglês na tela (regra 4), identificador de estrutura interna (`RNF-30`) e
+degradação silenciosa de conteúdo (`RF-43`). Era o maior emissor de texto sem sentido da aba,
+e ninguém o tinha visto porque nenhum teste da suíte parte de storage com checklist.
+
+O conserto é um tipo próprio, `tarefas`, não uma `lista` comum: **o estado de cada item é
+metade da informação**, e um checklist onde não se distingue feito de por fazer é uma lista de
+frases. O tipo obriga o renderizador a desenhar o estado, e o estado vai em **duas** formas —
+a caixinha (`aria-hidden`, é desenho) e a palavra em português, que é o que um leitor de tela
+lê. Marcador sozinho comunicaria estado só por forma, e o piso de a11y do projeto não aceita
+isso, pela mesma razão que `etiqueta` não leva cor (`D-34`).
+
+⚠️ **`incomplete` CONTÉM `complete`, e a comparação é exata.** Um `includes` marcaria o
+checklist inteiro como concluído — errado de um jeito que ninguém confere item a item.
+Qualquer outro valor cai em *a fazer*, que é o fail-closed certo: das duas leituras possíveis,
+só "está pronto" engana.
+
+⚠️ **O estado NÃO entra em `textoDe`.** Aquele texto vira trecho de busca e resumo; um
+"Concluída" que ninguém escreveu casaria com a busca de quem procura essa palavra.
+
+**2. `&ordm;` e `&minus;` saíam literais.** `Lembrete para Customizar Pedido (15&ordm; dia)`,
+na página "Programa de Envio Mensal Influencers". Mesma família do `&eacute;` de `version 22`,
+e `ordm`/`ordf` são justamente os que mais custam em português (`1º`, `1ª`) — faltavam desde
+sempre. Entraram eles e o grupo vizinho de documentação técnica (frações, expoentes, sinais de
+comparação, moedas).
+
+🚨 **E acrescentar `dagger` e as setas verticais teria espalhado um defeito latente.**
+`ENTIDADES_SIMBOLO` é consultada com `toLowerCase()`, o que é certo para `&COPY;`/`&copy;` —
+mas há pares em que a maiúscula é **outro caractere**: `&lArr;` é `⇐` e `&larr;` é `←`;
+`&Dagger;` é `‡` e `&dagger;` é `†`. As três setas horizontais já estavam na tabela tolerante,
+então `&lArr;` **já saía como `←`** — errado em silêncio, exatamente como `&Eacute;` → `é` era
+antes das duas tabelas de letra. Nasceu `ENTIDADES_SIMBOLO_EXATO`, consultada antes da
+tolerante. A ordem de `letraOuSimbolo` é hoje **exato → exato → tolerante**, e mover o
+`toLowerCase()` para cima reabre as duas famílias de uma vez.
+
+**3. Página sem conteúdo abria em branco.** Cinco páginas do `DTE` (`Agendor`, `Gateways
+financeiros`, `Problema dos reenvios`, `Tela de edição de pedido`, `Engine Prisma`) devolvem
+`nos: []` e a tela mostrava título, data e um retângulo vazio. *"Está vazia no Confluence"* e
+*"o app não conseguiu carregar"* são frases opostas, e o vazio é indistinguível das duas: quem
+lê tenta de novo, desiste e abre chamado — o contrário do que a aba existe para fazer. Mesmo
+par de `comentariosIndisponiveis` e dos três estados de `CargaEspacos`.
+
+⚠️ **A frase NÃO é o placeholder de `RF-43`.** Lá falta um bloco no meio de um texto que
+existe; aqui não há texto nenhum, e o trabalho é de quem escreve. Dizer "o goatlas ainda não
+sabe mostrar" acusaria o app de um defeito que não é dele.
+
+**4. Bloco conhecido caindo em `desconhecido`, com o nome técnico em inglês.** `view-file`
+(11 ocorrências, "Typesense - Documentação" e outras) e `adf:decision-list` ("Notas de
+Reunião") imprimiam `view-file` e `adf:decision-list` dentro da caixa que diz *"o goatlas
+ainda não sabe mostrar este bloco"*. O nome técnico existe para o caso em que ele é a **única
+pista** (`D-34`); quando se sabe o que o bloco é, imprimi-lo é despejar jargão da Atlassian em
+cima de quem só quer resolver um problema.
+
+`view-file` ganhou uma **quarta natureza** (`arquivo`), porque as três existentes davam o
+conselho errado: não é dinâmico (o arquivo existe), não é de outra página, e não está na tela.
+⚠️ O **nome do arquivo** continua fora — é parâmetro de macro (`RNF-30`), e a frase funciona
+sem ele.
+
+**O que NÃO foi mexido, e por quê.** A maior massa de inglês da aba é **conteúdo do
+Confluence**, não texto nosso: as três páginas iniciais de espaço são o template padrão da
+Atlassian, intocado (`Description`, `In a sentence or two, describe the purpose of this
+space.`, `🗑 Remove this panel once you're ready to share your space with team members.`,
+`👀 Most viewed articles`). Traduzir na renderização seria **reescrever conteúdo de
+terceiro** — heurística sobre texto que qualquer pessoa edita (`R-07`), que quebra na primeira
+mudança de template e apaga a distinção entre o que a página diz e o que o app diz. O conserto
+é editar aquelas três páginas no Confluence, e isso é trabalho do time de tech: fica
+registrado aqui, fora do PR. Pelo mesmo motivo não se tocou nas mensagens de erro em inglês
+citadas em "Mapeamento | Erros v4" — ali o inglês **é** a informação.
+
+#### `D-63b` — a segunda passada, depois de *"faça todas as correções"*
+
+Com o padrão do `ac:task-list` na mão — **tag desconhecida é desembrulhada, e o que ela
+carregava no atributo evapora** — a mesma varredura foi refeita procurando os outros casos
+dessa família. Saíram mais quatro.
+
+**5. 🚨 O emoji do título era jogado fora, e sobrava o espaço.** **69 títulos** de `DTE` e
+`GN` começavam com um espaço: `" Data"`, `" Instruções"`, `" Objetivos"`, `" Problema"`,
+`" Solução"`. O emoji que os abre (`🗓 Data`, `🗒 Instruções`) chega como `ac:emoticon`, e
+este arquivo o descartava inteiro desde sempre. Nos modelos de base de conhecimento do JSM o
+emoji é a **âncora visual de toda seção** — sem ele a página perde a varredura que o autor
+desenhou, e ninguém percebe que perdeu, porque o que sobra é um título perfeitamente normal.
+
+O emoji vem em dois lugares e os dois são lidos: `ac:emoji-fallback` (o caractere pronto) e,
+na falta dele, `ac:emoji-id` (o ponto de código em hexa). ⚠️ **Só decodifica hexa de
+verdade:** o id de emoji personalizado da Atlassian é texto (`atlassian-blue_star`), e um
+`parseInt` dele produziria um caractere qualquer em silêncio. ⚠️ E o intervalo é conferido
+antes de `String.fromCodePoint`, que **lança** — isto roda sobre conteúdo que qualquer pessoa
+edita (`R-07`), e um id malformado não pode derrubar a leitura da página inteira. ⚠️
+`ac:name` fica de fora: é o apelido interno (`blue-star`), e imprimi-lo trocaria um emoji
+perdido por jargão em inglês — o defeito que `D-63` acabou de fechar nos blocos.
+
+**6. A data do editor novo desaparecia.** `<time datetime="2026-08-13"/>` é tag **vazia**,
+com a informação inteira no atributo: desembrulhada, não sobra nada. É o que deixa a seção
+"Data" das notas de reunião com o título e o vazio embaixo. ⚠️ **O formato é montado por
+fatia de string, nunca por `Date`:** `new Date('2026-01-01')` é meia-noite **UTC**, e num
+fuso a oeste `toLocaleDateString` devolve `31/12/2025` — a data da reunião andaria um dia
+sozinha. O storage traz a data civil que o autor escolheu, e ela é reordenada como está.
+
+**7. `<ul></ul>` virava uma lista vazia na tela.** Invisível, mas com o `gap` da coluna: um
+buraco no meio do texto que se lê como *"faltou alguma coisa aqui"*. Uma ocorrência medida
+("Notas de Reunião"). Mesmo raciocínio de `status` com `title` vazio e de tarefa sem corpo:
+moldura vazia anuncia conteúdo que não existe.
+
+**8. 🚨 `toc` era o único bloco cuja frase de placeholder era FALSA.** Ela diz *"a página não
+guarda texto dele, então não há o que trazer para cá"* — e o texto do índice são exatamente
+os títulos que já estão na tela, na árvore que acabou de ser renderizada. Mesmo erro que
+`status` cometia em `D-34`: acusar limitação nossa sobre conteúdo que estava a uma função de
+distância. Aparecia em 4 páginas, sempre no topo.
+
+O índice passou a ser montado de verdade, e ele é **da mesma família de `livesearch`**: não
+há nada a reproduzir (nenhuma chamada de rede, nenhuma verificação de restrição a mais —
+`R-02`, `RN-06`), só uma função pura sobre a árvore. ⚠️ **Fica no envelope, não em
+`renderizarNos`:** `ConteudoConfluence` é o único lugar que sabe que os nós são uma página
+inteira; quem chama `renderizarNos` direto está desenhando um **trecho de busca**, e âncora
+de trecho aponta para título que não está na tela. ⚠️ **A âncora é chaveada pelo NÓ, não por
+posição** — títulos aparecem dentro de painel e de célula, e casar por índice exigiria
+percorrer duas árvores na mesma ordem em dois lugares; divergir ali é silencioso, do jeito de
+`urlDeLeituraNoApp`/`entradaDaUrl`. ⚠️ **Texto igual não gera âncora igual**: "Instruções"
+aparece duas vezes em página de processo, e duas âncoras iguais fazem o segundo link levar ao
+primeiro título — pior que não ter índice. O número de ordem resolve por construção. ⚠️
+Índice vazio **volta ao placeholder**, e ali a frase antiga passa a ser verdadeira.
+
+**9. `adf:extension` genérico** ganhou nome — é macro de um app instalado no Confluence. O
+nome do app é parâmetro (`RNF-30`), então a frase diz de onde o bloco veio, que é a única
+coisa acionável.
+
+**O que foi olhado e NÃO é bug:** os `true`/`false`/`null` soltos são valores dentro de código
+inline (conteúdo) · as vírgulas soltas são texto de parágrafo desembrulhado · as linhas de
+tabela totalmente vazias são as do próprio autor, e apagá-las mudaria a tabela que ele fez ·
+os dois links colados na home do `GN` estão colados **no storage**, num parágrafo só.
+
+**Testes** (`tests/qa-documentacao-13-08.test.ts`, **40 casos**): as duas palavras de status e
+o id fora da tela · `incomplete` não contando como concluída · status desconhecido caindo em
+*a fazer* · tarefa sem corpo descartada · metadado solto (marcação torta) · o estado ausente
+do texto puro · as entidades novas · **`&lArr;` ≠ `&larr;` e `&Dagger;` ≠ `&dagger;`** · o
+caminho tolerante ainda tolerante · entidade fora da tabela ainda saindo crua · a frase da
+página vazia e a garantia de que ela **não** aparece em página com texto · os blocos nomeados
+e o contraste com um bloco de verdade desconhecido, que **continua** mostrando o nome · o
+emoji pelas duas fontes, o id não-hexa que não vira lixo e o fora-de-intervalo que não derruba
+a página · a data sem `Date` · a lista vazia · e, para o `toc`, **o link e o `id` sendo a mesma
+âncora**, âncoras distintas para títulos homônimos, o placeholder de volta quando não há
+título, e o placeholder mantido no trecho de busca.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
