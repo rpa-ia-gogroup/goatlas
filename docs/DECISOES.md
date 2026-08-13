@@ -4047,6 +4047,53 @@ medido no navegador, com ← de `/avisos` até a lista de categorias.
 
 ---
 
+### D-66 · Coluna de etiquetas é centralizada; coluna de texto, nunca
+
+**Data:** 13/08/2026 · **Origem:** relato do mantenedor sobre a tabela "Versões"
+(`DTE:11632894`) · **Contexto:** `RF-39`, `RF-43`, `D-34`, `D-65`
+
+> *"centralize Status entre Escopo e Data de finalização, ele ficou todo pra esquerda"*
+
+**A primeira hipótese estava errada, e medir a derrubou.** Parecia sobra de largura mal
+distribuída depois de `D-65` ter soltado a tabela da medida do texto. Não é: `width:
+max-content` no navegador devolve **exatamente os mesmos 984px**, e a coluna `Status` tem
+**451px** porque as cinco pílulas de estado a exigem. O que sobra é um rótulo de seis letras
+encostado à esquerda de meio metro de coluna, com um vão até o cabeçalho seguinte.
+
+🚨 **`th { text-align: center }` global foi MEDIDO e recusado.** No "Glossário de Sistemas"
+(26 linhas, coluna de 372px de link) os cabeçalhos **coincidem** com o começo dos dados —
+`Cloud` exatamente sobre `k8s`, `Repositório` sobre os links. Centralizar todos consertaria
+uma tabela e **estragaria as outras**, jogando cada rótulo para o meio de uma coluna cujo
+conteúdo começa na esquerda. Foi o contraexemplo que definiu o desenho.
+
+A condição é **estrutural, nunca sobre o texto**: uma coluna é de etiquetas quando **toda**
+célula de corpo dela ou está vazia ou contém uma `etiqueta` — e há ao menos uma. Mesma
+disciplina de `ScC-4` (o *tipo* do campo decide, não o `fieldId`) e de `D-63` (nada de
+heurística sobre conteúdo de terceiro). Reconhecer "a coluna se chama Status" seria a
+heurística que quebra na primeira tabela em outro idioma.
+
+⚠️ **Centraliza o cabeçalho E os dados.** Centralizar só o rótulo o desalinharia do conteúdo
+que ele nomeia — o vão mudaria de lugar em vez de sumir.
+
+⚠️ **Célula vazia não desqualifica a coluna.** Em "Versões" três das cinco células do corpo
+são vazias; se vazio contasse como "não é etiqueta", a coluna de status nunca seria detectada
+— e o caso que originou a decisão não seria coberto por ela.
+
+⚠️ **Uma linha de texto desqualifica.** Alinhar pelo caso minoritário é o que faz tabela de
+verdade ficar torta.
+
+⚠️ **`colspan`/`rowspan` desligam a análise INTEIRA.** Com célula mesclada, a posição no array
+deixa de ser o índice da coluna, e centralizar por índice acertaria a coluna errada — em
+silêncio. Alinhamento errado é pior que alinhamento antigo.
+
+**Testes** (`tests/coluna-de-etiquetas.test.ts`, 8 casos): cabeçalho e dados centralizados na
+coluna de status · as outras quatro colunas da **mesma** tabela intocadas · o Glossário sem
+nenhuma centralização — o caso que reprova a regra global · linha de texto desqualificando ·
+célula vazia **não** desqualificando · `colspan` desligando tudo · e etiqueta **aninhada** em
+parágrafo continuando a contar, que é a forma mais comum no storage.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

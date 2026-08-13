@@ -1283,6 +1283,17 @@
   border-bottom: 0;
 }
 
+/* Coluna de ETIQUETAS — quem decide é `colunasDeEtiqueta`, no renderizador, por estrutura.
+ *
+ * Em "Versões" a coluna `Status` tem 451px porque as cinco pílulas a exigem, e o rótulo de
+ * seis letras ficava encostado à esquerda com um vão até o cabeçalho seguinte. ⚠️ `th` global
+ * centralizado foi MEDIDO e recusado: no "Glossário de Sistemas" os cabeçalhos coincidem com
+ * o começo dos dados, e centralizá-los jogaria `Repositório` para o meio de 372px. */
+.doc-tabela th[data-centrada='sim'],
+.doc-tabela td[data-centrada='sim'] {
+  text-align: center;
+}
+
 /* ---------- busca de documentação (RF-37, RNF-28) ---------------------- */
 
 /**
