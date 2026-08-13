@@ -32,6 +32,9 @@ import { Orquestrador } from './agent/orquestrador'
 import { Outbox } from './tickets/outbox'
 import { RepositorioAnexosPendentes } from './tickets/anexos-pendentes'
 import { AnexosEnviados } from './tickets/anexos-enviados'
+import { AnalisesDeAnexo } from './tickets/analises-anexo'
+import { criarLeitorPdf } from './ocr/http'
+import type { LeitorPdf } from './ocr/contrato'
 import { RepositorioVinculos } from './tickets/vinculos'
 import { ServicoChamados } from './tickets/servico'
 import { RepositorioInventario } from './governanca/inventario'
@@ -59,6 +62,15 @@ export interface EnvGoDeploy extends BootstrapEnv {
    * sistema, e como as outras três é lida só aqui (`RNF-01`).
    */
   readonly TG_API_TOKEN?: string
+  /**
+   * O **OCR Worker** — leitura de PDF (spec 007, `FR-6`). `OCR_WORKER_TOKEN` é a **quinta**
+   * credencial do sistema, e como as outras quatro é lida só aqui (`RNF-01`).
+   *
+   * ⚠️ É o **mesmo worker que o godocs usa em produção**. Rotacionar por causa de um quebra o
+   * outro — a mesma armadilha já registrada para `TG_API_TOKEN`.
+   */
+  readonly OCR_WORKER_URL?: string
+  readonly OCR_WORKER_TOKEN?: string
   readonly LLM_BASE_URL?: string
   readonly LLM_API_KEY?: string
   readonly LLM_MODEL?: string
@@ -114,6 +126,17 @@ export interface Contexto {
    * uma lista montada de lá mostraria os anexos sumindo sozinhos meio dia depois.
    */
   readonly anexosEnviados: AnexosEnviados
+  /** O que a IA entendeu de cada anexo da conversa — spec 007. */
+  readonly analisesAnexo: AnalisesDeAnexo
+  /**
+   * Leitura de PDF (spec 007, `FR-6`).
+   *
+   * ⚠️ **Nunca `null`**, ao contrário de `organizacao`/`teamguide`: sem `OCR_WORKER_URL` o
+   * leitor **existe** e recusa com `nao_configurado`, que é o que faz a tela dizer "não sei
+   * ler este arquivo" em vez de a rota ter de saber se a feature está ligada. Ausência é
+   * ausência, e ela se anuncia (T-132).
+   */
+  readonly lerPdf: LeitorPdf
   readonly chamados: ServicoChamados
   readonly orquestrador: Orquestrador
   /**
@@ -324,6 +347,16 @@ export async function montarContexto(
   const outbox = new Outbox(env.DB, agora)
   const anexosPendentes = new RepositorioAnexosPendentes(env.DB, agora)
   const anexosEnviados = new AnexosEnviados(env.DB, agora)
+  const analisesAnexo = new AnalisesDeAnexo(env.DB, agora)
+  // ⚠️ O teto é **nosso**, menor que os 60 s do godocs: aqui a leitura acontece dentro da
+  // requisição de upload, e o turno da conversa espera no máximo 8 s por ela (`FR-1b`).
+  const lerPdf: LeitorPdf = usandoFakes
+    ? async () => ({ estado: 'lido', texto: 'fake: texto extraído do PDF' })
+    : criarLeitorPdf({
+        url: env.OCR_WORKER_URL ?? '',
+        token: env.OCR_WORKER_TOKEN ?? '',
+        timeoutMs: 20_000,
+      })
   const chamados = new ServicoChamados(
     atlassian,
     outbox,
@@ -414,6 +447,8 @@ export async function montarContexto(
     outbox,
     anexosPendentes,
     anexosEnviados,
+    analisesAnexo,
+    lerPdf,
     chamados,
     orquestrador,
     organizacao,

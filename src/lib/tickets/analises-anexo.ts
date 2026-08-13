@@ -84,7 +84,9 @@ export function analiseVaiParaConversa(a: AnaliseDeAnexo): boolean {
  * diferentes sobre o mesmo arquivo, e a segunda é a que alguém lê meses depois tentando
  * entender por que um chamado chegou sem evidência.
  */
-export function acaoDeAuditoriaDaAnalise(estado: EstadoAnalise): string {
+export function acaoDeAuditoriaDaAnalise(
+  estado: EstadoAnalise,
+): 'anexo_analisado' | 'anexo_nao_lido' | 'anexo_leitura_indefinida' {
   switch (estado) {
     case 'pronta':
     case 'irrelevante':
