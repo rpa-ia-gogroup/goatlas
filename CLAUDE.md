@@ -949,6 +949,29 @@ destes reabre um vazamento que já foi fechado.
   `float: left` + `width: 100%`: o float tira o elemento daquela categoria e, num container
   flex, é ignorado — sobra um item de flex comum, que respeita padding e gap. Não trocar o
   `fieldset`/`legend` por `div`: são eles que nomeiam o grupo de rádio para leitor de tela.
+- 🚨 **A conversa só acompanha o fim se a pessoa JÁ está no fim** (`D-69`, `app/rolagem.ts`). A
+  rolagem era incondicional **e** mirava um sentinela que mora antes do compositor: alinhá-lo ao
+  rodapé parava a página ~270 px acima do fim real, com a mensagem nova 34 px **atrás** do campo
+  (medido). Hoje o alvo é o fim do **documento** e a condição é `estaNoFim` (tolerância de 80 px
+  — zero desligaria o acompanhamento sozinho por subpixel). ⚠️ Antes de `D-68` o alvo errado não
+  custava nada: é o **segundo** custo de pinar o compositor.
+- 🚨 **"Não arrastar" precisa de caminho de volta** (`D-69`). Lendo o histórico, nada desce a
+  tela — **nem a mensagem que a pessoa mesma mandou** —, e sem o atalho *"↓ Ir para a última
+  mensagem"* apertar Enter não teria efeito visível nenhum (texto e espera nascem fora da tela).
+  Ele vive **dentro** do compositor `sticky`, aparece só com as **duas** condições (longe do fim
+  **e** novidade não vista), apaga sozinho quando se volta rolando, e **não existe** quando não
+  há para onde ir — desabilitado seria móvel permanente no espaço mais caro da tela.
+- ⚠️ **A conversa cresce DEPOIS do alvo, e rolar desliga o acompanhamento** (`D-69`). Rolar no
+  efeito de `falas` deixava a página 200 px curta (cartão do anexo e linha de espera ainda
+  mudando de altura) — quem cola o fim é um `ResizeObserver` no `body`. E a rolagem dispara
+  `scroll` passando **longe** do fim no caminho, o que marcava a pessoa como "lendo o histórico":
+  `ehRolagemNossa` ignora eventos por 800 ms depois de uma rolagem nossa.
+- 🚨 **Aba fora de foco não gera quadros — e isso quebra `smooth` E o `scroll`** (`D-69`). Os dois
+  sintomas têm **uma** causa; lidos como fatos separados produziriam duas conclusões falsas
+  ("smooth é quebrado neste Chrome", "o listener não funciona") — a mesma armadilha de `D-40`. Por
+  isso a rolagem é **instantânea** (não se depende de animação para *chegar*, quando chegar é a
+  correção) e a verificação posiciona a página **disparando o `scroll`** que um gesto real
+  dispararia: o listener lê a posição do DOM, nunca o evento.
 - 🚨 **O compositor é FIXO, e o fixo tem um custo que precisa ser medido** (`D-68`). `sticky`
   com **fundo explícito** — sem ele a conversa passa por baixo do campo (o defeito de fundo
   transparente de `D-64`). ⚠️ E pinar criou problema novo: o compositor virou **39% da tela**
