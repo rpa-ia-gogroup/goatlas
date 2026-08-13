@@ -2427,7 +2427,7 @@ function avaliarRegra2(classificados, thresholdRecorrencia) {
   };
 }
 function urlDeLeituraNoApp(idPagina) {
-  return `/?pagina=${encodeURIComponent(idPagina)}`;
+  return `/documentacao?pagina=${encodeURIComponent(idPagina)}`;
 }
 var MENSAGEM_BLOQUEIO_PENDENTE = 'Ainda n\xE3o consigo abrir o chamado: primeiro preciso registrar o que a documenta\xE7\xE3o n\xE3o resolveu no seu caso. Use o bot\xE3o "Isso n\xE3o resolve meu caso" aqui embaixo e me conte em uma frase \u2014 abro o chamado na sequ\xEAncia.';
 function montarMensagemBloqueio(veredito) {
