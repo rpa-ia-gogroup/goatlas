@@ -2017,12 +2017,26 @@
  * armadilha de foco aqui (`FR-13`).
  */
 .visualizador {
+  /*
+   * 🚨 `margin: auto` **explícito**, e isto foi medido no navegador (13/08): o `<dialog>`
+   * nativo se centraliza por `margin: auto` do UA stylesheet, e o reset do app zera margem
+   * de tudo — então ele nascia colado no topo, atravessando a janela inteira, com o nome do
+   * arquivo fora da caixa. `inset: 0` completa a conta para o eixo vertical.
+   */
+  margin: auto;
+  inset: 0;
   width: min(92vw, 1000px);
   max-height: 88vh;
   border: none;
   border-radius: var(--radius-lg);
   padding: 0;
-  background: var(--go-surface);
+  /*
+   * 🚨 `--go-surface` NÃO EXISTE neste projeto — medido no navegador (13/08): o fundo caía em
+   * transparente e o texto da página aparecia **atravessando** a caixa, com o nome do arquivo
+   * por cima da conversa. Os cartões usam `--go-white`, e é ele que vale aqui.
+   * ⚠️ Token inventado não quebra build nem teste: `var()` sem valor simplesmente não pinta.
+   */
+  background: var(--go-white);
   color: var(--go-text-body);
   box-shadow: 0 24px 64px rgb(0 0 0 / 28%);
 }
