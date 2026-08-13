@@ -480,6 +480,8 @@ const CONFIG: ConfigValores = {
   dominios_permitidos: ['gocase.com'],
   espacos_confluence: ['TECH'],
   tipos_chamado_permitidos: ['70'],
+  // `D-70` — a extração só oferece tipo que existe no desk configurado.
+  service_desk_id: 'sd-1',
   // Alto de propósito: o assunto aqui é latência, não bloqueio.
   regra1_threshold_score: 0.99,
   regra2_exemplos_ajuste_operacional: ['Rodei o pipeline manualmente'],
@@ -595,12 +597,19 @@ describe('turno do agente: a proposta não espera a resposta do modelo', () => {
     let n = 0
     const novoId = () => `id-${++n}`
     const auditoria = new AuditoriaBanco(db, () => AGORA, novoId)
-    const atlassian = new ClienteAtlassianFake({ paginas: [pagina()], historico: [ticket()] })
+    const atlassian = new ClienteAtlassianFake({
+      paginas: [pagina()],
+      historico: [ticket()],
+      // `D-70` — sem o tipo aqui a extração não sai, e o teste mediria a ausência dela.
+      tiposChamado: [
+        { id: '70', serviceDeskId: 'sd-1', nome: 'Relatar um bug', descricao: null },
+      ],
+    })
     ia = new IaQueExigeSobreposicao()
     // O executor usa o fake padrão: quem está sob teste é a orquestração das idas ao
     // modelo, não a classificação.
     const executor = new ExecutorTools(atlassian, new ClienteIAFake(), db, auditoria, () => AGORA)
-    orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId)
+    orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId, atlassian)
   })
 
   it('a extração começa ANTES da resposta final do modelo terminar', async () => {

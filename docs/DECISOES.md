@@ -4260,6 +4260,125 @@ acompanhar · voltar **rolando** apaga o atalho sem clique.
 
 ---
 
+### D-70 · O assunto era escolhido entre números, e a pergunta do anexo ignorava o anexo
+
+**Data:** 13/08/2026 · **Origem:** teste do chat pelo mantenedor · **Contexto:** `D-53`, `D-59`,
+`D-62`, `D-47`, `RF-15`, `RF-18`, `RF-28`, `RF-62`, `RN-11`
+
+Dois defeitos, um relato. A pessoa descreveu *"meu PC desliga sozinho de pouco em pouco tempo,
+bem rápido"* e o cartão de confirmação anunciou o assunto **"Problema com Nota Fiscal específica
+ou grupo de Notas"** (tipo `92` do `GN`). No mesmo cartão, a pergunta *"você tem algo para
+anexar?"* — depois de ela ter colado **dois prints** na conversa.
+
+#### 1 · O modelo escolhia a fila do chamado entre ids
+
+`orquestrador.ts` mandava à extração:
+
+```ts
+tiposPermitidos: config.tipos_chamado_permitidos.map((id) => ({ id, nome: id }))
+```
+
+Então `montarPromptExtracao` escrevia `- 92: 92`, `- 70: 70`, `- 108: 108`. **O nome nunca
+chegava ao modelo** — e o nome é o único dado que distingue um assunto do outro. A escolha não
+tinha como ser melhor que um sorteio entre quinze números.
+
+🚨 **E nada quebrava.** A proposta nascia, `validarProposta` aceitava (o id *está* na allowlist),
+`D-53` resolvia o nome **depois** e o cartão o exibia com confiança. O nome existia no app o
+tempo todo, do lado errado da decisão: em `nomeDoTipoDaProposta`, que roda para *mostrar*.
+
+**O que mudou:** `tickets/tipos-oferecidos.ts` responde "que tipos dá para abrir aqui, e como se
+chamam?" num lugar só, e os **três** leitores passam por ele — a rota do formulário
+(`GET /api/tipos-chamado`), o cartão (`D-53`) e agora a extração.
+
+⚠️ **O filtro por service desk vem junto, e não é escopo extra.** `listarTiposChamado` varre
+todos os desks do site; a allowlist é lista de ids, então um id de outro desk passava por ela e
+por `validarProposta` para **falhar só na criação**, onde o `serviceDeskId` vem fixo da config.
+Oferecer ao modelo um tipo que a criação recusa é o caminho mais curto para perder o chamado — e
+faria a extração e o cartão discordarem, com o cartão dizendo "assunto não identificado" sobre um
+assunto que o próprio servidor acabou de escolher.
+
+⚠️ **Falha de leitura NÃO cai para os ids.** Cair reproduziria o bug em silêncio exatamente
+quando ninguém está olhando. A escolha certa já estava escrita em `RF-28`: *sem proposta o agente
+continua perguntando, o que é o pior caso aceitável; criar na fila errada não é*. E não custa
+nada à pessoa — o formulário sem IA (`D-04`) continua de pé. Lista vazia **encerra antes** da ida
+ao provedor: pagar uma chamada de IA para oferecer `(nenhum)` é gasto sem resultado possível
+(`RNF-16`).
+
+⚠️ **O prompt ganhou a regra do genérico**, e ela é sobre correspondência, não sobre eliminação:
+*uma palavra em comum não é correspondência* (é o `92` inteiro — "problema" com "problema"), e
+quando nada descreve o caso o certo é a entrada geral do time, porque quem recebe encaminha. Sem
+nem um genérico na lista, `pronto: false`.
+
+⚠️ **A `T-425`/`aceitaAnexo` não entra nisto** — nenhum dos quinze tipos do `GN` é de hardware, e
+o `68` ("Outras questões / dúvidas") é a resposta honesta para o caso do relato. Ampliar a fila
+para hardware é decisão de roteamento, não deste PR.
+
+**Quinta ocorrência da família de `D-47`:** o fake escondia. `ClienteIAFake.extrairProposta`
+filtra por `tiposPermitidos.some((t) => t.id === p.tipoChamadoId)` — compara **id**, e ignora
+`nome`. Um teste que afirmasse sobre a proposta devolvida continuaria verde com `nome: id` para
+sempre. O caso que vale afirma sobre `params.tiposPermitidos` **como a camada de IA o recebeu**.
+E os **sete** testes que quebraram na primeira rodada são a medida do ponto cego: nenhum deles
+registrava request type no fake, ou seja nenhum exercitava a instalação real.
+
+#### 2 · A pergunta do anexo não olhava o anexo
+
+Duas causas somadas, as duas em cima de `D-59` (o anexo passou a entrar **durante** a conversa):
+
+1. `telas.tsx` decidia a pendência por `aceitaAnexo && declarou === null` — nunca pelo que subiu;
+2. `PerguntaDeAnexo` contava os envios em estado **local**, que nasce vazio. Os prints entram pelo
+   compositor, num componente **irmão**, e recarregar a página zera até os do próprio cartão.
+
+Resultado: a pergunta feita a quem já respondeu por ato, e a nota *"Até 3 arquivos"* com dois já
+gastos. Quem confiasse na nota descobriria o teto **na recusa do quarto arquivo**, que é o pior
+lugar (`SC-08`).
+
+**O que mudou:** `GET /api/conversas/:id/anexos` devolve o que o servidor tem para a chave
+`conversa:<id>`, e `autorizarDeclaracaoDeAnexo` deixou de pedir a resposta que já tinha.
+
+⚠️ **Duas camadas, como toda trava daqui:** a tela não pergunta, e o servidor não exige. A camada
+do servidor é a que vale, e ela também cobre o formulário.
+
+🚨 **O FATO ganha da resposta.** `declarouAnexo: false` com arquivo já enviado é gravado como
+`true`. A declaração mede *intenção*; a linha em `anexos_pendentes` é *fato*, e é ela que a
+materialização usa de qualquer forma — `materializarAnexosDoChamado` **nunca** consultou a
+declaração. Isto responde a primeira pergunta do relato (*"se eu marcar que não tenho, ele ignora
+as duas?"*): não, e nunca ignorou. O que a resposta negativa fazia era gravar `declarouNaoTer` no
+indicador de `T-422` — *"as pessoas não colaboram"* sobre alguém que colaborou.
+
+⚠️ **`RN-11` não afrouxou.** Quem não anexou nada continua tendo de responder, e a resposta
+negativa continua abrindo chamado (`SC-03`). O que deixou de existir é a pergunta cuja resposta o
+servidor já tinha.
+
+⚠️ **Só o NOME sai pela rota.** O `temporaryAttachmentId` nunca trafega pelo navegador (`RF-30`
+aplicado a arquivo): com ele, colar o anexo de outra pessoa no próprio chamado seria trivial. E
+conversa de outra pessoa devolve **404**, não a lista.
+
+⚠️ **`nomeUnicoDeAnexo` passou a valer no cartão também**, comparando com o que veio do servidor:
+o print colado na conversa já gastou o nome `image.png`, e sem isso o `D-62` voltaria pela outra
+metade da tela.
+
+🚨 **Terceiro defeito, achado no NAVEGADOR e não pela suíte.** A primeira versão tinha duas
+listas — a do servidor fora, e os envios desta tela **dentro** de `{cabem > 0 && …}`. Anexar o
+terceiro arquivo zerava `cabem`, o bloco inteiro desaparecia, e com ele a linha do arquivo que
+**acabara de subir**: título dizendo "2 arquivos", lista com 2, frase dizendo "este é o limite de
+3". Evidência no chamado e nenhuma na tela — `D-62` outra vez, na versão nova. Hoje é **uma**
+lista, sempre desenhada, e o contador soma as duas origens.
+
+**Medido no navegador em 13/08:** dois prints colados na conversa → cartão sem rádio, *"Você já
+anexou 2 arquivos"* com os dois nomes e *"Ainda cabem 1 de 3"* · terceiro anexo pelo cartão →
+*"Você já anexou 3 arquivos"* com os três e *"Este é o limite de 3 arquivos"*, botão fora ·
+abertura sem declarar nada → `GOATLAS-1` com *"✓ Anexado: image.png, print-do-erro.png,
+terceiro.png"* · e a tela do formulário intacta, com os dois rádios e a frase composta de `D-46`.
+
+**Testes:** `tests/d70-assunto-com-nome.test.ts` (10 casos — o que atravessa a fronteira, o
+filtro de desk, a indisponibilidade que não cai para os ids) e
+`tests/d70-anexo-ja-enviado.test.ts` (18 — a rota e o que ela não expõe, o isolamento por
+e-mail, o fato vencendo a resposta, `RN-11` intacta para quem não anexou, e a lista que fica no
+teto). `ClienteAtlassianFake` ganhou falha injetável em `listarTiposChamado`: era a única
+operação sem uma, e sem ela o caminho de degradação não tinha como ser encenado.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

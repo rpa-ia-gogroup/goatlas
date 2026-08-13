@@ -132,29 +132,74 @@ export const ROTULOS_ENVIO: Record<
   falhou: { simbolo: '!', palavra: 'Não subiu' },
 }
 
+/**
+ * A pergunta de `RF-62`/`RN-11` — e o que fazer quando ela já foi respondida por ato.
+ *
+ * 🚨 **Arquivo já enviado NÃO é perguntado de novo** (`D-70`). Relato de 13/08/2026: a
+ * pessoa colou dois prints na conversa e o cartão perguntou se ela tinha material para
+ * anexar, *"como se eu já não tivesse enviado duas"* — e a nota dizia *"Até 3 arquivos"*,
+ * com dois já gastos e nenhum na tela. Duas causas somadas:
+ *
+ * 1. `faltaDeclararAnexo` olhava só `declarou === null` (`telas.tsx`), nunca o que subiu;
+ * 2. `envios` é estado **local** deste componente, e nasce vazio — o anexo do `D-59` entra
+ *    pelo compositor, num componente irmão, e recarregar a página zera até o do cartão.
+ *
+ * Quem sabe é o servidor: `GET /api/conversas/:id/anexos` (nome, nunca o
+ * `temporaryAttachmentId` — `RF-30`). Com a lista em mão a pergunta desaparece e sobra o
+ * que a pessoa precisa: **o que já foi**, e **quantos ainda cabem**.
+ *
+ * ⚠️ O teto vem de fora (`MAX_ANEXOS_POR_CHAMADO`): um `3` escrito na frase divergiria do
+ * servidor no dia em que o teto mudasse, e a recusa em cima da hora é o pior lugar para
+ * descobrir isso (`SC-08`).
+ */
 export function PerguntaDeAnexo({
   alvo,
   declarou,
   aoDeclarar,
+  jaEnviados = [],
+  teto,
 }: {
   alvo: AlvoDoAnexo
   declarou: Declaracao
   aoDeclarar: (valor: boolean) => void
+  /** `D-70` — nomes que o SERVIDOR já tem para esta chave. Vazio = nada enviado ainda. */
+  jaEnviados?: readonly string[]
+  teto: number
 }) {
   const [envios, setEnvios] = useState<readonly Envio[]>([])
   const entrada = useRef<HTMLInputElement>(null)
 
+  /** Tudo o que conta para o teto: o que o servidor já tem mais o que subiu nesta tela. */
+  const nomesOcupados = [
+    ...jaEnviados,
+    ...envios.filter((e) => e.estado !== 'falhou').map((e) => e.nome),
+  ]
+  const cabem = Math.max(0, teto - nomesOcupados.length)
+  /** `D-70` — já anexou: a pergunta foi respondida pelo ato, e o servidor concorda. */
+  const jaRespondeuAnexando = jaEnviados.length > 0
 
-  async function enviar(arquivos: readonly File[]) {
-    for (const arquivo of arquivos) {
+  async function enviar(recebidos: readonly File[]) {
+    // O teto é do servidor também (`SC-08`); aqui ele existe para a recusa não custar uma
+    // ida de rede — e a mensagem dele continua sendo a que vale.
+    const arquivos = recebidos.slice(0, cabem)
+    // `D-62` — dois prints se chamam `image.png` os dois. Sem o sufixo ANTES de subir, o
+    // segundo ocupa a linha do primeiro na lista e parece não ter acontecido, apesar de
+    // existir no chamado. ⚠️ Aqui a comparação inclui o que veio do servidor: o print
+    // colado na conversa já gastou o nome.
+    const usados = [...nomesOcupados]
+    for (const original of arquivos) {
+      const nome = nomeUnicoDeAnexo(original.name, usados)
+      usados.push(nome)
+      const arquivo =
+        nome === original.name ? original : new File([original], nome, { type: original.type })
       setEnvios((atuais) => [
-        ...atuais.filter((e) => e.nome !== arquivo.name),
-        { nome: arquivo.name, estado: 'enviando' },
+        ...atuais.filter((e) => e.nome !== nome),
+        { nome, estado: 'enviando' },
       ])
       try {
         await api.anexarAntesDoChamado(alvo, arquivo)
         setEnvios((atuais) =>
-          atuais.map((e) => (e.nome === arquivo.name ? { nome: e.nome, estado: 'enviado' } : e)),
+          atuais.map((e) => (e.nome === nome ? { nome: e.nome, estado: 'enviado' } : e)),
         )
       } catch (erro) {
         // A mensagem do servidor aparece inteira: ela é que diz se foi tamanho, teto de
@@ -162,14 +207,87 @@ export function PerguntaDeAnexo({
         const motivo =
           erro instanceof ErroApi ? erro.message : 'Não consegui enviar agora. Tente de novo.'
         setEnvios((atuais) =>
-          atuais.map((e) =>
-            e.nome === arquivo.name ? { nome: e.nome, estado: 'falhou', motivo } : e,
-          ),
+          atuais.map((e) => (e.nome === nome ? { nome: e.nome, estado: 'falhou', motivo } : e)),
         )
       }
     }
     // Sem isto, escolher o mesmo arquivo depois de uma falha não dispara `change`.
     if (entrada.current) entrada.current.value = ''
+  }
+
+  /**
+   * `D-70` — sem pergunta, porque ela já foi respondida.
+   *
+   * ⚠️ Continua sendo `fieldset`/`legend`: é ele que nomeia o grupo para leitor de tela, e
+   * o bloco segue sendo "a evidência deste chamado". Sem os rádios não há o que declarar.
+   */
+  if (jaRespondeuAnexando) {
+    /**
+     * 🚨 **UMA lista, sempre desenhada — e o contador conta as duas origens** (`D-70`,
+     * medido no navegador em 13/08).
+     *
+     * A primeira versão tinha duas listas: `jaEnviados` fora, e os envios desta tela
+     * **dentro** de `{cabem > 0 && …}`. Anexar o terceiro arquivo zerava `cabem`, o bloco
+     * inteiro desaparecia — e com ele a linha do arquivo que **acabara de subir**. Título
+     * dizendo "2 arquivos", lista com 2, frase dizendo "este é o limite de 3": a evidência
+     * no chamado e nenhuma na tela, que é exatamente o defeito de `D-62` outra vez.
+     *
+     * O contador é `nomesOcupados`, não `jaEnviados`: contar só o servidor deixaria o
+     * título discordando da lista logo abaixo dele.
+     */
+    const linhas: readonly Envio[] = [
+      ...jaEnviados.map((nome) => ({ nome, estado: 'enviado' as const })),
+      ...envios,
+    ]
+    return (
+      <fieldset className="pergunta-anexo">
+        <legend>
+          <span className="eyebrow">Evidência</span>
+          <span className="pergunta-anexo-titulo">
+            {nomesOcupados.length === 1
+              ? 'Você já anexou 1 arquivo'
+              : `Você já anexou ${nomesOcupados.length} arquivos`}
+          </span>
+        </legend>
+
+        <ul className="lista-envios" aria-live="polite">
+          {linhas.map((e) => (
+            <li key={e.nome} className={`envio envio-${e.estado}`}>
+              <span className="envio-estado">
+                <span aria-hidden="true">{ROTULOS_ENVIO[e.estado].simbolo}</span>{' '}
+                {ROTULOS_ENVIO[e.estado].palavra}
+              </span>
+              <span className="envio-nome">{e.nome}</span>
+              {e.motivo && <span className="envio-motivo">{e.motivo}</span>}
+            </li>
+          ))}
+        </ul>
+
+        <p className="dica">
+          {cabem > 0
+            ? `Vão junto com o chamado. Ainda cabem ${cabem} de ${teto} — anexe abaixo se faltar algo.`
+            : `Vão junto com o chamado. Este é o limite de ${teto} arquivos.`}
+        </p>
+
+        {cabem > 0 && (
+          <div className="zona-anexo">
+            <div className="escolher-arquivo">
+              <input
+                ref={entrada}
+                id="anexo-na-criacao"
+                className="entrada-arquivo"
+                type="file"
+                multiple
+                onChange={(e) => void enviar(Array.from(e.target.files ?? []))}
+              />
+              <label htmlFor="anexo-na-criacao" className="botao botao-contorno rotulo-arquivo">
+                Anexar outro arquivo
+              </label>
+            </div>
+          </div>
+        )}
+      </fieldset>
+    )
   }
 
   return (
@@ -197,7 +315,7 @@ export function PerguntaDeAnexo({
           <span className="opcao-cartao-texto">
             <span className="opcao-cartao-titulo">Tenho — quero anexar agora</span>
             <span className="opcao-cartao-nota">
-              Até 3 arquivos, de 8 MB cada. Sobem na hora que você escolhe.
+              Até {teto} arquivos, de 8 MB cada. Sobem na hora que você escolhe.
             </span>
           </span>
         </label>

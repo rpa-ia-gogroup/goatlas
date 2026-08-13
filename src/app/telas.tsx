@@ -777,14 +777,46 @@ export function ReciboConfirmacao({
     }
   }, [propostaInicial.tipoChamadoId, eu])
 
+  /**
+   * 🚨 **O que a conversa JÁ anexou** — `D-70`.
+   *
+   * Sem esta leitura o cartão perguntava "você tem algo para anexar?" a quem tinha acabado
+   * de colar dois prints, e anunciava o teto inteiro com dois já gastos. Quem sabe é o
+   * servidor: os arquivos entram pelo compositor (`D-59`), num componente irmão, e o estado
+   * local do cartão nunca os viu — nem sobrevive a um recarregamento.
+   *
+   * ⚠️ Falha de leitura cai para **lista vazia**, que é o comportamento de antes: a pergunta
+   * aparece. Perguntar de novo é chato; travar o botão porque uma leitura auxiliar caiu
+   * seria a parede que `RNF-18` proíbe.
+   */
+  const [jaEnviados, setJaEnviados] = useState<readonly string[]>([])
+  const [tetoAnexos, setTetoAnexos] = useState(MAX_ANEXOS_POR_CHAMADO)
+  useEffect(() => {
+    let vivo = true
+    api
+      .anexosDaConversa(conversaId)
+      .then((r) => {
+        if (!vivo) return
+        setJaEnviados(r.itens.map((a) => a.nome))
+        setTetoAnexos(r.teto)
+      })
+      .catch(() => {})
+    return () => {
+      vivo = false
+    }
+  }, [conversaId])
+
   // A mesma regra do servidor (`obrigatoriosFaltando`), na tela — camada 1 das duas. O
   // servidor recusa de qualquer jeito; isto evita a pessoa descobrir só depois de clicar.
   // `D-46` — e quem compõe a frase é `pendencias.ts`, o mesmo módulo do formulário: aqui
   // também dava para faltar campo E declaração ao mesmo tempo, e a tela só contava uma.
+  //
+  // ⚠️ `jaEnviados` desliga a pendência (`D-70`): arquivo enviado É a resposta, e o servidor
+  // decide igual (`autorizarDeclaracaoDeAnexo`) — duas camadas, como toda trava daqui.
   const pendencias = pendenciasParaAbrir({
     campos: campos ?? [],
     valores: valoresCampos,
-    faltaDeclararAnexo: aceitaAnexo && declarou === null,
+    faltaDeclararAnexo: aceitaAnexo && declarou === null && jaEnviados.length === 0,
   })
   const falta = faltaAlgumaCoisa(pendencias)
 
@@ -927,6 +959,8 @@ export function ReciboConfirmacao({
           alvo={{ via: 'conversa', conversaId }}
           declarou={declarou}
           aoDeclarar={setDeclarou}
+          jaEnviados={jaEnviados}
+          teto={tetoAnexos}
         />
       )}
 
@@ -1949,11 +1983,15 @@ function FormularioEmCurso({
         </span>
       </div>
 
+      {/* `D-70` — aqui `jaEnviados` fica no default vazio de propósito: a chave nasce
+          nesta montagem (`useRef(crypto.randomUUID())`), então não existe anexo anterior
+          para ela. O que subir nesta tela vive no estado do próprio componente. */}
       {aceitaAnexo && (
         <PerguntaDeAnexo
           alvo={{ via: 'formulario', chaveIdempotencia: chave.current }}
           declarou={declarou}
           aoDeclarar={setDeclarou}
+          teto={MAX_ANEXOS_POR_CHAMADO}
         />
       )}
 

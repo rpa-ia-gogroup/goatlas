@@ -226,10 +226,40 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   **atravessando** a caixa; `var()` sem valor simplesmente não pinta, então build, teste e
   typecheck passam. Os cartões usam `--go-white`. No mesmo lote: `<dialog>` precisa de
   `margin: auto` **explícito**, porque o reset do app zera a margem que o UA usa para centralizar.
+- 🚨 **O modelo escolhia o ASSUNTO entre números** (`D-70`, `tickets/tipos-oferecidos.ts`). A
+  extração recebia `tipos_chamado_permitidos.map((id) => ({ id, nome: id }))`, então o prompt
+  listava `- 92: 92` e a fila do chamado era sorteada entre quinze ids. Medido em 13/08:
+  *"meu PC desliga sozinho"* saiu como **"Problema com Nota Fiscal específica ou grupo de
+  Notas"** (tipo `92`) — e nada quebrou, porque `D-53` resolve o nome **depois**, para exibir.
+  Hoje três leitores passam por `tiposOferecidos`: a rota do formulário, o cartão e a
+  extração. ⚠️ **O filtro por service desk vem junto** — `listarTiposChamado` varre os cinco
+  desks, e tipo de outro desk passa por `validarProposta` para falhar **só na criação**.
+  ⚠️ **Falha de leitura NÃO cai para os ids**: sem nome não há proposta, e `RF-28` já dizia
+  qual é o pior caso aceitável (*o agente continua perguntando*; criar na fila errada não é).
+  Lista vazia encerra **antes** da ida ao provedor (`RNF-16`). ⚠️ **Quinta da família de
+  `D-47`**: `ClienteIAFake.extrairProposta` filtra por **id** e ignora `nome`, então teste
+  sobre a proposta devolvida ficaria verde para sempre — o caso que vale afirma sobre
+  `params.tiposPermitidos` como a camada de IA o recebeu. Os **sete** testes que quebraram na
+  primeira rodada nunca registravam request type no fake.
 - **A declaração de anexo trava RESPONDER, nunca ANEXAR** (`RN-11`). Quem diz "tenho",
   desiste e volta para "não tenho" abre o chamado. E a copy da opção negativa é "não tenho
   material para anexar" — **nunca "pular"**, que diria que anexar era o dever e faria a
   resposta honesta virar a que ninguém escolhe.
+- 🚨 **Quem JÁ anexou não é perguntado, e o FATO ganha da resposta** (`D-70`). Relato: dois
+  prints colados na conversa e o cartão perguntando *"você tem algo para anexar?"* — a
+  pendência olhava `declarou === null` e nunca o que subiu, e `PerguntaDeAnexo` contava os
+  envios em estado **local**, que nasce vazio (os prints entram pelo compositor, componente
+  **irmão**, e recarregar zera até os do cartão). Quem sabe é o servidor:
+  `GET /api/conversas/:id/anexos`. ⚠️ **Duas camadas**: a tela não pergunta e
+  `autorizarDeclaracaoDeAnexo` não exige. ⚠️ **`declarouAnexo: false` com arquivo pendente é
+  gravado como `true`** — a declaração mede intenção, a linha em `anexos_pendentes` é fato, e
+  `materializarAnexosDoChamado` **nunca** consultou a declaração; gravar `declarouNaoTer`
+  sujava `T-422` na direção "as pessoas não colaboram" sobre quem colaborou. ⚠️ **`RN-11` não
+  afrouxou**: sem anexo, sem resposta não abre. ⚠️ **Só o NOME sai pela rota** (`RF-30`), e
+  conversa de outra pessoa dá **404**. 🚨 **E a LISTA é uma só, sempre desenhada** — a primeira
+  versão punha os envios da tela dentro de `{cabem > 0 && …}`, e o terceiro arquivo zerava
+  `cabem`, apagando a linha do arquivo que acabara de subir: `D-62` outra vez, e achado no
+  **navegador**, não pela suíte.
 - 🚨 **A frase do botão travado é COMPOSTA, nunca constante** (`app/pendencias.ts`, `D-46`).
   Ela dizia *"É a única coisa que falta"* — afirmação sobre o **resto da tela**, que uma
   constante não vê: no formulário, com título, descrição e os obrigatórios do tipo todos
@@ -1581,7 +1611,19 @@ STATUS` vinha grudado. Agora cada tela tem caminho próprio (`app/rotas.ts`, sem
 router), `.doc` é grade de duas colunas e a etiqueta tem margem. ✅ **Histórico medido no
 navegador**: ← de `/avisos` até a lista de categorias, e de `?pagina=` de volta às categorias.
 
-**1400 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+🚨 **O assunto do chamado era sorteado, e a pergunta do anexo ignorava o anexo** (`D-70`,
+13/08/2026). Dois defeitos num relato de uso real: *"meu PC desliga sozinho de pouco em pouco
+tempo"* virou o tipo **`92` — "Problema com Nota Fiscal específica ou grupo de Notas"**, porque a
+extração recebia os tipos **sem nome** (`- 92: 92`); e o cartão perguntou *"você tem algo para
+anexar?"* depois de dois prints colados na conversa. Corrigidos com `tickets/tipos-oferecidos.ts`
+(uma regra para os três leitores, com o filtro de desk que faltava) e
+`GET /api/conversas/:id/anexos` + o gate que deixou de pedir a resposta que já tinha. ✅ **Medido
+no navegador**: cartão sem rádio com *"Você já anexou 2 arquivos · Ainda cabem 1 de 3"*, terceiro
+anexo somando para 3, e `GOATLAS-1` aberto com os três anexados sem declarar nada. ⚠️ **A escolha
+do tipo por um modelo REAL não foi medida** — em `npm run dev` a IA é o fake, que propõe `rt-dev`
+fixo; o que a suíte garante é que os nomes atravessam a fronteira.
+
+**1453 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

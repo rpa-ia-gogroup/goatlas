@@ -366,7 +366,7 @@ export async function montarContexto(
     anexosEnviados,
   )
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora)
-  const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId)
+  const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId, atlassian)
   const inventarioAssentos = new RepositorioInventario(env.DB, novoId)
 
   // --- Fase 3: notificação (RF-44 a RF-48) ----------------------------------

@@ -138,7 +138,7 @@ describe('prompt do agente — é ele que chega ao provedor', () => {
     const atlassian = new ClienteAtlassianFake({ paginas: [], historico: [] })
     ia = new ClienteIAFake([{ texto: 'oi' }])
     const executor = new ExecutorTools(atlassian, ia, db, auditoria, () => AGORA)
-    const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId)
+    const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId, atlassian)
     const c = await conversas.criar('c1', ANA)
     await orquestrador.processarMensagem(c, 'olá', config)
     const primeira = ia.chatsRecebidos[0]!.mensagens[0]!

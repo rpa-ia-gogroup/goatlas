@@ -1279,6 +1279,7 @@ var ClienteAtlassianFake = class {
         obterPagina: "nenhum",
         obterCamposDoTipo: "nenhum",
         obterSchemaDoTipo: "nenhum",
+        listarTiposChamado: "nenhum",
         paginaRestrita: "nenhum",
         obterAnexo: "nenhum",
         listarAnexosDoChamado: "nenhum",
@@ -1341,6 +1342,7 @@ var ClienteAtlassianFake = class {
   }
   async listarTiposChamado() {
     this.chamadas.push({ operacao: "listarTiposChamado", params: null });
+    this.checar(this.estado.falhas.listarTiposChamado, "listarTiposChamado");
     return this.estado.tiposChamado;
   }
   async obterCamposDoTipo(serviceDeskId, requestTypeId) {
@@ -2601,6 +2603,9 @@ Regras:
   - \`alta\`: funcionalidade comprometida, existe contorno tempor\xE1rio.
   - \`normal\`: melhoria, ajuste pontual, d\xFAvida, sugest\xE3o.
 - **tipoChamadoId**: escolha um id EXATAMENTE da lista fornecida. Nunca invente id.
+  - Leia o **nome** de cada tipo e escolha pelo assunto que ele descreve. Uma palavra em comum n\xE3o \xE9 correspond\xEAncia: um problema de hardware n\xE3o \xE9 um problema de nota fiscal s\xF3 porque os dois s\xE3o "problema".
+  - Se nenhum tipo descrever o caso, escolha o mais **gen\xE9rico** da lista \u2014 o de d\xFAvidas ou outras quest\xF5es. \xC9 melhor o chamado chegar na entrada geral do time do que numa fila especializada que n\xE3o \xE9 dele: quem recebe encaminha, e a pessoa n\xE3o fica esperando na fila errada.
+  - Se nem um gen\xE9rico existir na lista, devolva \`pronto: false\`. Nunca escolha um tipo por elimina\xE7\xE3o.
 - **area**: a \xE1rea do solicitante, se ela apareceu na conversa. Sen\xE3o, null.`;
 function montarPromptExtracao(params) {
   const tipos = params.tiposPermitidos.map((t) => `- ${t.id}: ${t.nome}`).join("\n");
@@ -4667,15 +4672,26 @@ var MENSAGEM_RECUSA = Object.freeze({
   sem_proposta: "Ainda n\xE3o tenho o conte\xFAdo do chamado montado."
 });
 
+// src/lib/tickets/tipos-oferecidos.ts
+async function tiposOferecidos(atlassian, valores) {
+  const desk = valores.service_desk_id;
+  if (desk === null) return [];
+  const permitidos = new Set(valores.tipos_chamado_permitidos);
+  if (permitidos.size === 0) return [];
+  const todos = await atlassian.listarTiposChamado();
+  return todos.filter((t) => t.serviceDeskId === desk && permitidos.has(t.id));
+}
+
 // src/lib/agent/orquestrador.ts
 var MAX_CICLOS_TOOL = 3;
 var Orquestrador = class {
-  constructor(ia, executor, conversas, auditoria, novoId) {
+  constructor(ia, executor, conversas, auditoria, novoId, fonteDeTipos) {
     this.ia = ia;
     this.executor = executor;
     this.conversas = conversas;
     this.auditoria = auditoria;
     this.novoId = novoId;
+    this.fonteDeTipos = fonteDeTipos;
   }
   async processarMensagem(conversa, textoUsuario, config) {
     await this.conversas.adicionarMensagem(
@@ -4864,9 +4880,11 @@ var Orquestrador = class {
   async tentarMontarProposta(conversa, config) {
     if (config.tipos_chamado_permitidos.length === 0) return 0;
     try {
+      const tiposPermitidos = await tiposOferecidos(this.fonteDeTipos, config);
+      if (tiposPermitidos.length === 0) return 0;
       const r = await this.ia.extrairProposta({
         mensagens: await this.conversas.listarMensagens(conversa.id),
-        tiposPermitidos: config.tipos_chamado_permitidos.map((id) => ({ id, nome: id }))
+        tiposPermitidos
       });
       if (r.proposta && await this.conversas.temBloqueioPendente(conversa.id)) {
         return r.custoEstimadoUsd;
@@ -7024,7 +7042,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     anexosEnviados
   );
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora);
-  const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId);
+  const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId, atlassian);
   const inventarioAssentos = new RepositorioInventario(env.DB, novoId);
   const repoNotificacoes = new RepositorioNotificacoes(env.DB, agora);
   const alertasSla = new RepositorioAlertasSla(env.DB, agora);
@@ -9849,6 +9867,19 @@ async function rotear(req, ctx, eu, caminho, url) {
       slaPrimeiraRespostaHoras: SLA_PRIMEIRA_RESPOSTA_HORAS[validada.proposta.prioridade]
     });
   }
+  const anexosDaConversa = caminho.match(/^\/api\/conversas\/([^/]+)\/anexos$/);
+  if (anexosDaConversa && req.method === "GET") {
+    const conversa = await ctx.conversas.obterDoSolicitante(anexosDaConversa[1], eu.email);
+    if (!conversa) return ERROS.naoEncontrado();
+    const pendentes = await ctx.anexosPendentes.listarNaoMaterializados(
+      normalizarChaveIdempotencia({ via: "conversa", conversaId: conversa.id }),
+      eu.email
+    );
+    return json({
+      itens: pendentes.map((a) => ({ nome: a.nomeArquivo })),
+      teto: MAX_ANEXOS_POR_CHAMADO
+    });
+  }
   const confirmar = caminho.match(/^\/api\/conversas\/([^/]+)\/confirmar$/);
   if (confirmar && req.method === "POST") {
     const conversa = await ctx.conversas.obterDoSolicitante(confirmar[1], eu.email);
@@ -9871,12 +9902,17 @@ async function rotear(req, ctx, eu, caminho, url) {
       serviceDeskId,
       conversa.proposta.tipoChamadoId
     );
+    const chaveDaConversa = normalizarChaveIdempotencia({
+      via: "conversa",
+      conversaId: conversa.id
+    });
     const declaracao = await autorizarDeclaracaoDeAnexo(
       ctx,
       eu.email,
       conversa.proposta.tipoChamadoId,
       schema,
-      corpoConfirmacao?.declarouAnexo
+      corpoConfirmacao?.declarouAnexo,
+      chaveDaConversa
     );
     if ("recusa" in declaracao) return declaracao.recusa;
     const camposDaConversa = {
@@ -9910,10 +9946,6 @@ async function rotear(req, ctx, eu, caminho, url) {
       resultado: "sucesso"
     });
     const atual = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email);
-    const chaveDaConversa = normalizarChaveIdempotencia({
-      via: "conversa",
-      conversaId: conversa.id
-    });
     const areaDoSolicitante = atual?.proposta?.area ?? await resolverArea({
       email: eu.email,
       teamguide: ctx.teamguide,
@@ -9996,7 +10028,10 @@ async function rotear(req, ctx, eu, caminho, url) {
       eu.email,
       validada.proposta.tipoChamadoId,
       schema,
-      corpo?.declarouAnexo
+      corpo?.declarouAnexo,
+      // `D-70` — mesma regra no formulário: quem já subiu arquivo por esta chave não é
+      // perguntado de novo. Chave ausente gerou um id novo acima, e aí não há anexo a casar.
+      chave
     );
     if ("recusa" in declaracao) return declaracao.recusa;
     const camposDinamicos = await filtrarCamposComSchema(
@@ -10783,11 +10818,7 @@ async function rotear(req, ctx, eu, caminho, url) {
     });
   }
   if (caminho === "/api/tipos-chamado" && req.method === "GET") {
-    const permitidos = new Set(ctx.valores.tipos_chamado_permitidos);
-    const todos = await ctx.atlassian.listarTiposChamado();
-    const desk = ctx.valores.service_desk_id;
-    const doDesk = desk === null ? [] : todos.filter((t) => t.serviceDeskId === desk);
-    return json({ itens: doDesk.filter((t) => permitidos.has(t.id)) });
+    return json({ itens: await tiposOferecidos(ctx.atlassian, ctx.valores) });
   }
   if (caminho === "/api/admin/config") {
     if (!eu.isAdmin) return ERROS.semPermissao();
@@ -11055,11 +11086,7 @@ function decodificar(bruto) {
 }
 async function nomeDoTipoDaProposta(ctx, tipoChamadoId) {
   try {
-    const permitidos = new Set(ctx.valores.tipos_chamado_permitidos);
-    const desk = ctx.valores.service_desk_id;
-    const todos = await ctx.atlassian.listarTiposChamado();
-    const oferecidos = todos.filter((t) => t.serviceDeskId === desk && permitidos.has(t.id));
-    return nomeDoTipo(tipoChamadoId, oferecidos);
+    return nomeDoTipo(tipoChamadoId, await tiposOferecidos(ctx.atlassian, ctx.valores));
   } catch {
     return null;
   }
@@ -11144,7 +11171,10 @@ async function filtrarCamposComSchema(ctx, atorEmail, tipoChamadoId, campos, sch
   }
   return filtrados;
 }
-async function autorizarDeclaracaoDeAnexo(ctx, atorEmail, tipoChamadoId, schema, bruto) {
+async function autorizarDeclaracaoDeAnexo(ctx, atorEmail, tipoChamadoId, schema, bruto, chaveIdempotencia) {
+  if (await ctx.anexosPendentes.contarDaChave(chaveIdempotencia, atorEmail) > 0) {
+    return { declarouAnexo: true };
+  }
   const r = validarDeclaracao(bruto, exigeDeclaracaoDeAnexo(schema));
   if (r.ok) return { declarouAnexo: r.declarouAnexo };
   await ctx.auditoria.registrar({

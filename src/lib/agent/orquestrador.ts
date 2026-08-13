@@ -22,6 +22,7 @@ import type { ConfigValores } from '../config'
 import { toolAutorizada, toolsPermitidas, TOOLS } from './gate'
 import { RepositorioConversas, type Conversa } from './estado'
 import { ExecutorTools } from './tools'
+import { tiposOferecidos, type FonteDeTipos } from '../tickets/tipos-oferecidos'
 
 export interface TurnoResultado {
   readonly texto: string
@@ -51,6 +52,14 @@ export class Orquestrador {
     private readonly conversas: RepositorioConversas,
     private readonly auditoria: Auditoria,
     private readonly novoId: () => string,
+    /**
+     * 🚨 Está aqui **só** para nomear os assuntos na extração da proposta (`D-70`).
+     *
+     * Nada nesta classe chama a Atlassian de outra forma — quem executa tool é o
+     * `ExecutorTools`, e é assim que se mantém. Sem esta fonte o prompt de extração
+     * listava `- 92: 92` e o modelo escolhia a fila do chamado entre números.
+     */
+    private readonly fonteDeTipos: FonteDeTipos,
   ) {}
 
   async processarMensagem(
@@ -330,9 +339,30 @@ export class Orquestrador {
   ): Promise<number> {
     if (config.tipos_chamado_permitidos.length === 0) return 0
     try {
+      /**
+       * 🚨 **Os tipos vão COM NOME, e sem nome não se propõe** (`D-70`).
+       *
+       * Antes daqui saía `config.tipos_chamado_permitidos.map((id) => ({ id, nome: id }))`,
+       * e o prompt de extração listava `- 92: 92`: o modelo escolhia a fila do chamado
+       * entre números, sem um único dado que distinguisse um assunto do outro. Medido em
+       * 13/08/2026 — "notebook desligando sozinho" saiu como *"Problema com Nota Fiscal
+       * específica ou grupo de Notas"*.
+       *
+       * ⚠️ **Falha de leitura NÃO cai para os ids.** Cair seria reproduzir o bug em
+       * silêncio justamente quando ninguém está olhando; e a escolha certa já está
+       * escrita em `RF-28` — *sem proposta o agente continua perguntando, o que é o pior
+       * caso aceitável; criar na fila errada não é*. O `catch` abaixo é esse caminho, e
+       * ele não custa nada à pessoa: o formulário sem IA (`D-04`) continua de pé.
+       *
+       * ⚠️ E a lista vazia **encerra antes da ida ao provedor**: pagar uma chamada de IA
+       * para oferecer `(nenhum)` é gasto sem resultado possível (`RNF-16`).
+       */
+      const tiposPermitidos = await tiposOferecidos(this.fonteDeTipos, config)
+      if (tiposPermitidos.length === 0) return 0
+
       const r = await this.ia.extrairProposta({
         mensagens: await this.conversas.listarMensagens(conversa.id),
-        tiposPermitidos: config.tipos_chamado_permitidos.map((id) => ({ id, nome: id })),
+        tiposPermitidos,
       })
       /**
        * ⚠️ Segunda camada de `RN-07`, e ela passou a valer de verdade quando a extração

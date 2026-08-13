@@ -205,6 +205,12 @@ export interface EstadoFake {
     /** Falha própria: o diagnóstico cai sem derrubar o formulário, e vice-versa. */
     obterSchemaDoTipo: ModoFalha
     /**
+     * `D-70` — sem esta lista não há **nome** de assunto, e a extração da proposta não
+     * roda. O caminho de degradação (não propor, jamais cair para os ids) não tinha como
+     * ser encenado enquanto esta operação era a única do fake sem falha injetável.
+     */
+    listarTiposChamado: ModoFalha
+    /**
      * Falha ao consultar restrição. No cliente real ela é engolida e vira
      * "restrita"; aqui ela **lança**, para provar que o gate de exposição também
      * fail-closed por conta própria — duas camadas, não uma.
@@ -328,6 +334,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
         obterPagina: 'nenhum',
         obterCamposDoTipo: 'nenhum',
         obterSchemaDoTipo: 'nenhum',
+        listarTiposChamado: 'nenhum',
         paginaRestrita: 'nenhum',
         obterAnexo: 'nenhum',
         listarAnexosDoChamado: 'nenhum',
@@ -406,6 +413,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
 
   async listarTiposChamado(): Promise<readonly TipoChamado[]> {
     this.chamadas.push({ operacao: 'listarTiposChamado', params: null })
+    this.checar(this.estado.falhas.listarTiposChamado, 'listarTiposChamado')
     return this.estado.tiposChamado
   }
 

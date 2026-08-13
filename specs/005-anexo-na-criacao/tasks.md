@@ -160,3 +160,25 @@ reprocessada. A v2 separa os dois passos. Registrado em `plan.md` §0 porque é
 exatamente o tipo de "simplificação" que alguém tentaria de novo.
 
 **Uma tarefa bloqueada (T-425), e é de verificação.** O resto não depende de `Q1`.
+
+### Emenda de 13/08/2026 — `D-70`, a pergunta que o servidor já sabia responder
+
+- [x] **T-426** — `GET /api/conversas/:id/anexos` (nome e teto; nunca o `temporaryAttachmentId`,
+      isolado por e-mail) e o cartão deixando de perguntar quando a conversa já tem anexo.
+      _Requirements: RF-61, RF-62, RF-63, RF-30, RN-11_
+- [x] **T-427** — `autorizarDeclaracaoDeAnexo` não exige declaração quando existe anexo pendente
+      para a chave, e **`false` explícito é gravado como `true`**: o fato vence a intenção, porque
+      a materialização nunca consultou a declaração e `declarouNaoTer` sujava `T-422`.
+      _Requirements: RN-11, RF-62_
+
+⚠️ **A pergunta nasceu certa e envelheceu.** Quando esta spec foi escrita, o cartão era o **único**
+lugar onde se anexava; `D-59` abriu o clipe/colar na conversa e transformou a pergunta em pedido
+para declarar o que a pessoa já tinha feito. O texto de `RN-11` foi emendado, não reescrito: a
+trava continua sendo **responder**, e continua valendo para quem não anexou nada.
+
+⚠️ **O terceiro defeito de `D-70` é desta spec, e só o navegador o pegou:** a lista de envios da
+tela vivia dentro de `{cabem > 0 && …}`, então o terceiro arquivo zerava `cabem` e apagava a
+própria linha que acabara de aparecer — arquivo no chamado, nada na tela, que é o `D-62` de novo.
+
+**1453 testes** com os 28 casos novos (`tests/d70-anexo-ja-enviado.test.ts`,
+`tests/d70-assunto-com-nome.test.ts`).

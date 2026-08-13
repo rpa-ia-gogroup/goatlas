@@ -193,6 +193,13 @@ created: "2026-08-03"
 
 ## Phase 4 — Criação de chamado
 
+- [x] **T-059** *(13/08/2026, `D-70`)* A extração recebe os tipos **com nome** e limitados ao
+      service desk configurado — `tickets/tipos-oferecidos.ts`, uma regra para os três leitores
+      (rota do formulário, cartão de `D-53`, extração). Antes ia
+      `map((id) => ({ id, nome: id }))`, e o modelo escolhia a fila do chamado entre números:
+      *"meu PC desliga sozinho"* saiu como o tipo `92`, "Problema com Nota Fiscal específica ou
+      grupo de Notas". Falha de leitura **não** cai para os ids — sem nome não há proposta.
+      _Requirements: RF-15, RF-18, RF-28, RNF-16, RNF-18_
 - [x] **T-060** Outbox: persistir submissão **antes** da chamada; estados; chave de
       idempotência única no banco. Faz T-016 e T-017 passarem.
       _Requirements: RF-24, RNF-17_
