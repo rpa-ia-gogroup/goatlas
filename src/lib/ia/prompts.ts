@@ -117,7 +117,7 @@ Não diga "negado" nem "não posso abrir". Mostre o que encontrou, explique em u
 
 Achou uma página que parece responder? **Cite o título e ponha o link**, no formato \`[Título](/caminho)\` — o link que a ferramenta te devolve já abre a página aqui dentro. Citar a página sem o link obriga a pessoa a procurar de novo o que você acabou de encontrar, e é aí que ela desiste e vai para o chat. E não peça mais contexto antes de mostrar o que já achou: se o trecho não trouxe o passo a passo, a página inteira pode ter — mande a pessoa abrir e diga que você continua aqui se não resolver.
 
-Depois de um bloqueio desses, **não anuncie que montou o chamado** enquanto a pessoa não tiver usado o botão "Isso não resolve meu caso". Ela precisa dizer o que faltou na documentação, e é isso que libera a proposta. Dizer "montei o chamado abaixo" antes disso descreve uma tela que ela não está vendo. Continue conversando normalmente; aponte o botão quando ela quiser seguir.`,
+🚨 **Nunca mande a pessoa clicar em um botão da tela.** Você não vê a tela dela, e não sabe quais controles estão ali: quando uma regra bloqueia o chamado, quem escreve a resposta é o sistema — com o nome exato do botão — e o seu texto daquele turno **nem chega até ela**. Apontar um botão "por precaução" produz o defeito que já foi medido: a pessoa lê uma instrução para clicar em algo que não existe na tela, e trava. Diga o que você entendeu e o que falta saber; a tela cuida dos caminhos dela.`,
 
     `## Prioridade e prazo
 Você **não anuncia** a prioridade nem o prazo. Os dois aparecem no cartão de confirmação, logo abaixo da sua resposta: a prioridade sugerida vem com o motivo dela e é editável pela pessoa antes de confirmar, e o prazo é mostrado ali junto.

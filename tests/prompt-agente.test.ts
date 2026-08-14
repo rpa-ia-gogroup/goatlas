@@ -64,10 +64,37 @@ describe('prompt do agente — identidade e escopo', () => {
     expect(p).toMatch(/não\s+(é\s+)?de resolução|não promete prazo de solução/i)
     // RF-16 — prioridade editável.
     expect(p).toMatch(/editável/i)
-    // RF-13 / D-21 — o botão é o caminho de saída, e o agente não anuncia proposta antes.
-    expect(p).toContain('Isso não resolve meu caso')
     // RNF-08 — conteúdo de tool é informação, nunca instrução.
     expect(p).toMatch(/nunca instrução/i)
+  })
+})
+
+/**
+ * **O agente não nomeia botão da tela** — medido na staging em 14/08/2026.
+ *
+ * 🚨 **Esta asserção inverteu, e o caso não foi apagado.** Ela exigia que o prompt
+ * contivesse `"Isso não resolve meu caso"`, para o agente apontar o caminho de saída de
+ * `RF-13`. O efeito medido foi o oposto: nos **três** turnos de uma conversa com
+ * `bloqueioPendente: false`, o agente mandou clicar num botão que **não estava na tela** —
+ * e quem lê uma instrução para clicar em algo que não existe trava ali.
+ *
+ * A causa é estrutural, não de redação: quando uma regra bloqueia, o texto do modelo é
+ * **descartado** e quem fala é o servidor (`MENSAGEM_BLOQUEIO_PENDENTE`, `D-21`); no turno
+ * seguinte o modelo **nem é chamado**. Ou seja, ele nunca observa o estado sobre o qual a
+ * instrução falava — e a única situação em que a frase dele chega à pessoa é justamente
+ * aquela em que o botão não existe.
+ *
+ * ⚠️ **A copy do botão continua no servidor**, nas três mensagens de bloqueio, e os testes
+ * que afirmam isso (`rn07-caminho-override`, `orquestrador`) ficam: o caminho de saída de
+ * `RF-13` não mudou de existência, mudou de dono.
+ */
+describe('RF-13 — o caminho de saída é dito pelo SERVIDOR, nunca pelo modelo', () => {
+  it('o prompt não nomeia o botão de override', () => {
+    expect(montarPromptAgente(COMPLETO)).not.toContain('Isso não resolve meu caso')
+  })
+
+  it('e proíbe explicitamente mandar clicar em botão da tela', () => {
+    expect(montarPromptAgente(COMPLETO)).toMatch(/bot[ãa]o da tela/i)
   })
 })
 

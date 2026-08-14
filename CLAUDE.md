@@ -604,6 +604,21 @@ destes reabre um vazamento que já foi fechado.
   que pode estar escrito. Os dois predicados são **reaproveitados** (`buscaConfigurada`,
   `regra2Disponivel`), nunca reescritos ali. ⚠️ Continua sendo **instrução, não trava** —
   `RF-08`/`RF-17` seguem em `agent/gate.ts`, e nenhum valor de config entra no texto (`RNF-30`).
+- 🚨 **O agente NUNCA nomeia botão da tela** (medido na staging em 14/08/2026). O prompt mandava
+  apontar *"Isso não resolve meu caso"* depois de um bloqueio, e o efeito foi o oposto: em três
+  turnos com `bloqueioPendente: false` ele mandou clicar num botão que **não estava lá**, e quem
+  lê isso trava. A causa é **estrutural**: com bloqueio, o texto do modelo é **descartado** e quem
+  fala é o servidor (`D-21`); no turno seguinte ele nem é chamado. Ou seja, o modelo **nunca
+  observa** o estado sobre o qual a instrução falava — e a única vez em que a frase dele chega à
+  pessoa é justamente quando o botão não existe. ⚠️ A copy do botão continua no **servidor**, nas
+  três mensagens de bloqueio: o caminho de saída de `RF-13` não mudou de existência, mudou de dono.
+- 🚨 **Token de CSS inventado não falha em NADA, e agora há varredura** (`tests/tokens-de-css-existem.test.ts`).
+  Depois de `--go-surface` (`D-64`) apareceram mais dois usos de **`--go-text-body`**, que também
+  não existe em `tokens.css` — e esses funcionavam **por acaso**: `var()` sem valor não pinta, a
+  cor caía no `inherit` da raiz, que já era a certa. Continuariam funcionando até alguém mudar a
+  raiz, e aí o texto de um `<dialog>` mudaria de cor sozinho. A varredura afirma que todo
+  `var(--x)` **sem fallback** aponta para token declarado; `var(--x, algo)` fica de fora, porque
+  ali a ausência foi prevista.
 - 🚨 **As horas do SLA SAÍRAM do prompt do agente, e a razão mudou de lugar — não sumiu**
   (`D-71`, `FR-6`). A regra antiga era derivá-las de `SLA_PRIMEIRA_RESPOSTA_HORAS` para o
   agente não prometer um prazo enquanto o cron cobrava outro; hoje o agente **não promete
@@ -1533,10 +1548,9 @@ duas frases; a correção *"existe um contorno pelo portal da prefeitura, e o co
 Invoices"* devolveu `alterados: [titulo, descricao, prioridade, motivoPrioridade,
 campo:components]`, com a prioridade caindo de **crítica** para **alta** e
 `camposSugeridos: {components: "10074"}` — rótulo casado contra o schema. Nenhuma linha
-`prosa_afirmou_prazo` nos três turnos. ⚠️ **Um defeito alheio apareceu junto e NÃO foi tocado:**
-o agente aponta *"Isso não resolve meu caso"* com `bloqueioPendente: false`, ou seja um botão
-que não está na tela — é o prompt de `RF-13` fora do bloqueio, e consertá-lo sem spec seria
-mudar comportamento por conta própria (`D-71`).
+`prosa_afirmou_prazo` nos três turnos. ⚠️ **Um defeito alheio apareceu junto** — o agente
+apontando *"Isso não resolve meu caso"* com `bloqueioPendente: false` — e foi ✅ **corrigido em
+seguida**, junto com o token de CSS inexistente (ver as duas linhas em "Padrões de código").
 
 **A spec 005 (anexo na criação) está completa em código.** `RF-61`/`RF-62`/`RF-63`/`RN-11`:
 a declaração obrigatória travada no servidor nas duas rotas de criação, o upload em dois
@@ -1671,7 +1685,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1588 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1591 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

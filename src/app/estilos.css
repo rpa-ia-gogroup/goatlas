@@ -2224,7 +2224,8 @@
   color: var(--go-text-heading);
 }
 .leitura-frase {
-  color: var(--go-text-body);
+  /* `--go-text-body` NÃO existe (`tokens.css`): resolvia em `inherit` e acertava por acaso. */
+  color: var(--go-text-primary);
 }
 /* Estado nunca só por cor (regra 9): a borda muda, e a FRASE já diz o que aconteceu. */
 .leitura-analisando,
@@ -2271,7 +2272,15 @@
    * ⚠️ Token inventado não quebra build nem teste: `var()` sem valor simplesmente não pinta.
    */
   background: var(--go-white);
-  color: var(--go-text-body);
+  /*
+   * 🚨 Aqui morava `--go-text-body`, que **não existe em `tokens.css`** — a mesma família
+   * de `--go-surface` logo acima, e o motivo de o comentário anterior ter passado batido:
+   * ele avisava sobre o token do FUNDO e repetia a armadilha na linha seguinte. Ele
+   * funcionava por acaso (`var()` sem valor não pinta, e a cor caía no `inherit` da raiz,
+   * que já é esta), e mudaria de cor sozinho no dia em que alguém mexesse na raiz.
+   * Quem impede a volta é `tests/tokens-de-css-existem.test.ts`.
+   */
+  color: var(--go-text-primary);
   box-shadow: 0 24px 64px rgb(0 0 0 / 28%);
 }
 .visualizador::backdrop {
@@ -2437,13 +2446,6 @@
   border-radius: var(--radius-lg);
   padding: 0;
   background: var(--go-white);
-  /*
-   * ⚠️ `--go-text-primary`, e NÃO `--go-text-body` — que é o que `.visualizador` usa e
-   * **não existe em `tokens.css`**. Ali ele funciona por acidente (`var()` sem valor não
-   * pinta, e a cor cai no `inherit` da raiz, que já é `--go-text-primary`), e é a mesma
-   * família de `--go-surface` em `D-64`: token inventado não quebra build, teste nem
-   * typecheck. Repeti-lo aqui seria copiar a armadilha para um lugar novo.
-   */
   color: var(--go-text-primary);
   box-shadow: 0 24px 64px rgb(0 0 0 / 28%);
 }
