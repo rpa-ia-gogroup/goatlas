@@ -11,6 +11,20 @@
 
 @import 'tailwindcss';
 
+/**
+ * 🚨 `public/` fica FORA da varredura do Tailwind.
+ *
+ * Medido em 14/08/2026: acrescentar `public/favicon.svg` — um arquivo que não tem uma
+ * única classe — fez a folha crescer **1,2 kB**. O Tailwind varre todo arquivo do
+ * projeto procurando o que pareça nome de classe, e o **comentário em português** dentro
+ * do SVG vira dezenas de candidatas. O CSS continuava funcionando, então nada quebrava:
+ * só a folha engordando por causa de um asset estático.
+ *
+ * ⚠️ `public/` é asset servido cru, nunca fonte de classe. Se um dia entrar HTML de
+ * verdade ali, é ele que precisa mudar de lugar — não esta linha.
+ */
+@source not "../../public";
+
 :root {
   /* Primárias */
   --go-blue: #0059a9;
