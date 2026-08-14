@@ -4521,6 +4521,10 @@ reconhecer o que a pessoa contou *com as palavras dela*, deixando o cartão dize
 ⚠️ **Não virou detector**, ao contrário de `FR-6`: daria para medir (o servidor conhece os
 rótulos do assunto vigente e o que casou), e o custo do defeito é uma frase confusa, não um
 chamado perdido. Se a medição mostrar reincidência, o detector é o passo seguinte — com dado.
+✅ **Medido na staging com o MESMO pedido, em 14/08:** antes, *"Perfeito. Vou considerar:
+Recorrência: 'De vez em quando' · Número do chamado antigo: 4471"*; depois, *"Entendi, acontece
+de vez em quando. E anotei o número que você informou como referência do caso anterior."* — o
+reconhecimento fica, a afirmação sobre o formulário sai.
 
 🚨 **`FR-17` foi medido de graça, e passou:** a prioridade não caiu por pedido, caiu porque o
 **impacto descrito** mudou (surgiu contorno). É a direção difícil da regra — a fácil (recusar
