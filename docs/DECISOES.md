@@ -4543,6 +4543,48 @@ dois turnos, `bloqueioPendente: false`): nenhuma menção a botão em nenhuma da
 
 ---
 
+### D-72 · `RNF-12` cortado: a latência do turno não é problema a perseguir
+
+**Data:** 14/08/2026 · **Origem:** decisão do dono do produto · **Contexto:** `D-32`, `D-68`,
+`D-71`, `RNF-12`
+
+O requisito pedia **primeira resposta do agente < 5 s no p95**. O turno medido em produção leva
+**25–40 s**, e o `D-32` já tinha extraído o que havia de folga estrutural (migração por
+requisição, cache que nunca acertava, cinco laços de rede em série, três idas ao provedor onde
+duas bastavam). O que sobrou é o tempo do **provedor de IA**.
+
+Apresentadas as alavancas — streaming da última resposta · um ciclo em vez de dois · modelo mais
+rápido só no `chat` — e a hipótese de o **alvo** estar errado, a decisão foi: **não perseguir**.
+O número de 5 s foi escrito antes de existir agente com modelo de raciocínio e duas idas ao
+provedor por turno; mantê-lo como meta é medir o produto contra algo que ele não se propôs a ser.
+
+#### O que NÃO foi cortado junto
+
+⚠️ **A transparência continua exigida**, e ela nunca esteve em disputa: a trilha das
+verificações, a espera que **fala** do que está rodando (`D-68`) e o cartão que sai da tela
+enquanto o turno corre (`D-71`, `FR-7`). O texto original do `RNF-12` já dizia *"isso precisa ser
+transparente na UI, com indicação de progresso"* — essa metade sobrevive ao corte.
+
+⚠️ **`tests/latencia.test.ts` FICA.** Ele não afirma sobre relógio: afirma **contagem de
+chamadas** e **simultaneidade** (a extração se sobrepõe ao `chat`, e serializar de novo trava o
+teste por deadlock). Isso protege o desenho de `D-32`/`D-71` contra regressão, e continua valendo
+com ou sem meta de p95.
+
+#### Por que a linha ficou riscada em vez de apagada
+
+🚨 **34 referências** em código, testes e specs apontam para `RNF-12`
+(`espera-de-analises.ts`, `rolagem.ts`, `frases-de-espera.ts`, `prosa-sem-prazo.ts`, quatro
+arquivos de teste, sete specs). Apagar a linha transformaria cada uma num **ponteiro para o
+nada**, contra o Princípio VII (rastreabilidade) — e é o mesmo tratamento que a `Q3` recebeu em
+`D-60` e o baseline de assentos em `D-57`: fica escrito, marcado como cortado, com a decisão
+ao lado. Requisito revogado em silêncio reaparece como meta na primeira leitura distraída.
+
+⚠️ **E a instrumentação que eu ia propor não foi feita**: medir a duração de cada ida ao
+provedor (`ia/cliente.ts` não tem uma única medição hoje) só faria sentido para perseguir a
+meta que acabou de ser cortada.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

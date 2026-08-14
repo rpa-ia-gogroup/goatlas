@@ -1706,6 +1706,11 @@ não falha. O formato dominante é *servidor pronto, tela ausente* e *metade de 
 o SLA que nunca é lido (`T-100`) e a faixa de calibragem que o rewrite do console descartou
 (`T-233`/`T-310`) — ✅ **esta última corrigida em `D-49`**, com os dez números do painel de
 volta à tela e um teste que reprova se um deles sumir. A lista por tarefa está nos `tasks.md`.
+✂️ **`RNF-12` foi CORTADO em 14/08/2026 (`D-72`)** — o alvo de 5 s foi escrito antes de existir
+agente com modelo de raciocínio, o turno medido leva **25–40 s**, e o dono do produto decidiu que
+isso não é problema a perseguir. ⚠️ **Não sugerir streaming, corte de ciclo nem troca de modelo
+para "consertar a latência"** sem sinal novo vindo dele. O parágrafo abaixo fica como **história
+do `D-32`**, não como pendência.
 ⚠️ **A latência de `RNF-12` foi corrigida em código e NÃO foi medida em produção** (`D-32`,
 10/08/2026). Eram quatro defeitos somados, todos invisíveis para teste de comportamento
 porque o app respondia certo: migração por requisição (~400 ms de piso), cache de `RNF-13`
