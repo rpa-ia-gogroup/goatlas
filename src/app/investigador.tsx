@@ -179,7 +179,8 @@ function FaixaDeResumo({ resumo }: { resumo: ResumoInvestigador }) {
         valor={resumo.duracaoMediaMs === null ? 'sem dados' : formatarMs(resumo.duracaoMediaMs)}
       />
       <Numero rotulo="Acima de 5 s" valor={resumo.lentas.toLocaleString('pt-BR')} />
-      <Numero rotulo="Custo de IA" valor={`US$ ${resumo.custoIaUsd.toFixed(4)}`} />
+      {/* Vírgula decimal, como todo número desta tela (regra 4). */}
+      <Numero rotulo="Custo de IA" valor={`US$ ${resumo.custoIaUsd.toFixed(4).replace('.', ',')}`} />
     </dl>
   )
 }
@@ -296,7 +297,11 @@ export function LinhaDeSessao({
           <time dateTime={s.criadoEm}>{formatarQuando(s.criadoEm)}</time>
         </span>
         <span className="inv-sessao-marcas">
-          <Marca>{s.mensagensDaPessoa} mensagens</Marca>
+          {/* ⚠️ Concordância, não capricho (regra 4): "1 mensagens" apareceu na staging em
+              14/08 e é o tipo de erro que a suíte não pega e que todo leitor vê. */}
+          <Marca>
+            {s.mensagensDaPessoa} {s.mensagensDaPessoa === 1 ? 'mensagem' : 'mensagens'}
+          </Marca>
           {s.issueKey ? (
             <Marca destaque>Chamado {s.issueKey}</Marca>
           ) : (
@@ -412,7 +417,7 @@ function ItemDoTempo({ evento }: { evento: EventoRegistrado }) {
         <span className="inv-tipo">{evento.tipo}</span>
         {evento.duracao_ms !== null && <span className="inv-medida">{formatarMs(evento.duracao_ms)}</span>}
         {evento.custo_usd !== null && evento.custo_usd > 0 && (
-          <span className="inv-medida">US$ {evento.custo_usd.toFixed(4)}</span>
+          <span className="inv-medida">US$ {evento.custo_usd.toFixed(4).replace('.', ',')}</span>
         )}
       </div>
       <p className="inv-resumo">{evento.resumo}</p>

@@ -148,16 +148,39 @@ describe('gravação em lote — SC-8b', () => {
     expect(db.execs[1]!.sql).toContain('investigador_eventos')
   })
 
-  it('a ordem dentro da requisição é gravada, porque o carimbo é o mesmo para todos', async () => {
+  it('cada evento carrega o instante em que ACONTECEU, e a ordem desempata', async () => {
+    // 🚨 Medido na staging em 14/08: carimbando tudo no `gravar`, um turno de 21 s mostrava
+    // catorze eventos no mesmo segundo — a informação principal da tela, apagada.
+    const instantes = ['2026-08-14T13:00:01.000Z', '2026-08-14T13:00:09.000Z']
+    let i = 0
+    let n = 0
+    const coleta = new ColetaDeRequisicao(
+      'req-1',
+      () => instantes[Math.min(i++, instantes.length - 1)]!,
+      () => `ev-${++n}`,
+    )
+    coleta.registrar({ tipo: 'mensagem_usuario', origem: 'usuario', resumo: 'primeiro' })
+    coleta.registrar({ tipo: 'ia_chat', origem: 'ia', resumo: 'segundo' })
+    const db = new BancoEspiao()
+    await coleta.gravar(db, desfecho)
+
+    const params = db.execs[1]!.params
+    // 12 colunas por evento; `ordem` é a 11ª e `criado_em` a 12ª.
+    expect(params[10]).toBe(0)
+    expect(params[11]).toBe(instantes[0])
+    expect(params[22]).toBe(1)
+    expect(params[23]).toBe(instantes[1])
+  })
+
+  it('a ordem continua existindo — dois eventos no mesmo milissegundo são o caso comum', async () => {
     const { coleta, db } = novaColeta()
     coleta.registrar({ tipo: 'mensagem_usuario', origem: 'usuario', resumo: 'primeiro' })
     coleta.registrar({ tipo: 'ia_chat', origem: 'ia', resumo: 'segundo' })
     await coleta.gravar(db, desfecho)
     const params = db.execs[1]!.params
-    // 12 colunas por evento; `ordem` é a 11ª e `criado_em` a 12ª.
+    expect(params[11]).toBe(params[23])
     expect(params[10]).toBe(0)
     expect(params[22]).toBe(1)
-    expect(params[11]).toBe(params[23])
   })
 
   it('acima do teto de eventos o registro DIZ quantos ficaram de fora', async () => {
@@ -168,6 +191,40 @@ describe('gravação em lote — SC-8b', () => {
     await coleta.gravar(db, desfecho)
     const todos = db.execs.flatMap((e) => e.params).map(String)
     expect(todos.some((p) => p.includes('Teto de eventos atingido'))).toBe(true)
+  })
+})
+
+describe('lote que a plataforma recusa cai para linha a linha', () => {
+  /**
+   * 🚨 **Medido na staging em 14/08/2026.** O `INSERT` de múltiplas tuplas grava no shim de
+   * teste (`node:sqlite`) e **falhou** contra o `env.DB` do GoDeploy: a linha da requisição
+   * entrava, o lote de eventos não, e a tabela ficava vazia com a lista de sessões
+   * funcionando. Família de `linhasComoObjetos` — o dublê implementa o documentado, a
+   * plataforma faz outra coisa, e o teste fica verde.
+   */
+  it('grava todos os eventos, um por vez, quando o lote é recusado', async () => {
+    class RecusaLote extends BancoEspiao {
+      override async exec(sql: string, params: readonly unknown[]): Promise<ResultadoExec> {
+        // Só o INSERT com mais de uma tupla é recusado — como a plataforma fez.
+        if (sql.includes('investigador_eventos') && sql.split('), (').length > 1) {
+          throw new Error('D1_ERROR: too many SQL variables')
+        }
+        return super.exec(sql, params)
+      }
+    }
+    const db = new RecusaLote()
+    let n = 0
+    const coleta = new ColetaDeRequisicao('req-1', () => AGORA, () => `ev-${++n}`)
+    coleta.registrar({ tipo: 'mensagem_usuario', origem: 'usuario', resumo: 'primeiro' })
+    coleta.registrar({ tipo: 'ia_chat', origem: 'ia', resumo: 'segundo' })
+    coleta.registrar({ tipo: 'resposta_agente', origem: 'servidor', resumo: 'terceiro' })
+
+    await coleta.gravar(db, desfecho)
+
+    const eventos = db.execs.filter((e) => e.sql.includes('investigador_eventos'))
+    // Nenhum evento se perde: três `INSERT` individuais depois do lote recusado.
+    expect(eventos).toHaveLength(3)
+    expect(db.execs.flatMap((e) => e.params)).toContain('terceiro')
   })
 })
 
