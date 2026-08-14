@@ -4520,7 +4520,8 @@ bloqueia, o texto do modelo é **descartado** e quem fala é o servidor (`D-21`)
 ele **nem é chamado**. Logo o modelo nunca observa o estado sobre o qual aquela instrução falava,
 e a única situação em que a frase dele chega à pessoa é justamente aquela em que o botão não
 existe. O prompt passou a **proibir** nomear botão da tela; a copy do botão continua no servidor,
-nas três mensagens de bloqueio.
+nas três mensagens de bloqueio. ✅ **Medido de novo na staging em 14/08/2026** (caso do Metabase,
+dois turnos, `bloqueioPendente: false`): nenhuma menção a botão em nenhuma das duas respostas.
 
 ---
 
