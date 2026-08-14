@@ -25,6 +25,11 @@ import { HEADER_EMAIL } from '@/lib/auth'
 import { ClienteAtlassianFake } from '@/lib/atlassian/fake'
 import { ClienteIAFake } from '@/lib/ia/fake'
 import { linhasComoObjetos } from '@/lib/db/tipos'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { createElement } from 'react'
+import { ReciboConfirmacao } from '@/app/telas'
+import { deveAvisarNegociacao, deveMostrarCartao } from '@/app/negociacao'
+import type { Proposta } from '@/app/api'
 import { SEM_MOTIVO_DE_PRIORIDADE } from '@/lib/tickets/motivo-da-prioridade'
 
 const ANA = 'ana@gocase.com'
@@ -321,5 +326,176 @@ describe('FR-23 — o desfecho do aviso é registrado, e só isso', () => {
 
     expect(depois?.proposta).toEqual(antes?.proposta)
     expect(depois?.estado).toBe(antes?.estado)
+  })
+})
+
+/**
+ * **T-751/T-757/T-762 — a tela do cartão negociável.**
+ *
+ * ⚠️ Afirma sobre **estado e conteúdo**, nunca sobre layout. Teste que copia marcação
+ * reprova em toda melhoria de tela, vira peso morto e acaba apagado — devolvendo o buraco
+ * que ele tapa (`D-47`/`D-49`). Por isso os dois estados derivados são **predicados
+ * exportados**, no estilo de `deveMostrarAtalhoDoFim` (`D-69`): a suíte roda em
+ * `environment: 'node'` e não clica em nada.
+ */
+describe('FR-7 — o cartão sai da tela enquanto o turno corre', () => {
+  it('com proposta e turno parado, ele aparece', () => {
+    expect(deveMostrarCartao({ temProposta: true, enviando: false, bloqueado: false })).toBe(true)
+  })
+
+  it('durante o turno, some — o que está ali é o chamado de antes', () => {
+    expect(deveMostrarCartao({ temProposta: true, enviando: true, bloqueado: false })).toBe(false)
+  })
+
+  it('com bloqueio pendente não existe — o caminho ali é o override (RN-07)', () => {
+    expect(deveMostrarCartao({ temProposta: true, enviando: false, bloqueado: true })).toBe(false)
+  })
+
+  it('sem proposta, nada a mostrar', () => {
+    expect(deveMostrarCartao({ temProposta: false, enviando: false, bloqueado: false })).toBe(false)
+  })
+})
+
+describe('FR-18/FR-19/FR-21 — o aviso, nas três condições', () => {
+  it('com proposta e nunca exibido, aparece uma vez', () => {
+    expect(
+      deveAvisarNegociacao({ temProposta: true, bloqueioPendente: false, jaExibido: false }),
+    ).toBe(true)
+  })
+
+  it('já exibido não volta — nem para quem fechou no Esc (SC-20)', () => {
+    expect(
+      deveAvisarNegociacao({ temProposta: true, bloqueioPendente: false, jaExibido: true }),
+    ).toBe(false)
+  })
+
+  it('sem proposta não existe: não há cartão para reescrever', () => {
+    expect(
+      deveAvisarNegociacao({ temProposta: false, bloqueioPendente: false, jaExibido: false }),
+    ).toBe(false)
+  })
+
+  it('SC-19 — com bloqueio pendente não existe: seria a parede que RF-13 proíbe', () => {
+    expect(
+      deveAvisarNegociacao({ temProposta: true, bloqueioPendente: true, jaExibido: false }),
+    ).toBe(false)
+  })
+})
+
+/**
+ * **T-753/T-755/T-760** — o conteúdo que o cartão passou a carregar.
+ */
+describe('o cartão: motivo, recusas e a linha fixa', () => {
+  const PROPOSTA: Proposta = {
+    titulo: 'Relatório de vendas não atualizou',
+    descricao: 'O relatório diário não trouxe os dados do dia anterior.',
+    tipoChamadoId: 'rt-1',
+    prioridade: 'alta',
+    area: 'Growth',
+    componente: null,
+  }
+
+  function render(negociacao?: Parameters<typeof ReciboConfirmacao>[0]['negociacao']): string {
+    return renderToStaticMarkup(
+      createElement(ReciboConfirmacao, {
+        ...(negociacao ? { negociacao } : {}),
+        eu: {
+          email: 'ana@gocase.com',
+          nome: 'Ana',
+          isAdmin: false,
+          modoDemo: false,
+          somenteLeitura: false,
+        },
+        conversaId: 'c1',
+        propostaInicial: PROPOSTA,
+        tipoNome: 'Relatar um problema (Sistema)',
+        aoCriar: () => {},
+        aoRecomecar: () => {},
+      }),
+    )
+  }
+
+  const BASE = {
+    motivoPrioridade: null,
+    motivoIndisponivel: null,
+    prioridadeSugerida: 'alta' as const,
+    recusasDeAjuste: [],
+    assuntoMudou: false,
+  }
+
+  it('FR-2b — com a pessoa em outro nível, o motivo é ATRIBUÍDO à sugestão', () => {
+    // 🚨 Mostrar o motivo cru ao lado de `normal` seria a tela justificando um nível que
+    // ninguém escolheu — e afirmando um porquê que a própria pessoa acabou de contrariar.
+    const saida = renderToStaticMarkup(
+      createElement(ReciboConfirmacao, {
+        negociacao: {
+          ...BASE,
+          motivoPrioridade: 'O relatório do dia não fecha e o comercial trabalha sem ele.',
+          prioridadeSugerida: 'alta',
+        },
+        estado: {
+          prioridade: 'normal',
+          aoMudarPrioridade: () => {},
+          valoresCampos: {},
+          aoMudarValoresCampos: () => {},
+          declarou: null,
+          aoDeclarar: () => {},
+        },
+        eu: {
+          email: 'ana@gocase.com',
+          nome: 'Ana',
+          isAdmin: false,
+          modoDemo: false,
+          somenteLeitura: false,
+        },
+        conversaId: 'c1',
+        propostaInicial: PROPOSTA,
+        tipoNome: 'Relatar um problema (Sistema)',
+        aoCriar: () => {},
+        aoRecomecar: () => {},
+      }),
+    )
+    expect(saida).toContain('A sugestão era alta')
+    expect(saida).toContain('O relatório do dia não fecha')
+  })
+
+  it('FR-13 — a recusa de opção lista os RÓTULOS válidos, nunca os ids', () => {
+    const saida = render({
+      ...BASE,
+      recusasDeAjuste: [
+        { rotulo: 'Recorrência', motivo: 'opcao_inexistente', opcoes: ['Sempre', 'Às vezes'] },
+      ],
+    })
+    expect(saida).toContain('Recorrência')
+    expect(saida).toContain('Sempre')
+    expect(saida).toContain('Às vezes')
+    expect(saida).not.toContain('10127')
+  })
+
+  it('FR-14 — campo inexistente diz o que fazer, sem culpar quem pediu', () => {
+    const saida = render({
+      ...BASE,
+      recusasDeAjuste: [{ rotulo: 'Número da nota fiscal', motivo: 'campo_inexistente' }],
+    })
+    expect(saida).toContain('Número da nota fiscal')
+    expect(saida).toContain('Este assunto não tem o campo')
+  })
+
+  it('FR-10 — assunto mudou: a tela DIZ, campo não some em silêncio', () => {
+    const saida = render({ ...BASE, assuntoMudou: true })
+    expect(saida).toContain('O assunto do chamado mudou')
+  })
+
+  it('FR-22 — a linha fixa não depende de a pessoa ter visto o aviso', () => {
+    const saida = render(BASE)
+    expect(saida).toContain('pode ser reescrito')
+  })
+
+  it('sem negociação (formulário e override), o cartão continua inteiro', () => {
+    const saida = render()
+    // Nem linha fixa, nem recusa, nem declaração de motivo — e o botão de abrir de pé.
+    expect(saida).toContain('Abrir chamado')
+    expect(saida).not.toContain('pode ser reescrito')
+    expect(saida).not.toContain('Não deu para ajustar')
   })
 })

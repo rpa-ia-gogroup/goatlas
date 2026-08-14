@@ -191,52 +191,52 @@ created: "2026-08-13"
 
 ## Phase 7 — A tela
 
-- [ ] **T-750** Levantar `prioridade`, `valoresCampos` e `declarou` de `ReciboConfirmacao`
+- [x] **T-750** Levantar `prioridade`, `valoresCampos` e `declarou` de `ReciboConfirmacao`
       para `ConversaEmCurso`. ⚠️ **Não é `key={revisao}`**: remontar zeraria exatamente o que
       `FR-9` preserva e refaria a leitura de schema a cada turno (`R-02`). A `key` de `D-46`
       continua só no "Abrir outro chamado". _Requirements: FR-8, FR-9_
-- [ ] **T-751** O cartão **sai da tela** enquanto o turno corre (`enviando`), e volta com os
+- [x] **T-751** O cartão **sai da tela** enquanto o turno corre (`enviando`), e volta com os
       valores mesclados. ⚠️ Estado derivado vira **predicado exportado** —
       `deveMostrarCartao({proposta, enviando, bloqueado})`, no estilo de `deveMostrarAtalhoDoFim`
       (`D-69`): a suíte renderiza (`renderToStaticMarkup`), mas predicado é mais barato de afirmar
       e não reprova em melhoria de tela (`D-49`). _Requirements: FR-7_
-- [ ] **T-752** Aplicar `mesclarNaTela` na volta de cada turno. _Requirements: FR-8, FR-9,
+- [x] **T-752** Aplicar `mesclarNaTela` na volta de cada turno. _Requirements: FR-8, FR-9,
       RN-13_
-- [ ] **T-753** O **motivo** no cartão, junto do seletor. 🚨 **Sai UMA frase, não duas**
+- [x] **T-753** O **motivo** no cartão, junto do seletor. 🚨 **Sai UMA frase, não duas**
       (achado do `/analyze`): *"Sugerimos alta — ajuste se não bate com o seu caso"* sai, e
       **`p.criterio` FICA** — ele responde *o que é Alta*, é o que informa quem edita o seletor, e
       já foi movido para fora do `select` porque truncava lá dentro. Sem motivo, a tela
       **declara** que a sugestão não veio justificada (`D-53`), com o botão vivo.
       _Requirements: FR-2, FR-5_
-- [ ] **T-753b** `FR-2b`/`SC-2b`: com a prioridade exibida diferente da sugerida, o motivo é
+- [x] **T-753b** `FR-2b`/`SC-2b`: com a prioridade exibida diferente da sugerida, o motivo é
       **atribuído** (*"a sugestão era alta, porque…"*), nunca apresentado como justificativa do
       nível escolhido — e nada é dito sobre a escolha da pessoa (`SC-8`). É a forma que a tela já
       usa hoje (*"A sugestão era alta."*), agora com o porquê. _Requirements: FR-2b, SC-2b_
-- [ ] **T-753c** Atualizar `tests/rf18-recibo-confirmacao.test.ts`: a asserção de
+- [x] **T-753c** Atualizar `tests/rf18-recibo-confirmacao.test.ts`: a asserção de
       `'Sugerimos alta'` passa a ser sobre o **motivo**; a do **critério continua** — apagar o
       caso devolveria o furo que ele fecha (critério ilegível dentro do `select`).
       _Requirements: FR-2, FR-2b_
-- [ ] **T-754** Assunto mudou: a tela **diz** isso, e os campos do assunto anterior somem sem
+- [x] **T-754** Assunto mudou: a tela **diz** isso, e os campos do assunto anterior somem sem
       deixar valor para trás — campo não desaparece em silêncio. _Requirements: FR-10_
-- [ ] **T-755** As **recusas de ajuste** junto do cartão, ao lado do que elas explicam, em
+- [x] **T-755** As **recusas de ajuste** junto do cartão, ao lado do que elas explicam, em
       português, com os rótulos das opções. _Requirements: FR-13, FR-14_
-- [ ] **T-756** O aviso em `<dialog>` nativo com `margin: auto` explícito (`D-64`), duas
+- [x] **T-756** O aviso em `<dialog>` nativo com `margin: auto` explícito (`D-64`), duas
       ações, `Esc` = **voltar ao formulário** (a saída sem efeito), foco devolvido à origem.
       _Requirements: FR-18, SC-20_
-- [ ] **T-757** "Uma vez por conversa", disparado pela **exibição** e não pela escolha, e não
+- [x] **T-757** "Uma vez por conversa", disparado pela **exibição** e não pela escolha, e não
       volta nem se o cartão desaparecer e reaparecer. ⚠️ Também como predicado exportado
       (`deveAvisarNegociacao({temProposta, bloqueioPendente, jaExibido})`), pelo motivo de
       `T-751`. _Requirements: FR-19, FR-21_
-- [ ] **T-758** Voltar ao formulário **não envia** a mensagem, não altera a proposta e
+- [x] **T-758** Voltar ao formulário **não envia** a mensagem, não altera a proposta e
       preserva o rascunho. _Requirements: FR-20_
-- [ ] **T-759** Sem proposta, ou com bloqueio pendente sem override, o aviso **não existe** —
+- [x] **T-759** Sem proposta, ou com bloqueio pendente sem override, o aviso **não existe** —
       ali ele seria a parede que `RF-13`/`RN-07` proíbem. _Requirements: FR-21, SC-19_
-- [ ] **T-760** [P] `FR-22`: linha fixa no cartão dizendo que conversar pode reescrever o que
+- [x] **T-760** [P] `FR-22`: linha fixa no cartão dizendo que conversar pode reescrever o que
       foi preenchido, **sem** depender de a pessoa ter visto o aviso. _Requirements: FR-22_
-- [ ] **T-761** [P] CSS em `estilos.css` para o motivo, as recusas e o `<dialog>`: fundo
+- [x] **T-761** [P] CSS em `estilos.css` para o motivo, as recusas e o `<dialog>`: fundo
       **explícito** (`--go-white`; `--go-surface` não existe, `D-64`), foco visível,
       `prefers-reduced-motion`, estado nunca só por cor. _Requirements: FR-2, FR-13, SC-20_
-- [ ] **T-762** [P] `tests/008-cartao-negociavel.test.ts`: descritores e estados do cartão —
+- [x] **T-762** [P] `tests/008-cartao-negociavel.test.ts`: descritores e estados do cartão —
       motivo presente · frase genérica ausente · cartão ausente no turno · aviso nas três
       condições. ⚠️ Afirma sobre **estado e conteúdo**, nunca sobre layout (`D-47`/`D-49`:
       teste que copia layout reprova em toda melhoria e acaba apagado). _Requirements: FR-2,

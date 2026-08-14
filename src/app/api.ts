@@ -116,6 +116,22 @@ export interface RespostaTurno {
   }[]
   /** O assunto mudou neste turno — a tela diz, e os campos do anterior somem (`FR-10`). */
   readonly assuntoMudou?: boolean
+  /**
+   * A frase de `FR-5`, pronta, quando o motivo não pôde ser exibido.
+   *
+   * ⚠️ Vem do servidor em vez de a tela inventá-la porque **a rota do override** mostra o
+   * mesmo cartão: duas redações da mesma ausência é a divergência silenciosa de sempre.
+   */
+  readonly motivoIndisponivel?: string | null
+  /**
+   * Há o que negociar? — `FR-21`.
+   *
+   * `false` sem proposta e `false` com bloqueio pendente. É o servidor quem sabe as duas
+   * coisas, e é dele que a tela tira a decisão de exibir o aviso: um aviso dizendo
+   * "conversar pode reescrever o cartão" na frente de uma conversa **sem** cartão seria a
+   * parede que `RF-13`/`RN-07` proíbem.
+   */
+  readonly podeNegociar?: boolean
 }
 
 export interface ChamadoResumo {

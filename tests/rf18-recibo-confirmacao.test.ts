@@ -20,6 +20,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import { ReciboConfirmacao } from '@/app/telas'
 import { PRIORIDADES, type Proposta } from '@/app/api'
+import { SEM_MOTIVO_DE_PRIORIDADE } from '@/lib/tickets/motivo-da-prioridade'
 
 const PROPOSTA: Proposta = {
   titulo: 'Relatório de vendas não atualizou',
@@ -32,10 +33,14 @@ const PROPOSTA: Proposta = {
 
 function render(
   proposta: Proposta = PROPOSTA,
-  extras: { tipoNome?: string | null } = {},
+  extras: {
+    tipoNome?: string | null
+    negociacao?: Parameters<typeof ReciboConfirmacao>[0]['negociacao']
+  } = {},
 ): string {
   return renderToStaticMarkup(
     createElement(ReciboConfirmacao, {
+      ...(extras.negociacao ? { negociacao: extras.negociacao } : {}),
       // A identidade preenche os campos do solicitante (`RF-21`); aqui ela só precisa
       // existir, porque este teste afirma sobre a copy do recibo, não sobre campo.
       eu: { email: 'ana@gocase.com', nome: 'Ana', isAdmin: false, modoDemo: false, somenteLeitura: false },
@@ -95,10 +100,46 @@ describe('RF-16 — a prioridade é editável, e o critério fica LEGÍVEL', () 
     expect(saida).toContain(CRITERIO_ALTA)
   })
 
-  it('a sugestão original é dita, para a pessoa saber que pode discordar', () => {
-    const saida = render()
-    expect(saida).toContain('Sugerimos alta')
-    expect(saida).toContain('ajuste se não bate com o seu caso')
+  /**
+   * 🚨 **Esta asserção mudou de objeto, e o caso NÃO foi apagado** (`T-753c`).
+   *
+   * A dica dizia `{critério}. Sugerimos alta — ajuste se não bate com o seu caso.` e as
+   * duas metades faziam trabalhos diferentes: o **critério** responde *o que é Alta* — é o
+   * que informa quem está mexendo no seletor, e já tinha descido para fora do `<option>`
+   * porque truncava lá dentro. A outra metade não justificava nada; ela **finge**
+   * justificar, e ocupava o lugar de quem justifica de verdade (`FR-2`, spec 008).
+   *
+   * ⚠️ O caso do **critério** continua logo acima, intocado: apagar este arquivo inteiro
+   * devolveria o furo que ele fecha.
+   */
+  it('sem motivo do turno, a tela DECLARA que a sugestão não veio justificada (FR-5)', () => {
+    const saida = render(PROPOSTA, {
+      negociacao: {
+        motivoPrioridade: null,
+        motivoIndisponivel: SEM_MOTIVO_DE_PRIORIDADE,
+        prioridadeSugerida: 'alta',
+        recusasDeAjuste: [],
+        assuntoMudou: false,
+      },
+    })
+    expect(saida).toContain(SEM_MOTIVO_DE_PRIORIDADE)
+    // A frase que fingia justificar saiu de vez.
+    expect(saida).not.toContain('Sugerimos alta')
+  })
+
+  it('com motivo, ele aparece no lugar da frase genérica (FR-2)', () => {
+    const saida = render(PROPOSTA, {
+      negociacao: {
+        motivoPrioridade: 'O relatório do dia não fecha e o time comercial trabalha sem ele.',
+        motivoIndisponivel: null,
+        prioridadeSugerida: 'alta',
+        recusasDeAjuste: [],
+        assuntoMudou: false,
+      },
+    })
+    expect(saida).toContain('O relatório do dia não fecha')
+    // ⚠️ O critério FICA: ele responde uma pergunta que o motivo não responde.
+    expect(saida).toContain(CRITERIO_ALTA)
   })
 })
 

@@ -2325,6 +2325,9 @@ function negociacaoNaResposta(
     camposSugeridos: turno.camposSugeridos,
     alterados: turno.alterados,
     recusasDeAjuste: turno.recusasDeAjuste,
+    // `FR-10` — derivado aqui, do mesmo `alterados`: um segundo produtor faria a tela
+    // apagar os campos numa condição e o merge preservá-los em outra.
+    assuntoMudou: turno.alterados.includes('tipoChamadoId'),
     /**
      * `FR-21` — há o que negociar? Com bloqueio pendente **não há**: ali o único caminho é
      * o botão de override (`D-21`), e um aviso dizendo "conversar pode reescrever o cartão"

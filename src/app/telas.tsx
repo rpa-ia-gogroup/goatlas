@@ -54,6 +54,7 @@ import {
   Vazio,
 } from './componentes'
 import { Visualizador, type AnexoParaVer } from './visualizador'
+import { deveAvisarNegociacao, deveMostrarCartao, mesclarNaTela } from './negociacao'
 import {
   arquivosDoColar,
   PerguntaDeAnexo,
@@ -191,6 +192,30 @@ function ConversaEmCurso({
   const [proposta, setProposta] = useState<Proposta | null>(null)
   // `D-53` — o nome do assunto acompanha a proposta, mas não faz parte dela.
   const [tipoNome, setTipoNome] = useState<string | null>(null)
+  /**
+   * 🚨 **O estado do cartão mora AQUI** — `FR-8`/`FR-9`, `T-750`.
+   *
+   * Ele vivia dentro de `ReciboConfirmacao`, e `useState(propostaInicial.prioridade)` só roda
+   * na montagem: com a proposta mudando a cada turno, o seletor ficava travado no primeiro
+   * valor. Subir resolve `FR-8` de graça (prop nova re-renderiza) e é o que permite `FR-7` —
+   * esconder o cartão durante o turno **desmonta** o componente, e estado interno morreria
+   * junto com ele.
+   */
+  const [prioridadeNaTela, setPrioridadeNaTela] = useState<Prioridade>('normal')
+  const [valoresCampos, setValoresCampos] = useState<Record<string, string>>({})
+  const [declarou, setDeclarou] = useState<Declaracao>(null)
+  /** O que o último turno decidiu sobre motivo e ajustes — spec 008. */
+  const [negociacao, setNegociacao] = useState<NegociacaoNaTela | null>(null)
+  /**
+   * `FR-19` — o aviso é **uma vez por conversa**, e o gatilho é a EXIBIÇÃO.
+   *
+   * `ref`, não estado: ele nunca redesenha nada sozinho, e um `useState` faria o aviso
+   * reaparecer no render entre marcar e fechar. Contar a *escolha* em vez da exibição faria
+   * o aviso voltar para quem saiu pelo `Esc` — que é justamente a saída sem efeito (`SC-20`).
+   */
+  const avisoJaExibido = useRef(false)
+  /** A mensagem que espera o aviso ser respondido. `null` = não há aviso na tela. */
+  const [aguardandoAviso, setAguardandoAviso] = useState<string | null>(null)
   const [criado, setCriado] = useState<ResultadoCriacao | null>(null)
   // spec 007 — o que a IA leu de cada anexo, como veio do último turno (`FR-5`).
   const [analises, setAnalises] = useState<RespostaTurno['analisesAnexo']>(undefined)
@@ -336,6 +361,29 @@ function ConversaEmCurso({
     const texto = rascunho.trim()
     if (!texto || enviando) return
 
+    /**
+     * `FR-18` — com o cartão na tela, a primeira mensagem passa pelo aviso.
+     *
+     * ⚠️ **O rascunho continua onde está** até a pessoa escolher: quem volta ao formulário
+     * não perde o que escreveu (`FR-20`), e quem segue tem a mensagem enviada exatamente
+     * como digitou.
+     */
+    if (
+      deveAvisarNegociacao({
+        temProposta: proposta !== null,
+        bloqueioPendente: bloqueado,
+        jaExibido: avisoJaExibido.current,
+      })
+    ) {
+      avisoJaExibido.current = true
+      setAguardandoAviso(texto)
+      return
+    }
+
+    await enviarTexto(texto)
+  }
+
+  async function enviarTexto(texto: string) {
     setErro(null)
     setEnviando(true)
     setFalas((f) => [...f, { de: 'usuario', texto }])
@@ -356,11 +404,60 @@ function ConversaEmCurso({
       setProposta(r.proposta)
       setTipoNome(r.tipoNome ?? null)
       setAnalises(r.analisesAnexo)
+      /**
+       * `FR-8`/`FR-9`/`RN-13` — o merge de três pontas. Campo que a IA mudou vale o dela;
+       * campo que ela não tocou continua como a pessoa deixou. Quem decide "mudou" é o
+       * servidor (`alterados`), num lugar só — a alternativa (comparar aqui) faria a tela
+       * mesclar por um critério e a auditoria contar por outro.
+       */
+      if (r.proposta) {
+        /**
+         * ⚠️ **Sem cartão antes, não há o que preservar.** A primeira proposta chega com
+         * `alterados: []` — base nula não é "tudo mudou" (`diffDeProposta`) —, e mesclar
+         * contra o estado inicial faria a tela mostrar `normal` enquanto a IA sugeriu
+         * `alta`: o valor errado no lugar certo, sem erro nenhum.
+         */
+        const mesclado = mesclarNaTela({
+          naTela: proposta
+            ? { prioridade: prioridadeNaTela, valoresCampos }
+            : { prioridade: r.proposta.prioridade, valoresCampos: {} },
+          prioridadeDaProposta: r.proposta.prioridade,
+          camposSugeridos: r.camposSugeridos ?? {},
+          alterados: r.alterados ?? [],
+          assuntoMudou: r.assuntoMudou ?? false,
+        })
+        setPrioridadeNaTela(mesclado.prioridade)
+        setValoresCampos(mesclado.valoresCampos)
+        // Assunto novo, formulário novo: a declaração do assunto anterior não se aplica.
+        if (r.assuntoMudou) setDeclarou(null)
+        setNegociacao({
+          motivoPrioridade: r.motivoPrioridade ?? null,
+          motivoIndisponivel: r.motivoIndisponivel ?? null,
+          prioridadeSugerida: r.prioridadeSugerida ?? null,
+          recusasDeAjuste: r.recusasDeAjuste ?? [],
+          assuntoMudou: r.assuntoMudou ?? false,
+        })
+      }
       setFalas((f) => [...f, { de: 'agente', texto: r.texto }])
     } catch (e) {
       setErro(e instanceof ErroApi ? e.message : 'Não conseguimos enviar sua mensagem. Tente de novo.')
     } finally {
       setEnviando(false)
+    }
+  }
+
+  /**
+   * `FR-23` — o desfecho do aviso, para o console saber se ele ajuda ou atrapalha.
+   *
+   * ⚠️ **Sem `await` na frente do envio, e falha dele não pode impedir a pessoa de falar**:
+   * auditoria não entra no caminho crítico de uma mensagem (`RNF-18`).
+   */
+  async function registrarDesfechoDoAviso(desfecho: 'seguiu' | 'voltou') {
+    if (!conversaId) return
+    try {
+      await api.registrarAvisoDeNegociacao(conversaId, desfecho)
+    } catch {
+      // Silencioso de propósito: o registro é para nós, não para quem está conversando.
     }
   }
 
@@ -375,6 +472,9 @@ function ConversaEmCurso({
       if (r.proposta) {
         setProposta(r.proposta)
         setTipoNome(r.tipoNome ?? null)
+        // O cartão nasce aqui: a prioridade da tela é a que a IA sugeriu (não há edição
+        // anterior a preservar). O motivo vem no turno seguinte — esta rota não o devolve.
+        setPrioridadeNaTela(r.proposta.prioridade)
       }
       setFalas((f) => [
         ...f,
@@ -466,7 +566,10 @@ function ConversaEmCurso({
         />
       )}
 
-      {proposta && conversaId && !bloqueado && (
+      {/* `FR-7` — durante o turno o cartão SAI da tela: o que está ali é o chamado de antes,
+          e a IA pode estar reescrevendo-o. Conferir e confirmar um resumo prestes a mudar
+          sozinho é o defeito, não a espera. */}
+      {conversaId && proposta && deveMostrarCartao({ temProposta: true, enviando, bloqueado }) && (
         <ReciboConfirmacao
           eu={eu}
           conversaId={conversaId}
@@ -474,6 +577,32 @@ function ConversaEmCurso({
           tipoNome={tipoNome}
           aoCriar={setCriado}
           aoRecomecar={aoRecomecar}
+          negociacao={negociacao ?? undefined}
+          estado={{
+            prioridade: prioridadeNaTela,
+            aoMudarPrioridade: setPrioridadeNaTela,
+            valoresCampos,
+            aoMudarValoresCampos: setValoresCampos,
+            declarou,
+            aoDeclarar: setDeclarou,
+          }}
+        />
+      )}
+
+      {aguardandoAviso !== null && (
+        <AvisoDeNegociacao
+          aoSeguir={() => {
+            const texto = aguardandoAviso
+            setAguardandoAviso(null)
+            void registrarDesfechoDoAviso('seguiu')
+            void enviarTexto(texto)
+          }}
+          aoVoltar={() => {
+            // `FR-20` — sem efeito: a mensagem não é enviada, a proposta não muda, e o
+            // rascunho continua no compositor exatamente como a pessoa o deixou.
+            setAguardandoAviso(null)
+            void registrarDesfechoDoAviso('voltou')
+          }}
         />
       )}
 
@@ -709,6 +838,158 @@ export function CaminhoOverride({
 }
 
 /**
+ * O aviso de que conversar pode reescrever o cartão — `FR-18`, `FR-20`, `SC-20`.
+ *
+ * ⚠️ `<dialog>` **nativo**, pelo motivo de `D-64`/`D-68`: foco contido, `Esc` e devolução do
+ * foco à origem vêm do navegador, e nenhum JS de armadilha de foco precisa existir aqui.
+ *
+ * 🚨 **`Esc` = voltar ao formulário, e essa é a saída SEM efeito.** A mensagem não é enviada,
+ * a proposta não muda e o rascunho continua onde estava (`FR-20`): quem fecha por reflexo não
+ * pode perder o que escreveu nem disparar o turno que estava avaliando.
+ */
+function AvisoDeNegociacao({
+  aoSeguir,
+  aoVoltar,
+}: {
+  aoSeguir: () => void
+  aoVoltar: () => void
+}) {
+  const caixa = useRef<HTMLDialogElement | null>(null)
+  useEffect(() => {
+    // `showModal` é o que dá backdrop, foco contido e `Esc` — `open` no atributo não dá.
+    caixa.current?.showModal()
+  }, [])
+  return (
+    <dialog
+      ref={caixa}
+      className="aviso-negociacao"
+      aria-labelledby="titulo-aviso-negociacao"
+      onCancel={(e) => {
+        e.preventDefault()
+        aoVoltar()
+      }}
+    >
+      <form method="dialog" className="aviso-negociacao-corpo">
+        <h2 id="titulo-aviso-negociacao" className="titulo-secao">
+          Continuar conversando pode reescrever o chamado
+        </h2>
+        <p>
+          O resumo abaixo acompanha a conversa. Se você mandar outra mensagem, o agente pode
+          ajustar título, descrição, assunto, prioridade e os campos do formulário — o que
+          você editou e ninguém pediu para mudar continua como está.
+        </p>
+        <div className="acoes">
+          <button type="submit" className="botao botao-primario" onClick={aoSeguir}>
+            Enviar mesmo assim
+          </button>
+          <button type="button" className="botao botao-discreto" onClick={aoVoltar}>
+            Voltar ao formulário
+          </button>
+        </div>
+      </form>
+    </dialog>
+  )
+}
+
+/**
+ * O que o último turno decidiu sobre prioridade e ajustes — spec 008, `FR-1`…`FR-14`.
+ *
+ * Chega **opcional** ao cartão porque o formulário (`D-04`) e a rota de override montam o
+ * mesmo componente sem ter passado por um turno de conversa: ali não há motivo nem recusa, e
+ * o cartão continua inteiro.
+ */
+interface NegociacaoNaTela {
+  readonly motivoPrioridade: string | null
+  readonly motivoIndisponivel: string | null
+  readonly prioridadeSugerida: Prioridade | null
+  readonly recusasDeAjuste: readonly RecusaNaTela[]
+  readonly assuntoMudou: boolean
+}
+
+/** `FR-13`/`FR-14` — um ajuste pedido em texto que não coube, como a tela o recebe. */
+export interface RecusaNaTela {
+  readonly rotulo: string
+  readonly motivo: 'campo_inexistente' | 'opcao_inexistente'
+  /** Rótulos das opções válidas — nunca ids (`RNF-30`). */
+  readonly opcoes?: readonly string[]
+}
+
+/**
+ * Por que a IA sugeriu **este** nível — `FR-1`, `FR-2`, `FR-2b`, `FR-5`.
+ *
+ * 🚨 **Com a pessoa em outro nível, o motivo é ATRIBUÍDO.** Mostrá-lo cru ao lado de
+ * `normal` seria a tela justificando um nível que ninguém escolheu — e afirmando um porquê
+ * que a própria pessoa acabou de contrariar (`SC-2b`). A forma *"a sugestão era alta:
+ * …"* já era a que a tela usava; o que mudou é que agora ela vem com o porquê.
+ *
+ * ⚠️ **Ausência é declarada, nunca disfarçada** (precedente de `D-53`). Sem motivo a linha
+ * diz que a sugestão não veio justificada — e o botão de abrir continua vivo (`FR-5`,
+ * `RNF-18`). Silêncio faria a pessoa achar que o nível é um dado, e não uma sugestão.
+ */
+function MotivoDaPrioridade({
+  motivo,
+  indisponivel,
+  sugerida,
+  escolhida,
+}: {
+  motivo: string | null
+  indisponivel: string | null
+  sugerida: Prioridade | null
+  escolhida: Prioridade
+}) {
+  if (!motivo) {
+    return indisponivel ? <p className="motivo-prioridade">{indisponivel}</p> : null
+  }
+  const outraEscolha = sugerida !== null && sugerida !== escolhida
+  return (
+    <p className="motivo-prioridade">
+      {outraEscolha && (
+        <span className="motivo-prioridade-dono">
+          A sugestão era {prioridadePor(sugerida).rotulo.toLowerCase()}:{' '}
+        </span>
+      )}
+      {motivo}
+    </p>
+  )
+}
+
+/**
+ * O que a pessoa pediu em texto e **não** foi aplicado — `FR-13`, `FR-14`.
+ *
+ * ⚠️ **Mora aqui, e não na resposta do agente.** A prosa é escrita **antes** de a decisão
+ * voltar (as duas chamadas são paralelas, `D-32`) — a mesma razão pela qual `FR-6` proíbe o
+ * agente de afirmar nível e prazo. Ele não sabe o que foi recusado; a tela sabe.
+ *
+ * ⚠️ E o estado nunca é só a cor: cada linha **diz** o que aconteceu, com o rótulo do campo
+ * e as opções válidas por extenso.
+ */
+function RecusasDeAjuste({ itens }: { itens: readonly RecusaNaTela[] }) {
+  if (itens.length === 0) return null
+  return (
+    <div className="recusas-ajuste">
+      <p className="eyebrow">Não deu para ajustar</p>
+      <ul>
+        {itens.map((r) => (
+          <li key={`${r.rotulo}:${r.motivo}`}>
+            {r.motivo === 'campo_inexistente' ? (
+              <>
+                Este assunto não tem o campo <strong>{r.rotulo}</strong>. Se ele é essencial,
+                conte na conversa — pode ser que o assunto certo seja outro.
+              </>
+            ) : (
+              <>
+                <strong>{r.rotulo}</strong> aceita só estas opções:{' '}
+                {(r.opcoes ?? []).join(' · ')}. Escolha uma delas no formulário abaixo.
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/**
  * Recibo de confirmação — RF-16, RF-17, RF-18.
  *
  * Metáfora de recibo: é o artefato que a pessoa vai registrar, e ela precisa
@@ -722,6 +1003,8 @@ export function ReciboConfirmacao({
   tipoNome,
   aoCriar,
   aoRecomecar,
+  negociacao,
+  estado,
 }: {
   eu: Identidade
   conversaId: string
@@ -731,8 +1014,39 @@ export function ReciboConfirmacao({
   aoCriar: (r: ResultadoCriacao) => void
   /** `D-46` — a saída quando a criação falhou e NÃO vai ser reprocessada. */
   aoRecomecar: () => void
+  /**
+   * O que o último turno decidiu sobre a prioridade e os ajustes — spec 008.
+   *
+   * Opcional porque o **formulário** (`D-04`) e a rota de override montam o mesmo cartão sem
+   * ter passado por um turno de conversa: ali não há motivo nem recusa, e o cartão continua
+   * inteiro.
+   */
+  negociacao?: NegociacaoNaTela | undefined
+  /**
+   * 🚨 **O estado do cartão mora na tela da conversa, não aqui** — `FR-8`/`FR-9`, `T-750`.
+   *
+   * `useState(propostaInicial.prioridade)` só roda na **montagem**: com a proposta mudando a
+   * cada turno, o seletor ficava travado no primeiro valor. E remontar por `key` (a letra de
+   * `D-46`) zeraria exatamente o que `FR-9` preserva — valores digitados, prioridade
+   * corrigida, declaração de anexo — e refaria a leitura de schema em todo turno (`R-02`).
+   *
+   * Opcional: sem ele o cartão gerencia o próprio estado, que é o que o formulário e o
+   * override precisam.
+   */
+  estado?: {
+    readonly prioridade: Prioridade
+    readonly aoMudarPrioridade: (p: Prioridade) => void
+    readonly valoresCampos: Record<string, string>
+    readonly aoMudarValoresCampos: (
+      f: (atuais: Record<string, string>) => Record<string, string>,
+    ) => void
+    readonly declarou: Declaracao
+    readonly aoDeclarar: (d: Declaracao) => void
+  }
 }) {
-  const [prioridade, setPrioridade] = useState<Prioridade>(propostaInicial.prioridade)
+  const [prioridadeLocal, setPrioridadeLocal] = useState<Prioridade>(propostaInicial.prioridade)
+  const prioridade = estado?.prioridade ?? prioridadeLocal
+  const setPrioridade = estado?.aoMudarPrioridade ?? setPrioridadeLocal
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<Falha | null>(null)
   const p = prioridadePor(prioridade)
@@ -741,13 +1055,17 @@ export function ReciboConfirmacao({
   // carrega e se a leitura falhar: o mesmo fail-open do servidor (`SC-05b`), pelo mesmo
   // motivo — indisponibilidade de schema não pode virar botão que não abre chamado.
   const [aceitaAnexo, setAceitaAnexo] = useState(false)
-  const [declarou, setDeclarou] = useState<Declaracao>(null)
+  const [declarouLocal, setDeclarouLocal] = useState<Declaracao>(null)
+  const declarou = estado?.declarou ?? declarouLocal
+  const setDeclarou = estado?.aoDeclarar ?? setDeclarouLocal
   // 🚨 RF-27 na conversa (`D-38`). Sem coletar isto, tipo com campo obrigatório — 70
   // ("Relatar um bug"), 134, 108, 93 — **não abria chamado** por aqui: o JSM recusava e a
   // pessoa lia "algo deu errado". `null` = ainda carregando; `[]` = sem campo extra OU a
   // leitura falhou, tratados igual pelo mesmo fail-open de sempre.
   const [campos, setCampos] = useState<CampoRequestType[] | null>(null)
-  const [valoresCampos, setValoresCampos] = useState<Record<string, string>>({})
+  const [valoresLocais, setValoresLocais] = useState<Record<string, string>>({})
+  const valoresCampos = estado?.valoresCampos ?? valoresLocais
+  const setValoresCampos = estado?.aoMudarValoresCampos ?? setValoresLocais
 
   const idsDoSolicitante = camposPreenchidosPeloApp(propostaInicial.tipoChamadoId)
   const camposDoSolicitante = (campos ?? []).filter((c) => idsDoSolicitante.includes(c.fieldId))
@@ -761,13 +1079,18 @@ export function ReciboConfirmacao({
         if (!vivo) return
         setAceitaAnexo(r.aceitaAnexo)
         setCampos(r.itens)
-        setValoresCampos(
-          resolverCamposDoSolicitante(
+        // ⚠️ **O que já está na tela ganha do que resolvemos aqui** (`FR-9`). Este efeito
+        // roda de novo quando o assunto muda, e sobrescrever produziria o pior dos dois
+        // mundos: apagar o valor que a pessoa digitou e o que a IA acabou de ajustar, com o
+        // schema novo já carregado. Os campos de identidade só preenchem o que está vazio.
+        setValoresCampos((atuais) => ({
+          ...resolverCamposDoSolicitante(
             propostaInicial.tipoChamadoId,
             { conhecido: true, campos: r.itens },
             eu,
           ),
-        )
+          ...atuais,
+        }))
       })
       .catch(() => {
         if (vivo) setCampos([])
@@ -848,7 +1171,27 @@ export function ReciboConfirmacao({
         <h2 id="titulo-recibo" className="titulo-secao">
           {propostaInicial.titulo}
         </h2>
+        {/* `FR-22` — linha fixa, **sem** depender de a pessoa ter visto o aviso: quem
+            recarregou a página, ou entrou por outro caminho, precisa saber que continuar
+            conversando pode reescrever o que ela acabou de preencher. */}
+        {negociacao && (
+          <p className="dica recibo-negociavel">
+            Este resumo acompanha a conversa: se você continuar escrevendo, ele pode ser
+            reescrito. O que você editar aqui é mantido, menos o que você pedir para mudar.
+          </p>
+        )}
       </div>
+
+      {negociacao?.assuntoMudou && (
+        // `FR-10` — campo não desaparece em silêncio. O formulário do assunto novo nasce
+        // vazio, e quem tinha preenchido o anterior precisa saber por que ele sumiu.
+        <Aviso>
+          O assunto do chamado mudou, então o formulário abaixo é outro — os campos do
+          assunto anterior não vieram junto.
+        </Aviso>
+      )}
+
+      <RecusasDeAjuste itens={negociacao?.recusasDeAjuste ?? []} />
 
       <dl>
         <dt>Descrição</dt>
@@ -901,12 +1244,17 @@ export function ReciboConfirmacao({
                 </option>
               ))}
             </select>
-            <span className="dica">
-              {p.criterio}.{' '}
-              {prioridade === propostaInicial.prioridade
-                ? `Sugerimos ${prioridadePor(propostaInicial.prioridade).rotulo.toLowerCase()} — ajuste se não bate com o seu caso.`
-                : `A sugestão era ${prioridadePor(propostaInicial.prioridade).rotulo.toLowerCase()}.`}
-            </span>
+            {/* ⚠️ `p.criterio` responde *o que é Alta* — é o que informa quem está mexendo
+                no seletor, e já desceu para cá porque truncava dentro do `<option>`. Ele
+                **fica**; o que saiu foi a outra metade ("Sugerimos alta — ajuste se não
+                bate"), que não justificava nada e ocupava o lugar do motivo. */}
+            <span className="dica">{p.criterio}.</span>
+            <MotivoDaPrioridade
+              motivo={negociacao?.motivoPrioridade ?? null}
+              indisponivel={negociacao?.motivoIndisponivel ?? null}
+              sugerida={negociacao?.prioridadeSugerida ?? propostaInicial.prioridade}
+              escolhida={prioridade}
+            />
           </div>
         </dd>
 

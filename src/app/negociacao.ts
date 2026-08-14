@@ -78,3 +78,43 @@ export function mesclarNaTela(entrada: EntradaDoMerge): EstadoNaTela {
   }
   return { prioridade, valoresCampos }
 }
+
+/**
+ * O cartão aparece agora? — `FR-7`.
+ *
+ * Durante o turno ele **sai da tela**: enquanto a IA reescreve o chamado, o que está ali é o
+ * chamado de antes, e deixá-lo visível convida a pessoa a conferir e confirmar um resumo que
+ * está prestes a mudar sozinho. Sumir é a forma honesta de dizer "isto está sendo refeito".
+ *
+ * ⚠️ Com bloqueio pendente ele também não existe (`RN-07`, `D-21`): ali o único caminho é o
+ * botão de override, e a proposta só nasce depois dele.
+ *
+ * Predicado exportado, no estilo de `deveMostrarAtalhoDoFim` (`D-69`): a suíte roda em
+ * `environment: 'node'` e renderiza sem clicar, então afirmar sobre a condição é mais barato
+ * que sobre a marcação — e não reprova em melhoria de tela (`D-49`).
+ */
+export function deveMostrarCartao(estado: {
+  readonly temProposta: boolean
+  readonly enviando: boolean
+  readonly bloqueado: boolean
+}): boolean {
+  return estado.temProposta && !estado.enviando && !estado.bloqueado
+}
+
+/**
+ * O aviso de que conversar pode reescrever o cartão aparece agora? — `FR-18`, `FR-19`, `FR-21`.
+ *
+ * ⚠️ **"Uma vez por conversa" é disparado pela EXIBIÇÃO, nunca pela escolha.** Contar a
+ * escolha faria o aviso voltar para quem fechou no `Esc` — e `Esc` é justamente a saída sem
+ * efeito (`SC-20`). Quem já o viu não precisa vê-lo de novo, tenha respondido o que for.
+ *
+ * ⚠️ E ele **não existe** sem proposta nem com bloqueio pendente: nos dois casos não há
+ * cartão para reescrever, e o aviso seria a parede que `RF-13` proíbe.
+ */
+export function deveAvisarNegociacao(estado: {
+  readonly temProposta: boolean
+  readonly bloqueioPendente: boolean
+  readonly jaExibido: boolean
+}): boolean {
+  return estado.temProposta && !estado.bloqueioPendente && !estado.jaExibido
+}
