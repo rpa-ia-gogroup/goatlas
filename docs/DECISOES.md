@@ -4581,7 +4581,86 @@ ao lado. Requisito revogado em silêncio reaparece como meta na primeira leitura
 
 ⚠️ **E a instrumentação que eu ia propor não foi feita**: medir a duração de cada ida ao
 provedor (`ia/cliente.ts` não tem uma única medição hoje) só faria sentido para perseguir a
-meta que acabou de ser cortada.
+meta que acabou de ser cortada. ⚠️ **Isso mudou em `D-73`, e por outro motivo:** o Investigador
+mede a duração de cada chamada externa — não para perseguir os 5 s, mas para localizar **onde**
+um turno quebrou. Continua valendo: não sugerir streaming, corte de ciclo nem troca de modelo
+"para consertar a latência" sem sinal novo do dono do produto.
+
+---
+
+### D-73 · O Investigador: o registro que faltava para responder "o que aconteceu com essa pessoa?"
+
+**Data:** 14/08/2026 · **Origem:** incidente em produção + pedido do mantenedor ·
+**Contexto:** spec 009, `RF-72` a `RF-77`, `RNF-37`
+
+#### O que aconteceu
+
+Em 14/08/2026 uma pessoa usou o app publicado por **70 minutos**, mandou **seis mensagens** ao
+agente, **nunca viu o cartão de confirmação**, tentou o formulário direto e foi embora **sem
+abrir chamado**. Perguntado o motivo, o projeto inteiro não tinha resposta:
+
+| Fonte | O que sabia | O que não sabia |
+|---|---|---|
+| `getAppLogs` | método e caminho de cada `/api/*` | status, duração, corpo, erro — **nada** disso é registrado |
+| `auditoria` | seis `mensagem_enviada` | o resto, e **de propósito**: `RN-10`/`RNF-30` mantêm conteúdo pessoal fora dali |
+| `mensagens` | o histórico | por que a extração devolveu `null` |
+| a tela | nada — a pessoa já tinha ido | — |
+
+🚨 **O caminho mais provável do defeito é a ilustração perfeita do buraco:**
+`interpretarProposta` recusa a proposta inteira em **quatro** situações — `pronto !== true`,
+título/descrição curtos, prioridade fora da união, `tipoChamadoId` fora da allowlist (`RF-28`)
+— e as quatro produzem exatamente a mesma coisa na tela e no banco: **silêncio**. O agente
+continua perguntando, que é o comportamento certo, e ninguém consegue distinguir *"a IA não
+achou que já dava"* de *"a IA escolheu uma fila que o admin não liberou"*.
+
+#### O que foi decidido
+
+Uma aba **Investigador**, só admin, alimentada por duas tabelas novas. As decisões que
+sustentam:
+
+1. **Não é auditoria, e a separação é em todos os eixos.** `auditoria` é append-only de longa
+   duração (piso de 180 dias, `D-17`) e **sem** conteúdo; o Investigador carrega conteúdo, tem
+   retenção curta (30 dias, configurável) e existe para depurar. Fundir daria a pior das duas.
+2. **Acumula em memória, grava uma vez.** Um `INSERT` por evento faria uma rodada de polling
+   com 100 chamados custar centenas de idas ao banco — o custo invisível que `RNF-36` existe
+   para conter. Custo aceito e declarado: requisição que morre antes do `finally` perde o
+   próprio rastro.
+3. **A instrumentação das chamadas externas é no `fetch`, não nos transportes.** Os cinco já
+   aceitam `fetchImpl`; embrulhá-lo custa **zero linha** dentro deles e cobre o transporte que
+   nascer amanhã. A retentativa aparece como duas linhas, e isso é o desejado: `429 → espera →
+   200` é o que responde "por que o turno levou 40 s?".
+4. **`investigador_ligado` nasce `true`** — a **segunda** chave do projeto cujo default não é
+   fail-closed, junto de `emails_piloto` (`D-16`). O critério é o mesmo: ela não governa
+   **exposição**, governa se existe registro, e um instrumento de depuração que nasce desligado
+   não existe no dia em que alguém precisa dele.
+5. **Sem campo no console** (`D-25`), como TTL e rate limit: são ajustes que ninguém decide sem
+   ler o código.
+6. **O expurgo pega carona no cron do outbox** (T-415), pelas duas razões de sempre:
+   `aplicarRetencao` não apaga nada com política `null` (`D-20`) e `/api/cron/retencao` responde
+   403 hoje.
+7. **Origem se lê por FORMA e por PALAVRA, nunca por cor.** Seis origens coloridas exigiriam
+   inventar paleta (a identidade tem duas cores de acento) **e** quebrar o piso de a11y.
+
+#### O defeito que a própria feature revelou, e que a suíte pegou
+
+🚨 **`ColetaDeRequisicao` com id fixo parava de gravar depois da primeira requisição.** Em
+produção `montarContexto` roda por requisição, então o id nunca se repetia; mas o shim de
+desenvolvimento e **toda** a suíte reaproveitam o mesmo `Contexto` em várias chamadas. Com o id
+fixo, a **segunda** gravação colidia com a `PRIMARY KEY`, o `catch` de `FR-20` engolia o erro e o
+registro parava para sempre — **sem exceção, sem log**, e com a primeira linha lá para fazer
+parecer que funcionava. Mesma família de `{}` silencioso de `linhasComoObjetos`. O id agora é
+rotativo: cada `gravar` fecha uma requisição e abre a próxima.
+
+#### O que fica pendente
+
+⚠️ **Nada disto foi medido no app publicado.** O que a suíte prova é que os eventos nascem,
+que a redação e o truncamento funcionam, que o gate de admin recusa e que o expurgo não toca
+`auditoria`/`mensagens`. O que só a staging responde é se o volume real cabe no orçamento de
+`RNF-36` — e se o caso de 14/08 se explica quando acontecer de novo.
+
+⚠️ **Campo de TEXTO não é registrado tecla a tecla** (`FR-8`): só campo de escolha (assunto,
+prioridade) e o payload final. O texto que a pessoa escreveu chega pelos eventos `confirmacao` e
+`payload_final`.
 
 ---
 

@@ -441,6 +441,12 @@ export interface ConfigValores {
   readonly retencao_conversas_dias: number | null
   readonly retencao_auditoria_dias: number | null
   readonly retencao_notificacoes_dias: number | null
+  /**
+   * Spec 009 — o Investigador. Sem campo no console (`D-25`), como TTL e rate limit; estão
+   * aqui porque este tipo espelha `ConfigValores` inteiro e o compilador cobra o par.
+   */
+  readonly investigador_ligado: boolean
+  readonly investigador_retencao_dias: number
   /** T-134 — faixas de preço por produto. Vazio = economia de ocioso sai como teto. */
   readonly curva_preco_por_produto: Record<
     string,
@@ -993,6 +999,137 @@ export const api = {
     chamar<{ itens: RegistroAuditoria[] }>(
       email ? `/api/admin/auditoria?email=${encodeURIComponent(email)}` : '/api/admin/auditoria',
     ),
+
+  // --- Investigador (spec 009) — só admin, e o gate real é do servidor ---------
+  investigadorSessoes: (filtro: { recorte?: string; email?: string } = {}) => {
+    const q = new URLSearchParams()
+    if (filtro.recorte) q.set('recorte', filtro.recorte)
+    if (filtro.email) q.set('email', filtro.email)
+    const cauda = q.toString()
+    return chamar<RespostaSessoes>(`/api/investigador/sessoes${cauda ? `?${cauda}` : ''}`)
+  },
+
+  investigadorSessao: (id: string) =>
+    chamar<DetalheDeSessao>(`/api/investigador/sessoes/${encodeURIComponent(id)}`),
+
+  investigadorRequisicoes: (filtro: { recorte?: string; caminho?: string } = {}) => {
+    const q = new URLSearchParams()
+    if (filtro.recorte) q.set('recorte', filtro.recorte)
+    if (filtro.caminho) q.set('caminho', filtro.caminho)
+    const cauda = q.toString()
+    return chamar<{ itens: RequisicaoRegistrada[] }>(
+      `/api/investigador/requisicoes${cauda ? `?${cauda}` : ''}`,
+    )
+  },
+
+  investigadorResumo: () => chamar<ResumoInvestigador>('/api/investigador/resumo'),
+
+  /**
+   * `FR-8` — a tela declara que um campo mudou.
+   *
+   * ⚠️ **Nunca lança para quem chamou.** É registro de depuração: derrubar o preenchimento
+   * de um formulário porque o log falhou seria trocar o problema por um pior (`FR-20`), na
+   * ponta do cliente.
+   */
+  investigadorFormulario: (dados: {
+    tela: string
+    campo: string
+    de?: unknown
+    para?: unknown
+    conversaId?: string | null
+  }) =>
+    chamar<{ ok: boolean }>('/api/investigador/formulario', {
+      method: 'POST',
+      body: JSON.stringify(dados),
+    }).catch(() => ({ ok: false })),
+}
+
+export interface SessaoInvestigada {
+  readonly conversaId: string
+  readonly solicitanteEmail: string
+  readonly estado: string
+  readonly criadoEm: string
+  readonly ultimaAtividade: string
+  readonly custoUsd: number
+  readonly mensagensDaPessoa: number
+  readonly mensagensDoAgente: number
+  readonly bloqueios: number
+  readonly overrides: number
+  readonly temProposta: boolean
+  readonly confirmadoEm: string | null
+  readonly issueKey: string | null
+  readonly requisicoes: number
+  readonly errosDeApi: number
+  readonly duracaoMaximaMs: number | null
+  readonly motivoSemProposta: string | null
+}
+
+export interface RespostaSessoes {
+  readonly itens: SessaoInvestigada[]
+  readonly ligado: boolean
+  readonly retencaoDias: number
+}
+
+export interface EventoRegistrado {
+  readonly id: string
+  readonly requisicao_id: string | null
+  readonly conversa_id: string | null
+  readonly ator_email: string
+  readonly tipo: string
+  readonly origem: string
+  readonly resumo: string | null
+  readonly dados_json: string | null
+  readonly custo_usd: number | null
+  readonly duracao_ms: number | null
+  readonly ordem: number
+  readonly criado_em: string
+}
+
+export interface RequisicaoRegistrada {
+  readonly id: string
+  readonly ator_email: string
+  readonly conversa_id: string | null
+  readonly metodo: string
+  readonly caminho: string
+  readonly status: number
+  readonly duracao_ms: number
+  readonly req_bytes: number | null
+  readonly resp_bytes: number | null
+  readonly req_json: string | null
+  readonly resp_json: string | null
+  readonly erro: string | null
+  readonly criado_em: string
+}
+
+export interface DetalheDeSessao {
+  readonly eventos: EventoRegistrado[]
+  readonly requisicoes: RequisicaoRegistrada[]
+  readonly mensagens: {
+    readonly id: string
+    readonly papel: string
+    readonly conteudo: string
+    readonly tool_nome: string | null
+    readonly criado_em: string
+  }[]
+}
+
+export interface ResumoInvestigador {
+  readonly totalRequisicoes: number
+  readonly totalErros: number
+  readonly taxaErro: number | null
+  readonly duracaoMediaMs: number | null
+  readonly lentas: number
+  readonly porCaminho: {
+    readonly caminho: string
+    readonly total: number
+    readonly erros: number
+    readonly duracaoMediaMs: number
+    readonly duracaoMaximaMs: number
+  }[]
+  readonly totalEventos: number
+  readonly custoIaUsd: number
+  readonly ligado: boolean
+  readonly retencaoDias: number
 }
 
 /** Rótulos de prioridade com o SLA de PRIMEIRA RESPOSTA explícito (RN-08). */

@@ -63,6 +63,29 @@ export async function analisarAnexoDaConversa(
       custoUsd: r.custoUsd,
     })
 
+    /**
+     * `FR-10` — o que a IA entendeu do arquivo, **com a descrição**.
+     *
+     * ⚠️ Aqui ela entra, e na auditoria não (linha abaixo). Não é inconsistência: são duas
+     * tabelas com propósitos e prazos opostos. A auditoria responde "quantos anexos o app
+     * conseguiu ler?" por seis meses; o Investigador responde "o que ele leu **deste**
+     * arquivo?" por trinta dias, atrás de gate de admin. E `irrelevante` — que a tela da
+     * pessoa não mostra (`FR-5b`) — é justamente o estado que só aparece aqui.
+     */
+    ctx.investigador.registrar({
+      tipo: 'anexo_analisado',
+      origem: 'ia',
+      conversaId: arquivo.conversaId,
+      resumo: `Leitura de "${arquivo.nome}": ${r.estado}`,
+      custoUsd: r.custoUsd ?? null,
+      dados: {
+        nome: arquivo.nome,
+        tipoDeclarado: arquivo.tipo,
+        estado: r.estado,
+        descricao: r.descricao,
+      },
+    })
+
     await ctx.auditoria.registrar({
       atorEmail: arquivo.solicitanteEmail,
       // Três ações, derivadas dos seis estados por uma função só (achado `F3`).

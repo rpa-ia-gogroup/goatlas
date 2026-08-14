@@ -293,6 +293,19 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   teclado — e quem aparece é o `label`, que já era o nome acessível. O anel de foco é
   **reemitido** no `label` (`:focus-visible + .rotulo-arquivo`): o global de `tokens.css`
   desenharia num elemento de 1px, invisível.
+- 🚨 **O Investigador NÃO é a auditoria, e fundir os dois estraga os dois** (`D-73`, spec 009).
+  `auditoria` é append-only de longa duração (piso de 180 dias, `D-17`) e **sem** conteúdo
+  pessoal (`RN-10`, `RNF-30`); `investigador_requisicoes`/`investigador_eventos` carregam
+  **conteúdo** — texto da conversa, corpo de requisição, resposta crua do modelo —, têm
+  retenção **curta** (`investigador_retencao_dias`, default 30) e existem para depurar. Juntar
+  daria a pior das duas: registro sensível guardado seis meses, ou investigação sem o dado que
+  interessa. ⚠️ **A razão de existir está medida:** em 14/08/2026 uma pessoa passou 70 minutos no
+  app, mandou seis mensagens, nunca viu o cartão e foi embora sem chamado — e nenhuma fonte do
+  projeto sabia por quê. `interpretarProposta` recusa a proposta em **quatro** situações e as
+  quatro produzem o mesmo silêncio. ⚠️ **`investigador_ligado` nasce `true`**, a segunda chave do
+  projeto cujo default não é fail-closed (a outra é `emails_piloto`, `D-16`): ela não governa
+  exposição, governa se existe registro — e registro que nasce desligado não existe no dia em que
+  alguém precisa dele. Sem campo no console, como TTL e rate limit (`D-25`).
 - **N8N está descartado.** Não propor voltar a ele.
 - **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
   olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe
@@ -662,6 +675,27 @@ destes reabre um vazamento que já foi fechado.
   `tests/painel-do-console.test.ts` —, não por asserções novas naquele: os dois fazem
   perguntas diferentes (*o campo diz o efeito?* × *o painel chega à tela?*), e misturá-las
   faria a segunda morrer junto com a primeira no próximo rewrite.
+- 🚨 **A coleta do Investigador ACUMULA e grava UMA vez, e o id dela é rotativo** (`D-73`,
+  `investigador/coleta.ts`). Um `INSERT` por evento faria uma rodada de polling com 100 chamados
+  custar centenas de idas ao banco — o custo que `RNF-36` existe para conter, na versão que
+  ninguém vê até a conta chegar. Custo aceito e declarado: requisição que morre antes do
+  `finally` perde o próprio rastro. ⚠️ **O id rotativo não é zelo, foi defeito medido**: em
+  produção `montarContexto` roda por requisição, mas o shim de dev e **toda** a suíte
+  reaproveitam o mesmo `Contexto` — com id fixo, a **segunda** gravação colidia com a `PRIMARY
+  KEY`, o `catch` de `FR-20` engolia o erro e o registro parava **para sempre**, com a primeira
+  linha lá para fazer parecer que funcionava (família de `linhasComoObjetos`).
+- ⚠️ **As chamadas externas são instrumentadas no `fetch`, nunca dentro dos transportes**
+  (`investigador/fetch-observado.ts`). Os cinco (`atlassian/http.ts`, `organizacao.ts`,
+  `ia/cliente.ts`, `teamguide/http.ts`, `ocr/http.ts`) já aceitam `fetchImpl`; embrulhá-lo custa
+  **zero linha** dentro deles, e o transporte que nascer amanhã já vem coberto. ⚠️ **Retentativa
+  aparece como duas linhas de propósito** — `429 → espera → 200` é o que responde "por que o
+  turno levou 40 s?" (`RNF-15`, `R-02`). ⚠️ E vai **caminho**, nunca a URL inteira: a query
+  carrega CQL e JQL, e JQL pode nomear projeto que quem lê o console não deveria conhecer.
+- ⚠️ **`redigirSensiveis` roda ANTES do truncamento** (`investigador/coleta.ts#corpoSeguro`).
+  Truncar primeiro deixaria um segredo intacto sempre que ele estivesse nos primeiros 16 mil
+  caracteres — que é onde o começo do corpo costuma estar. A ordem inversa passa em todo teste de
+  caminho feliz. E corpo que **não** parseia como objeto tem redação por padrão de texto: JSON
+  malformado e formulário urlencoded não têm chave nenhuma para `redigirSensiveis` agir.
 - **Mensagem de erro nunca inclui o corpo da resposta da Atlassian** — ele pode
   conter dado interno e o erro sobe até o log (RNF-01, RNF-30).
 - **Secrets são lidos em UM lugar só** (`src/lib/contexto.ts`). Um segundo lugar
@@ -1541,7 +1575,19 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 [004](specs/004-piloto-e-rollout/tasks.md) ·
 [005](specs/005-anexo-na-criacao/tasks.md) ·
 [007](specs/007-analise-de-anexo/tasks.md) ·
-[008](specs/008-cartao-negociavel/tasks.md).
+[008](specs/008-cartao-negociavel/tasks.md) ·
+[009](specs/009-investigador/tasks.md).
+
+🚨 **A spec 009 (Investigador) está completa em código** (`D-73`, 14/08/2026). Uma aba nova, só
+admin, que responde *"o que aconteceu com esta pessoa?"*: toda requisição `/api/*` vira uma linha
+com status, duração e os dois corpos; cada turno vira eventos ordenados (mensagem · ida ao
+modelo com os dois lados · tools executadas e recusadas · bloqueio · proposta rederivada ·
+resposta exibida); **por que não houve proposta** é registrado com a **resposta crua do modelo**;
+o payload entregue ao Jira e o desfecho da criação ficam gravados; e toda chamada que sai do app
+(Jira/Confluence, Organizations, IA, TeamGuide, OCR) aparece com alvo, caminho, status e duração.
+⚠️ **Nada disso foi medido no app publicado** — o que a suíte prova é que os eventos nascem, que
+a redação e o truncamento funcionam, que o gate de admin recusa e que o expurgo não toca
+`auditoria`/`mensagens`.
 
 🚨 **A spec 008 (cartão negociável) está completa em código** (`D-71`, 14/08/2026). O resumo de
 confirmação deixou de ser um formulário congelado: a proposta é **rederivada a cada turno**, em
@@ -1574,9 +1620,11 @@ spec 008 — staging `3936ca2d` com o **mesmo bundle** (`index-Ct4jtfSS.js`), de
 ⚠️ **`updateApp` MESCLA assets**: o manifesto acumula todos os bundles hasheados dos deploys
 anteriores (33 entradas na staging). É inócuo — o `index.html` aponta para os novos —, mas quem
 for limpar precisa dos dois deploys de `assets: []` que o próprio `CLAUDE.md` descreve.
-⚠️ **Já não é modo demonstração** (`GOATLAS_MODO_DEMO` saiu): o app lê Confluence e Jira
-**de verdade** com o `ATATT` validado, e o que impede efeito colateral é
-`GOATLAS_SOMENTE_LEITURA=1`, que recusa toda escrita no decorador do cliente.
+🚨 **PROD NÃO ESTÁ EM SOMENTE LEITURA** — conferido por `listAppSecrets` em 14/08/2026: nem
+`GOATLAS_MODO_DEMO` nem `GOATLAS_SOMENTE_LEITURA` existem nos secrets do `9c47f42f`. O app lê
+**e escreve** de verdade: chamado confirmado em prod nasce na fila do time de tech. Este
+parágrafo afirmava o contrário até hoje, e a frase errada é a mais cara possível para quem for
+testar em produção achando que nada acontece.
 Config apontada para o real: `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"),
 tipos `70,134,108,68`, espaços **`GT,DTE,GN`** (`D-61`, 13/08 — os 7 de `D-29` voltaram a 3
 por instrução repassada: o critério passou de *"é documentação técnica?"* para *"o usuário
@@ -1693,7 +1741,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1592 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1636 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

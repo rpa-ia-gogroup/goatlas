@@ -4,6 +4,7 @@ import { App } from './App'
 import './tokens.css'
 import './estilos.css'
 import './console.css'
+import './investigador.css'
 
 const raiz = document.getElementById('raiz')
 if (raiz) createRoot(raiz).render(<StrictMode><App /></StrictMode>)

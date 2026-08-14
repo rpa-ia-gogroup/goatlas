@@ -19,6 +19,7 @@ import { MENSAGEM_BLOQUEIO_PENDENTE, regra2Disponivel } from '../rules'
 import { buscaConfigurada } from '../config/diagnostico'
 import type { Auditoria } from '../audit'
 import type { ConfigValores } from '../config'
+import { INVESTIGADOR_DESLIGADO, type Investigador } from '../investigador/registro'
 import { toolAutorizada, toolsPermitidas, TOOLS } from './gate'
 import { RepositorioConversas, type Conversa } from './estado'
 import { ExecutorTools } from './tools'
@@ -111,6 +112,15 @@ export class Orquestrador {
      * listava `- 92: 92` e o modelo escolhia a fila do chamado entre números.
      */
     private readonly fonteDeTipos: FonteDeTipos & FonteDeSchemaDoTipo,
+    /**
+     * O registro de depuração do turno — spec 009, `FR-5`.
+     *
+     * ⚠️ **Opcional com no-op como default, nunca `null`**: os testes que já existiam
+     * constroem o orquestrador com seis argumentos, e um parâmetro obrigatório aqui
+     * transformaria um instrumento de investigação em um patch de trinta arquivos de teste.
+     * `INVESTIGADOR_DESLIGADO` é o mesmo objeto de `contexto.ts` com a config desligada.
+     */
+    private readonly investigador: Investigador = INVESTIGADOR_DESLIGADO,
   ) {}
 
   async processarMensagem(
@@ -125,6 +135,14 @@ export class Orquestrador {
       textoUsuario,
       null,
     )
+    this.investigador.emConversa(conversa.id)
+    this.investigador.registrar({
+      tipo: 'mensagem_usuario',
+      origem: 'usuario',
+      conversaId: conversa.id,
+      resumo: `Mensagem da pessoa (${textoUsuario.length} caracteres)`,
+      dados: { texto: textoUsuario, estadoDaConversa: conversa.estado },
+    })
 
     // Bloqueio de pé: nem chama o modelo. O texto dele seria descartado de
     // qualquer forma (a regra em vigor é quem fala), e pagar por uma resposta que
@@ -233,6 +251,31 @@ export class Orquestrador {
       })
       custoTurno += resposta.custoEstimadoUsd
       ultimoTexto = resposta.texto
+      /**
+       * `FR-5` — a ida ao modelo, dos dois lados.
+       *
+       * ⚠️ **O histórico vai sem o system prompt.** Ele é configuração da instalação
+       * (`D-33`), é o mesmo em toda requisição, e repeti-lo por ciclo encheria a tabela com
+       * o mesmo texto — a razão pela qual `D-54` também o deixa fora da transcrição.
+       */
+      this.investigador.registrar({
+        tipo: 'ia_chat',
+        origem: 'ia',
+        conversaId: atual.id,
+        resumo: `Ciclo ${ciclo + 1}: modelo respondeu ${resposta.texto.length} caracteres e propôs ${resposta.toolsPropostas.length} ferramenta(s)`,
+        custoUsd: resposta.custoEstimadoUsd,
+        dados: {
+          ciclo: ciclo + 1,
+          toolsPermitidas: permitidas.map((t) => t.nome),
+          historicoEnviado: historico.map((m) => ({
+            papel: m.papel,
+            toolNome: m.toolNome ?? null,
+            conteudo: m.conteudo,
+          })),
+          textoDoModelo: resposta.texto,
+          toolsPropostas: resposta.toolsPropostas,
+        },
+      })
 
       if (resposta.toolsPropostas.length === 0) break
 
@@ -241,6 +284,17 @@ export class Orquestrador {
         // só reconhece o que ele mesmo autorizou neste turno.
         if (!toolAutorizada(atual, proposta.nome)) {
           recusadas.push(proposta.nome)
+          this.investigador.registrar({
+            tipo: 'tool_recusada',
+            origem: 'servidor',
+            conversaId: atual.id,
+            resumo: `Ferramenta "${proposta.nome}" recusada — não está autorizada neste momento`,
+            dados: {
+              toolProposta: proposta.nome,
+              argumentos: proposta.argumentos,
+              permitidas: permitidas.map((t) => t.nome),
+            },
+          })
           await this.auditoria.registrar({
             atorEmail: atual.solicitanteEmail,
             acao: 'tool_recusada',
@@ -259,6 +313,23 @@ export class Orquestrador {
         const r = await this.rodarTool(atual, proposta.nome, proposta.argumentos, config)
         custoTurno += r.custoUsd
         executadas.push(proposta.nome)
+        // `FR-5` — o que a tool devolveu **ao modelo**. É o texto que decide o turno
+        // seguinte, e sem ele "a busca não achou nada" e "a busca nem foi configurada"
+        // continuam indistinguíveis depois do fato (`D-33`, `D-41`).
+        this.investigador.registrar({
+          tipo: 'tool_executada',
+          origem: 'servidor',
+          conversaId: atual.id,
+          resumo: `Ferramenta "${proposta.nome}" executada${r.falhou ? ' e FALHOU' : ''}`,
+          custoUsd: r.custoUsd,
+          dados: {
+            tool: proposta.nome,
+            argumentos: proposta.argumentos,
+            falhou: r.falhou,
+            paraModelo: r.paraModelo,
+            bloqueou: Boolean(r.veredito?.bloquear),
+          },
+        })
         historico.push({
           papel: 'tool',
           conteudo: r.paraModelo,
@@ -353,6 +424,35 @@ export class Orquestrador {
       textoFinal,
       null,
     )
+    /**
+     * `FR-5` — o que a pessoa leu, e se foi o modelo quem falou.
+     *
+     * ⚠️ **`textoDoModeloDescartado` é o campo que importa aqui.** Com bloqueio pendente o
+     * servidor **substitui** a resposta do modelo (`D-21`), e sem esta linha o registro
+     * mostraria a frase do servidor como se fosse a do provedor — a mesma confusão que já
+     * fez o agente mandar clicar num botão que não estava na tela.
+     */
+    this.investigador.registrar({
+      tipo: 'resposta_agente',
+      origem: 'servidor',
+      conversaId: atual.id,
+      resumo: bloqueio
+        ? 'Resposta do turno: mensagem de BLOQUEIO (texto do modelo descartado)'
+        : bloqueioPendente
+          ? 'Resposta do turno: bloqueio pendente (texto do modelo descartado)'
+          : 'Resposta do turno: texto do modelo',
+      custoUsd: custoTurno,
+      dados: {
+        textoExibido: textoFinal,
+        textoDoModeloDescartado: Boolean(bloqueio || bloqueioPendente),
+        textoDoModelo: ultimoTexto,
+        bloqueioPendente,
+        toolsExecutadas: executadas,
+        toolsRecusadas: recusadas,
+        // O que a tela decide com isto: sem proposta não há cartão (`FR-7` da 008).
+        temProposta: Boolean(atual.proposta),
+      },
+    })
     if (bloqueio) await this.conversas.definirEstado(atual.id, 'bloqueado')
 
     return {
@@ -428,7 +528,12 @@ export class Orquestrador {
     conversa: Conversa,
     config: ConfigValores,
   ): Promise<Rederivacao> {
-    if (config.tipos_chamado_permitidos.length === 0) return { custoUsd: 0, ...SEM_REDERIVACAO }
+    if (config.tipos_chamado_permitidos.length === 0) {
+      this.semProposta(conversa, 'allowlist_de_tipos_vazia', {
+        detalhe: 'Nenhum tipo de chamado liberado na configuração (RF-28).',
+      })
+      return { custoUsd: 0, ...SEM_REDERIVACAO }
+    }
     try {
       /**
        * 🚨 **Os tipos vão COM NOME, e sem nome não se propõe** (`D-70`).
@@ -449,7 +554,15 @@ export class Orquestrador {
        * para oferecer `(nenhum)` é gasto sem resultado possível (`RNF-16`).
        */
       const tiposPermitidos = await tiposOferecidos(this.fonteDeTipos, config)
-      if (tiposPermitidos.length === 0) return { custoUsd: 0, ...SEM_REDERIVACAO }
+      if (tiposPermitidos.length === 0) {
+        this.semProposta(conversa, 'nenhum_tipo_com_nome', {
+          detalhe:
+            'A allowlist tem tipos, mas nenhum deles saiu do service desk configurado com nome (D-70).',
+          idsNaAllowlist: config.tipos_chamado_permitidos,
+          serviceDeskId: config.service_desk_id,
+        })
+        return { custoUsd: 0, ...SEM_REDERIVACAO }
+      }
 
       /**
        * O formulário do assunto **vigente**, para a pessoa poder corrigi-lo conversando
@@ -473,8 +586,31 @@ export class Orquestrador {
        * O custo da chamada é devolvido de qualquer forma: ela aconteceu e foi paga
        * (`RNF-16` mede gasto, não gasto aproveitado).
        */
-      if (!r.proposta) return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO }
+      if (!r.proposta) {
+        /**
+         * 🚨 **O evento que responde à pergunta de 14/08/2026** (`FR-6`).
+         *
+         * `interpretarProposta` devolve `null` em quatro situações — o modelo não se
+         * declarou pronto, título ou descrição curtos demais, prioridade fora da união, ou
+         * `tipoChamadoId` fora da allowlist (`RF-28`). As quatro chegam aqui **idênticas**,
+         * e a pessoa vê a mesma coisa nas quatro: o cartão nunca aparece. É por isso que a
+         * resposta crua do modelo vai junto: sem ela, o registro só confirmaria o que já se
+         * sabia — que não houve proposta.
+         */
+        this.semProposta(conversa, 'extracao_sem_proposta', {
+          detalhe:
+            'O modelo respondeu e a proposta foi recusada na interpretação — a resposta crua diz qual das condições falhou.',
+          respostaBrutaDoModelo: r.respostaBruta ?? null,
+          tiposOferecidos: tiposPermitidos,
+          camposDoAssunto: camposParaExtracao(schema),
+        })
+        return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO }
+      }
       if (await this.conversas.temBloqueioPendente(conversa.id)) {
+        this.semProposta(conversa, 'bloqueio_pendente_na_gravacao', {
+          detalhe:
+            'A proposta veio pronta e foi descartada: nasceu um bloqueio enquanto a extração estava em voo (RN-07).',
+        })
         return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO }
       }
 
@@ -510,15 +646,70 @@ export class Orquestrador {
       await this.conversas.definirPropostaDaIa(conversa.id, nova)
 
       await this.registrarAjuste(conversa, alterados, ajuste.recusas)
+      /**
+       * `FR-7` — a proposta com **valores**, ao contrário da auditoria, que carrega só os
+       * nomes dos campos (`RN-10`). Aqui o valor é o ponto: é ele que se compara com o que a
+       * pessoa disse ter pedido.
+       */
+      this.investigador.registrar({
+        tipo: 'proposta_rederivada',
+        origem: 'ia',
+        conversaId: conversa.id,
+        resumo:
+          alterados.length > 0
+            ? `Proposta rederivada — a IA mudou: ${alterados.join(', ')}`
+            : 'Proposta rederivada — a IA não mudou nada',
+        custoUsd: r.custoEstimadoUsd,
+        dados: {
+          proposta: nova,
+          alterados,
+          assuntoMudou,
+          camposSugeridos: ajuste.valores,
+          recusasDeAjuste: ajuste.recusas,
+          baseAnterior: conversa.propostaDaIa ?? null,
+        },
+      })
       return {
         custoUsd: r.custoEstimadoUsd,
         alterados,
         camposSugeridos: ajuste.valores,
         recusasDeAjuste: ajuste.recusas,
       }
-    } catch {
+    } catch (e) {
+      // ⚠️ Este `catch` engolia a exceção **inteira**, e era o buraco mais fundo: leitura de
+      // tipos, leitura de schema e a ida ao provedor caem todas aqui, e o resultado para
+      // quem usa é sempre o mesmo — o agente continua perguntando, para sempre.
+      this.semProposta(conversa, 'excecao_na_extracao', {
+        detalhe: 'A extração lançou. O agente segue conversando (RF-28), e ninguém é avisado.',
+        classe: e instanceof Error ? e.name : typeof e,
+        mensagem: e instanceof Error ? e.message : String(e),
+      })
       return { custoUsd: 0, ...SEM_REDERIVACAO }
     }
+  }
+
+  /**
+   * O registro de **por que não houve proposta** — spec 009, `FR-6`.
+   *
+   * ⚠️ **Uma função só, e um `motivo` fechado por chamada.** As seis saídas sem proposta
+   * pedem trabalho diferente de quem investiga (configurar allowlist · conferir o service
+   * desk · ler a resposta do modelo · usar o override · olhar a exceção), e é exatamente a
+   * distinção que `area_indisponivel` × `area_nao_encontrada` já defende em outro canto do
+   * app. Uma linha genérica "não houve proposta" repetiria o silêncio que este arquivo
+   * inteiro existe para desfazer.
+   */
+  private semProposta(
+    conversa: Conversa,
+    motivo: string,
+    dados: Readonly<Record<string, unknown>>,
+  ): void {
+    this.investigador.registrar({
+      tipo: 'ia_extracao_recusada',
+      origem: 'ia',
+      conversaId: conversa.id,
+      resumo: `Sem proposta: ${motivo}`,
+      dados: { motivo, ...dados },
+    })
   }
 
   /**
@@ -606,6 +797,15 @@ export class Orquestrador {
     evidencia: unknown,
   ): Promise<void> {
     await this.conversas.registrarBloqueio(this.novoId(), conversa.id, regra, motivo, evidencia)
+    // `FR-5` — com a evidência, que a auditoria não carrega (`RN-10`). É ela que responde
+    // "qual página o app achou que resolvia o caso dessa pessoa?".
+    this.investigador.registrar({
+      tipo: 'bloqueio',
+      origem: 'servidor',
+      conversaId: conversa.id,
+      resumo: `Bloqueio por ${regra} — a conversa fica parada até o override (RF-13)`,
+      dados: { regra, motivo, evidencia },
+    })
     await this.auditoria.registrar({
       atorEmail: conversa.solicitanteEmail,
       acao: 'bloqueio_disparado',

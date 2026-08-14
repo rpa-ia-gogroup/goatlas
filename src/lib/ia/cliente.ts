@@ -325,12 +325,12 @@ export class ClienteIAHttp implements ClienteIA {
       Number(dados.usage?.completion_tokens ?? 0),
     )
     this._custoAcumuladoUsd += custo
+    const bruto = dados.choices?.[0]?.message?.content
     return {
-      proposta: interpretarProposta(
-        dados.choices?.[0]?.message?.content,
-        params.tiposPermitidos.map((t) => t.id),
-      ),
+      proposta: interpretarProposta(bruto, params.tiposPermitidos.map((t) => t.id)),
       custoEstimadoUsd: custo,
+      // spec 009, `FR-6` — só o Investigador lê isto, e só quando a proposta é recusada.
+      respostaBruta: typeof bruto === 'string' ? bruto : null,
     }
   }
 

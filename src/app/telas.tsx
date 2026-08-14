@@ -54,6 +54,20 @@ import {
   Vazio,
 } from './componentes'
 import { Visualizador, type AnexoParaVer } from './visualizador'
+import { registrarMudancaDeCampo } from './registro-de-formulario'
+
+/**
+ * O **nome** do assunto, para o registro do Investigador (`FR-8`).
+ *
+ * ⚠️ Nunca o id sozinho: `- 92: 92` foi exatamente o que fez o modelo sortear a fila do
+ * chamado (`D-70`), e um registro que só guarda `92` obriga quem investiga a repetir a mesma
+ * tradução à mão. `(desconhecido)` quando a lista ainda não chegou — nunca um id disfarçado
+ * de nome.
+ */
+function nomeDoTipoNaLista(tipos: TipoChamado[] | null, id: string): string {
+  if (!id) return '(nenhum)'
+  return tipos?.find((t) => t.id === id)?.nome ?? '(desconhecido)'
+}
 import { deveAvisarNegociacao, deveMostrarCartao, mesclarNaTela } from './negociacao'
 import {
   arquivosDoColar,
@@ -2269,7 +2283,22 @@ function FormularioEmCurso({
 
       <div className="campo">
         <label htmlFor="tipo">Tipo de chamado</label>
-        <select id="tipo" value={tipoChamadoId} onChange={(e) => setTipo(e.target.value)} required>
+        {/* `FR-8` da spec 009 — o assunto decide a FILA do chamado, então trocá-lo é a
+            decisão mais cara desta tela e a que mais se investiga depois. */}
+        <select
+          id="tipo"
+          value={tipoChamadoId}
+          onChange={(e) => {
+            registrarMudancaDeCampo({
+              tela: 'formulario',
+              campo: 'Tipo de chamado',
+              de: nomeDoTipoNaLista(tipos, tipoChamadoId),
+              para: nomeDoTipoNaLista(tipos, e.target.value),
+            })
+            setTipo(e.target.value)
+          }}
+          required
+        >
           {(tipos ?? []).map((t) => (
             <option key={t.id} value={t.id}>
               {t.nome}
@@ -2317,7 +2346,17 @@ function FormularioEmCurso({
         <select
           id="prioridade-form"
           value={prioridade}
-          onChange={(e) => setPrioridade(e.target.value as Prioridade)}
+          onChange={(e) => {
+            // `FR-8` — rebaixar ou subir prioridade é a outra decisão que muda o prazo
+            // cobrado (`RN-08`), e `R-04` existe justamente para acompanhar isto.
+            registrarMudancaDeCampo({
+              tela: 'formulario',
+              campo: 'Prioridade',
+              de: prioridade,
+              para: e.target.value,
+            })
+            setPrioridade(e.target.value as Prioridade)
+          }}
         >
           {PRIORIDADES.map((op) => (
             <option key={op.valor} value={op.valor}>
