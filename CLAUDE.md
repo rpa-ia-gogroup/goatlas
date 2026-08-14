@@ -1560,9 +1560,9 @@ tarefa aberta era **T-425** — ✅ **respondida em 11/08/2026**:
 `GET /api/tipos-chamado/68/campos` na staging devolveu **`aceitaAnexo: true`**. O request
 type expõe campo de anexo, então o anexo na criação funciona sem uma linha a mudar.
 
-**No ar em SOMENTE LEITURA: https://goatlas.devgogroup.com** (`appId 9c47f42f`,
-`version 41`, deploy de 13/08/2026 — staging `3936ca2d` na `version 20`, com o **mesmo bundle**,
-deployada e validada antes, conforme a regra 10). Login Google pelo edge, admin por allowlist.
+**No ar: https://goatlas.devgogroup.com** (`appId 9c47f42f`, deploy de **14/08/2026** com a
+spec 008 — staging `3936ca2d` com o **mesmo bundle** (`index-Ct4jtfSS.js`), deployada e validada
+**na tela** antes, conforme a regra 10). Login Google pelo edge, admin por allowlist.
 ⚠️ **`updateApp` MESCLA assets**: o manifesto acumula todos os bundles hasheados dos deploys
 anteriores (33 entradas na staging). É inócuo — o `index.html` aponta para os novos —, mas quem
 for limpar precisa dos dois deploys de `assets: []` que o próprio `CLAUDE.md` descreve.
