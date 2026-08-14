@@ -97,6 +97,15 @@ import {
 import { anexarTranscricaoDoChamado } from '../tickets/transcricao'
 import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
 import { buscaConfigurada } from '../config/diagnostico'
+// spec 009 — o Investigador. Ver o comentário sobre o envelope em `tratarRequisicao`.
+import { corpoDaRequisicao, corpoDaResposta } from '../investigador/corpos'
+import {
+  detalharSessao,
+  expurgarInvestigador,
+  listarRequisicoes,
+  listarSessoes,
+  resumoInvestigador,
+} from '../investigador/leitura'
 
 export interface EnvCron {
   readonly GODEPLOY_CRON_KEY?: string
@@ -106,6 +115,19 @@ const PRIORIDADES: readonly Prioridade[] = ['critica', 'alta', 'normal']
 const ehPrioridade = (v: unknown): v is Prioridade =>
   typeof v === 'string' && (PRIORIDADES as readonly string[]).includes(v)
 
+/**
+ * O envelope do Investigador — spec 009, `FR-1`, `FR-10c`, `FR-20`.
+ *
+ * ⚠️ **Uma linha por requisição, gravada no fim, junto com os eventos do caminho todo.** O
+ * corpo de entrada é lido de um clone **antes** do despacho (o handler consome o original);
+ * o de saída, de um clone da resposta. Os dois gates de tipo e tamanho estão em
+ * `investigador/corpos.ts`, e existem para o upload de 8 MB não passar uma terceira vez pela
+ * memória do Worker.
+ *
+ * ⚠️ **`finally`, e nunca depois do `return`.** Uma rota que lança em qualquer ponto ainda
+ * precisa deixar rastro — é justamente a requisição que quebrou a que se quer ler depois. E
+ * `fecharInvestigacao` não lança (`FR-20`).
+ */
 export async function tratarRequisicao(
   req: Request,
   ctx: Contexto,
@@ -115,6 +137,47 @@ export async function tratarRequisicao(
   const caminho = url.pathname
 
   if (!caminho.startsWith('/api/')) return new Response(null, { status: 404 })
+
+  const inicio = Date.parse(ctx.agora())
+  const entrada = await corpoDaRequisicao(req)
+  // Mutável de propósito: o e-mail só existe depois do gate de `RF-01`, e a requisição
+  // recusada **também** tem de aparecer no registro — com o rótulo honesto de quem ainda não
+  // foi identificado.
+  const quem = { email: '(sem identidade)' }
+  let resposta: Response | null = null
+  let falha: string | null = null
+  try {
+    resposta = await despachar(req, ctx, env, url, caminho, quem)
+    return resposta
+  } catch (e) {
+    falha = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+    throw e
+  } finally {
+    const saida = resposta ? await corpoDaResposta(resposta) : { texto: null, bytes: null }
+    await ctx.fecharInvestigacao({
+      atorEmail: quem.email,
+      metodo: req.method,
+      caminho,
+      // Sem resposta houve exceção que subiu até o `worker.ts`, que devolve 500.
+      status: resposta ? resposta.status : 500,
+      duracaoMs: Math.max(0, Date.parse(ctx.agora()) - inicio),
+      reqBytes: entrada.bytes,
+      respBytes: saida.bytes,
+      reqBruto: entrada.texto,
+      respBruto: saida.texto,
+      erro: falha,
+    })
+  }
+}
+
+async function despachar(
+  req: Request,
+  ctx: Contexto,
+  env: EnvCron,
+  url: URL,
+  caminho: string,
+  quem: { email: string },
+): Promise<Response> {
 
   // Health check é público de propósito: precisa responder mesmo quando o SSO ou
   // a config estão quebrados — é para isso que ele serve (RF-59).
@@ -145,6 +208,7 @@ export async function tratarRequisicao(
     return erro(MENSAGEM_NEGACAO[auth.motivo], 'acesso_negado', 403)
   }
   const eu = auth.identidade
+  quem.email = eu.email
 
   if (caminho === '/api/auth/me' && req.method === 'GET') {
     // `modoDemo` vai para a UI porque ela precisa avisar de forma permanente que
@@ -191,6 +255,19 @@ export async function tratarRequisicao(
     if (e instanceof CriacaoRecusada) {
       return ERROS.regraDeCriacao(e.motivos.map((m) => MENSAGEM_RECUSA[m]))
     }
+    // ⚠️ A auditoria guarda a **mensagem**; o Investigador guarda a mensagem **e a pilha**.
+    // É a diferença entre saber que uma rota caiu e saber em qual linha — e a pilha não
+    // pode ir para a auditoria, que é lida por admin e tem piso de 180 dias (`D-17`).
+    ctx.investigador.registrar({
+      tipo: 'erro_de_rota',
+      origem: 'servidor',
+      resumo: `A rota ${caminho} lançou`,
+      dados: {
+        classe: e instanceof Error ? e.name : typeof e,
+        mensagem: e instanceof Error ? e.message : String(e),
+        pilha: e instanceof Error ? e.stack ?? null : null,
+      },
+    })
     // Erro inesperado nunca vaza detalhe (RNF-01, RNF-30), mas é auditado.
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -350,6 +427,13 @@ async function rotear(
       )
     }
     const sobrepostos = await ctx.conversas.registrarOverride(conversa.id, motivo)
+    ctx.investigador.registrar({
+      tipo: 'override',
+      origem: 'usuario',
+      conversaId: conversa.id,
+      resumo: `Override: ${sobrepostos} bloqueio(s) sobrepostos`,
+      dados: { motivo, bloqueiosSobrepostos: sobrepostos },
+    })
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: 'override_registrado',
@@ -385,6 +469,15 @@ async function rotear(
     const corpo = await lerJson<Record<string, unknown>>(req)
     const validada = validarProposta(corpo, ctx.valores.tipos_chamado_permitidos)
     if ('erro' in validada) return ERROS.dadosInvalidos(validada.erro)
+    // `FR-7` — a edição da pessoa, com o antes e o depois. É o par do
+    // `proposta_rederivada`: junto, os dois contam quem mexeu em quê ao longo da conversa.
+    ctx.investigador.registrar({
+      tipo: 'proposta_editada',
+      origem: 'usuario',
+      conversaId: conversa.id,
+      resumo: 'A pessoa editou o cartão',
+      dados: { antes: conversa.proposta ?? null, depois: validada.proposta },
+    })
     await ctx.conversas.definirProposta(conversa.id, validada.proposta)
     return json({
       proposta: validada.proposta,
@@ -517,6 +610,21 @@ async function rotear(
     )
     if (!prioridadeNaConversa.ok) return ERROS.dadosInvalidos(prioridadeNaConversa.mensagem)
 
+    // `FR-8`/`FR-9` — o formulário **como foi confirmado**, antes de virar payload. É aqui
+    // que se vê o que a tela mandou, e o `payload_final` de `servico.ts` mostra o que saiu
+    // daqui para o Jira: divergir os dois é o defeito silencioso que `D-39` já produziu.
+    ctx.investigador.registrar({
+      tipo: 'confirmacao',
+      origem: 'usuario',
+      conversaId: conversa.id,
+      resumo: 'A pessoa confirmou a abertura pela conversa',
+      dados: {
+        proposta: conversa.proposta,
+        camposDaConversa,
+        declarouAnexo: declaracao.declarouAnexo,
+        prioridadeParaOJira: prioridadeNaConversa.campos,
+      },
+    })
     await ctx.conversas.registrarConfirmacao(conversa.id)
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -1111,6 +1219,23 @@ async function rotear(
       chaveIdempotencia,
       temporaryAttachmentId,
       nomeArquivo: validado.nome,
+    })
+
+    // `FR-10` — o nome do arquivo, que a auditoria **não** carrega (é conteúdo pessoal, e
+    // ela é lida por admin com piso de 180 dias). Aqui carrega: a retenção é curta, e sem o
+    // nome não dá para casar o upload com a análise nem com o que foi ao chamado.
+    ctx.investigador.registrar({
+      tipo: 'anexo_recebido',
+      origem: 'usuario',
+      conversaId,
+      resumo: `Anexo recebido: ${validado.nome} (${validado.bytes.byteLength} bytes)`,
+      dados: {
+        nome: validado.nome,
+        tipo: validado.tipo,
+        bytes: validado.bytes.byteLength,
+        duplicado,
+        chaveIdempotencia,
+      },
     })
 
     await ctx.auditoria.registrar({
@@ -2001,6 +2126,90 @@ async function rotear(
     })
   }
 
+  /**
+   * --- Investigador (spec 009) — SÓ ADMIN -----------------------------------
+   *
+   * ⚠️ **O gate é do servidor, em cada rota.** A aba some da tela para quem não é admin, e
+   * isso é conveniência: quem chama a rota direto nunca viu a tela (o mesmo raciocínio de
+   * `toolsPermitidas` × `autorizarCriacao` em `agent/gate.ts`).
+   *
+   * ⚠️ **Estas rotas leem o registro sem filtro por e-mail — de propósito.** É a exceção
+   * declarada a `RF-30`, e ela existe porque investigar o caso de outra pessoa é literalmente
+   * o trabalho: a proteção aqui é o gate de admin, a retenção curta e a redação de credencial,
+   * não o isolamento por solicitante.
+   */
+  if (caminho === '/api/investigador/sessoes' && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    return json({
+      itens: await listarSessoes(ctx.db, {
+        email: url.searchParams.get('email'),
+        recorte: url.searchParams.get('recorte'),
+        limite: Number(url.searchParams.get('limite')) || undefined,
+      }),
+      ligado: ctx.valores.investigador_ligado,
+      retencaoDias: ctx.valores.investigador_retencao_dias,
+    })
+  }
+
+  const sessaoInvestigador = caminho.match(/^\/api\/investigador\/sessoes\/([^/]+)$/)
+  if (sessaoInvestigador && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    return json(await detalharSessao(ctx.db, sessaoInvestigador[1]!))
+  }
+
+  if (caminho === '/api/investigador/requisicoes' && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    return json({
+      itens: await listarRequisicoes(ctx.db, {
+        caminho: url.searchParams.get('caminho'),
+        recorte: url.searchParams.get('recorte'),
+        email: url.searchParams.get('email'),
+        limite: Number(url.searchParams.get('limite')) || undefined,
+      }),
+    })
+  }
+
+  if (caminho === '/api/investigador/resumo' && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    return json({
+      ...(await resumoInvestigador(ctx.db)),
+      ligado: ctx.valores.investigador_ligado,
+      retencaoDias: ctx.valores.investigador_retencao_dias,
+    })
+  }
+
+  /**
+   * `FR-8` — a **única** escrita do Investigador, e a única que vem do cliente.
+   *
+   * 🚨 As três travas que a tornam segura, e nenhuma delas é a boa vontade de quem chama:
+   * (1) o `tipo` é fixado **no servidor** — o corpo não escolhe que evento está gravando;
+   * (2) o e-mail vem do header já validado (`RF-04`), nunca do corpo;
+   * (3) o valor passa pelo mesmo truncamento e pela mesma redação de todo o resto
+   *     (`coleta.ts`), e a rota já está sob o rate limit de `RNF-11`, que vale para todo
+   *     `POST`.
+   *
+   * ⚠️ **Não é keystroke.** A tela chama isto quando um campo **fecha** com valor diferente,
+   * e é por isso que a spec diz "mudança declarada", não "digitação".
+   */
+  if (caminho === '/api/investigador/formulario' && req.method === 'POST') {
+    const corpo = await lerJson<Record<string, unknown>>(req)
+    const campo = typeof corpo?.campo === 'string' ? corpo.campo.slice(0, 120) : ''
+    if (!campo) return ERROS.dadosInvalidos('Campo não informado.')
+    ctx.investigador.registrar({
+      tipo: 'formulario_alterado',
+      origem: 'usuario',
+      conversaId: typeof corpo?.conversaId === 'string' ? corpo.conversaId : null,
+      resumo: `Formulário: "${campo}" mudou`,
+      dados: {
+        tela: typeof corpo?.tela === 'string' ? corpo.tela.slice(0, 40) : null,
+        campo,
+        de: corpo?.de ?? null,
+        para: corpo?.para ?? null,
+      },
+    })
+    return json({ ok: true })
+  }
+
   // --- governança de assentos (RF-51 a RF-54, T-124 a T-128) ----------------
   //
   // As duas rotas leem o CACHE (`inventario_assentos`), nunca a Organizations API
@@ -2855,13 +3064,26 @@ async function tratarCron(
     ).toISOString()
     const anexosPendentesExpurgados = await ctx.anexosPendentes.expurgarAnterioresA(limite)
 
+    /**
+     * spec 009, `FR-19` — o expurgo do Investigador pega carona **aqui**, pelas duas razões
+     * do bloco acima: `aplicarRetencao` não apaga nada com política `null` (`D-20`) e a rota
+     * de retenção responde 403. Código pendurado lá nunca rodaria.
+     *
+     * ⚠️ Toca **só** as duas tabelas do Investigador (`SC-10`).
+     */
+    const investigadorExpurgado = await expurgarInvestigador(
+      ctx.db,
+      ctx.valores.investigador_retencao_dias,
+      ctx.agora(),
+    )
+
     await ctx.auditoria.registrar({
       atorEmail: '(cron)',
       acao: 'submissao_reprocessada',
       resultado: 'sucesso',
-      detalhe: { ...r, anexosPendentesExpurgados },
+      detalhe: { ...r, anexosPendentesExpurgados, investigadorExpurgado },
     })
-    return json({ ...r, anexosPendentesExpurgados })
+    return json({ ...r, anexosPendentesExpurgados, investigadorExpurgado })
   }
 
   if (caminho === '/api/cron/reconciliar-vinculos') {

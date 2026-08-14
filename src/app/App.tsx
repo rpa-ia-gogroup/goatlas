@@ -12,6 +12,7 @@ import { api, ErroApi, type Identidade } from './api'
 import { Aviso } from './componentes'
 import { TelaConversa, TelaDetalhe, TelaFormulario, TelaMeusChamados } from './telas'
 import { TelaAdmin } from './admin'
+import { TelaInvestigador } from './investigador'
 import { TelaAvisos } from './avisos'
 import { entradaDaUrl, TelaDocumentacao, type EntradaDocumentacao } from './confluence'
 import {
@@ -36,6 +37,9 @@ const ABAS: readonly { nome: Tela['nome']; rotulo: string; soAdmin?: boolean }[]
   // A aba só aparece para admin — mas quem garante o acesso é o gate do SERVIDOR
   // em cada rota `/api/admin/*`. Esconder no cliente é conveniência, não segurança.
   { nome: 'admin', rotulo: 'Administração', soAdmin: true },
+  // Depois de Administração de propósito: o console é onde se **decide**, e o Investigador
+  // é onde se **apura**. Quem abre o app com um problema não passa por nenhum dos dois.
+  { nome: 'investigador', rotulo: 'Investigador', soAdmin: true },
 ]
 
 export function App() {
@@ -213,6 +217,9 @@ export function App() {
             )}
             {tela.nome === 'avisos' && <TelaAvisos />}
             {tela.nome === 'admin' && <TelaAdmin />}
+            {/* Esconder no cliente é conveniência; quem garante é o gate de cada rota
+                `/api/investigador/*` no servidor. */}
+            {tela.nome === 'investigador' && <TelaInvestigador />}
             {tela.nome === 'detalhe' && (
               <TelaDetalhe
                 issueKey={tela.issueKey}

@@ -1,0 +1,468 @@
+/**
+ * A aba Investigador — folha própria, como o console (`console.css`).
+ *
+ * ## A decisão de desenho
+ *
+ * A **espinha lime** vertical é o mesmo traço da leitura de documentação (`.doc` em
+ * `estilos.css`) e da mensagem do agente. Lá ela diz *"daqui para a direita o conteúdo é de
+ * outra origem"*; aqui diz exatamente o mesmo — à direita está o **registro**, não a
+ * opinião do app. Reaproveitar o vocabulário é o oposto de economizar: é o que faz a aba
+ * nova pertencer ao mesmo produto.
+ *
+ * ⚠️ **Origem se lê por FORMA e por PALAVRA, nunca por cor.** A identidade GoGroup tem duas
+ * cores de acento (§1.2) e nenhuma semântica de vermelho/verde (§1.3, `D-34`); seis origens
+ * coloridas exigiriam inventar paleta **e** quebrar o piso de a11y (regra 9). O marcador na
+ * espinha muda de forma, e o nome da origem está escrito ao lado.
+ *
+ * ⚠️ **O lime marca o que PEDE ATENÇÃO**, como no console: sessão sem cartão, chamada com
+ * erro. O que funcionou não compete por atenção.
+ */
+
+.investigador {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.inv-topo .dica {
+  margin-top: var(--space-2);
+  max-width: 62ch;
+}
+
+.inv-estado {
+  margin-top: var(--space-3);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
+}
+
+/* ---------- faixa de números ------------------------------------------- */
+
+.inv-faixa {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5) var(--space-7);
+  padding: var(--space-4) var(--space-5);
+  background: var(--go-white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.inv-numero dt {
+  font-size: var(--fs-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
+}
+.inv-numero dd {
+  margin: 0;
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+  font-variant-numeric: tabular-nums;
+}
+.inv-numero dd small {
+  display: block;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-regular);
+  color: var(--go-text-primary);
+}
+
+/* ---------- alternador de visão ---------------------------------------- */
+
+.inv-visoes {
+  display: flex;
+  gap: var(--space-2);
+}
+.inv-visao {
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-blue);
+  background: transparent;
+  border: 2px solid color-mix(in srgb, var(--go-blue) 25%, transparent);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+.inv-visao[aria-current='true'] {
+  background: var(--go-blue);
+  border-color: var(--go-blue);
+  color: var(--go-text-on-blue);
+}
+
+/* ---------- filtros ------------------------------------------------------ */
+
+.inv-secao {
+  display: grid;
+  gap: var(--space-4);
+}
+.inv-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.inv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.inv-chip {
+  font: inherit;
+  font-size: var(--fs-small);
+  color: var(--go-text-primary);
+  background: var(--go-white);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 20%, transparent);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+.inv-chip[aria-pressed='true'] {
+  background: var(--go-light-blue);
+  border-color: var(--go-blue);
+  font-weight: var(--fw-semibold);
+}
+.inv-busca {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.inv-busca label {
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
+}
+.inv-busca input {
+  font: inherit;
+  font-size: var(--fs-small);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 25%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--go-white);
+  min-width: 18ch;
+}
+.inv-busca button {
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-on-blue);
+  background: var(--go-blue);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+/* ---------- lista de sessões -------------------------------------------- */
+
+.inv-sessoes {
+  display: grid;
+  gap: var(--space-2);
+}
+.inv-sessao-alvo {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  background: var(--go-white);
+  border: none;
+  /* A espinha do vocabulário do app, aqui como aresta esquerda da linha. */
+  border-left: 4px solid color-mix(in srgb, var(--go-blue) 20%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+.inv-sessao-alvo:hover {
+  border-left-color: var(--go-blue);
+}
+.inv-sessao-topo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.inv-sessao-topo strong {
+  color: var(--go-text-heading);
+}
+.inv-sessao-topo time {
+  font-size: var(--fs-caption);
+  color: color-mix(in srgb, var(--go-text-primary) 65%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.inv-sessao-marcas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.inv-marca {
+  font-size: var(--fs-caption);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--go-cream);
+  color: var(--go-text-primary);
+}
+/* Lime só no que pede atenção — sessão sem cartão, erro de API. */
+.inv-marca-destaque {
+  background: var(--go-lime);
+  color: var(--go-text-dark);
+  font-weight: var(--fw-semibold);
+}
+.inv-motivo {
+  font-size: var(--fs-small);
+  color: var(--go-text-primary);
+  border-left: 3px solid var(--go-lime);
+  padding-left: var(--space-3);
+}
+
+.inv-voltar {
+  justify-self: start;
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-blue);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* ---------- linha do tempo ---------------------------------------------- */
+
+.inv-tempo {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0 0 0 var(--space-5);
+  list-style: none;
+  /* A espinha: um traço só, contínuo, à esquerda da coluna. */
+  border-left: 2px solid var(--go-lime);
+}
+.inv-evento {
+  position: relative;
+  display: grid;
+  gap: var(--space-2);
+}
+/*
+  O marcador. A FORMA é o que distingue a origem — a cor é a mesma nas seis.
+  `aria-hidden` por construção: é `::before`, então leitor de tela nunca o anuncia, e o
+  nome da origem está escrito no `.inv-origem` ao lado.
+*/
+.inv-evento::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--space-5) * -1 - 5px);
+  top: 6px;
+  width: 10px;
+  height: 10px;
+  background: var(--go-blue);
+  border: 2px solid var(--go-blue);
+}
+.inv-evento[data-forma='cheio']::before {
+  border-radius: 50%;
+}
+.inv-evento[data-forma='vazado']::before {
+  border-radius: 50%;
+  background: var(--go-cream);
+}
+.inv-evento[data-forma='quadrado']::before {
+  border-radius: 1px;
+}
+.inv-evento[data-forma='losango']::before {
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+.inv-evento[data-forma='barra']::before {
+  height: 4px;
+  top: 9px;
+  border-radius: 2px;
+}
+.inv-evento[data-forma='cruz']::before {
+  background: var(--go-cream);
+  border-radius: 1px;
+  transform: rotate(45deg);
+  width: 8px;
+  height: 8px;
+}
+
+.inv-evento-cabeca {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: var(--fs-caption);
+}
+.inv-evento-cabeca time {
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--go-text-primary) 65%, transparent);
+}
+.inv-origem {
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--go-text-heading);
+}
+.inv-tipo {
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
+}
+.inv-medida {
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
+}
+.inv-resumo {
+  margin: 0;
+  font-size: var(--fs-small);
+}
+
+/* ---------- JSON --------------------------------------------------------- */
+
+.inv-json {
+  background: var(--go-white);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 15%, transparent);
+  overflow: hidden;
+}
+.inv-json-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--go-cream);
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.inv-json-topo button {
+  font: inherit;
+  font-size: var(--fs-caption);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--go-blue);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--go-blue) 30%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  cursor: pointer;
+}
+.inv-json pre {
+  margin: 0;
+  padding: var(--space-3);
+  /* ⚠️ Rola dentro da própria caixa: sem isto um JSON de 16 mil caracteres empurra a
+     página inteira na horizontal (o defeito que `D-65` corrigiu na tabela do Confluence). */
+  overflow-x: auto;
+  max-height: 22rem;
+  overflow-y: auto;
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* ---------- chamadas de API ---------------------------------------------- */
+
+.inv-chamadas {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.inv-chamada {
+  background: var(--go-white);
+  border-radius: var(--radius-md);
+  border-left: 4px solid color-mix(in srgb, var(--go-blue) 20%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+/* Erro tem borda lime E o status escrito — nunca só a cor. */
+.inv-chamada[data-erro='sim'] {
+  border-left-color: var(--go-lime);
+}
+.inv-chamada summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  font-size: var(--fs-small);
+}
+.inv-metodo {
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.06em;
+  color: var(--go-text-heading);
+}
+.inv-caminho {
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  flex: 1 1 20ch;
+  word-break: break-all;
+}
+.inv-status {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-semibold);
+}
+.inv-chamada summary time {
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--go-text-primary) 65%, transparent);
+}
+.inv-chamada-corpo {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+/* ---------- a conversa como o modelo a leu -------------------------------- */
+
+.inv-bloco {
+  background: var(--go-white);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+.inv-bloco > summary {
+  cursor: pointer;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-text-heading);
+}
+.inv-mensagens {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  padding: var(--space-3) 0 0;
+  margin: 0;
+}
+.inv-mensagens li {
+  border-left: 2px solid color-mix(in srgb, var(--go-blue) 20%, transparent);
+  padding-left: var(--space-3);
+}
+.inv-papel {
+  display: block;
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--go-text-heading);
+}
+.inv-mensagens p {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-small);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  .inv-faixa {
+    gap: var(--space-4);
+  }
+  .inv-filtros {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

@@ -43,6 +43,12 @@ type Familia =
   | 'canal_ou_vazio'
   | 'mapa_de_texto'
   | 'baseline_ou_vazio'
+  /**
+   * Liga/desliga — spec 009. ⚠️ **Recusa `"true"` e `1`**, como o resto deste arquivo
+   * recusa `"0.9"`: coerção esconde de quem chamou que ele mandou a coisa errada, e o
+   * `1` de hoje é o `"talvez"` de amanhã chegando como `true`.
+   */
+  | 'booleano'
 
 /**
  * ⚠️ `Record<ChaveConfig, …>` de propósito: chave nova em `ConfigValores` sem
@@ -100,6 +106,10 @@ const FAMILIA: Record<ChaveConfig, Familia> = {
   retencao_conversas_dias: 'inteiro_positivo_ou_vazio',
   retencao_auditoria_dias: 'inteiro_positivo_ou_vazio',
   retencao_notificacoes_dias: 'inteiro_positivo_ou_vazio',
+
+  // Spec 009 — o Investigador. Sem tela no console, como TTL e rate limit (`D-25`).
+  investigador_ligado: 'booleano',
+  investigador_retencao_dias: 'inteiro_positivo',
 }
 
 function numeroReal(valor: unknown): valor is number {
@@ -181,6 +191,12 @@ function validarFamilia(familia: Familia, valor: unknown): ResultadoValidacao {
       }
       return { ok: true, valor }
     }
+
+    case 'booleano':
+      if (typeof valor !== 'boolean') {
+        return { ok: false, motivo: 'Esperado verdadeiro ou falso.' }
+      }
+      return { ok: true, valor }
 
     case 'canal_ou_vazio': {
       if (valor === null) return { ok: true, valor: null }

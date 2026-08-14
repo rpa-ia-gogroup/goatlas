@@ -141,6 +141,28 @@ export interface ConfigValores {
   limite_requisicoes_por_minuto: number
   /** RNF-16 — teto de custo de IA por conversa, em USD. */
   teto_custo_conversa_usd: number
+
+  /**
+   * Spec 009, `FR-18` — o Investigador registra?
+   *
+   * 🚨 **É a segunda chave do projeto cujo default NÃO é fail-closed**, e a razão é a mesma
+   * de `emails_piloto` (`D-16`): ela não governa **exposição**, governa se existe registro.
+   * Um instrumento de depuração que nasce desligado simplesmente não existe no dia em que
+   * alguém precisa dele — e é exatamente o dia de 14/08/2026, quando a pergunta *"por que
+   * essa pessoa não abriu chamado?"* não teve resposta em fonte nenhuma.
+   *
+   * O que ele **não** afrouxa: a leitura continua atrás do gate de admin no servidor, a
+   * retenção é curta, e credencial continua redigida.
+   */
+  investigador_ligado: boolean
+  /**
+   * Spec 009, `FR-19` — por quantos dias o registro do Investigador fica.
+   *
+   * ⚠️ Curto **de propósito**, ao contrário da auditoria (`D-17`, piso de 180 dias): aqui há
+   * conteúdo de conversa e corpo de requisição. Investigação é sobre o que aconteceu esta
+   * semana; guardar seis meses disso seria trocar o problema de hoje pelo risco de amanhã.
+   */
+  investigador_retencao_dias: number
 }
 
 export const CONFIG_PADRAO: Readonly<ConfigValores> = Object.freeze({
@@ -177,6 +199,9 @@ export const CONFIG_PADRAO: Readonly<ConfigValores> = Object.freeze({
   ttl_conteudo_seg: 300,
   limite_requisicoes_por_minuto: 30,
   teto_custo_conversa_usd: 0.5,
+  // Ver o comentário do campo: ligado por default é deliberado, e é a exceção declarada.
+  investigador_ligado: true,
+  investigador_retencao_dias: 30,
 })
 
 export type ChaveConfig = keyof ConfigValores

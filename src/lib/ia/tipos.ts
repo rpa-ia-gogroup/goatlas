@@ -196,6 +196,23 @@ export interface ResultadoExtracao {
   /** `null` quando ainda não há contexto suficiente — o agente segue perguntando. */
   readonly proposta: PropostaSugerida | null
   readonly custoEstimadoUsd: number
+  /**
+   * O texto **cru** que o modelo devolveu — spec 009, `FR-6`. Só para o Investigador.
+   *
+   * 🚨 **É o campo que responde à pergunta de 14/08/2026.** `interpretarProposta` recusa a
+   * proposta inteira em quatro situações — `pronto !== true`, título curto demais,
+   * prioridade fora da união, `tipoChamadoId` fora da allowlist (`RF-28`) — e as quatro
+   * chegam aqui como o **mesmo** `proposta: null`. Sem o texto cru, "a IA achou que ainda
+   * não dava" e "a IA escolheu uma fila que o admin não liberou" são indistinguíveis, e o
+   * sintoma para quem usa é idêntico: o cartão nunca aparece.
+   *
+   * ⚠️ **Não fere `RNF-23`**: o que atravessa a fronteira é o texto que o próprio modelo
+   * escreveu, nunca um tipo do provedor. E ele **nunca** vai para a tela do usuário — só
+   * para a tabela do Investigador, que tem gate de admin e retenção curta.
+   *
+   * Opcional porque o fake não precisa produzi-lo para os testes de comportamento valerem.
+   */
+  readonly respostaBruta?: string | null
 }
 
 export interface ClienteIA {

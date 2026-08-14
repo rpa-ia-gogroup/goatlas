@@ -186,7 +186,20 @@ export class ClienteIAFake implements ClienteIA {
     const p = this.propostaSugerida
     // Respeita a allowlist como o cliente real: id fora da lista descarta.
     const permitido = p && params.tiposPermitidos.some((t) => t.id === p.tipoChamadoId)
-    return { proposta: permitido ? p : null, custoEstimadoUsd: 0.0002 }
+    return {
+      proposta: permitido ? p : null,
+      custoEstimadoUsd: 0.0002,
+      /**
+       * spec 009, `FR-6` — o fake também devolve a resposta crua.
+       *
+       * ⚠️ **Sem isto, o dublê esconderia justamente o campo que a feature existe para
+       * entregar** — a família de `D-38`/`D-39`/`D-43`/`D-47`: o teste ficaria verde
+       * afirmando que o Investigador registra a recusa, e em produção a coluna viria vazia.
+       * A prova sobre o cliente **real** vive em `009-investigador-turno.test.ts`, contra o
+       * corpo entregue ao `fetchImpl`.
+       */
+      respostaBruta: JSON.stringify({ pronto: Boolean(permitido), ...(p ?? {}) }),
+    }
   }
 
   async verificarSaude(): Promise<{ ok: boolean; detalhe: string }> {

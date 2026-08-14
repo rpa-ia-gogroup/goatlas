@@ -451,6 +451,77 @@ export const TABELAS = [
    )`,
   `CREATE INDEX IF NOT EXISTS idx_analises_anexo_conversa
      ON analises_anexo (conversa_id, solicitante_email)`,
+
+  /**
+   * O Investigador — spec 009, `FR-1`.
+   *
+   * 🚨 **Existe porque em 14/08/2026 ninguém conseguiu responder por que uma pessoa passou
+   * 70 minutos no app e não abriu chamado.** `getAppLogs` da plataforma registra método e
+   * caminho de `/api/*` e mais nada — sem status, sem duração, sem corpo. A `auditoria`
+   * sabe que houve seis `mensagem_enviada` e **não pode** saber o resto, porque `RN-10`
+   * mantém conteúdo pessoal fora dela de propósito.
+   *
+   * ⚠️ **Esta tabela NÃO é auditoria, e a diferença é em todos os eixos.** `auditoria` é
+   * append-only de longa duração (piso de 180 dias, `D-17`) e sem conteúdo; esta carrega
+   * conteúdo, tem retenção curta (`investigador_retencao_dias`, default 30) e existe para
+   * depurar. Fundir as duas daria a pior das duas: registro sensível guardado por seis
+   * meses, ou investigação sem o dado que interessa.
+   *
+   * `req_json`/`resp_json` são **truncados com marca** e passam pela redação de
+   * credenciais — ver `investigador/coleta.ts`, o único lugar que escreve aqui.
+   */
+  `CREATE TABLE IF NOT EXISTS investigador_requisicoes (
+     id           TEXT PRIMARY KEY,
+     ator_email   TEXT NOT NULL,
+     conversa_id  TEXT,
+     metodo       TEXT NOT NULL,
+     caminho      TEXT NOT NULL,
+     status       INTEGER NOT NULL,
+     duracao_ms   INTEGER NOT NULL,
+     req_bytes    INTEGER,
+     resp_bytes   INTEGER,
+     req_json     TEXT,
+     resp_json    TEXT,
+     erro         TEXT,
+     criado_em    TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_req_criado
+     ON investigador_requisicoes (criado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_req_conversa
+     ON investigador_requisicoes (conversa_id, criado_em)`,
+
+  /**
+   * Os eventos dentro de cada requisição — spec 009, `FR-5`, `FR-10b`.
+   *
+   * ⚠️ **`ordem` não é enfeite.** A gravação é em **lote, no fim da requisição** (`FR-10c`),
+   * então dezenas de eventos compartilham o mesmo carimbo de milissegundo. Ordenar por
+   * `criado_em` devolveria uma ordem indeterminada — e "em que ordem isso aconteceu?" é
+   * exatamente a pergunta que esta tabela existe para responder. `ordem` é o índice dentro
+   * da requisição; a chave de ordenação da tela é `(criado_em, ordem)`.
+   *
+   * ⚠️ **`requisicao_id` é o que liga a ida ao modelo ao POST que a conteve.** Sem ele, "o
+   * turno levou 38 s" e "a chamada de extração levou 31 s" seriam dois fatos soltos.
+   */
+  `CREATE TABLE IF NOT EXISTS investigador_eventos (
+     id             TEXT PRIMARY KEY,
+     requisicao_id  TEXT,
+     conversa_id    TEXT,
+     ator_email     TEXT NOT NULL,
+     tipo           TEXT NOT NULL,
+     origem         TEXT NOT NULL,
+     resumo         TEXT,
+     dados_json     TEXT,
+     custo_usd      REAL,
+     duracao_ms     INTEGER,
+     ordem          INTEGER NOT NULL DEFAULT 0,
+     criado_em      TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_ev_conversa
+     ON investigador_eventos (conversa_id, criado_em, ordem)`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_ev_criado
+     ON investigador_eventos (criado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_ev_requisicao
+     ON investigador_eventos (requisicao_id, ordem)`,
 ] as const
 
 /**

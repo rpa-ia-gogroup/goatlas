@@ -280,6 +280,12 @@ Serve ao colaborador diretamente **e** ao agente, via `search_confluence`. É a 
 | RF-58 | Log de auditoria append-only de toda ação que toque a Atlassian ou a API de IA: quem, quando, o quê, qual recurso, resultado. | P0 |
 | RF-59 | Health check das dependências (Atlassian, API de IA, banco, SSO) em rota própria. | P0 |
 | RF-60 | Monitorar a taxa de respostas 429 da Atlassian e o custo/latência da API de IA, com alerta em limiar configurável. | P1 |
+| RF-72 | Registrar cada requisição `/api/*` com quem, método, caminho, status, duração e os corpos de entrada e saída quando forem JSON e couberem no teto — o **Investigador** (spec 009). | P0 |
+| RF-73 | Registrar, na ordem em que acontecem, os eventos de um turno: mensagem da pessoa, ida ao modelo (o que foi enviado e o que voltou), tools executadas e recusadas, bloqueio, proposta rederivada e resposta exibida. | P0 |
+| RF-74 | Registrar **por que não houve proposta**, distinguindo os motivos — incluindo a resposta crua do modelo quando a extração é recusada na interpretação. | P0 |
+| RF-75 | Registrar a mudança de campo declarada pela tela (assunto, prioridade) e o payload final entregue ao Jira, com o desfecho da criação. | P1 |
+| RF-76 | Registrar toda chamada que sai do app — Jira/Confluence, Organizations, IA, TeamGuide, OCR — com alvo, caminho, status e duração. | P1 |
+| RF-77 | Expor o registro numa aba **Investigador**, só para admin, com lista de sessões filtrável, linha do tempo por sessão e log de API com filtro por erro e por lentidão. | P0 |
 
 ---
 
@@ -350,6 +356,7 @@ Organizados pelas características de qualidade da ISO/IEC 25010:2023.
 | ID | Requisito |
 |---|---|
 | RNF-33 | Dados pessoais no mínimo necessário (nome e e-mail corporativo), com retenção definida para vínculos, conversas e auditoria. |
+| RNF-37 | O registro do **Investigador** (RF-72 a RF-77) carrega conteúdo pessoal e por isso é o oposto da auditoria em todos os eixos: acesso só de admin, retenção **curta** e configurável (default 30 dias), credencial sempre redigida, corpo binário nunca guardado, e desligável sem deploy. Nenhuma parte dele pode ser exposta a quem não é admin, e nenhuma falha dele pode derrubar a requisição que estava sendo servida. |
 | RNF-34 | Conteúdo interno (tickets, Confluence) trafega para uma API de IA externa. Verificar a política de retenção e treinamento do provedor; preferir o proxy de IA corporativo, se já existir, em vez de contratar acesso novo. Ver **Q6**. |
 | RNF-35 | A decisão pela arquitetura de proxy total (1.2) fica registrada como decisão consciente, com revisão trimestral e caminho de saída em **RNF-22**. |
 

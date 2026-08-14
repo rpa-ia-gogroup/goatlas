@@ -2879,12 +2879,12 @@ ${m.conteudo}` : m.conteudo
       Number(dados.usage?.completion_tokens ?? 0)
     );
     this._custoAcumuladoUsd += custo;
+    const bruto = dados.choices?.[0]?.message?.content;
     return {
-      proposta: interpretarProposta(
-        dados.choices?.[0]?.message?.content,
-        params.tiposPermitidos.map((t) => t.id)
-      ),
-      custoEstimadoUsd: custo
+      proposta: interpretarProposta(bruto, params.tiposPermitidos.map((t) => t.id)),
+      custoEstimadoUsd: custo,
+      // spec 009, `FR-6` — só o Investigador lê isto, e só quando a proposta é recusada.
+      respostaBruta: typeof bruto === "string" ? bruto : null
     };
   }
   async verificarSaude() {
@@ -3116,7 +3116,20 @@ var ClienteIAFake = class {
     }
     const p = this.propostaSugerida;
     const permitido = p && params.tiposPermitidos.some((t) => t.id === p.tipoChamadoId);
-    return { proposta: permitido ? p : null, custoEstimadoUsd: 2e-4 };
+    return {
+      proposta: permitido ? p : null,
+      custoEstimadoUsd: 2e-4,
+      /**
+       * spec 009, `FR-6` — o fake também devolve a resposta crua.
+       *
+       * ⚠️ **Sem isto, o dublê esconderia justamente o campo que a feature existe para
+       * entregar** — a família de `D-38`/`D-39`/`D-43`/`D-47`: o teste ficaria verde
+       * afirmando que o Investigador registra a recusa, e em produção a coluna viria vazia.
+       * A prova sobre o cliente **real** vive em `009-investigador-turno.test.ts`, contra o
+       * corpo entregue ao `fetchImpl`.
+       */
+      respostaBruta: JSON.stringify({ pronto: Boolean(permitido), ...p ?? {} })
+    };
   }
   async verificarSaude() {
     return this.falharChat ? { ok: false, detalhe: "fake com falha" } : { ok: true, detalhe: "fake" };
@@ -3218,6 +3231,248 @@ var AuditoriaBanco = class {
   }
 };
 
+// src/lib/investigador/coleta.ts
+var MAX_CORPO = 16e3;
+var MAX_DADOS_EVENTO = 8e3;
+var EVENTOS_POR_LOTE = 40;
+var MAX_EVENTOS_POR_REQUISICAO = 400;
+var CREDENCIAL_EM_TEXTO = /((?:token|senha|password|secret|api[_-]?key|authorization|bearer)\s*[":=]+\s*)("?)([^\s",}]+)/gi;
+function truncar(texto3, teto) {
+  if (texto3.length <= teto) return texto3;
+  return `${texto3.slice(0, teto)}\u2026[truncado, ${texto3.length} caracteres]`;
+}
+function corpoSeguro(bruto, teto = MAX_CORPO) {
+  if (bruto === null || bruto === void 0 || bruto.length === 0) return null;
+  let texto3 = bruto;
+  try {
+    const v = JSON.parse(bruto);
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      texto3 = JSON.stringify(redigirSensiveis(v));
+    }
+  } catch {
+  }
+  return truncar(texto3.replace(CREDENCIAL_EM_TEXTO, "$1$2[REDIGIDO]"), teto);
+}
+var ColetaDeRequisicao = class {
+  constructor(id, agora, novoId) {
+    this.agora = agora;
+    this.novoId = novoId;
+    this.idAtual = id;
+  }
+  linhas = [];
+  conversaId = null;
+  descartados = 0;
+  /**
+   * O id da requisição **corrente**. Muda a cada `gravar`.
+   *
+   * 🚨 **Isto não é zelo — foi um defeito medido.** Em produção `montarContexto` roda por
+   * requisição, mas o shim de desenvolvimento e a suíte reaproveitam o mesmo `Contexto` em
+   * várias chamadas (é como todo teste de rota deste projeto é escrito). Com um id fixo, a
+   * **segunda** gravação colidia com a `PRIMARY KEY`, o `catch` de `FR-20` engolia o erro e
+   * o registro parava para sempre — sem exceção, sem log, e com a primeira linha lá para
+   * fazer parecer que funcionava. A mesma família de `{}` silencioso de `linhasComoObjetos`.
+   */
+  idAtual;
+  /** O id da requisição corrente — é ele que os eventos carregam em `requisicao_id`. */
+  get id() {
+    return this.idAtual;
+  }
+  /** A conversa só é conhecida depois do roteamento; o detalhe do painel agrupa por ela. */
+  emConversa(id) {
+    if (id) this.conversaId = id;
+  }
+  registrar(evento) {
+    if (this.linhas.length >= MAX_EVENTOS_POR_REQUISICAO) {
+      this.descartados += 1;
+      return;
+    }
+    if (evento.conversaId) this.conversaId = evento.conversaId;
+    this.linhas.push({
+      id: this.novoId(),
+      conversaId: evento.conversaId ?? this.conversaId,
+      tipo: evento.tipo,
+      origem: evento.origem,
+      resumo: evento.resumo,
+      dadosJson: evento.dados ? corpoSeguro(seguroStringify(evento.dados), MAX_DADOS_EVENTO) : null,
+      custoUsd: evento.custoUsd ?? null,
+      duracaoMs: evento.duracaoMs ?? null,
+      ordem: this.linhas.length
+    });
+  }
+  /** O observador que os cinco transportes externos recebem — `FR-10b`. */
+  observador() {
+    return (c) => {
+      this.registrar({
+        tipo: "chamada_externa",
+        origem: c.alvo === "organizacao" ? "atlassian" : c.alvo,
+        resumo: `${c.alvo} ${c.metodo} ${c.caminho} \u2192 ${c.falha ?? c.status ?? "sem resposta"}`,
+        dados: {
+          alvo: c.alvo,
+          metodo: c.metodo,
+          caminho: c.caminho,
+          status: c.status,
+          falha: c.falha ?? null
+        },
+        duracaoMs: c.duracaoMs
+      });
+    };
+  }
+  get totalEventos() {
+    return this.linhas.length;
+  }
+  /**
+   * Grava tudo. **Nunca lança** (`FR-20`): o registro é acessório, e derrubar a rota que se
+   * queria investigar seria trocar o problema por um pior.
+   */
+  async gravar(db, desfecho) {
+    const criadoEm = this.agora();
+    const linhas = this.linhas;
+    const descartados = this.descartados;
+    const conversaId = this.conversaId;
+    const id = this.idAtual;
+    this.linhas = [];
+    this.descartados = 0;
+    this.conversaId = null;
+    this.idAtual = this.novoId();
+    try {
+      await db.exec(
+        `INSERT INTO investigador_requisicoes
+           (id, ator_email, conversa_id, metodo, caminho, status, duracao_ms,
+            req_bytes, resp_bytes, req_json, resp_json, erro, criado_em)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          desfecho.atorEmail,
+          conversaId,
+          desfecho.metodo,
+          desfecho.caminho,
+          desfecho.status,
+          desfecho.duracaoMs,
+          desfecho.reqBytes ?? null,
+          desfecho.respBytes ?? null,
+          corpoSeguro(desfecho.reqBruto),
+          corpoSeguro(desfecho.respBruto),
+          desfecho.erro ? truncar(desfecho.erro, 500) : null,
+          criadoEm
+        ]
+      );
+    } catch (e) {
+      aviso("requisicao", e);
+      return;
+    }
+    if (descartados > 0) {
+      linhas.push({
+        id: this.novoId(),
+        conversaId,
+        tipo: "erro_de_rota",
+        origem: "servidor",
+        // ⚠️ Teto atingido é DITO, nunca silencioso: registro que some sem avisar faz quem
+        // investiga concluir que o app parou onde na verdade o registro parou.
+        resumo: `Teto de eventos atingido \u2014 ${descartados} evento(s) n\xE3o registrado(s).`,
+        dadosJson: null,
+        custoUsd: null,
+        duracaoMs: null,
+        ordem: linhas.length
+      });
+    }
+    for (let i = 0; i < linhas.length; i += EVENTOS_POR_LOTE) {
+      const lote = linhas.slice(i, i + EVENTOS_POR_LOTE);
+      const params = [];
+      for (const l of lote) {
+        params.push(
+          l.id,
+          id,
+          l.conversaId,
+          desfecho.atorEmail,
+          l.tipo,
+          l.origem,
+          truncar(l.resumo, 400),
+          l.dadosJson,
+          l.custoUsd,
+          l.duracaoMs,
+          l.ordem,
+          criadoEm
+        );
+      }
+      try {
+        await db.exec(
+          `INSERT INTO investigador_eventos
+             (id, requisicao_id, conversa_id, ator_email, tipo, origem, resumo,
+              dados_json, custo_usd, duracao_ms, ordem, criado_em)
+           VALUES ${lote.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`,
+          params
+        );
+      } catch (e) {
+        aviso("eventos", e);
+        return;
+      }
+    }
+  }
+};
+function seguroStringify(v) {
+  try {
+    return JSON.stringify(v) ?? "";
+  } catch {
+    return '"[n\xE3o foi poss\xEDvel serializar este evento]"';
+  }
+}
+function aviso(etapa, e) {
+  const classe = e instanceof Error ? e.name : typeof e;
+  console.warn(`[investigador] falha ao gravar ${etapa} (${classe})`);
+}
+
+// src/lib/investigador/fetch-observado.ts
+function caminhoDe(entrada) {
+  try {
+    const bruto = typeof entrada === "string" ? entrada : entrada instanceof URL ? entrada.toString() : entrada.url;
+    return new URL(bruto).pathname;
+  } catch {
+    return "(caminho n\xE3o reconhecido)";
+  }
+}
+function rotuloDaFalha2(e) {
+  const alvo = e;
+  const nome = typeof alvo?.name === "string" && alvo.name || typeof alvo?.constructor?.name === "string" && alvo.constructor.name || "erro";
+  return String(nome).toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 24);
+}
+function fetchObservado(alvo, observar, base = fetch.bind(globalThis), agoraMs = () => Date.now()) {
+  return async (entrada, init) => {
+    const comeco = agoraMs();
+    const metodo = String(
+      init?.method ?? (typeof entrada === "object" && "method" in entrada ? entrada.method : "GET")
+    ).toUpperCase();
+    const caminho = caminhoDe(entrada);
+    try {
+      const r = await base(entrada, init);
+      observar({ alvo, metodo, caminho, status: r.status, duracaoMs: agoraMs() - comeco });
+      return r;
+    } catch (e) {
+      observar({
+        alvo,
+        metodo,
+        caminho,
+        status: null,
+        duracaoMs: agoraMs() - comeco,
+        falha: rotuloDaFalha2(e)
+      });
+      throw e;
+    }
+  };
+}
+
+// src/lib/investigador/registro.ts
+var InvestigadorDesligado = class {
+  registrar() {
+  }
+  emConversa() {
+  }
+  observador() {
+    return () => {
+    };
+  }
+};
+var INVESTIGADOR_DESLIGADO = new InvestigadorDesligado();
+
 // src/lib/config/index.ts
 var CONFIG_PADRAO = Object.freeze({
   dominios_permitidos: [],
@@ -3252,7 +3507,10 @@ var CONFIG_PADRAO = Object.freeze({
   ttl_metadados_seg: 900,
   ttl_conteudo_seg: 300,
   limite_requisicoes_por_minuto: 30,
-  teto_custo_conversa_usd: 0.5
+  teto_custo_conversa_usd: 0.5,
+  // Ver o comentário do campo: ligado por default é deliberado, e é a exceção declarada.
+  investigador_ligado: true,
+  investigador_retencao_dias: 30
 });
 function lista(bruto) {
   return (bruto ?? "").split(",").map((v) => v.trim().toLowerCase()).filter((v) => v.length > 0);
@@ -3916,7 +4174,76 @@ var TABELAS = [
      UNIQUE (conversa_id, nome_arquivo)
    )`,
   `CREATE INDEX IF NOT EXISTS idx_analises_anexo_conversa
-     ON analises_anexo (conversa_id, solicitante_email)`
+     ON analises_anexo (conversa_id, solicitante_email)`,
+  /**
+   * O Investigador — spec 009, `FR-1`.
+   *
+   * 🚨 **Existe porque em 14/08/2026 ninguém conseguiu responder por que uma pessoa passou
+   * 70 minutos no app e não abriu chamado.** `getAppLogs` da plataforma registra método e
+   * caminho de `/api/*` e mais nada — sem status, sem duração, sem corpo. A `auditoria`
+   * sabe que houve seis `mensagem_enviada` e **não pode** saber o resto, porque `RN-10`
+   * mantém conteúdo pessoal fora dela de propósito.
+   *
+   * ⚠️ **Esta tabela NÃO é auditoria, e a diferença é em todos os eixos.** `auditoria` é
+   * append-only de longa duração (piso de 180 dias, `D-17`) e sem conteúdo; esta carrega
+   * conteúdo, tem retenção curta (`investigador_retencao_dias`, default 30) e existe para
+   * depurar. Fundir as duas daria a pior das duas: registro sensível guardado por seis
+   * meses, ou investigação sem o dado que interessa.
+   *
+   * `req_json`/`resp_json` são **truncados com marca** e passam pela redação de
+   * credenciais — ver `investigador/coleta.ts`, o único lugar que escreve aqui.
+   */
+  `CREATE TABLE IF NOT EXISTS investigador_requisicoes (
+     id           TEXT PRIMARY KEY,
+     ator_email   TEXT NOT NULL,
+     conversa_id  TEXT,
+     metodo       TEXT NOT NULL,
+     caminho      TEXT NOT NULL,
+     status       INTEGER NOT NULL,
+     duracao_ms   INTEGER NOT NULL,
+     req_bytes    INTEGER,
+     resp_bytes   INTEGER,
+     req_json     TEXT,
+     resp_json    TEXT,
+     erro         TEXT,
+     criado_em    TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_req_criado
+     ON investigador_requisicoes (criado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_req_conversa
+     ON investigador_requisicoes (conversa_id, criado_em)`,
+  /**
+   * Os eventos dentro de cada requisição — spec 009, `FR-5`, `FR-10b`.
+   *
+   * ⚠️ **`ordem` não é enfeite.** A gravação é em **lote, no fim da requisição** (`FR-10c`),
+   * então dezenas de eventos compartilham o mesmo carimbo de milissegundo. Ordenar por
+   * `criado_em` devolveria uma ordem indeterminada — e "em que ordem isso aconteceu?" é
+   * exatamente a pergunta que esta tabela existe para responder. `ordem` é o índice dentro
+   * da requisição; a chave de ordenação da tela é `(criado_em, ordem)`.
+   *
+   * ⚠️ **`requisicao_id` é o que liga a ida ao modelo ao POST que a conteve.** Sem ele, "o
+   * turno levou 38 s" e "a chamada de extração levou 31 s" seriam dois fatos soltos.
+   */
+  `CREATE TABLE IF NOT EXISTS investigador_eventos (
+     id             TEXT PRIMARY KEY,
+     requisicao_id  TEXT,
+     conversa_id    TEXT,
+     ator_email     TEXT NOT NULL,
+     tipo           TEXT NOT NULL,
+     origem         TEXT NOT NULL,
+     resumo         TEXT,
+     dados_json     TEXT,
+     custo_usd      REAL,
+     duracao_ms     INTEGER,
+     ordem          INTEGER NOT NULL DEFAULT 0,
+     criado_em      TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_ev_conversa
+     ON investigador_eventos (conversa_id, criado_em, ordem)`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_ev_criado
+     ON investigador_eventos (criado_em)`,
+  `CREATE INDEX IF NOT EXISTS idx_investigador_ev_requisicao
+     ON investigador_eventos (requisicao_id, ordem)`
 ];
 var COLUNAS_ADICIONADAS = [
   // T-304 / RF-19 — a área **no momento da criação** é o dado histórico correto,
@@ -4904,13 +5231,14 @@ var SEM_REDERIVACAO = {
 };
 var MAX_CICLOS_TOOL = 3;
 var Orquestrador = class {
-  constructor(ia, executor, conversas, auditoria, novoId, fonteDeTipos) {
+  constructor(ia, executor, conversas, auditoria, novoId, fonteDeTipos, investigador = INVESTIGADOR_DESLIGADO) {
     this.ia = ia;
     this.executor = executor;
     this.conversas = conversas;
     this.auditoria = auditoria;
     this.novoId = novoId;
     this.fonteDeTipos = fonteDeTipos;
+    this.investigador = investigador;
   }
   async processarMensagem(conversa, textoUsuario, config) {
     await this.conversas.adicionarMensagem(
@@ -4920,6 +5248,14 @@ var Orquestrador = class {
       textoUsuario,
       null
     );
+    this.investigador.emConversa(conversa.id);
+    this.investigador.registrar({
+      tipo: "mensagem_usuario",
+      origem: "usuario",
+      conversaId: conversa.id,
+      resumo: `Mensagem da pessoa (${textoUsuario.length} caracteres)`,
+      dados: { texto: textoUsuario, estadoDaConversa: conversa.estado }
+    });
     if (await this.conversas.temBloqueioPendente(conversa.id)) {
       await this.conversas.adicionarMensagem(
         this.novoId(),
@@ -4982,10 +5318,39 @@ var Orquestrador = class {
       });
       custoTurno += resposta.custoEstimadoUsd;
       ultimoTexto = resposta.texto;
+      this.investigador.registrar({
+        tipo: "ia_chat",
+        origem: "ia",
+        conversaId: atual.id,
+        resumo: `Ciclo ${ciclo + 1}: modelo respondeu ${resposta.texto.length} caracteres e prop\xF4s ${resposta.toolsPropostas.length} ferramenta(s)`,
+        custoUsd: resposta.custoEstimadoUsd,
+        dados: {
+          ciclo: ciclo + 1,
+          toolsPermitidas: permitidas.map((t) => t.nome),
+          historicoEnviado: historico.map((m) => ({
+            papel: m.papel,
+            toolNome: m.toolNome ?? null,
+            conteudo: m.conteudo
+          })),
+          textoDoModelo: resposta.texto,
+          toolsPropostas: resposta.toolsPropostas
+        }
+      });
       if (resposta.toolsPropostas.length === 0) break;
       for (const proposta of resposta.toolsPropostas) {
         if (!toolAutorizada(atual, proposta.nome)) {
           recusadas.push(proposta.nome);
+          this.investigador.registrar({
+            tipo: "tool_recusada",
+            origem: "servidor",
+            conversaId: atual.id,
+            resumo: `Ferramenta "${proposta.nome}" recusada \u2014 n\xE3o est\xE1 autorizada neste momento`,
+            dados: {
+              toolProposta: proposta.nome,
+              argumentos: proposta.argumentos,
+              permitidas: permitidas.map((t) => t.nome)
+            }
+          });
           await this.auditoria.registrar({
             atorEmail: atual.solicitanteEmail,
             acao: "tool_recusada",
@@ -5003,6 +5368,20 @@ var Orquestrador = class {
         const r = await this.rodarTool(atual, proposta.nome, proposta.argumentos, config);
         custoTurno += r.custoUsd;
         executadas.push(proposta.nome);
+        this.investigador.registrar({
+          tipo: "tool_executada",
+          origem: "servidor",
+          conversaId: atual.id,
+          resumo: `Ferramenta "${proposta.nome}" executada${r.falhou ? " e FALHOU" : ""}`,
+          custoUsd: r.custoUsd,
+          dados: {
+            tool: proposta.nome,
+            argumentos: proposta.argumentos,
+            falhou: r.falhou,
+            paraModelo: r.paraModelo,
+            bloqueou: Boolean(r.veredito?.bloquear)
+          }
+        });
         historico.push({
           papel: "tool",
           conteudo: r.paraModelo,
@@ -5055,6 +5434,23 @@ var Orquestrador = class {
       textoFinal,
       null
     );
+    this.investigador.registrar({
+      tipo: "resposta_agente",
+      origem: "servidor",
+      conversaId: atual.id,
+      resumo: bloqueio ? "Resposta do turno: mensagem de BLOQUEIO (texto do modelo descartado)" : bloqueioPendente ? "Resposta do turno: bloqueio pendente (texto do modelo descartado)" : "Resposta do turno: texto do modelo",
+      custoUsd: custoTurno,
+      dados: {
+        textoExibido: textoFinal,
+        textoDoModeloDescartado: Boolean(bloqueio || bloqueioPendente),
+        textoDoModelo: ultimoTexto,
+        bloqueioPendente,
+        toolsExecutadas: executadas,
+        toolsRecusadas: recusadas,
+        // O que a tela decide com isto: sem proposta não há cartão (`FR-7` da 008).
+        temProposta: Boolean(atual.proposta)
+      }
+    });
     if (bloqueio) await this.conversas.definirEstado(atual.id, "bloqueado");
     return {
       texto: textoFinal,
@@ -5115,18 +5511,41 @@ var Orquestrador = class {
    * informação — inventar campos para poder propor seria pior.
    */
   async tentarMontarProposta(conversa, config) {
-    if (config.tipos_chamado_permitidos.length === 0) return { custoUsd: 0, ...SEM_REDERIVACAO };
+    if (config.tipos_chamado_permitidos.length === 0) {
+      this.semProposta(conversa, "allowlist_de_tipos_vazia", {
+        detalhe: "Nenhum tipo de chamado liberado na configura\xE7\xE3o (RF-28)."
+      });
+      return { custoUsd: 0, ...SEM_REDERIVACAO };
+    }
     try {
       const tiposPermitidos = await tiposOferecidos(this.fonteDeTipos, config);
-      if (tiposPermitidos.length === 0) return { custoUsd: 0, ...SEM_REDERIVACAO };
+      if (tiposPermitidos.length === 0) {
+        this.semProposta(conversa, "nenhum_tipo_com_nome", {
+          detalhe: "A allowlist tem tipos, mas nenhum deles saiu do service desk configurado com nome (D-70).",
+          idsNaAllowlist: config.tipos_chamado_permitidos,
+          serviceDeskId: config.service_desk_id
+        });
+        return { custoUsd: 0, ...SEM_REDERIVACAO };
+      }
       const schema = await this.schemaDoAssuntoVigente(conversa, config);
       const r = await this.ia.extrairProposta({
         mensagens: await this.conversas.listarMensagens(conversa.id),
         tiposPermitidos,
         camposDoAssunto: camposParaExtracao(schema)
       });
-      if (!r.proposta) return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO };
+      if (!r.proposta) {
+        this.semProposta(conversa, "extracao_sem_proposta", {
+          detalhe: "O modelo respondeu e a proposta foi recusada na interpreta\xE7\xE3o \u2014 a resposta crua diz qual das condi\xE7\xF5es falhou.",
+          respostaBrutaDoModelo: r.respostaBruta ?? null,
+          tiposOferecidos: tiposPermitidos,
+          camposDoAssunto: camposParaExtracao(schema)
+        });
+        return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO };
+      }
       if (await this.conversas.temBloqueioPendente(conversa.id)) {
+        this.semProposta(conversa, "bloqueio_pendente_na_gravacao", {
+          detalhe: "A proposta veio pronta e foi descartada: nasceu um bloqueio enquanto a extra\xE7\xE3o estava em voo (RN-07)."
+        });
         return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO };
       }
       const assuntoMudou = r.proposta.tipoChamadoId !== conversa.proposta?.tipoChamadoId;
@@ -5149,15 +5568,54 @@ var Orquestrador = class {
       const alterados = diffDeProposta(conversa.propostaDaIa, nova);
       await this.conversas.definirPropostaDaIa(conversa.id, nova);
       await this.registrarAjuste(conversa, alterados, ajuste.recusas);
+      this.investigador.registrar({
+        tipo: "proposta_rederivada",
+        origem: "ia",
+        conversaId: conversa.id,
+        resumo: alterados.length > 0 ? `Proposta rederivada \u2014 a IA mudou: ${alterados.join(", ")}` : "Proposta rederivada \u2014 a IA n\xE3o mudou nada",
+        custoUsd: r.custoEstimadoUsd,
+        dados: {
+          proposta: nova,
+          alterados,
+          assuntoMudou,
+          camposSugeridos: ajuste.valores,
+          recusasDeAjuste: ajuste.recusas,
+          baseAnterior: conversa.propostaDaIa ?? null
+        }
+      });
       return {
         custoUsd: r.custoEstimadoUsd,
         alterados,
         camposSugeridos: ajuste.valores,
         recusasDeAjuste: ajuste.recusas
       };
-    } catch {
+    } catch (e) {
+      this.semProposta(conversa, "excecao_na_extracao", {
+        detalhe: "A extra\xE7\xE3o lan\xE7ou. O agente segue conversando (RF-28), e ningu\xE9m \xE9 avisado.",
+        classe: e instanceof Error ? e.name : typeof e,
+        mensagem: e instanceof Error ? e.message : String(e)
+      });
       return { custoUsd: 0, ...SEM_REDERIVACAO };
     }
+  }
+  /**
+   * O registro de **por que não houve proposta** — spec 009, `FR-6`.
+   *
+   * ⚠️ **Uma função só, e um `motivo` fechado por chamada.** As seis saídas sem proposta
+   * pedem trabalho diferente de quem investiga (configurar allowlist · conferir o service
+   * desk · ler a resposta do modelo · usar o override · olhar a exceção), e é exatamente a
+   * distinção que `area_indisponivel` × `area_nao_encontrada` já defende em outro canto do
+   * app. Uma linha genérica "não houve proposta" repetiria o silêncio que este arquivo
+   * inteiro existe para desfazer.
+   */
+  semProposta(conversa, motivo, dados) {
+    this.investigador.registrar({
+      tipo: "ia_extracao_recusada",
+      origem: "ia",
+      conversaId: conversa.id,
+      resumo: `Sem proposta: ${motivo}`,
+      dados: { motivo, ...dados }
+    });
   }
   /**
    * O schema do assunto vigente, ou vazio.
@@ -5224,6 +5682,13 @@ var Orquestrador = class {
   }
   async registrarBloqueio(conversa, regra, motivo, evidencia) {
     await this.conversas.registrarBloqueio(this.novoId(), conversa.id, regra, motivo, evidencia);
+    this.investigador.registrar({
+      tipo: "bloqueio",
+      origem: "servidor",
+      conversaId: conversa.id,
+      resumo: `Bloqueio por ${regra} \u2014 a conversa fica parada at\xE9 o override (RF-13)`,
+      dados: { regra, motivo, evidencia }
+    });
     await this.auditoria.registrar({
       atorEmail: conversa.solicitanteEmail,
       acao: "bloqueio_disparado",
@@ -6002,13 +6467,14 @@ function falhaDefinitivaDeCriacao(erro2) {
   return erro2 instanceof ErroAtlassian && !erro2.detalhe.transitorio;
 }
 var ServicoChamados = class {
-  constructor(atlassian, outbox, vinculos, auditoria, novoId, anexosEnviados) {
+  constructor(atlassian, outbox, vinculos, auditoria, novoId, anexosEnviados, investigador = INVESTIGADOR_DESLIGADO) {
     this.atlassian = atlassian;
     this.outbox = outbox;
     this.vinculos = vinculos;
     this.auditoria = auditoria;
     this.novoId = novoId;
     this.anexosEnviados = anexosEnviados;
+    this.investigador = investigador;
   }
   /**
    * Abertura a partir de uma conversa com o agente.
@@ -6106,6 +6572,22 @@ var ServicoChamados = class {
   }
   /** Usado tanto na abertura quanto pelo cron de reprocessamento. */
   async processar(submissaoId, dados) {
+    this.investigador.emConversa(dados.conversaId);
+    this.investigador.registrar({
+      tipo: "payload_final",
+      origem: "servidor",
+      conversaId: dados.conversaId,
+      resumo: `Entregando ao Jira: tipo ${dados.payload.tipoChamadoId}, prioridade ${dados.payload.prioridade ?? "(nenhuma)"}`,
+      dados: {
+        submissaoId,
+        via: dados.via,
+        chaveIdempotencia: dados.chaveIdempotencia,
+        verificadoRegras: dados.verificadoRegras,
+        declarouAnexo: dados.declarouAnexo ?? null,
+        area: dados.area,
+        payload: dados.payload
+      }
+    });
     try {
       const criado = await this.atlassian.criarChamado({
         serviceDeskId: dados.payload.serviceDeskId,
@@ -6168,6 +6650,13 @@ var ServicoChamados = class {
           declarouAnexo: dados.declarouAnexo ?? null
         }
       });
+      this.investigador.registrar({
+        tipo: "desfecho_criacao",
+        origem: "atlassian",
+        conversaId: dados.conversaId,
+        resumo: `Chamado criado: ${criado.issueKey}`,
+        dados: { issueKey: criado.issueKey, submissaoId }
+      });
       return {
         issueKey: criado.issueKey,
         estado: "criado",
@@ -6177,6 +6666,13 @@ var ServicoChamados = class {
     } catch (erro2) {
       const transitorio = erro2 instanceof ErroAtlassian ? erro2.detalhe.transitorio : true;
       const mensagem = erro2 instanceof Error ? erro2.message : String(erro2);
+      this.investigador.registrar({
+        tipo: "desfecho_criacao",
+        origem: "atlassian",
+        conversaId: dados.conversaId,
+        resumo: transitorio ? "Cria\xE7\xE3o falhou de forma TRANSIT\xD3RIA \u2014 o cron vai tentar de novo" : "Cria\xE7\xE3o falhou de forma DEFINITIVA \u2014 esta submiss\xE3o n\xE3o ser\xE1 reprocessada",
+        dados: { submissaoId, transitorio, erro: mensagem }
+      });
       await this.outbox.registrarTentativaFalha(submissaoId, mensagem, transitorio);
       await this.auditoria.registrar({
         atorEmail: dados.solicitanteEmail,
@@ -7289,6 +7785,10 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   const auditoria = new AuditoriaBanco(env.DB, agora, novoId);
   const usandoFakes = modoDemo || env.GOATLAS_USAR_FAKES === "1" || !env.ATLASSIAN_API_TOKEN;
   const somenteLeitura = env.GOATLAS_SOMENTE_LEITURA === "1";
+  const coleta = valores.investigador_ligado ? new ColetaDeRequisicao(novoId(), agora, novoId) : null;
+  const investigador = coleta ?? INVESTIGADOR_DESLIGADO;
+  const observarChamada = investigador.observador();
+  const olho = (alvo) => coleta ? { fetchImpl: fetchObservado(alvo, observarChamada) } : {};
   const atlassianBase = reaproveitar.atlassian ? reaproveitar.atlassian : usandoFakes ? new ClienteAtlassianFake() : new ClienteAtlassianHttp({
     baseUrl: env.ATLASSIAN_BASE_URL ?? "",
     email: env.ATLASSIAN_EMAIL ?? "",
@@ -7296,21 +7796,29 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     ttlMetadadosSeg: valores.ttl_metadados_seg,
     ttlConteudoSeg: valores.ttl_conteudo_seg,
     // O que faz o TTL acima valer de verdade — ver `cachesAtlassianDoIsolate`.
-    caches: cachesAtlassianDoIsolate
+    caches: cachesAtlassianDoIsolate,
+    // Spec 009 — o registro do ponto de ruptura. Objeto vazio com o Investigador
+    // desligado, e aí o transporte usa o `fetch` de sempre.
+    ...olho("atlassian")
     // RF-21, Q4 — configurável (RNF-25), nunca hardcoded. `null` até o time
     // de tech confirmar o id do campo "Solicitante"; o solicitante real
     // continua indo na descrição enquanto isso (cinto e suspensório).
   });
   const atlassian = somenteLeitura ? new ClienteAtlassianSomenteLeitura(atlassianBase) : atlassianBase;
   const ia = reaproveitar.ia ? reaproveitar.ia : usandoFakes ? new ClienteIAFake() : !env.LLM_API_KEY ? new ClienteIAIndisponivel() : new ClienteIAHttp({
+    ...olho("ia"),
     baseUrl: env.LLM_BASE_URL ?? null,
     apiKey: env.LLM_API_KEY,
     modelo: env.LLM_MODEL ?? "gpt-5.4-mini",
     apiKeyFallback: env.LLM_FALLBACK ?? null,
     ...env.LLM_FALLBACK_MODEL ? { modeloFallback: env.LLM_FALLBACK_MODEL } : {}
   });
-  const organizacao = reaproveitar.organizacao ? reaproveitar.organizacao : usandoFakes ? new ClienteOrganizacaoFake() : env.ATLASSIAN_ORG_API_KEY ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY }) : null;
-  const teamguide = usandoFakes ? new ClienteTeamGuideFake() : env.TG_API_TOKEN ? new ClienteTeamGuideHttp({ token: env.TG_API_TOKEN, cache: cacheTeamGuideDoIsolate }) : null;
+  const organizacao = reaproveitar.organizacao ? reaproveitar.organizacao : usandoFakes ? new ClienteOrganizacaoFake() : env.ATLASSIAN_ORG_API_KEY ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY, ...olho("organizacao") }) : null;
+  const teamguide = usandoFakes ? new ClienteTeamGuideFake() : env.TG_API_TOKEN ? new ClienteTeamGuideHttp({
+    token: env.TG_API_TOKEN,
+    cache: cacheTeamGuideDoIsolate,
+    ...olho("teamguide")
+  }) : null;
   if (modoDemo) {
     if (atlassianBase instanceof ClienteAtlassianFake) {
       semearAtlassianDemo(atlassianBase);
@@ -7328,7 +7836,8 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   const lerPdf = usandoFakes ? async () => ({ estado: "lido", texto: "fake: texto extra\xEDdo do PDF" }) : criarLeitorPdf({
     url: env.OCR_WORKER_URL ?? "",
     token: env.OCR_WORKER_TOKEN ?? "",
-    timeoutMs: 2e4
+    timeoutMs: 2e4,
+    ...olho("ocr")
   });
   const chamados = new ServicoChamados(
     atlassian,
@@ -7336,10 +7845,19 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     vinculos,
     auditoria,
     novoId,
-    anexosEnviados
+    anexosEnviados,
+    investigador
   );
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora);
-  const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId, atlassian);
+  const orquestrador = new Orquestrador(
+    ia,
+    executor,
+    conversas,
+    auditoria,
+    novoId,
+    atlassian,
+    investigador
+  );
   const inventarioAssentos = new RepositorioInventario(env.DB, novoId);
   const repoNotificacoes = new RepositorioNotificacoes(env.DB, agora);
   const alertasSla = new RepositorioAlertasSla(env.DB, agora);
@@ -7394,6 +7912,10 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     config,
     valores,
     auditoria,
+    investigador,
+    // Com o registro desligado, fechar é não fazer nada — e nada é lido nem gravado.
+    fecharInvestigacao: coleta ? (desfecho) => coleta.gravar(env.DB, desfecho) : async () => {
+    },
     atlassian,
     ia,
     conversas,
@@ -9549,6 +10071,19 @@ async function analisarAnexoDaConversa(ctx, arquivo) {
       descricao: r.descricao,
       custoUsd: r.custoUsd
     });
+    ctx.investigador.registrar({
+      tipo: "anexo_analisado",
+      origem: "ia",
+      conversaId: arquivo.conversaId,
+      resumo: `Leitura de "${arquivo.nome}": ${r.estado}`,
+      custoUsd: r.custoUsd ?? null,
+      dados: {
+        nome: arquivo.nome,
+        tipoDeclarado: arquivo.tipo,
+        estado: r.estado,
+        descricao: r.descricao
+      }
+    });
     await ctx.auditoria.registrar({
       atorEmail: arquivo.solicitanteEmail,
       // Três ações, derivadas dos seis estados por uma função só (achado `F3`).
@@ -9771,13 +10306,13 @@ var FRASE_DO_ESTADO = {
   falhou: "a leitura falhou \u2014 o arquivo n\xE3o foi analisado"
 };
 function recortar(texto3) {
-  const aviso = "\n\n---\n\n_\u26A0\uFE0F Transcri\xE7\xE3o truncada: a conversa passou do limite de arquivo do goatlas. O di\xE1logo completo continua registrado no app._\n";
+  const aviso2 = "\n\n---\n\n_\u26A0\uFE0F Transcri\xE7\xE3o truncada: a conversa passou do limite de arquivo do goatlas. O di\xE1logo completo continua registrado no app._\n";
   const codificador = new TextEncoder();
   if (codificador.encode(texto3).length <= LIMITE_TRANSCRICAO_BYTES) return texto3;
-  const sobra = LIMITE_TRANSCRICAO_BYTES - codificador.encode(aviso).length;
+  const sobra = LIMITE_TRANSCRICAO_BYTES - codificador.encode(aviso2).length;
   const bytes = codificador.encode(texto3).slice(0, Math.max(0, sobra));
   const decodificador = new TextDecoder("utf-8", { fatal: false });
-  return decodificador.decode(bytes).replace(/�+$/u, "") + aviso;
+  return decodificador.decode(bytes).replace(/�+$/u, "") + aviso2;
 }
 function nomeDoArquivo(issueKey) {
   return `conversa-${issueKey.replace(/[^A-Za-z0-9-]/g, "")}.md`;
@@ -9873,7 +10408,10 @@ var FAMILIA = {
   // que significaria "apagar tudo imediatamente" — e apagar dado pessoal é irreversível.
   retencao_conversas_dias: "inteiro_positivo_ou_vazio",
   retencao_auditoria_dias: "inteiro_positivo_ou_vazio",
-  retencao_notificacoes_dias: "inteiro_positivo_ou_vazio"
+  retencao_notificacoes_dias: "inteiro_positivo_ou_vazio",
+  // Spec 009 — o Investigador. Sem tela no console, como TTL e rate limit (`D-25`).
+  investigador_ligado: "booleano",
+  investigador_retencao_dias: "inteiro_positivo"
 };
 function numeroReal(valor) {
   return typeof valor === "number" && Number.isFinite(valor);
@@ -9936,6 +10474,11 @@ function validarFamilia(familia, valor) {
       }
       return { ok: true, valor };
     }
+    case "booleano":
+      if (typeof valor !== "boolean") {
+        return { ok: false, motivo: "Esperado verdadeiro ou falso." };
+      }
+      return { ok: true, valor };
     case "canal_ou_vazio": {
       if (valor === null) return { ok: true, valor: null };
       if (valor !== "chat" && valor !== "email" && valor !== "nenhum") {
@@ -10006,6 +10549,275 @@ function chaveDeConfigConhecida(chave2) {
   return chave2 in CONFIG_PADRAO;
 }
 
+// src/lib/investigador/corpos.ts
+var MAX_CORPO_LIDO_BYTES = 64e3;
+function ehJson(tipo) {
+  if (!tipo) return false;
+  const t = tipo.toLowerCase();
+  return t.includes("application/json") || t.includes("+json");
+}
+async function corpoDaRequisicao(req) {
+  const tipo = req.headers.get("content-type");
+  const declarado = Number(req.headers.get("content-length") ?? "");
+  const bytes = Number.isFinite(declarado) && declarado >= 0 ? declarado : null;
+  if (req.method === "GET" || req.method === "HEAD") return { texto: null, bytes: null };
+  if (!ehJson(tipo)) return { texto: null, bytes };
+  if (bytes !== null && bytes > MAX_CORPO_LIDO_BYTES) return { texto: null, bytes };
+  try {
+    const texto3 = await req.clone().text();
+    return { texto: texto3, bytes: bytes ?? texto3.length };
+  } catch {
+    return { texto: null, bytes };
+  }
+}
+async function corpoDaResposta(r) {
+  const tipo = r.headers.get("content-type");
+  if (!ehJson(tipo)) {
+    const declarado = Number(r.headers.get("content-length") ?? "");
+    return { texto: null, bytes: Number.isFinite(declarado) ? declarado : null };
+  }
+  try {
+    const texto3 = await r.clone().text();
+    return { texto: texto3, bytes: texto3.length };
+  } catch {
+    return { texto: null, bytes: null };
+  }
+}
+
+// src/lib/investigador/leitura.ts
+var LIMITE_PADRAO = 60;
+function inteiro(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+async function listarSessoes(db, filtro = {}) {
+  const limite2 = Math.min(Math.max(filtro.limite ?? LIMITE_PADRAO, 1), 200);
+  const porEmail = filtro.email?.trim().toLowerCase() || null;
+  const conversas = linhasComoObjetos(
+    await db.query(
+      `SELECT id, solicitante_email, estado, custo_usd, proposta_json, confirmado_em,
+              criado_em, atualizado_em
+         FROM conversas
+        ${porEmail ? "WHERE lower(solicitante_email) = ?" : ""}
+        ORDER BY criado_em DESC
+        LIMIT ?`,
+      porEmail ? [porEmail, limite2] : [limite2]
+    )
+  );
+  if (conversas.length === 0) return [];
+  const mensagens = /* @__PURE__ */ new Map();
+  for (const m of linhasComoObjetos(
+    await db.query(
+      `SELECT conversa_id, papel, COUNT(*) AS total, MAX(criado_em) AS ultima
+         FROM mensagens GROUP BY conversa_id, papel`,
+      []
+    )
+  )) {
+    const atual = mensagens.get(m.conversa_id) ?? { pessoa: 0, agente: 0, ultima: "" };
+    if (m.papel === "user") atual.pessoa += inteiro(m.total);
+    if (m.papel === "assistant") atual.agente += inteiro(m.total);
+    if (m.ultima > atual.ultima) atual.ultima = m.ultima;
+    mensagens.set(m.conversa_id, atual);
+  }
+  const bloqueios = /* @__PURE__ */ new Map();
+  for (const b of linhasComoObjetos(
+    await db.query(
+      `SELECT conversa_id, COUNT(*) AS total, SUM(houve_override) AS overrides
+         FROM bloqueios GROUP BY conversa_id`,
+      []
+    )
+  )) {
+    bloqueios.set(b.conversa_id, { total: inteiro(b.total), overrides: inteiro(b.overrides) });
+  }
+  const api = /* @__PURE__ */ new Map();
+  for (const r of linhasComoObjetos(
+    await db.query(
+      `SELECT conversa_id, COUNT(*) AS total,
+              SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS erros,
+              MAX(duracao_ms) AS max_ms
+         FROM investigador_requisicoes
+        WHERE conversa_id IS NOT NULL
+        GROUP BY conversa_id`,
+      []
+    )
+  )) {
+    api.set(r.conversa_id, {
+      total: inteiro(r.total),
+      erros: inteiro(r.erros),
+      maxMs: inteiro(r.max_ms)
+    });
+  }
+  const chamados = /* @__PURE__ */ new Map();
+  for (const s of linhasComoObjetos(
+    await db.query(
+      `SELECT conversa_id, issue_key FROM submissoes
+        WHERE conversa_id IS NOT NULL AND issue_key IS NOT NULL`,
+      []
+    )
+  )) {
+    if (s.issue_key) chamados.set(s.conversa_id, s.issue_key);
+  }
+  const semProposta = /* @__PURE__ */ new Map();
+  for (const e of linhasComoObjetos(
+    await db.query(
+      `SELECT conversa_id, json_extract(dados_json, '$.motivo') AS motivo
+         FROM investigador_eventos
+        WHERE tipo = 'ia_extracao_recusada' AND conversa_id IS NOT NULL
+        ORDER BY criado_em ASC, ordem ASC`,
+      []
+    )
+  )) {
+    if (e.motivo) semProposta.set(e.conversa_id, e.motivo);
+  }
+  const itens = conversas.map((c) => {
+    const msg = mensagens.get(c.id) ?? { pessoa: 0, agente: 0, ultima: "" };
+    const blo = bloqueios.get(c.id) ?? { total: 0, overrides: 0 };
+    const req = api.get(c.id) ?? { total: 0, erros: 0, maxMs: 0 };
+    const temProposta = Boolean(c.proposta_json);
+    return {
+      conversaId: c.id,
+      solicitanteEmail: c.solicitante_email,
+      estado: c.estado,
+      criadoEm: c.criado_em,
+      ultimaAtividade: msg.ultima || c.atualizado_em,
+      custoUsd: Number(c.custo_usd) || 0,
+      mensagensDaPessoa: msg.pessoa,
+      mensagensDoAgente: msg.agente,
+      bloqueios: blo.total,
+      overrides: blo.overrides,
+      temProposta,
+      confirmadoEm: c.confirmado_em,
+      issueKey: chamados.get(c.id) ?? null,
+      requisicoes: req.total,
+      errosDeApi: req.erros,
+      duracaoMaximaMs: req.maxMs || null,
+      // Só faz sentido quando não houve proposta — com cartão na tela, o motivo antigo
+      // seria uma explicação para algo que deixou de ser verdade.
+      motivoSemProposta: temProposta ? null : semProposta.get(c.id) ?? null
+    };
+  });
+  return aplicarRecorte(itens, filtro.recorte ?? null);
+}
+function aplicarRecorte(itens, recorte) {
+  switch (recorte) {
+    case "sem_proposta":
+      return itens.filter((s) => !s.temProposta);
+    case "com_bloqueio":
+      return itens.filter((s) => s.bloqueios > 0);
+    case "com_erro":
+      return itens.filter((s) => s.errosDeApi > 0);
+    // "Abandonada" é conversa com mensagem e **sem chamado**: é a definição operacional de
+    // quem veio pedir ajuda e foi embora sem ela.
+    case "abandonada":
+      return itens.filter((s) => s.issueKey === null && s.mensagensDaPessoa > 0);
+    default:
+      return itens;
+  }
+}
+async function detalharSessao(db, conversaId) {
+  const eventos = linhasComoObjetos(
+    await db.query(
+      `SELECT * FROM investigador_eventos WHERE conversa_id = ?
+        ORDER BY criado_em ASC, ordem ASC LIMIT 2000`,
+      [conversaId]
+    )
+  );
+  const requisicoes = linhasComoObjetos(
+    await db.query(
+      `SELECT * FROM investigador_requisicoes WHERE conversa_id = ?
+        ORDER BY criado_em ASC LIMIT 500`,
+      [conversaId]
+    )
+  );
+  const mensagens = linhasComoObjetos(
+    await db.query(
+      `SELECT id, papel, conteudo, tool_nome, criado_em FROM mensagens
+        WHERE conversa_id = ? ORDER BY criado_em ASC LIMIT 500`,
+      [conversaId]
+    )
+  );
+  return { eventos, requisicoes, mensagens };
+}
+var LENTO_MS = 5e3;
+async function listarRequisicoes(db, filtro = {}) {
+  const limite2 = Math.min(Math.max(filtro.limite ?? 200, 1), 500);
+  const condicoes = [];
+  const params = [];
+  if (filtro.caminho?.trim()) {
+    condicoes.push("caminho LIKE ?");
+    params.push(`%${filtro.caminho.trim()}%`);
+  }
+  if (filtro.email?.trim()) {
+    condicoes.push("lower(ator_email) = ?");
+    params.push(filtro.email.trim().toLowerCase());
+  }
+  if (filtro.recorte === "erro") condicoes.push("status >= 400");
+  if (filtro.recorte === "lento") {
+    condicoes.push("duracao_ms >= ?");
+    params.push(LENTO_MS);
+  }
+  params.push(limite2);
+  return linhasComoObjetos(
+    await db.query(
+      `SELECT * FROM investigador_requisicoes
+        ${condicoes.length > 0 ? `WHERE ${condicoes.join(" AND ")}` : ""}
+        ORDER BY criado_em DESC LIMIT ?`,
+      params
+    )
+  );
+}
+async function resumoInvestigador(db) {
+  const geral = linhasComoObjetos(
+    await db.query(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS erros,
+              AVG(duracao_ms) AS media,
+              SUM(CASE WHEN duracao_ms >= ? THEN 1 ELSE 0 END) AS lentas
+         FROM investigador_requisicoes`,
+      [LENTO_MS]
+    )
+  )[0];
+  const porCaminho = linhasComoObjetos(
+    await db.query(
+      `SELECT caminho, COUNT(*) AS total,
+              SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS erros,
+              AVG(duracao_ms) AS media, MAX(duracao_ms) AS maximo
+         FROM investigador_requisicoes
+        GROUP BY caminho ORDER BY total DESC LIMIT 40`,
+      []
+    )
+  );
+  const eventos = linhasComoObjetos(
+    await db.query(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(custo_usd), 0) AS custo FROM investigador_eventos`,
+      []
+    )
+  )[0];
+  const total = inteiro(geral?.total);
+  return {
+    totalRequisicoes: total,
+    totalErros: inteiro(geral?.erros),
+    taxaErro: total > 0 ? Math.round(inteiro(geral?.erros) / total * 1e3) / 10 : null,
+    duracaoMediaMs: total > 0 ? Math.round(Number(geral?.media) || 0) : null,
+    lentas: inteiro(geral?.lentas),
+    porCaminho: porCaminho.map((c) => ({
+      caminho: c.caminho,
+      total: inteiro(c.total),
+      erros: inteiro(c.erros),
+      duracaoMediaMs: Math.round(Number(c.media) || 0),
+      duracaoMaximaMs: inteiro(c.maximo)
+    })),
+    totalEventos: inteiro(eventos?.total),
+    custoIaUsd: Number(eventos?.custo) || 0
+  };
+}
+async function expurgarInvestigador(db, dias, agoraIso) {
+  const corte = new Date(Date.parse(agoraIso) - dias * 24 * 60 * 60 * 1e3).toISOString();
+  const req = await db.exec(`DELETE FROM investigador_requisicoes WHERE criado_em < ?`, [corte]);
+  const ev = await db.exec(`DELETE FROM investigador_eventos WHERE criado_em < ?`, [corte]);
+  return { requisicoes: req.rowsWritten ?? 0, eventos: ev.rowsWritten ?? 0 };
+}
+
 // src/lib/http/rotas.ts
 var PRIORIDADES = ["critica", "alta", "normal"];
 var ehPrioridade = (v) => typeof v === "string" && PRIORIDADES.includes(v);
@@ -10013,6 +10825,35 @@ async function tratarRequisicao(req, ctx, env) {
   const url = new URL(req.url);
   const caminho = url.pathname;
   if (!caminho.startsWith("/api/")) return new Response(null, { status: 404 });
+  const inicio = Date.parse(ctx.agora());
+  const entrada = await corpoDaRequisicao(req);
+  const quem = { email: "(sem identidade)" };
+  let resposta = null;
+  let falha = null;
+  try {
+    resposta = await despachar(req, ctx, env, url, caminho, quem);
+    return resposta;
+  } catch (e) {
+    falha = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    throw e;
+  } finally {
+    const saida = resposta ? await corpoDaResposta(resposta) : { texto: null, bytes: null };
+    await ctx.fecharInvestigacao({
+      atorEmail: quem.email,
+      metodo: req.method,
+      caminho,
+      // Sem resposta houve exceção que subiu até o `worker.ts`, que devolve 500.
+      status: resposta ? resposta.status : 500,
+      duracaoMs: Math.max(0, Date.parse(ctx.agora()) - inicio),
+      reqBytes: entrada.bytes,
+      respBytes: saida.bytes,
+      reqBruto: entrada.texto,
+      respBruto: saida.texto,
+      erro: falha
+    });
+  }
+}
+async function despachar(req, ctx, env, url, caminho, quem) {
   if (caminho === "/api/health") return await tratarHealth(ctx);
   if (caminho.startsWith("/api/cron/")) {
     return await tratarCron(req, ctx, env, caminho);
@@ -10032,6 +10873,7 @@ async function tratarRequisicao(req, ctx, env) {
     return erro(MENSAGEM_NEGACAO[auth.motivo], "acesso_negado", 403);
   }
   const eu = auth.identidade;
+  quem.email = eu.email;
   if (caminho === "/api/auth/me" && req.method === "GET") {
     return json({
       email: eu.email,
@@ -10067,6 +10909,16 @@ async function tratarRequisicao(req, ctx, env) {
     if (e instanceof CriacaoRecusada) {
       return ERROS.regraDeCriacao(e.motivos.map((m) => MENSAGEM_RECUSA[m]));
     }
+    ctx.investigador.registrar({
+      tipo: "erro_de_rota",
+      origem: "servidor",
+      resumo: `A rota ${caminho} lan\xE7ou`,
+      dados: {
+        classe: e instanceof Error ? e.name : typeof e,
+        mensagem: e instanceof Error ? e.message : String(e),
+        pilha: e instanceof Error ? e.stack ?? null : null
+      }
+    });
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: "acesso_negado",
@@ -10181,6 +11033,13 @@ async function rotear(req, ctx, eu, caminho, url) {
       );
     }
     const sobrepostos = await ctx.conversas.registrarOverride(conversa.id, motivo);
+    ctx.investigador.registrar({
+      tipo: "override",
+      origem: "usuario",
+      conversaId: conversa.id,
+      resumo: `Override: ${sobrepostos} bloqueio(s) sobrepostos`,
+      dados: { motivo, bloqueiosSobrepostos: sobrepostos }
+    });
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
       acao: "override_registrado",
@@ -10209,6 +11068,13 @@ async function rotear(req, ctx, eu, caminho, url) {
     const corpo = await lerJson(req);
     const validada = validarProposta(corpo, ctx.valores.tipos_chamado_permitidos);
     if ("erro" in validada) return ERROS.dadosInvalidos(validada.erro);
+    ctx.investigador.registrar({
+      tipo: "proposta_editada",
+      origem: "usuario",
+      conversaId: conversa.id,
+      resumo: "A pessoa editou o cart\xE3o",
+      dados: { antes: conversa.proposta ?? null, depois: validada.proposta }
+    });
     await ctx.conversas.definirProposta(conversa.id, validada.proposta);
     return json({
       proposta: validada.proposta,
@@ -10286,6 +11152,18 @@ async function rotear(req, ctx, eu, caminho, url) {
       conversa.proposta.prioridade
     );
     if (!prioridadeNaConversa.ok) return ERROS.dadosInvalidos(prioridadeNaConversa.mensagem);
+    ctx.investigador.registrar({
+      tipo: "confirmacao",
+      origem: "usuario",
+      conversaId: conversa.id,
+      resumo: "A pessoa confirmou a abertura pela conversa",
+      dados: {
+        proposta: conversa.proposta,
+        camposDaConversa,
+        declarouAnexo: declaracao.declarouAnexo,
+        prioridadeParaOJira: prioridadeNaConversa.campos
+      }
+    });
     await ctx.conversas.registrarConfirmacao(conversa.id);
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -10698,6 +11576,19 @@ async function rotear(req, ctx, eu, caminho, url) {
       chaveIdempotencia,
       temporaryAttachmentId,
       nomeArquivo: validado.nome
+    });
+    ctx.investigador.registrar({
+      tipo: "anexo_recebido",
+      origem: "usuario",
+      conversaId,
+      resumo: `Anexo recebido: ${validado.nome} (${validado.bytes.byteLength} bytes)`,
+      dados: {
+        nome: validado.nome,
+        tipo: validado.tipo,
+        bytes: validado.bytes.byteLength,
+        duplicado,
+        chaveIdempotencia
+      }
     });
     await ctx.auditoria.registrar({
       atorEmail: eu.email,
@@ -11265,6 +12156,60 @@ async function rotear(req, ctx, eu, caminho, url) {
       )
     });
   }
+  if (caminho === "/api/investigador/sessoes" && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    return json({
+      itens: await listarSessoes(ctx.db, {
+        email: url.searchParams.get("email"),
+        recorte: url.searchParams.get("recorte"),
+        limite: Number(url.searchParams.get("limite")) || void 0
+      }),
+      ligado: ctx.valores.investigador_ligado,
+      retencaoDias: ctx.valores.investigador_retencao_dias
+    });
+  }
+  const sessaoInvestigador = caminho.match(/^\/api\/investigador\/sessoes\/([^/]+)$/);
+  if (sessaoInvestigador && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    return json(await detalharSessao(ctx.db, sessaoInvestigador[1]));
+  }
+  if (caminho === "/api/investigador/requisicoes" && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    return json({
+      itens: await listarRequisicoes(ctx.db, {
+        caminho: url.searchParams.get("caminho"),
+        recorte: url.searchParams.get("recorte"),
+        email: url.searchParams.get("email"),
+        limite: Number(url.searchParams.get("limite")) || void 0
+      })
+    });
+  }
+  if (caminho === "/api/investigador/resumo" && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    return json({
+      ...await resumoInvestigador(ctx.db),
+      ligado: ctx.valores.investigador_ligado,
+      retencaoDias: ctx.valores.investigador_retencao_dias
+    });
+  }
+  if (caminho === "/api/investigador/formulario" && req.method === "POST") {
+    const corpo = await lerJson(req);
+    const campo = typeof corpo?.campo === "string" ? corpo.campo.slice(0, 120) : "";
+    if (!campo) return ERROS.dadosInvalidos("Campo n\xE3o informado.");
+    ctx.investigador.registrar({
+      tipo: "formulario_alterado",
+      origem: "usuario",
+      conversaId: typeof corpo?.conversaId === "string" ? corpo.conversaId : null,
+      resumo: `Formul\xE1rio: "${campo}" mudou`,
+      dados: {
+        tela: typeof corpo?.tela === "string" ? corpo.tela.slice(0, 40) : null,
+        campo,
+        de: corpo?.de ?? null,
+        para: corpo?.para ?? null
+      }
+    });
+    return json({ ok: true });
+  }
   if (caminho === "/api/admin/assentos" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();
     const snapshot = await ctx.inventarioAssentos.obterMaisRecente();
@@ -11720,13 +12665,18 @@ async function tratarCron(req, ctx, env, caminho) {
       Date.parse(ctx.agora()) - TTL_ANEXO_PENDENTE_HORAS * 3600 * 1e3
     ).toISOString();
     const anexosPendentesExpurgados = await ctx.anexosPendentes.expurgarAnterioresA(limite2);
+    const investigadorExpurgado = await expurgarInvestigador(
+      ctx.db,
+      ctx.valores.investigador_retencao_dias,
+      ctx.agora()
+    );
     await ctx.auditoria.registrar({
       atorEmail: "(cron)",
       acao: "submissao_reprocessada",
       resultado: "sucesso",
-      detalhe: { ...r, anexosPendentesExpurgados }
+      detalhe: { ...r, anexosPendentesExpurgados, investigadorExpurgado }
     });
-    return json({ ...r, anexosPendentesExpurgados });
+    return json({ ...r, anexosPendentesExpurgados, investigadorExpurgado });
   }
   if (caminho === "/api/cron/reconciliar-vinculos") {
     const recuperados = await ctx.chamados.reconciliarVinculos(50);

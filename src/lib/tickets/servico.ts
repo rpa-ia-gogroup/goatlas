@@ -22,6 +22,7 @@ import {
 import { anexosParaExibir, provaDePublicidade, type AnexosParaExibir } from './anexos-do-chamado'
 import type { ViaDoAnexo } from './anexos-enviados'
 import type { Auditoria } from '../audit'
+import { INVESTIGADOR_DESLIGADO, type Investigador } from '../investigador/registro'
 import { CriacaoRecusada, autorizarCriacao } from '../agent/gate'
 import type { Conversa } from '../agent/estado'
 import { Outbox, type PayloadSubmissao } from './outbox'
@@ -102,6 +103,14 @@ export class ServicoChamados {
         }[]
       >
     },
+    /**
+     * spec 009 — o registro do payload entregue ao Jira (`FR-9`).
+     *
+     * Opcional com no-op como default, pela mesma razão do orquestrador: dezenas de testes
+     * já constroem este serviço à mão, e um parâmetro obrigatório transformaria um
+     * instrumento de investigação num patch de trinta arquivos de teste.
+     */
+    private readonly investigador: Investigador = INVESTIGADOR_DESLIGADO,
   ) {}
 
   /**
@@ -249,6 +258,34 @@ export class ServicoChamados {
 
   /** Usado tanto na abertura quanto pelo cron de reprocessamento. */
   async processar(submissaoId: string, dados: DadosAbertura): Promise<ResultadoCriacao> {
+    /**
+     * 🚨 **O que sai daqui para o Jira, exatamente como sai** — spec 009, `FR-9`.
+     *
+     * ⚠️ **Mora aqui, e não nas duas rotas de criação.** As duas montam o mesmo objeto, e
+     * registrar nas duas produziria a divergência que `D-52` (duas áreas) e `D-70` (duas
+     * listas de tipos) já custaram — com o agravante de que aqui a divergência só apareceria
+     * no dia em que alguém fosse investigar um chamado perdido.
+     *
+     * ⚠️ E cobre o **reprocessamento** de graça, porque o cron do outbox entra por este
+     * mesmo método: cada tentativa vira uma linha, que é o que responde "quantas vezes o app
+     * tentou abrir esse chamado, e com qual corpo?".
+     */
+    this.investigador.emConversa(dados.conversaId)
+    this.investigador.registrar({
+      tipo: 'payload_final',
+      origem: 'servidor',
+      conversaId: dados.conversaId,
+      resumo: `Entregando ao Jira: tipo ${dados.payload.tipoChamadoId}, prioridade ${dados.payload.prioridade ?? '(nenhuma)'}`,
+      dados: {
+        submissaoId,
+        via: dados.via,
+        chaveIdempotencia: dados.chaveIdempotencia,
+        verificadoRegras: dados.verificadoRegras,
+        declarouAnexo: dados.declarouAnexo ?? null,
+        area: dados.area,
+        payload: dados.payload,
+      },
+    })
     try {
       // (3) Cria no JSM.
       const criado = await this.atlassian.criarChamado({
@@ -333,6 +370,13 @@ export class ServicoChamados {
         },
       })
 
+      this.investigador.registrar({
+        tipo: 'desfecho_criacao',
+        origem: 'atlassian',
+        conversaId: dados.conversaId,
+        resumo: `Chamado criado: ${criado.issueKey}`,
+        dados: { issueKey: criado.issueKey, submissaoId },
+      })
       return {
         issueKey: criado.issueKey,
         estado: 'criado',
@@ -342,6 +386,21 @@ export class ServicoChamados {
     } catch (erro) {
       const transitorio = erro instanceof ErroAtlassian ? erro.detalhe.transitorio : true
       const mensagem = erro instanceof Error ? erro.message : String(erro)
+      /**
+       * ⚠️ **`transitorio` é o campo que decide o destino do chamado** (`RNF-17`): definitivo
+       * marca a submissão como `falha` e ela **nunca** é reprocessada. Registrar a mensagem
+       * junto do veredito é o que permite descobrir, depois, que uma indisponibilidade foi
+       * classificada como definitiva — o bug que `rf24-outbox-degradacao` pegou uma vez.
+       */
+      this.investigador.registrar({
+        tipo: 'desfecho_criacao',
+        origem: 'atlassian',
+        conversaId: dados.conversaId,
+        resumo: transitorio
+          ? 'Criação falhou de forma TRANSITÓRIA — o cron vai tentar de novo'
+          : 'Criação falhou de forma DEFINITIVA — esta submissão não será reprocessada',
+        dados: { submissaoId, transitorio, erro: mensagem },
+      })
       await this.outbox.registrarTentativaFalha(submissaoId, mensagem, transitorio)
       await this.auditoria.registrar({
         atorEmail: dados.solicitanteEmail,

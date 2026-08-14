@@ -21,6 +21,9 @@ import { ClienteIAFake } from './ia/fake'
 import { ClienteIAIndisponivel } from './ia/indisponivel'
 import type { ClienteIA } from './ia/tipos'
 import { AuditoriaBanco, type Auditoria } from './audit'
+import { ColetaDeRequisicao, type DesfechoDaRequisicao } from './investigador/coleta'
+import { fetchObservado } from './investigador/fetch-observado'
+import { INVESTIGADOR_DESLIGADO, type Investigador } from './investigador/registro'
 import { Config, valoresDoBootstrap, type BootstrapEnv, type ConfigValores } from './config'
 import { configDemo, repovoarChamadosDemo, semearAtlassianDemo, semearIaDemo } from './demo'
 import { garantirMigracao } from './db/schema'
@@ -110,6 +113,22 @@ export interface Contexto {
   readonly config: Config
   readonly valores: ConfigValores
   readonly auditoria: Auditoria
+  /**
+   * O registro de depuração desta requisição — spec 009.
+   *
+   * ⚠️ **Nunca `null`**, como `lerPdf`: desligado é `INVESTIGADOR_DESLIGADO`, um no-op. Um
+   * `ctx.investigador?.registrar(…)` espalhado por dez arquivos é dez lugares para esquecer
+   * o `?.` e derrubar uma rota por causa do registro.
+   */
+  readonly investigador: Investigador
+  /**
+   * Fecha a coleta e grava — chamado **uma vez**, pelo envelope de `tratarRequisicao`.
+   *
+   * É uma função no contexto, e não um método de `ctx.investigador`, para que a interface
+   * que o resto do app vê **não tenha** como gravar no meio do caminho: a economia de idas
+   * ao banco de `FR-10c` fica estrutural em vez de virar disciplina.
+   */
+  readonly fecharInvestigacao: (desfecho: DesfechoDaRequisicao) => Promise<void>
   readonly atlassian: ClienteAtlassian
   readonly ia: ClienteIA
   readonly conversas: RepositorioConversas
@@ -254,6 +273,32 @@ export async function montarContexto(
   const usandoFakes = modoDemo || env.GOATLAS_USAR_FAKES === '1' || !env.ATLASSIAN_API_TOKEN
   const somenteLeitura = env.GOATLAS_SOMENTE_LEITURA === '1'
 
+  /**
+   * A coleta nasce **aqui**, e não no roteador — spec 009, `FR-10b`.
+   *
+   * ⚠️ A razão é a ordem: os transportes externos são construídos logo abaixo e precisam
+   * receber o observador **na construção**. Criá-la no roteador significaria injetar o
+   * observador depois de o cliente já existir, com um `setObservador` mutável que ninguém
+   * garante ter sido chamado — e o sintoma seria um registro pela metade, que é pior que
+   * registro nenhum porque parece completo.
+   *
+   * ⚠️ E ela é **por requisição por construção**: `montarContexto` roda uma vez por
+   * requisição (`worker.ts`), então não existe variável de módulo capaz de atribuir a
+   * chamada de uma pessoa à conversa de outra num isolate com duas em voo.
+   */
+  const coleta = valores.investigador_ligado
+    ? new ColetaDeRequisicao(novoId(), agora, novoId)
+    : null
+  const investigador: Investigador = coleta ?? INVESTIGADOR_DESLIGADO
+  const observarChamada = investigador.observador()
+  /**
+   * ⚠️ **Só embrulha quando está ligado.** Desligado, os transportes recebem `undefined` e
+   * caem no `fetch.bind(globalThis)` de sempre — o desligamento tem de ser real, e não uma
+   * camada a mais que não grava nada (`FR-18`).
+   */
+  const olho = (alvo: Parameters<typeof fetchObservado>[0]) =>
+    coleta ? { fetchImpl: fetchObservado(alvo, observarChamada) } : {}
+
   const atlassianBase: ClienteAtlassian = reaproveitar.atlassian
     ? reaproveitar.atlassian
     : usandoFakes
@@ -266,6 +311,9 @@ export async function montarContexto(
         ttlConteudoSeg: valores.ttl_conteudo_seg,
         // O que faz o TTL acima valer de verdade — ver `cachesAtlassianDoIsolate`.
         caches: cachesAtlassianDoIsolate,
+        // Spec 009 — o registro do ponto de ruptura. Objeto vazio com o Investigador
+        // desligado, e aí o transporte usa o `fetch` de sempre.
+        ...olho('atlassian'),
         // RF-21, Q4 — configurável (RNF-25), nunca hardcoded. `null` até o time
         // de tech confirmar o id do campo "Solicitante"; o solicitante real
         // continua indo na descrição enquanto isso (cinto e suspensório).
@@ -291,6 +339,7 @@ export async function montarContexto(
       : !env.LLM_API_KEY
       ? new ClienteIAIndisponivel()
       : new ClienteIAHttp({
+          ...olho('ia'),
           baseUrl: env.LLM_BASE_URL ?? null,
           apiKey: env.LLM_API_KEY,
           modelo: env.LLM_MODEL ?? 'gpt-5.4-mini',
@@ -307,7 +356,7 @@ export async function montarContexto(
     : usandoFakes
       ? new ClienteOrganizacaoFake()
       : env.ATLASSIAN_ORG_API_KEY
-        ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY })
+        ? new ClienteOrganizacaoHttp({ apiKey: env.ATLASSIAN_ORG_API_KEY, ...olho('organizacao') })
         : null
 
   // A fonte organizacional (`RF-19`). Mesmos três estados da governança — fake · real ·
@@ -322,7 +371,11 @@ export async function montarContexto(
   const teamguide: ClienteTeamGuide | null = usandoFakes
     ? new ClienteTeamGuideFake()
     : env.TG_API_TOKEN
-      ? new ClienteTeamGuideHttp({ token: env.TG_API_TOKEN, cache: cacheTeamGuideDoIsolate })
+      ? new ClienteTeamGuideHttp({
+          token: env.TG_API_TOKEN,
+          cache: cacheTeamGuideDoIsolate,
+          ...olho('teamguide'),
+        })
       : null
 
   if (modoDemo) {
@@ -356,6 +409,7 @@ export async function montarContexto(
         url: env.OCR_WORKER_URL ?? '',
         token: env.OCR_WORKER_TOKEN ?? '',
         timeoutMs: 20_000,
+        ...olho('ocr'),
       })
   const chamados = new ServicoChamados(
     atlassian,
@@ -364,9 +418,18 @@ export async function montarContexto(
     auditoria,
     novoId,
     anexosEnviados,
+    investigador,
   )
   const executor = new ExecutorTools(atlassian, ia, env.DB, auditoria, agora)
-  const orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId, atlassian)
+  const orquestrador = new Orquestrador(
+    ia,
+    executor,
+    conversas,
+    auditoria,
+    novoId,
+    atlassian,
+    investigador,
+  )
   const inventarioAssentos = new RepositorioInventario(env.DB, novoId)
 
   // --- Fase 3: notificação (RF-44 a RF-48) ----------------------------------
@@ -439,6 +502,11 @@ export async function montarContexto(
     config,
     valores,
     auditoria,
+    investigador,
+    // Com o registro desligado, fechar é não fazer nada — e nada é lido nem gravado.
+    fecharInvestigacao: coleta
+      ? (desfecho) => coleta.gravar(env.DB, desfecho)
+      : async () => {},
     atlassian,
     ia,
     conversas,
