@@ -4512,11 +4512,15 @@ E `proposta_ajustada` gravou `{"campos":[…]}` com os **nomes** e **nenhum valo
 **impacto descrito** mudou (surgiu contorno). É a direção difícil da regra — a fácil (recusar
 "sobe pra crítica") já tinha caso na suíte.
 
-⚠️ **Um defeito ALHEIO apareceu na medição, e não foi tocado:** o agente mandou clicar em
-*"Isso não resolve meu caso"* nos três turnos, com `bloqueioPendente: false` — ou seja, apontando
-um botão que **não está na tela**. É o prompt de `RF-13` sendo aplicado fora do bloqueio; não é
-regressão da 008 (nada aqui toca essa seção), e consertá-lo sem spec seria mudar comportamento
-por conta própria. Fica registrado para virar tarefa.
+⚠️ **Um defeito ALHEIO apareceu na medição:** o agente mandou clicar em *"Isso não resolve meu
+caso"* nos três turnos, com `bloqueioPendente: false` — ou seja, apontando um botão que **não
+está na tela**. Não é regressão da 008 (nada aqui toca essa seção). ✅ **Corrigido em seguida,
+em `fix/botao-fantasma-e-token`**, e a causa é estrutural, não de redação: quando uma regra
+bloqueia, o texto do modelo é **descartado** e quem fala é o servidor (`D-21`); no turno seguinte
+ele **nem é chamado**. Logo o modelo nunca observa o estado sobre o qual aquela instrução falava,
+e a única situação em que a frase dele chega à pessoa é justamente aquela em que o botão não
+existe. O prompt passou a **proibir** nomear botão da tela; a copy do botão continua no servidor,
+nas três mensagens de bloqueio.
 
 ---
 
