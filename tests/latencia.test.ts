@@ -507,8 +507,14 @@ const PROPOSTA = {
  * dele. Asserção de tempo seria frágil; deadlock é determinístico.
  */
 class IaQueExigeSobreposicao implements ClienteIA {
-  private chats = 0
+  chats = 0
   extracoes = 0
+  /**
+   * Turno de **rederivação** (`FR-8`): as verificações já fecharam em turnos anteriores,
+   * então o modelo não pede tool nenhuma e a primeira ida já é a resposta à pessoa. É o
+   * caso em que a extração precisa arrancar **antes do laço**, e não no fim dele.
+   */
+  semTools = false
   private extracaoComecou!: () => void
   private readonly esperaExtracao = new Promise<void>((ok) => {
     this.extracaoComecou = ok
@@ -519,7 +525,7 @@ class IaQueExigeSobreposicao implements ClienteIA {
 
   async chat(params: ParametrosChat): Promise<RespostaIA> {
     this.chats += 1
-    if (this.chats === 1) {
+    if (this.chats === 1 && !this.semTools) {
       return {
         texto: 'Vou verificar as duas coisas.',
         toolsPropostas: [
@@ -623,6 +629,42 @@ describe('turno do agente: a proposta não espera a resposta do modelo', () => {
     expect(ia.extracoes).toBe(1)
     expect(r.texto).toBe('Montei o chamado abaixo.')
     expect((await conversas.obter('c1'))?.proposta?.titulo).toBe(PROPOSTA.titulo)
+  })
+
+  /**
+   * **T-733 / ScC-8, RNF-12** — a rederivação não acrescenta uma ida **em série**.
+   *
+   * A partir da spec 008 a extração roda em **todo** turno, não só no primeiro. Se ela
+   * arrancasse depois do laço de tools, cada mensagem passaria a custar duas idas ao
+   * provedor em série — num turno que já leva 25–40 s medidos em produção, seria dobrar a
+   * espera da pessoa em troca de nada.
+   *
+   * ⚠️ Como em todo este arquivo, a falha é por **deadlock**, não por relógio: o `chat`
+   * espera a extração começar, então serializar trava o teste em vez de produzir um número
+   * frágil que reprova em máquina carregada (`D-57`).
+   */
+  it('turno de REDERIVAÇÃO: a extração começa antes da resposta do modelo (FR-8)', async () => {
+    await conversas.criar('c3', ANA)
+    // As duas verificações já fecharam num turno anterior, e já existe proposta: é o
+    // estado de quem está negociando o cartão.
+    await conversas.marcarConfluenceVerificado('c3', false)
+    await conversas.marcarHistoricoVerificado('c3', false)
+    await conversas.definirPropostaDaIa('c3', {
+      ...PROPOSTA,
+      area: null,
+      componente: null,
+      motivoPrioridade: null,
+      campos: {},
+    })
+    ia.semTools = true
+
+    const atual = (await conversas.obter('c3'))!
+    const r = await orquestrador.processarMensagem(atual, 'na verdade é no Protheus', CONFIG)
+
+    // Uma ida ao modelo e uma extração, sobrepostas — não duas em série.
+    expect(ia.chats).toBe(1)
+    expect(ia.extracoes).toBe(1)
+    expect(r.texto).toBe('Montei o chamado abaixo.')
   })
 
   it('bloqueio que aparece DURANTE a extração impede a proposta (RN-07)', async () => {

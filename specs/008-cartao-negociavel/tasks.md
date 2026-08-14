@@ -126,21 +126,21 @@ created: "2026-08-13"
 
 ## Phase 5 — O orquestrador rederiva (o coração de F-1)
 
-- [ ] **T-730** `tests/orquestrador.test.ts` (Red): turno **com** proposta existente chama
+- [x] **T-730** `tests/orquestrador.test.ts` (Red): turno **com** proposta existente chama
       `extrairProposta` de novo · a proposta muda quando a IA muda de opinião · a **base**
       (`proposta_ia_json`) é gravada junto · bloqueio pendente **não** deixa rederivar
       (`RN-07`, `D-21`) · teto de custo atingido **não** rederiva (`RNF-16`).
       _Requirements: FR-8, FR-11, RN-13_
-- [ ] **T-731** `Orquestrador`: a rederivação arranca **no início do turno**, em paralelo com
+- [x] **T-731** `Orquestrador`: a rederivação arranca **no início do turno**, em paralelo com
       o `chat`, quando as verificações já estão concluídas. ⚠️ É seguro pela razão que já está
       escrita no arquivo — com as verificações fechadas `toolsPermitidas` é lista **vazia**,
       então nenhum ciclo executa tool e não pode nascer bloqueio concorrente. O turno em que
       as verificações **fecham** mantém o comportamento de hoje. _Requirements: FR-8, FR-11_
-- [ ] **T-732** `tentarMontarProposta` → `rederivarProposta`: reconfere `temBloqueioPendente`
+- [x] **T-732** `tentarMontarProposta` → `rederivarProposta`: reconfere `temBloqueioPendente`
       **antes de gravar** (o `if` que rodou antes do `await` não protege o que vem depois —
       `RN-07` já foi burlada uma vez, `D-21`), grava vigente **e** base, e devolve o custo
       mesmo quando descarta. _Requirements: FR-8, RN-07_
-- [ ] **T-733** `tests/latencia.test.ts`: idas ao provedor **em série** por turno inalteradas,
+- [x] **T-733** `tests/latencia.test.ts`: idas ao provedor **em série** por turno inalteradas,
       e a extração **se sobrepõe** ao `chat`. ⚠️ O caso falha por **deadlock**, não por
       relógio (a correção de `D-57`): o `chat` só resolve depois de a extração começar.
       _Requirements: ScC-8, RNF-12_
