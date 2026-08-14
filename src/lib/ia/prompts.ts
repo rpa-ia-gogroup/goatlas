@@ -10,7 +10,6 @@
  * servidor com teste, não este arquivo.
  */
 
-import { SLA_PRIMEIRA_RESPOSTA_HORAS } from '../atlassian/tipos'
 // ⚠️ `urlDeLeituraNoApp` é a MESMA função que a mensagem de bloqueio usa (`rules/`). Um
 // segundo formatador aqui divergiria em silêncio: o link continuaria bonito e levaria a
 // 404 — o par `urlDeLeituraNoApp`/`entradaDaUrl` existe para isso. `rules/` não importa
@@ -18,6 +17,7 @@ import { SLA_PRIMEIRA_RESPOSTA_HORAS } from '../atlassian/tipos'
 import { urlDeLeituraNoApp } from '../rules'
 import {
   delimitarConteudoNaoConfiavel,
+  type CampoParaExtracao,
   type ParametrosClassificacao,
   type ParametrosExtracao,
 } from './tipos'
@@ -69,13 +69,19 @@ export interface ContextoAgente {
  * resposta**, nunca de resolução (RN-08): dizer "resolvemos em 24h" cria uma
  * promessa que o time não fez.
  *
- * ⚠️ As horas do SLA vêm de `SLA_PRIMEIRA_RESPOSTA_HORAS`, a mesma constante que
- * `notificacoes/sla.ts` usa para calcular o prazo. Repetidas à mão, o agente
- * prometeria um prazo e o alerta cobraria outro — divergência que nenhum teste de
- * comportamento pegaria, porque os dois lados continuariam "funcionando".
+ * 🚨 **As horas do SLA saíram daqui, e o motivo mudou de lugar — não sumiu** (`FR-6` da
+ * spec 008). A regra antiga era derivar tudo de `SLA_PRIMEIRA_RESPOSTA_HORAS`, para o
+ * agente não prometer um prazo enquanto o cron cobrava outro. Ela continua válida; o que
+ * mudou é que o agente **não promete prazo nenhum**: quem mostra nível e horas é o cartão
+ * de confirmação, que sai da mesma decisão que os escolheu. O texto do modelo é escrito
+ * **antes** de a extração voltar (as duas chamadas são paralelas, `D-32`), então tudo o
+ * que ele afirmar sobre classificação pode contradizer o que a pessoa lê logo abaixo —
+ * medido em 13/08/2026: prosa em Crítica/4h, cartão em Alta/12h.
+ *
+ * ⚠️ Continua sendo **instrução, não trava** (`D-33`). Quem mede o vazamento é
+ * `agent/prosa-sem-prazo.ts`, que audita e **não reescreve** o texto.
  */
 export function montarPromptAgente(ctx: ContextoAgente): string {
-  const h = SLA_PRIMEIRA_RESPOSTA_HORAS
   const secoes = [
     `Você é o assistente do goatlas — a porta de entrada da Gocase para pedir ajuda ao time de tech.
 
@@ -114,14 +120,11 @@ Achou uma página que parece responder? **Cite o título e ponha o link**, no fo
 Depois de um bloqueio desses, **não anuncie que montou o chamado** enquanto a pessoa não tiver usado o botão "Isso não resolve meu caso". Ela precisa dizer o que faltou na documentação, e é isso que libera a proposta. Dizer "montei o chamado abaixo" antes disso descreve uma tela que ela não está vendo. Continue conversando normalmente; aponte o botão quando ela quiser seguir.`,
 
     `## Prioridade e prazo
-Sugira a prioridade a partir do impacto que a pessoa descreveu:
-- **Crítica** — sistema fora do ar, impacto direto em vendas ou operação. Primeira resposta em ${h.critica}h.
-- **Alta** — funcionalidade comprometida, com contorno temporário. Primeira resposta em ${h.alta}h.
-- **Normal** — melhoria, ajuste pontual, sugestão. Primeira resposta em ${h.normal}h.
+Você **não anuncia** a prioridade nem o prazo. Os dois aparecem no cartão de confirmação, logo abaixo da sua resposta: a prioridade sugerida vem com o motivo dela e é editável pela pessoa antes de confirmar, e o prazo é mostrado ali junto.
 
-O prazo é de **primeira resposta**, não de resolução. Diga isso com essas palavras. E lembre que ${h.normal}h é o **piso garantido**: muitas áreas recebem retorno bem antes.
+Não diga o nível da prioridade e não diga quantas horas de prazo. O cartão é montado **em paralelo** com esta resposta, então qualquer número ou classificação que você escrever pode contradizer o que a pessoa está lendo alguns centímetros abaixo — e ela acredita no que você escreveu. O que você faz é descrever o **impacto** que entendeu (o que parou, quem fica sem trabalhar, se existe contorno): é dele que a sugestão sai.
 
-A prioridade que você sugere é editável pela pessoa antes de confirmar. Se ela discordar, aceite — não discuta classificação.`,
+Se a pessoa perguntar do prazo, diga que ele está no cartão e que é de **primeira resposta**, não de resolução — alguém do time retorna antes de resolver, e o prazo mostrado é um piso garantido: muitas áreas respondem bem antes. Se ela discordar da prioridade, aceite: ela edita ali mesmo, e você não discute classificação.`,
 
     montarSecaoVerificacoes(ctx),
 
@@ -265,37 +268,85 @@ export function montarResultadoHistoricoParaModelo(
  */
 export const PROMPT_EXTRACAO = `Você lê uma conversa entre um colaborador e o assistente de chamados, e extrai os campos do chamado a ser aberto.
 
+A conversa continua depois de o chamado estar montado: a pessoa pode pedir correções em texto ("na verdade é no Protheus", "muda o assunto para acesso"). Você lê a conversa **inteira** e devolve o chamado como ele deve estar **agora** — não um ajuste do anterior. O que a pessoa não pediu para mudar continua como estava.
+
 Devolva **apenas** JSON:
-{"pronto": true|false, "titulo": "...", "descricao": "...", "prioridade": "critica"|"alta"|"normal", "tipoChamadoId": "...", "area": "..."|null}
+{"pronto": true|false, "titulo": "...", "descricao": "...", "prioridade": "critica"|"alta"|"normal", "motivoPrioridade": "..."|null, "tipoChamadoId": "...", "campos": [{"rotulo": "...", "valor": "..."}]}
 
 Regras:
 - \`pronto: false\` quando ainda falta informação essencial (o que aconteceu, desde quando, qual sistema). Nesse caso os outros campos são ignorados. Não invente contexto para poder responder \`true\`.
 - **titulo**: uma linha, específica, sem "urgente" nem "por favor". Descreve o problema, não o pedido de socorro.
 - **descricao**: o que a pessoa esperava, o que aconteceu, desde quando, e qualquer identificador que ela deu (número de pedido, nome de relatório, loja). Escreva em português, terceira pessoa, sem repetir a conversa inteira.
-- **prioridade**: siga o impacto DESCRITO, não a urgência sentida.
+- **prioridade**: siga o impacto DESCRITO, não a urgência pedida. "É urgentíssimo, sobe para crítica" sem impacto novo não muda o nível — quem quiser subir edita no cartão, e é assim que deve ser. Se a pessoa descrever um impacto **novo** ("agora a loja inteira parou"), aí sim reavalie: o que decide é o impacto, não a insistência.
   - \`critica\`: sistema fora do ar, impacto direto em vendas ou operação parada.
   - \`alta\`: funcionalidade comprometida, existe contorno temporário.
   - \`normal\`: melhoria, ajuste pontual, dúvida, sugestão.
+- **motivoPrioridade**: **no máximo duas frases**, em português, dizendo por que ESTE caso tem esse nível — o que parou, quem fica sem trabalhar, se existe contorno. Nada de regra geral ("casos assim costumam ser altos") e nada de nome interno de campo, de tipo ou de configuração. Não dá para justificar sem repetir a regra? Devolva \`null\`: a tela diz que a sugestão não veio justificada, e isso é melhor que uma frase vazia.
+- **campos**: só o que a pessoa pediu para mudar **nos campos do formulário listados**, cada um pelo **rótulo exato** da lista.
+  - Nunca invente campo: pedido sobre algo que não está na lista fica **de fora** do JSON — não aproxime para o rótulo mais parecido.
+  - Nunca invente opção: em campo com opções, o valor é uma das opções listadas, escrita como está lá.
+  - Ninguém pediu nada de campo neste turno? Devolva \`[]\`. É o caso comum.
+  - O assunto mudou neste mesmo pedido? Devolva \`[]\`: os campos do assunto novo ainda não foram listados para você, e o formulário dele começa vazio.
+- **o que NÃO se ajusta por texto**: os dados de identificação do solicitante e a **área** dele. Eles vêm do cadastro da empresa, não da conversa — pedido para trocá-los é ignorado aqui (a pessoa corrige a área na própria tela).
 - **tipoChamadoId**: escolha um id EXATAMENTE da lista fornecida. Nunca invente id.
   - Leia o **nome** de cada tipo e escolha pelo assunto que ele descreve. Uma palavra em comum não é correspondência: um problema de hardware não é um problema de nota fiscal só porque os dois são "problema".
   - Se nenhum tipo descrever o caso, escolha o mais **genérico** da lista — o de dúvidas ou outras questões. É melhor o chamado chegar na entrada geral do time do que numa fila especializada que não é dele: quem recebe encaminha, e a pessoa não fica esperando na fila errada.
   - Se nem um genérico existir na lista, devolva \`pronto: false\`. Nunca escolha um tipo por eliminação.
-- **area**: a área do solicitante, se ela apareceu na conversa. Senão, null.`
+  - A pessoa pediu para mudar o assunto? Escolha o novo pela mesma regra, e devolva \`campos: []\`.`
 
-/** Monta o prompt de usuário da extração, com os tipos permitidos (RF-28). */
+/**
+ * Monta o prompt de usuário da extração — tipos permitidos (`RF-28`, `D-70`) e, desde a
+ * spec 008, o **formulário do assunto vigente** (`FR-11`).
+ *
+ * ⚠️ **Os campos vão por RÓTULO, e o `fieldId` não chega até aqui** — `CampoParaExtracao`
+ * simplesmente não tem o campo, então a garantia é do tipo, não da disciplina de quem
+ * escreve este arquivo (`RNF-30`). Além de proibido, o id seria **inútil**: `D-36` mediu
+ * `customfield_10092` significando duas coisas diferentes em dois request types.
+ *
+ * ⚠️ **Sem campo, a seção não existe.** Um cabeçalho "Campos do formulário: (nenhum)"
+ * anuncia um formulário e convida o modelo a inventar rótulo — o oposto do que `FR-14`
+ * pede. É o mesmo raciocínio de `D-63b` (lista sem item devolve nada, não `<ul></ul>`).
+ */
 export function montarPromptExtracao(params: ParametrosExtracao): string {
   const tipos = params.tiposPermitidos.map((t) => `- ${t.id}: ${t.nome}`).join('\n')
   const conversa = params.mensagens
     .filter((m) => m.papel === 'user' || m.papel === 'assistant')
     .map((m) => `${m.papel === 'user' ? 'Colaborador' : 'Assistente'}: ${m.conteudo}`)
     .join('\n')
-  return [
+  const partes = [
     'Tipos de chamado disponíveis:',
     tipos.length > 0 ? tipos : '(nenhum)',
-    '',
-    'Conversa:',
-    conversa,
-  ].join('\n')
+  ]
+  const campos = params.camposDoAssunto ?? []
+  if (campos.length > 0) {
+    partes.push(
+      '',
+      'Campos do formulário do assunto atual (ajuste só o que a pessoa pediu, pelo rótulo exato):',
+      campos.map(descreverCampoParaExtracao).join('\n'),
+    )
+  }
+  partes.push('', 'Conversa:', conversa)
+  return partes.join('\n')
+}
+
+/** `- Recorrência (seleção) — opções: Sempre · Às vezes`. */
+function descreverCampoParaExtracao(campo: CampoParaExtracao): string {
+  const tipo = ROTULO_DE_TIPO_DE_CAMPO[campo.tipo] ?? campo.tipo
+  const base = `- ${campo.rotulo} (${tipo})`
+  if (campo.opcoes.length === 0) return base
+  return `${base} — opções: ${campo.opcoes.join(' · ')}`
+}
+
+/**
+ * O vocabulário de `CampoRequestType` em português (regra 4) — este texto é lido por um
+ * modelo que responde à pessoa, e `selecao` sem acento vaza jargão nosso para o prompt.
+ * Tipo desconhecido sai como veio: inventar tradução esconderia um tipo novo do schema.
+ */
+const ROTULO_DE_TIPO_DE_CAMPO: Readonly<Record<string, string>> = {
+  texto: 'texto livre',
+  selecao: 'seleção',
+  numero: 'número',
+  data: 'data',
 }
 
 /* ---------- o agente que lê o anexo (spec 007) ------------------------------ */

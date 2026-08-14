@@ -23,6 +23,14 @@ import { toolAutorizada, toolsPermitidas, TOOLS } from './gate'
 import { RepositorioConversas, type Conversa } from './estado'
 import { ExecutorTools } from './tools'
 import { tiposOferecidos, type FonteDeTipos } from '../tickets/tipos-oferecidos'
+import { prosaAfirmaPrazo } from './prosa-sem-prazo'
+import {
+  ajustarCamposPorRotulo,
+  camposParaExtracao,
+  type RecusaDeAjuste,
+} from '../tickets/ajuste-por-rotulo'
+import { diffDeProposta, houveAjusteDeProposta, type CampoAlterado } from '../tickets/diff-de-proposta'
+import type { CampoRequestType } from '../atlassian/tipos'
 
 export interface TurnoResultado {
   readonly texto: string
@@ -40,6 +48,49 @@ export interface TurnoResultado {
   readonly custoUsd: number
   /** RNF-16 — o teto de custo por conversa foi atingido. */
   readonly tetoCustoAtingido: boolean
+  /**
+   * `RN-13` — o que a **IA** mudou nesta volta, comparado com a última proposta dela.
+   *
+   * ⚠️ Produzido num lugar só (`tickets/diff-de-proposta.ts`) porque tem dois consumidores:
+   * a tela, que mescla com ele, e a auditoria de `FR-23`, que conta com ele. Calculado nos
+   * dois lugares, a tela mesclaria por um critério e o console contaria por outro — a
+   * divergência silenciosa que `D-52` (duas áreas) e `D-70` (duas listas de tipos) custaram.
+   */
+  readonly alterados: readonly CampoAlterado[]
+  /** `FR-11` — o que a IA sugeriu para os campos do formulário, já por `fieldId`. */
+  readonly camposSugeridos: Readonly<Record<string, string>>
+  /** `FR-13`/`FR-14` — o que ela pediu e não coube, para a tela dizer ao lado do cartão. */
+  readonly recusasDeAjuste: readonly RecusaDeAjuste[]
+}
+
+/** Um turno sem nenhuma rederivação — o estado neutro dos três campos novos. */
+const SEM_REDERIVACAO = {
+  alterados: [] as readonly CampoAlterado[],
+  camposSugeridos: {} as Readonly<Record<string, string>>,
+  recusasDeAjuste: [] as readonly RecusaDeAjuste[],
+}
+
+/**
+ * O que o orquestrador precisa da Atlassian para montar o formulário do assunto vigente.
+ *
+ * ⚠️ Interface mínima, como `FonteDeTipos`: o orquestrador não recebe o cliente inteiro,
+ * então nenhum caminho novo daqui pode chamar `criarChamado` por engano. Quem satisfaz as
+ * duas em produção é o mesmo cliente, e a leitura passa pela cache de `RNF-13` que ele já
+ * tem — nenhuma ida de rede a mais por turno (`R-02`).
+ */
+export interface FonteDeSchemaDoTipo {
+  obterCamposDoTipo(
+    serviceDeskId: string,
+    requestTypeId: string,
+  ): Promise<readonly CampoRequestType[]>
+}
+
+/** O resultado de uma rederivação, incluindo o custo — que se paga mesmo quando descarta. */
+interface Rederivacao {
+  readonly custoUsd: number
+  readonly alterados: readonly CampoAlterado[]
+  readonly camposSugeridos: Readonly<Record<string, string>>
+  readonly recusasDeAjuste: readonly RecusaDeAjuste[]
 }
 
 /** Quantas idas ao modelo por turno. Sem limite, uma conversa pode custar sozinha. */
@@ -59,7 +110,7 @@ export class Orquestrador {
      * `ExecutorTools`, e é assim que se mantém. Sem esta fonte o prompt de extração
      * listava `- 92: 92` e o modelo escolhia a fila do chamado entre números.
      */
-    private readonly fonteDeTipos: FonteDeTipos,
+    private readonly fonteDeTipos: FonteDeTipos & FonteDeSchemaDoTipo,
   ) {}
 
   async processarMensagem(
@@ -96,6 +147,8 @@ export class Orquestrador {
         toolsRecusadas: [],
         custoUsd: 0,
         tetoCustoAtingido: false,
+        // Nada foi rederivado: `RN-07` mantém a proposta parada até o override (`D-21`).
+        ...SEM_REDERIVACAO,
       }
     }
 
@@ -124,7 +177,27 @@ export class Orquestrador {
      * `tentarMontarProposta` reconfere `temBloqueioPendente` antes de gravar: raciocínio
      * é documentação, e `RN-07` já foi burlada uma vez (`D-21`).
      */
-    let propostaEmVoo: Promise<number> | null = null
+    let propostaEmVoo: Promise<Rederivacao> | null = null
+
+    /**
+     * 🚨 **A rederivação arranca ANTES do laço** — é isto que faz o cartão ser negociável
+     * (`FR-8`, `FR-11`). Enquanto a condição era `!atual.proposta`, a proposta nascia uma
+     * vez e congelava: argumentar depois dela montada não mudava nada, e *"na verdade é no
+     * Protheus"* virava uma frase simpática do agente com um chamado idêntico ao anterior.
+     *
+     * ⚠️ Seguro pela razão que já vale para `propostaEmVoo`, e por uma a mais:
+     * (1) com as duas verificações concluídas `toolsPermitidas` devolve lista **vazia**,
+     * então nenhum ciclo executa tool e não pode nascer bloqueio concorrente; e
+     * (2) bloqueio de turnos anteriores já saiu pelo `return` no topo deste método.
+     * O turno em que as verificações **fecham** mantém o comportamento de hoje — lá a
+     * rederivação continua arrancando no fim do laço, onde ainda pode nascer bloqueio.
+     */
+    if (
+      this.verificacoesConcluidas(atual) &&
+      atual.custoUsd < config.teto_custo_conversa_usd
+    ) {
+      propostaEmVoo = this.tentarMontarProposta(atual, config)
+    }
 
     for (let ciclo = 0; ciclo < MAX_CICLOS_TOOL; ciclo += 1) {
       // RNF-16 — teto de custo por conversa. Atingido, o turno para e o caminho
@@ -149,6 +222,7 @@ export class Orquestrador {
           toolsRecusadas: recusadas,
           custoUsd: custoTurno,
           tetoCustoAtingido: true,
+          ...SEM_REDERIVACAO,
         }
       }
 
@@ -218,7 +292,6 @@ export class Orquestrador {
       // a proposta gastaria uma chamada que o teto acabaria de recusar (RNF-16).
       if (
         !propostaEmVoo &&
-        !atual.proposta &&
         this.verificacoesConcluidas(atual) &&
         atual.custoUsd + custoTurno < config.teto_custo_conversa_usd
       ) {
@@ -235,16 +308,12 @@ export class Orquestrador {
     // anteriores: bloqueio sem override não deixa a proposta nascer, por mais
     // mensagens que venham. É o que impede o bypass por conversa (RN-07).
     const bloqueioPendente = await this.conversas.temBloqueioPendente(atual.id)
+    let rederivacao: Rederivacao | null = null
     if (propostaEmVoo) {
-      // Já estava em voo desde o fim do ciclo das tools; aqui só se espera o que sobrou.
-      custoTurno += await propostaEmVoo
-      const relido = await this.conversas.obter(atual.id)
-      if (relido) atual = relido
-    } else if (!bloqueio && !bloqueioPendente && !atual.proposta && this.verificacoesConcluidas(atual)) {
-      // Caminho de quem não passou pelo laço de tools neste turno (as verificações já
-      // vinham concluídas de um turno anterior). Aqui não há ida ao modelo concorrente com
-      // que paralelizar, então continua em série.
-      custoTurno += await this.tentarMontarProposta(atual, config)
+      // Já estava em voo — desde o início do turno, ou desde o fim do ciclo das tools.
+      // Aqui só se espera o que sobrou.
+      rederivacao = await propostaEmVoo
+      custoTurno += rederivacao.custoUsd
       const relido = await this.conversas.obter(atual.id)
       if (relido) atual = relido
     }
@@ -258,6 +327,25 @@ export class Orquestrador {
     // Acrescentar o aviso ao texto do modelo, em vez de substituí-lo, produzia uma
     // resposta que se contradizia sozinha.
     const textoFinal = bloqueio?.texto ?? (bloqueioPendente ? MENSAGEM_BLOQUEIO_PENDENTE : ultimoTexto)
+
+    // `FR-6` — a prosa afirmou nível ou horas? Só MEDE: o texto vai inteiro para a pessoa,
+    // e o achado (nunca a frase, `RNF-30`) vai para a auditoria. Recortar mutilaria o
+    // parágrafo, e o defeito voltaria com outra redação — a escalada, se a medição mostrar
+    // vazamento recorrente, é com dado (§3.6 do plano da 008).
+    // ⚠️ Só o texto do MODELO é avaliado: com bloqueio quem fala é o servidor, e auditar a
+    // nossa própria mensagem mediria a nossa copy, não o que o provedor escreveu.
+    if (!bloqueio && !bloqueioPendente) {
+      for (const achado of prosaAfirmaPrazo(textoFinal)) {
+        await this.auditoria.registrar({
+          atorEmail: atual.solicitanteEmail,
+          acao: 'prosa_afirmou_prazo',
+          recurso: `conversa:${atual.id}`,
+          resultado: 'sucesso',
+          detalhe: { achado },
+        })
+      }
+    }
+
     await this.conversas.adicionarMensagem(
       this.novoId(),
       atual.id,
@@ -280,6 +368,9 @@ export class Orquestrador {
       toolsRecusadas: recusadas,
       custoUsd: custoTurno,
       tetoCustoAtingido: false,
+      alterados: rederivacao?.alterados ?? SEM_REDERIVACAO.alterados,
+      camposSugeridos: rederivacao?.camposSugeridos ?? SEM_REDERIVACAO.camposSugeridos,
+      recusasDeAjuste: rederivacao?.recusasDeAjuste ?? SEM_REDERIVACAO.recusasDeAjuste,
     }
   }
 
@@ -298,8 +389,8 @@ export class Orquestrador {
     // ele existe para que um caminho FUTURO que chame este método sem passar
     // pelo override não vire o bypass que acabamos de fechar.
     if (await this.conversas.temBloqueioPendente(conversa.id)) return false
-    const custo = await this.tentarMontarProposta(conversa, config)
-    if (custo > 0) await this.conversas.somarCusto(conversa.id, custo)
+    const { custoUsd } = await this.tentarMontarProposta(conversa, config)
+    if (custoUsd > 0) await this.conversas.somarCusto(conversa.id, custoUsd)
     return Boolean((await this.conversas.obter(conversa.id))?.proposta)
   }
 
@@ -336,8 +427,8 @@ export class Orquestrador {
   private async tentarMontarProposta(
     conversa: Conversa,
     config: ConfigValores,
-  ): Promise<number> {
-    if (config.tipos_chamado_permitidos.length === 0) return 0
+  ): Promise<Rederivacao> {
+    if (config.tipos_chamado_permitidos.length === 0) return { custoUsd: 0, ...SEM_REDERIVACAO }
     try {
       /**
        * 🚨 **Os tipos vão COM NOME, e sem nome não se propõe** (`D-70`).
@@ -358,11 +449,19 @@ export class Orquestrador {
        * para oferecer `(nenhum)` é gasto sem resultado possível (`RNF-16`).
        */
       const tiposPermitidos = await tiposOferecidos(this.fonteDeTipos, config)
-      if (tiposPermitidos.length === 0) return 0
+      if (tiposPermitidos.length === 0) return { custoUsd: 0, ...SEM_REDERIVACAO }
+
+      /**
+       * O formulário do assunto **vigente**, para a pessoa poder corrigi-lo conversando
+       * (`FR-11`). Vazio antes da primeira proposta (não há assunto de que falar) e vazio
+       * quando o schema não pôde ser lido — o fail-open de `D-27`.
+       */
+      const schema = await this.schemaDoAssuntoVigente(conversa, config)
 
       const r = await this.ia.extrairProposta({
         mensagens: await this.conversas.listarMensagens(conversa.id),
         tiposPermitidos,
+        camposDoAssunto: camposParaExtracao(schema),
       })
       /**
        * ⚠️ Segunda camada de `RN-07`, e ela passou a valer de verdade quando a extração
@@ -374,27 +473,107 @@ export class Orquestrador {
        * O custo da chamada é devolvido de qualquer forma: ela aconteceu e foi paga
        * (`RNF-16` mede gasto, não gasto aproveitado).
        */
-      if (r.proposta && (await this.conversas.temBloqueioPendente(conversa.id))) {
-        return r.custoEstimadoUsd
+      if (!r.proposta) return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO }
+      if (await this.conversas.temBloqueioPendente(conversa.id)) {
+        return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO }
       }
-      if (r.proposta) {
-        await this.conversas.definirProposta(conversa.id, {
-          titulo: r.proposta.titulo,
-          descricao: r.proposta.descricao,
-          tipoChamadoId: r.proposta.tipoChamadoId,
-          prioridade: r.proposta.prioridade,
-          // ⚠️ **A IA não decide área** (`D-52`). O extrator ainda pode devolver uma —
-          // ela vem do texto da conversa —, e usá-la produzia a divergência que a
-          // auditoria de `D-47` achou: o cartão mostrava a área adivinhada e o vínculo
-          // gravava a de `resolverArea`, sem nada na tela indicando. Quem preenche este
-          // campo agora é `garantirAreaNaProposta`, com a fonte organizacional.
-          area: null,
-          componente: null,
-        })
+
+      /**
+       * `FR-16` — o assunto mudou **neste** pedido: os campos não são preenchidos, e nem
+       * recusados. Os rótulos que a IA devolveu descrevem o formulário **anterior**, e o do
+       * assunto novo ela ainda não viu; avaliá-los contra o schema velho produziria recusa
+       * sobre um formulário que já não é o vigente — ruído com cara de erro da pessoa.
+       */
+      const assuntoMudou = r.proposta.tipoChamadoId !== conversa.proposta?.tipoChamadoId
+      const ajuste = assuntoMudou
+        ? { valores: {}, recusas: [] }
+        : ajustarCamposPorRotulo(r.proposta.campos, schema)
+
+      const nova = {
+        titulo: r.proposta.titulo,
+        descricao: r.proposta.descricao,
+        tipoChamadoId: r.proposta.tipoChamadoId,
+        prioridade: r.proposta.prioridade,
+        // ⚠️ **A IA não decide área** (`D-52`). O extrator ainda pode devolver uma —
+        // ela vem do texto da conversa —, e usá-la produzia a divergência que a
+        // auditoria de `D-47` achou: o cartão mostrava a área adivinhada e o vínculo
+        // gravava a de `resolverArea`, sem nada na tela indicando. Quem preenche este
+        // campo agora é `garantirAreaNaProposta`, com a fonte organizacional.
+        area: null,
+        componente: null,
+        motivoPrioridade: r.proposta.motivoPrioridade,
+        campos: ajuste.valores,
       }
-      return r.custoEstimadoUsd
+      const alterados = diffDeProposta(conversa.propostaDaIa, nova)
+      // Vigente **e** base na mesma escrita (`RN-13`): gravar só uma faria o diff do turno
+      // seguinte comparar contra a proposta errada, e o sintoma apareceria turnos depois.
+      await this.conversas.definirPropostaDaIa(conversa.id, nova)
+
+      await this.registrarAjuste(conversa, alterados, ajuste.recusas)
+      return {
+        custoUsd: r.custoEstimadoUsd,
+        alterados,
+        camposSugeridos: ajuste.valores,
+        recusasDeAjuste: ajuste.recusas,
+      }
     } catch {
-      return 0
+      return { custoUsd: 0, ...SEM_REDERIVACAO }
+    }
+  }
+
+  /**
+   * O schema do assunto vigente, ou vazio.
+   *
+   * ⚠️ **Nada aqui lança** — `D-27`, o mesmo fail-open de `RF-62`: schema ilegível não
+   * ajusta campo nenhum e **não** derruba o resto do turno. Fail-closed aqui seria deixar de
+   * corrigir o título por causa de uma queda na leitura de um formulário.
+   */
+  private async schemaDoAssuntoVigente(
+    conversa: Conversa,
+    config: ConfigValores,
+  ): Promise<readonly CampoRequestType[]> {
+    const tipo = conversa.proposta?.tipoChamadoId
+    const desk = config.service_desk_id
+    if (!tipo || !desk) return []
+    try {
+      return await this.fonteDeTipos.obterCamposDoTipo(desk, tipo)
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * `FR-23` — o registro do ajuste: **nomes** de campo, nunca valores.
+   *
+   * ⚠️ O conteúdo do chamado não entra na auditoria (`RN-10`, `RNF-30`): guardar o título
+   * gravaria o relato da pessoa numa tabela com piso de retenção de 180 dias (`D-17`).
+   *
+   * ⚠️ E motivo reescrito sozinho **não** é ajuste (`ScC-9`): o modelo redige o motivo de
+   * novo a cada rederivação, então contá-lo faria *toda* mensagem virar `proposta_ajustada`
+   * e a pergunta "em quais campos a argumentação pega?" mediria variação de redação.
+   */
+  private async registrarAjuste(
+    conversa: Conversa,
+    alterados: readonly CampoAlterado[],
+    recusas: readonly RecusaDeAjuste[],
+  ): Promise<void> {
+    if (houveAjusteDeProposta(alterados)) {
+      await this.auditoria.registrar({
+        atorEmail: conversa.solicitanteEmail,
+        acao: 'proposta_ajustada',
+        recurso: `conversa:${conversa.id}`,
+        resultado: 'sucesso',
+        detalhe: { campos: alterados },
+      })
+    }
+    for (const recusa of recusas) {
+      await this.auditoria.registrar({
+        atorEmail: conversa.solicitanteEmail,
+        acao: 'ajuste_recusado',
+        recurso: `conversa:${conversa.id}`,
+        resultado: 'negado',
+        detalhe: { rotulo: recusa.rotulo, motivo: recusa.motivo },
+      })
     }
   }
 

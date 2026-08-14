@@ -143,11 +143,43 @@ export class ClienteIAFake implements ClienteIA {
     prioridade: 'alta',
     tipoChamadoId: 'rt-1',
     area: null,
+    /**
+     * ⚠️ **O default vem COM motivo, e isso é escolha de dublê** (`FR-1`): o caminho comum de
+     * produção tem motivo, então um fake sem ele faria todo teste de tela exercitar o caminho
+     * de exceção (`FR-5`) sem ninguém notar. Quem testa a ausência a escreve explicitamente.
+     *
+     * 🚨 **E nenhum caso prova comportamento pelo que sai daqui** (`D-47`, cinco ocorrências):
+     * motivo válido é o que `motivo-da-prioridade.ts` diz, e campo ajustado é o que
+     * `ajuste-por-rotulo.ts` casa contra o schema. Aqui é roteiro, não evidência.
+     */
+    motivoPrioridade:
+      'O relatório diário está sem os dados de ontem, com contorno manual disponível. Nenhuma venda parada foi relatada.',
+    campos: [],
   }
   readonly extracoesRecebidas: ParametrosExtracao[] = []
 
+  /**
+   * Roteiro de extrações, **uma por turno** — spec 008, `FR-8`.
+   *
+   * A proposta agora é rederivada em **todo** turno, e o cenário que importa é a IA
+   * mudando de opinião no meio da conversa. Com um valor único, encenar isso exige mexer
+   * em `propostaSugerida` entre as chamadas — o que funciona, e não serve para o caso em
+   * que os dois turnos acontecem dentro da **mesma** chamada sob teste.
+   *
+   * Vazio (o normal), cai em `propostaSugerida`. Consumido em ordem, e o último valor
+   * **permanece** para os turnos seguintes: roteiro que acaba não pode virar "sem
+   * proposta", que é outro cenário e mediria outra coisa.
+   */
+  readonly roteiroDePropostas: (PropostaSugerida | null)[] = []
+
   async extrairProposta(params: ParametrosExtracao): Promise<ResultadoExtracao> {
     this.extracoesRecebidas.push(params)
+    if (this.roteiroDePropostas.length > 0) {
+      this.propostaSugerida =
+        this.roteiroDePropostas.length > 1
+          ? (this.roteiroDePropostas.shift() ?? null)
+          : this.roteiroDePropostas[0]!
+    }
     if (this.falharChat) {
       throw new ErroIA('fake: extração indisponível', { transitorio: true, etapa: 'extracao' })
     }

@@ -132,6 +132,47 @@ export interface PropostaSugerida {
   /** Id do tipo de chamado, escolhido ENTRE OS PERMITIDOS (RF-28). */
   readonly tipoChamadoId: string
   readonly area: string | null
+  /**
+   * Por que **este** nível para **este** caso — `RF-68`, `FR-1` da spec 008.
+   *
+   * Sai da MESMA operação que escolheu `prioridade`, e é isso que torna impossível a
+   * contradição medida em 13/08/2026 (a prosa dizendo Crítica/4h com o cartão em
+   * Alta/12h): quem explica é quem decidiu. Duas frases no máximo — quem valida é
+   * `tickets/motivo-da-prioridade.ts`, **nunca** esta camada, porque texto que veio do
+   * modelo não é confiável só por ter chegado tipado.
+   *
+   * `null` é resposta legítima: cai em `FR-5` e a tela **declara** que a sugestão não
+   * veio justificada (precedente de `D-53` — ausência declarada, nunca disfarçada).
+   */
+  readonly motivoPrioridade: string | null
+  /**
+   * Ajustes pedidos **em texto** aos campos do formulário do assunto vigente — `RF-71`.
+   *
+   * 🚨 **Por RÓTULO, nunca por `fieldId`.** O rótulo é o texto que a pessoa já lê na
+   * tela; o `fieldId` é identificador interno e não pode entrar no prompt (`RNF-30`) —
+   * e `D-36` mostrou que ele **não significa nada** fora do request type
+   * (`customfield_10092` é "Cargo/Função" no tipo 108 e "Em que sistema o Bug está
+   * ocorrendo?" no 70). Quem traduz de volta é `tickets/ajuste-por-rotulo.ts`, com
+   * casamento exato e recusa dita na tela quando não casa.
+   *
+   * Lista vazia é o caso comum: a pessoa não pediu nada de campo neste turno.
+   */
+  readonly campos: readonly { readonly rotulo: string; readonly valor: string }[]
+}
+
+/**
+ * Um campo do formulário do assunto vigente, como o MODELO o vê — spec 008, `FR-11`.
+ *
+ * ⚠️ Não tem `fieldId` **de propósito**: é este tipo que garante, na fronteira, que o id
+ * interno não tem por onde vazar ao prompt (`RNF-30`). As opções também vão por rótulo —
+ * o id da opção é resolvido no servidor, como em `D-39`/`D-48`.
+ */
+export interface CampoParaExtracao {
+  readonly rotulo: string
+  /** `texto` · `selecao` · `numero` · `data` — o mesmo vocabulário de `CampoRequestType`. */
+  readonly tipo: string
+  /** Rótulos das opções, quando o campo é de seleção. Vazio nos outros casos. */
+  readonly opcoes: readonly string[]
 }
 
 export interface ParametrosExtracao {
@@ -141,6 +182,14 @@ export interface ParametrosExtracao {
    * da lista é descartado por quem chama — o modelo não amplia a allowlist.
    */
   readonly tiposPermitidos: readonly { readonly id: string; readonly nome: string }[]
+  /**
+   * Campos do assunto **vigente**, para a pessoa poder corrigi-los conversando (`RF-71`).
+   *
+   * Vazio quando ainda não há proposta (não há assunto de que falar) ou quando o schema
+   * não pôde ser lido — e aí nenhum campo é ajustado naquele turno, que é o fail-open de
+   * `D-27`: `RF-71` é qualidade de produto, não trava.
+   */
+  readonly camposDoAssunto?: readonly CampoParaExtracao[]
 }
 
 export interface ResultadoExtracao {

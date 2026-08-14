@@ -500,6 +500,20 @@ export const COLUNAS_ADICIONADAS = [
    * criação foi diferida) · `0` = tentou e nenhum subiu · `N` = subiram N.
    */
   `ALTER TABLE submissoes ADD COLUMN anexos_anexados INTEGER`,
+  /**
+   * `RN-13` (spec 008) — a **base do merge de três pontas**: a última proposta que a IA
+   * produziu, com o motivo da prioridade e os campos que ela sugeriu.
+   *
+   * 🚨 **Por que não guardar isso em `proposta_json`:** aquela coluna é a proposta
+   * **vigente**, e ela carrega a edição da pessoa (`PUT /proposta`, `RF-16`). Comparar a
+   * proposta nova contra ela diria "a IA mudou a prioridade" quando a IA repetiu a própria
+   * opinião e foi a **pessoa** que mudou — e a tela atropelaria a escolha dela. `SC-7` proíbe
+   * isso, e o sintoma é zero: nenhum erro, nenhum teste vermelho.
+   *
+   * ⚠️ `NULL` em toda conversa anterior a esta migração, o que é o estado certo: sem base
+   * não há motivo, e o cartão **declara** isso (`FR-5`) até a rederivação seguinte.
+   */
+  `ALTER TABLE conversas ADD COLUMN proposta_ia_json TEXT`,
 ] as const
 
 /**

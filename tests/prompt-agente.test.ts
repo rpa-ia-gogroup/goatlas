@@ -71,17 +71,32 @@ describe('prompt do agente — identidade e escopo', () => {
   })
 })
 
-describe('prompt do agente — prazos vêm da mesma constante do SLA (RN-08)', () => {
-  it('não repete as horas à mão: o texto usa SLA_PRIMEIRA_RESPOSTA_HORAS', () => {
+describe('prompt do agente — o prazo saiu do texto e foi para o cartão (FR-6, spec 008)', () => {
+  /**
+   * 🚨 **Esta asserção inverteu, e a razão dela NÃO mudou** (`T-723`).
+   *
+   * O caso antigo exigia que as horas viessem de `SLA_PRIMEIRA_RESPOSTA_HORAS` — para o
+   * agente não prometer um prazo enquanto o cron cobrava outro. O risco continua real; o
+   * que mudou é que o agente **não promete prazo nenhum**: quem mostra nível e horas é o
+   * cartão de confirmação, montado pela mesma decisão que os escolheu.
+   *
+   * Sem isso, prosa e cartão discordavam na mesma tela — medido em 13/08/2026: texto em
+   * Crítica/4h, cartão em Alta/12h. Eles saem de chamadas **paralelas** (`D-32`), então a
+   * prosa é escrita antes de a extração voltar e afirma o que não decidiu.
+   *
+   * ⚠️ Apagar o caso em vez de invertê-lo devolveria o furo pelo outro lado: nada impediria
+   * as horas de voltarem ao texto na próxima reescrita do prompt.
+   */
+  it('nenhuma quantidade de horas sobrou no texto', () => {
     const p = montarPromptAgente(COMPLETO)
-    expect(p).toContain(`${SLA_PRIMEIRA_RESPOSTA_HORAS.critica}h`)
-    expect(p).toContain(`${SLA_PRIMEIRA_RESPOSTA_HORAS.alta}h`)
-    expect(p).toContain(`${SLA_PRIMEIRA_RESPOSTA_HORAS.normal}h`)
-    // O piso garantido é o prazo da prioridade normal (R-05) — se um dia mudar, muda
-    // na constante, e esta asserção é o que impede o texto de ficar para trás.
-    expect(p).toMatch(
-      new RegExp(`${SLA_PRIMEIRA_RESPOSTA_HORAS.normal}h é o \\*\\*piso garantido\\*\\*`),
-    )
+    for (const horas of Object.values(SLA_PRIMEIRA_RESPOSTA_HORAS)) {
+      expect(p).not.toContain(`${horas}h`)
+    }
+    expect(p).not.toMatch(/\d{1,3}\s*horas?\b/i)
+  })
+
+  it('o piso garantido continua dito — sem número (R-05)', () => {
+    expect(montarPromptAgente(COMPLETO)).toMatch(/piso garantido/i)
   })
 })
 

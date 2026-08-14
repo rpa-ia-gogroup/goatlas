@@ -2352,3 +2352,116 @@
   display: block;
   margin-top: var(--space-2);
 }
+
+/* ---------- o cartão negociável (spec 008) --------------------------------- */
+
+/*
+ * `FR-22` — a linha que diz que conversar pode reescrever o cartão.
+ *
+ * Fica logo abaixo do título e antes de tudo: é a condição sob a qual a pessoa lê o resto.
+ * Sem cor própria e sem ícone — o que ela precisa é ser lida uma vez, não competir com o
+ * título nem com o botão.
+ */
+.recibo-negociavel {
+  margin-top: var(--space-2);
+}
+
+/*
+ * `FR-2` — por que a IA sugeriu ESTE nível.
+ *
+ * Vive colado ao seletor, porque é dele que fala. A borda à esquerda é a mesma gramática de
+ * `.aviso` (o texto pertence a outra voz — aqui, a da sugestão), em peso menor: ela informa
+ * quem está decidindo, não interrompe.
+ */
+.motivo-prioridade {
+  margin-top: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 2px solid color-mix(in srgb, var(--go-blue) 30%, transparent);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--go-text-primary) 78%, transparent);
+}
+
+/*
+ * `FR-2b` — de quem é o motivo, quando a pessoa escolheu outro nível.
+ *
+ * ⚠️ O peso extra existe para a atribuição ser lida ANTES da justificativa. Sem ela, o
+ * motivo aparece ao lado de um nível que ninguém escolheu e a tela passa a justificar a
+ * escolha da pessoa com o raciocínio da IA (`SC-2b`).
+ */
+.motivo-prioridade-dono {
+  font-weight: var(--fw-bold);
+  color: var(--go-text-primary);
+}
+
+/*
+ * `FR-13`/`FR-14` — o que a pessoa pediu em texto e não coube.
+ *
+ * ⚠️ **O estado nunca é só a cor**: cada linha diz o que aconteceu e o que fazer, com o
+ * rótulo do campo e as opções válidas por extenso. A caixa usa o mesmo fundo dos cartões
+ * (`--go-white`, e não um token inventado — `D-64`) e a borda lime de `.aviso-atencao`,
+ * que é a marca de "requer sua atenção" que o app já usa.
+ */
+.recusas-ajuste {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--go-white);
+  border-left: 4px solid var(--go-lime);
+  font-size: var(--fs-small);
+  color: var(--go-text-primary);
+}
+.recusas-ajuste ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.recusas-ajuste li {
+  line-height: 1.5;
+}
+
+/*
+ * `FR-18` — o aviso de negociação.
+ *
+ * Mesmas mecânicas de `.visualizador` (`D-64`), e pelos mesmos dois motivos medidos no
+ * navegador: `margin: auto` **explícito**, porque o reset do app zera a margem que o UA usa
+ * para centralizar o `<dialog>`; e fundo **explícito**, porque `var()` sem valor não pinta e
+ * a página apareceria atravessando a caixa.
+ */
+.aviso-negociacao {
+  margin: auto;
+  inset: 0;
+  width: min(92vw, 520px);
+  border: none;
+  border-radius: var(--radius-lg);
+  padding: 0;
+  background: var(--go-white);
+  /*
+   * ⚠️ `--go-text-primary`, e NÃO `--go-text-body` — que é o que `.visualizador` usa e
+   * **não existe em `tokens.css`**. Ali ele funciona por acidente (`var()` sem valor não
+   * pinta, e a cor cai no `inherit` da raiz, que já é `--go-text-primary`), e é a mesma
+   * família de `--go-surface` em `D-64`: token inventado não quebra build, teste nem
+   * typecheck. Repeti-lo aqui seria copiar a armadilha para um lugar novo.
+   */
+  color: var(--go-text-primary);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 28%);
+}
+.aviso-negociacao::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+.aviso-negociacao-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+.aviso-negociacao-corpo p {
+  font-size: var(--fs-small);
+  line-height: 1.6;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .aviso-negociacao[open] {
+    animation: visualizador-entra 120ms ease-out;
+  }
+}

@@ -66,6 +66,72 @@ export interface RespostaTurno {
    */
   readonly tipoNome: string | null
   readonly tetoCustoAtingido: boolean
+  /**
+   * Por que **este** nível para **este** caso — `RF-68`, `FR-1`/`FR-2`.
+   *
+   * Já validado pelo servidor (duas frases, português, sem id interno): `null` significa
+   * "não veio justificada", e a tela **declara** isso em vez de silenciar (`FR-5`,
+   * precedente de `D-53`). ⚠️ Vem da **base da IA**, não da proposta vigente — editar a
+   * prioridade à mão não apaga o motivo (`plan.md` §4).
+   */
+  readonly motivoPrioridade: string | null
+  /**
+   * De **quem** é o motivo — `FR-2b`.
+   *
+   * A prioridade que a IA sugeriu neste turno. Quando ela difere da que está na tela (a
+   * pessoa mexeu no seletor), o motivo é apresentado **atribuído à sugestão** (*"a sugestão
+   * era alta, porque…"*) e nunca como justificativa do nível escolhido — senão a tela
+   * afirma um porquê de um nível que ninguém escolheu (`SC-2`, `SC-2b`).
+   */
+  readonly prioridadeSugerida: Prioridade | null
+  /**
+   * Valores que a IA sugeriu para os campos do formulário, por `fieldId` — `FR-11`.
+   *
+   * ⚠️ Sai por `fieldId` porque quem preenche o formulário é este navegador, e ele **já**
+   * conhece os `fieldId` do schema que ele mesmo lê. `RNF-30` fala de **prompt e tela**: o
+   * id nunca é exibido, e é o rótulo que atravessa a fronteira do modelo.
+   */
+  readonly camposSugeridos?: Readonly<Record<string, string>>
+  /**
+   * O que a IA **mudou** nesta volta — `RN-13`, `FR-8`/`FR-9`.
+   *
+   * 🚨 É o servidor que decide isso, comparando contra a última proposta **da IA** (nunca
+   * contra a vigente, que carrega a edição da pessoa). A tela usa esta lista para o merge:
+   * campo aqui vale o da IA, campo fora daqui continua como a pessoa deixou. Calcular no
+   * cliente faria a tela mesclar por um critério e a auditoria contar por outro.
+   */
+  readonly alterados?: readonly string[]
+  /**
+   * Ajuste pedido em texto que **não** foi aplicado — `FR-13`/`FR-14`.
+   *
+   * ⚠️ Mora aqui, e não na prosa do agente, porque a prosa é escrita **antes** de a decisão
+   * voltar (as duas chamadas são paralelas, `D-32`) — a mesma razão de `FR-6`. Na tela isto
+   * aparece junto do cartão, ao lado do que explica.
+   */
+  readonly recusasDeAjuste?: readonly {
+    readonly rotulo: string
+    readonly motivo: 'campo_inexistente' | 'opcao_inexistente'
+    /** Rótulos das opções válidas, quando o motivo é `opcao_inexistente`. Nunca ids. */
+    readonly opcoes?: readonly string[]
+  }[]
+  /** O assunto mudou neste turno — a tela diz, e os campos do anterior somem (`FR-10`). */
+  readonly assuntoMudou?: boolean
+  /**
+   * A frase de `FR-5`, pronta, quando o motivo não pôde ser exibido.
+   *
+   * ⚠️ Vem do servidor em vez de a tela inventá-la porque **a rota do override** mostra o
+   * mesmo cartão: duas redações da mesma ausência é a divergência silenciosa de sempre.
+   */
+  readonly motivoIndisponivel?: string | null
+  /**
+   * Há o que negociar? — `FR-21`.
+   *
+   * `false` sem proposta e `false` com bloqueio pendente. É o servidor quem sabe as duas
+   * coisas, e é dele que a tela tira a decisão de exibir o aviso: um aviso dizendo
+   * "conversar pode reescrever o cartão" na frente de uma conversa **sem** cartão seria a
+   * parede que `RF-13`/`RN-07` proíbem.
+   */
+  readonly podeNegociar?: boolean
 }
 
 export interface ChamadoResumo {
@@ -696,6 +762,19 @@ export const api = {
   anexosDaConversa: (conversaId: string) =>
     chamar<{ itens: { nome: string }[]; teto: number }>(
       `/api/conversas/${encodeURIComponent(conversaId)}/anexos`,
+    ),
+
+  /**
+   * O desfecho do aviso de negociação — `FR-23`.
+   *
+   * ⚠️ **Disparado sem `await` na frente do envio:** auditoria não entra no caminho crítico
+   * de uma mensagem, e falha dela não pode impedir a pessoa de falar. Um caminho só para os
+   * dois desfechos, porque duas mecânicas divergiriam na primeira correção.
+   */
+  registrarAvisoDeNegociacao: (conversaId: string, desfecho: 'seguiu' | 'voltou') =>
+    chamar<{ ok: true }>(
+      `/api/conversas/${encodeURIComponent(conversaId)}/aviso-negociacao`,
+      { method: 'POST', body: JSON.stringify({ desfecho }) },
     ),
 
   /**

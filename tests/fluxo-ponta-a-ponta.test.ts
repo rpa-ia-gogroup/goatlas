@@ -266,3 +266,71 @@ describe('RF-28 — a extração não amplia a allowlist', () => {
     }
   })
 })
+
+/**
+ * **T-770 / D-47** — o que o FAKE não pode ser a evidência de.
+ *
+ * 🚨 Quinta ocorrência documentada da família: `D-38` (obrigatório faltando), `D-39` (campo
+ * de seleção), `D-43` (autor do comentário), `D-47` (prioridade) e `D-70` (o nome do tipo).
+ * O padrão é sempre o mesmo — o dublê guarda o argumento e devolve o valor certo, enquanto o
+ * cliente real faz outra coisa —, e o sintoma é uma suíte verde sobre um caminho que nunca
+ * funcionou em produção.
+ *
+ * Os dois campos que a spec 008 acrescentou **cruzam a fronteira do provedor**, então quem
+ * responde por eles é `interpretarProposta`, sobre o **texto cru** que o modelo devolveu.
+ * `ClienteIAFake.extrairProposta` não interpreta nada: ele devolve o objeto que o teste
+ * plantou, e um caso que afirmasse sobre ele provaria só que o fake é consistente consigo.
+ *
+ * _Requirements: FR-1, FR-11_
+ */
+describe('FR-1/FR-11 — motivo e campos, lidos do texto do modelo (nunca do fake)', () => {
+  const BASE = {
+    pronto: true,
+    titulo: 'Relatório de vendas não fecha o dia',
+    descricao: 'O fechamento diário não trouxe os pedidos de ontem.',
+    prioridade: 'alta',
+    tipoChamadoId: 'rt-1',
+  }
+
+  const ler = (extra: Record<string, unknown>) =>
+    interpretarProposta(JSON.stringify({ ...BASE, ...extra }), ['rt-1'])
+
+  it('o motivo é lido como veio — quem julga é a validação, não o parser', () => {
+    // ⚠️ Motivo comprido, em inglês ou com `customfield_…` **chega** até aqui: texto do
+    // modelo não fica confiável por ter vindo tipado. Quem o transforma na declaração de
+    // `FR-5` é `motivo-da-prioridade.ts`, e é lá que esse caso mora.
+    expect(ler({ motivoPrioridade: '  O comercial trabalha sem o relatório.  ' })?.motivoPrioridade)
+      .toBe('O comercial trabalha sem o relatório.')
+    expect(ler({})?.motivoPrioridade).toBeNull()
+    expect(ler({ motivoPrioridade: '   ' })?.motivoPrioridade).toBeNull()
+    expect(ler({ motivoPrioridade: 42 })?.motivoPrioridade).toBeNull()
+  })
+
+  it('os campos vêm por rótulo, e item malformado é descartado em silêncio', () => {
+    const p = ler({
+      campos: [
+        { rotulo: 'Recorrência', valor: 'Sempre' },
+        { rotulo: '  Sistema afetado  ', valor: '  Protheus ' },
+        { rotulo: 'Sem valor' },
+        { valor: 'sem rótulo' },
+        { rotulo: '', valor: 'vazio' },
+        'nem objeto',
+        null,
+      ],
+    })
+    // A recusa **não** nasce aqui: este ponto não conhece o assunto vigente, então "existe
+    // este campo?" é pergunta que ele não tem como responder (`ajuste-por-rotulo.ts` a faz).
+    expect(p?.campos).toEqual([
+      { rotulo: 'Recorrência', valor: 'Sempre' },
+      { rotulo: 'Sistema afetado', valor: 'Protheus' },
+    ])
+  })
+
+  it('formato inesperado devolve lista vazia — nunca derruba a proposta inteira', () => {
+    for (const campos of [undefined, null, 'texto', 42, {}]) {
+      const p = ler({ campos })
+      expect(p, String(campos)).not.toBeNull()
+      expect(p?.campos, String(campos)).toEqual([])
+    }
+  })
+})

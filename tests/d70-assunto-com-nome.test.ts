@@ -97,6 +97,8 @@ function montar(tipos: readonly TipoChamado[]) {
     prioridade: 'alta',
     tipoChamadoId: '68',
     area: null,
+    motivoPrioridade: 'O equipamento reinicia sozinho e impede o trabalho. Há máquina de reserva.',
+    campos: [],
   }
   const executor = new ExecutorTools(atlassian, ia, db, auditoria, () => AGORA)
   orquestrador = new Orquestrador(ia, executor, conversas, auditoria, novoId, atlassian)

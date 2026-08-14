@@ -411,3 +411,405 @@ describe('RNF-16 — teto de custo por conversa', () => {
   })
 })
 
+
+/**
+ * **T-730 / FR-8, FR-11, RN-13** — o turno REDERIVA a proposta, em vez de congelá-la.
+ *
+ * ## O defeito que isto fecha
+ *
+ * A proposta nascia uma vez (`!atual.proposta` era condição para extrair) e não voltava a
+ * ser tocada: argumentar depois do cartão montado não mudava nada, e a pessoa só tinha o
+ * seletor de prioridade e os campos do formulário. *"Na verdade é no Protheus"* virava uma
+ * frase simpática do agente e um chamado idêntico ao anterior.
+ *
+ * ⚠️ **A base do merge é a última proposta DA IA** (`proposta_ia_json`), nunca a vigente:
+ * a vigente carrega a edição da pessoa (`PUT /proposta`), e diffar contra ela faria a IA
+ * "mudar" a prioridade só por repetir a sugestão que a pessoa tinha rebaixado — atropelando
+ * a escolha dela sem erro nenhum (`SC-7`).
+ */
+describe('FR-8/RN-13 — a proposta é rederivada a cada turno', () => {
+  const ROTEIRO_VERIFICA_E_SEGUE: readonly TurnoRoteirizado[] = [
+    {
+      texto: 'Deixa eu verificar.',
+      toolsPropostas: [
+        { nome: 'search_confluence', argumentos: { topico: 'pipeline' } },
+        { nome: 'check_jira_history', argumentos: { tipoProblema: 'pipeline' } },
+      ],
+    },
+    { texto: 'Montei o chamado abaixo.' },
+    { texto: 'Ajustei como você pediu.' },
+    { texto: 'Ajustei de novo.' },
+  ]
+
+  /** Config que de fato oferece o tipo `rt-1` (allowlist + service desk — `D-70`). */
+  const CONFIG_COM_TIPO: ConfigValores = {
+    ...CONFIG,
+    tipos_chamado_permitidos: ['rt-1', 'rt-2'],
+    service_desk_id: 'sd-1',
+    // Threshold alto: a Regra 1 não bloqueia, e o turno chega à proposta.
+    regra1_threshold_score: 0.99,
+  }
+
+  function prepararTipos() {
+    atlassian.estado.tiposChamado = [
+      { id: 'rt-1', serviceDeskId: 'sd-1', nome: 'Suporte de tecnologia', descricao: null },
+      { id: 'rt-2', serviceDeskId: 'sd-1', nome: 'Acesso a sistema', descricao: null },
+    ]
+    atlassian.estado.camposPorTipo.set('rt-1', [
+      { fieldId: 'customfield_1', rotulo: 'Sistema afetado', obrigatorio: false, tipo: 'texto', opcoes: [] },
+      {
+        fieldId: 'customfield_2',
+        rotulo: 'Recorrência',
+        obrigatorio: false,
+        tipo: 'selecao',
+        opcoes: [
+          { id: '10127', rotulo: 'Sempre' },
+          { id: '10128', rotulo: 'Às vezes' },
+        ],
+      },
+    ])
+  }
+
+  /** Leva a conversa até ter proposta, e devolve o estado dela. */
+  async function ateAPrimeiraProposta() {
+    prepararTipos()
+    const c = await conversas.criar('c1', ANA)
+    await orquestrador.processarMensagem(c, 'o pipeline não rodou', CONFIG_COM_TIPO)
+    return (await conversas.obter('c1'))!
+  }
+
+  it('turno COM proposta existente chama `extrairProposta` de novo', async () => {
+    montar(ROTEIRO_VERIFICA_E_SEGUE)
+    const comProposta = await ateAPrimeiraProposta()
+    expect(comProposta.proposta).not.toBeNull()
+    const extracoesAteAqui = ia.extracoesRecebidas.length
+
+    await orquestrador.processarMensagem(comProposta, 'na verdade é no Protheus', CONFIG_COM_TIPO)
+    expect(ia.extracoesRecebidas.length).toBe(extracoesAteAqui + 1)
+  })
+
+  it('a proposta MUDA quando a IA muda de opinião', async () => {
+    montar(ROTEIRO_VERIFICA_E_SEGUE)
+    const comProposta = await ateAPrimeiraProposta()
+    expect(comProposta.proposta?.titulo).toBe('Pipeline de vendas não atualizou')
+
+    ia.propostaSugerida = {
+      ...ia.propostaSugerida!,
+      titulo: 'Protheus não atualizou o pipeline de vendas',
+      prioridade: 'critica',
+    }
+    const r = await orquestrador.processarMensagem(
+      comProposta,
+      'é no Protheus, e parou tudo',
+      CONFIG_COM_TIPO,
+    )
+
+    const depois = await conversas.obter('c1')
+    expect(depois?.proposta?.titulo).toBe('Protheus não atualizou o pipeline de vendas')
+    expect(depois?.proposta?.prioridade).toBe('critica')
+    // `alterados` é produzido pelo SERVIDOR, num lugar só — a tela mescla com ele e a
+    // auditoria de `FR-23` conta com ele. Dois produtores divergiriam em silêncio.
+    expect(r.alterados).toContain('titulo')
+    expect(r.alterados).toContain('prioridade')
+  })
+
+  it('a BASE (`proposta_ia_json`) é gravada junto, com o motivo', async () => {
+    montar(ROTEIRO_VERIFICA_E_SEGUE)
+    const comProposta = await ateAPrimeiraProposta()
+
+    expect(comProposta.propostaDaIa).not.toBeNull()
+    expect(comProposta.propostaDaIa?.motivoPrioridade).toBeTruthy()
+    // 🚨 O motivo mora na BASE, nunca na vigente: `validarProposta` é allowlist por
+    // construção e o `PUT /proposta` sobrescreve o `proposta_json` inteiro — com o motivo
+    // ali, editar a prioridade (o gesto que `RF-16` existe para permitir) o apagaria.
+    expect(comProposta.proposta as unknown as Record<string, unknown>).not.toHaveProperty(
+      'motivoPrioridade',
+    )
+  })
+
+  it('a primeira proposta da conversa NÃO conta como ajuste — base nula, `alterados` vazio', async () => {
+    montar(ROTEIRO_VERIFICA_E_SEGUE)
+    prepararTipos()
+    const c = await conversas.criar('c1', ANA)
+    const r = await orquestrador.processarMensagem(c, 'o pipeline não rodou', CONFIG_COM_TIPO)
+    expect(r.alterados).toEqual([])
+  })
+
+  it('RN-07 — com bloqueio pendente não se rederiva, por mais mensagens que venham', async () => {
+    montar([
+      {
+        texto: 'Deixa eu ver.',
+        toolsPropostas: [
+          { nome: 'search_confluence', argumentos: { topico: 'pipeline' } },
+          { nome: 'check_jira_history', argumentos: { tipoProblema: 'pipeline' } },
+        ],
+      },
+      { texto: 'segue' },
+      { texto: 'segue de novo' },
+    ])
+    prepararTipos()
+    const c = await conversas.criar('c1', ANA)
+    // Threshold baixo: a Regra 1 bloqueia com a página do fake.
+    const primeiro = await orquestrador.processarMensagem(c, 'o pipeline não rodou', {
+      ...CONFIG_COM_TIPO,
+      regra1_threshold_score: 0.5,
+    })
+    expect(primeiro.bloqueioPendente).toBe(true)
+    const extracoesAteAqui = ia.extracoesRecebidas.length
+
+    const atual = (await conversas.obter('c1'))!
+    await orquestrador.processarMensagem(atual, 'isso não resolve, abre logo', CONFIG_COM_TIPO)
+
+    expect(ia.extracoesRecebidas.length).toBe(extracoesAteAqui)
+    expect((await conversas.obter('c1'))?.proposta).toBeNull()
+  })
+
+  it('RNF-16 — com o teto de custo atingido não se rederiva', async () => {
+    montar(ROTEIRO_VERIFICA_E_SEGUE)
+    await ateAPrimeiraProposta()
+    await conversas.somarCusto('c1', 10)
+    const caro = (await conversas.obter('c1'))!
+    const extracoesAteAqui = ia.extracoesRecebidas.length
+
+    const r = await orquestrador.processarMensagem(caro, 'muda pra crítica', CONFIG_COM_TIPO)
+    expect(r.tetoCustoAtingido).toBe(true)
+    expect(ia.extracoesRecebidas.length).toBe(extracoesAteAqui)
+  })
+})
+
+/**
+ * **T-742 / FR-11, FR-12, FR-13, FR-14, FR-16** — o ajuste por texto, do rótulo ao `fieldId`.
+ */
+describe('FR-11 — a IA ajusta os campos do assunto vigente, por rótulo', () => {
+  const ROTEIRO: readonly TurnoRoteirizado[] = [
+    {
+      texto: 'Deixa eu verificar.',
+      toolsPropostas: [
+        { nome: 'search_confluence', argumentos: { topico: 'pipeline' } },
+        { nome: 'check_jira_history', argumentos: { tipoProblema: 'pipeline' } },
+      ],
+    },
+    { texto: 'Montei o chamado.' },
+    { texto: 'Ajustei.' },
+  ]
+
+  const CONFIG_COM_TIPO: ConfigValores = {
+    ...CONFIG,
+    tipos_chamado_permitidos: ['rt-1', 'rt-2'],
+    service_desk_id: 'sd-1',
+    regra1_threshold_score: 0.99,
+  }
+
+  async function comProposta() {
+    atlassian.estado.tiposChamado = [
+      { id: 'rt-1', serviceDeskId: 'sd-1', nome: 'Suporte de tecnologia', descricao: null },
+      { id: 'rt-2', serviceDeskId: 'sd-1', nome: 'Acesso a sistema', descricao: null },
+    ]
+    atlassian.estado.camposPorTipo.set('rt-1', [
+      { fieldId: 'customfield_1', rotulo: 'Sistema afetado', obrigatorio: false, tipo: 'texto', opcoes: [] },
+      {
+        fieldId: 'customfield_2',
+        rotulo: 'Recorrência',
+        obrigatorio: false,
+        tipo: 'selecao',
+        opcoes: [
+          { id: '10127', rotulo: 'Sempre' },
+          { id: '10128', rotulo: 'Às vezes' },
+        ],
+      },
+    ])
+    const c = await conversas.criar('c1', ANA)
+    await orquestrador.processarMensagem(c, 'o pipeline não rodou', CONFIG_COM_TIPO)
+    return (await conversas.obter('c1'))!
+  }
+
+  it('o modelo recebe os campos do assunto vigente — por RÓTULO, nunca por fieldId', async () => {
+    montar(ROTEIRO)
+    const atual = await comProposta()
+    await orquestrador.processarMensagem(atual, 'é sempre que acontece', CONFIG_COM_TIPO)
+
+    const ultima = ia.extracoesRecebidas.at(-1)!
+    const rotulos = (ultima.camposDoAssunto ?? []).map((c) => c.rotulo)
+    expect(rotulos).toContain('Recorrência')
+    expect(JSON.stringify(ultima.camposDoAssunto)).not.toContain('customfield')
+  })
+
+  it('rótulo e opção que casam viram `fieldId` + valor sugerido', async () => {
+    montar(ROTEIRO)
+    const atual = await comProposta()
+    ia.propostaSugerida = {
+      ...ia.propostaSugerida!,
+      campos: [{ rotulo: 'Recorrência', valor: 'Sempre' }],
+    }
+    const r = await orquestrador.processarMensagem(atual, 'acontece sempre', CONFIG_COM_TIPO)
+
+    expect(r.camposSugeridos).toEqual({ customfield_2: '10127' })
+    expect(r.alterados).toContain('campo:customfield_2')
+    expect(r.recusasDeAjuste).toEqual([])
+  })
+
+  it('FR-14 — campo que o assunto não tem é recusado, com o rótulo em português', async () => {
+    montar(ROTEIRO)
+    const atual = await comProposta()
+    ia.propostaSugerida = {
+      ...ia.propostaSugerida!,
+      campos: [{ rotulo: 'Número da nota fiscal', valor: '123' }],
+    }
+    const r = await orquestrador.processarMensagem(atual, 'a nota é a 123', CONFIG_COM_TIPO)
+
+    expect(r.camposSugeridos).toEqual({})
+    expect(r.recusasDeAjuste).toEqual([
+      { rotulo: 'Número da nota fiscal', motivo: 'campo_inexistente' },
+    ])
+  })
+
+  it('FR-13 — opção fora da lista é recusada, e a tela recebe os RÓTULOS válidos', async () => {
+    montar(ROTEIRO)
+    const atual = await comProposta()
+    ia.propostaSugerida = {
+      ...ia.propostaSugerida!,
+      campos: [{ rotulo: 'Recorrência', valor: 'De vez em quando' }],
+    }
+    const r = await orquestrador.processarMensagem(
+      atual,
+      'acontece de vez em quando',
+      CONFIG_COM_TIPO,
+    )
+
+    expect(r.camposSugeridos).toEqual({})
+    expect(r.recusasDeAjuste[0]?.motivo).toBe('opcao_inexistente')
+    expect(r.recusasDeAjuste[0]?.opcoes).toEqual(['Sempre', 'Às vezes'])
+    expect(JSON.stringify(r.recusasDeAjuste)).not.toContain('10127')
+  })
+
+  it('FR-16 — assunto mudou no mesmo turno: nenhum campo é preenchido', async () => {
+    montar(ROTEIRO)
+    const atual = await comProposta()
+    ia.propostaSugerida = {
+      ...ia.propostaSugerida!,
+      tipoChamadoId: 'rt-2',
+      campos: [{ rotulo: 'Recorrência', valor: 'Sempre' }],
+    }
+    const r = await orquestrador.processarMensagem(
+      atual,
+      'na verdade é pedido de acesso',
+      CONFIG_COM_TIPO,
+    )
+
+    expect(r.alterados).toContain('tipoChamadoId')
+    expect(r.camposSugeridos).toEqual({})
+    // Nem recusa: o campo não foi avaliado contra um formulário que ainda não é o vigente.
+    expect(r.recusasDeAjuste).toEqual([])
+  })
+
+  it('FR-12/RF-28 — assunto fora da oferta não muda o assunto', async () => {
+    montar(ROTEIRO)
+    const atual = await comProposta()
+    ia.propostaSugerida = {
+      ...ia.propostaSugerida!,
+      tipoChamadoId: 'rt-99',
+      titulo: 'outro título',
+    }
+    await orquestrador.processarMensagem(atual, 'joga isso na fila do financeiro', CONFIG_COM_TIPO)
+
+    const depois = await conversas.obter('c1')
+    expect(depois?.proposta?.tipoChamadoId).toBe('rt-1')
+    // A proposta inteira é descartada (`RF-28`), então nada mais mudou junto.
+    expect(depois?.proposta?.titulo).toBe('Pipeline de vendas não atualizou')
+  })
+
+  it('D-27 — schema ilegível não ajusta campo nenhum, e o cartão continua de pé', async () => {
+    montar(ROTEIRO)
+    const atual = await comProposta()
+    atlassian.estado.falhas.obterCamposDoTipo = 'indisponivel'
+    ia.propostaSugerida = {
+      ...ia.propostaSugerida!,
+      titulo: 'Título ajustado mesmo sem schema',
+      campos: [{ rotulo: 'Recorrência', valor: 'Sempre' }],
+    }
+    const r = await orquestrador.processarMensagem(atual, 'acontece sempre', CONFIG_COM_TIPO)
+
+    expect(r.camposSugeridos).toEqual({})
+    expect(r.recusasDeAjuste).toEqual([])
+    // ⚠️ Fail-open: a indisponibilidade do schema não derruba o resto do ajuste.
+    expect((await conversas.obter('c1'))?.proposta?.titulo).toBe(
+      'Título ajustado mesmo sem schema',
+    )
+  })
+})
+
+/**
+ * **T-745 / FR-23, ScC-9** — o que a auditoria registra do ajuste, e o que ela NUNCA registra.
+ */
+describe('FR-23 — auditoria do ajuste: nomes de campo, nunca valores', () => {
+  const ROTEIRO: readonly TurnoRoteirizado[] = [
+    {
+      texto: 'Verificando.',
+      toolsPropostas: [
+        { nome: 'search_confluence', argumentos: { topico: 'pipeline' } },
+        { nome: 'check_jira_history', argumentos: { tipoProblema: 'pipeline' } },
+      ],
+    },
+    { texto: 'Montei.' },
+    { texto: 'Ajustei.' },
+  ]
+  const CONFIG_COM_TIPO: ConfigValores = {
+    ...CONFIG,
+    tipos_chamado_permitidos: ['rt-1'],
+    service_desk_id: 'sd-1',
+    regra1_threshold_score: 0.99,
+  }
+
+  function prepararTipo() {
+    atlassian.estado.tiposChamado = [
+      { id: 'rt-1', serviceDeskId: 'sd-1', nome: 'Suporte de tecnologia', descricao: null },
+    ]
+  }
+
+  it('`proposta_ajustada` guarda os NOMES dos campos, e nenhum valor digitado', async () => {
+    montar(ROTEIRO)
+    prepararTipo()
+    const c = await conversas.criar('c1', ANA)
+    await orquestrador.processarMensagem(c, 'o pipeline não rodou', CONFIG_COM_TIPO)
+    const atual = (await conversas.obter('c1'))!
+
+    ia.propostaSugerida = {
+      ...ia.propostaSugerida!,
+      titulo: 'O Protheus não fecha o pedido 884213',
+    }
+    await orquestrador.processarMensagem(atual, 'é no Protheus, pedido 884213', CONFIG_COM_TIPO)
+
+    const r = await db.query(
+      `SELECT detalhe_json FROM auditoria WHERE acao = 'proposta_ajustada'`,
+      [],
+    )
+    const linhas = linhasComoObjetos<{ detalhe_json: string }>(r)
+    expect(linhas).toHaveLength(1)
+    expect(linhas[0]!.detalhe_json).toContain('titulo')
+    // 🚨 `RN-10`/`RNF-30` — o conteúdo do chamado não vai para a auditoria. Guardar o
+    // título gravaria o relato da pessoa numa tabela com piso de retenção de 180 dias.
+    expect(linhas[0]!.detalhe_json).not.toContain('Protheus')
+    expect(linhas[0]!.detalhe_json).not.toContain('884213')
+  })
+
+  it('ScC-9 — motivo reescrito sozinho NÃO conta como proposta ajustada', async () => {
+    montar(ROTEIRO)
+    prepararTipo()
+    const c = await conversas.criar('c1', ANA)
+    await orquestrador.processarMensagem(c, 'o pipeline não rodou', CONFIG_COM_TIPO)
+    const atual = (await conversas.obter('c1'))!
+
+    ia.propostaSugerida = {
+      ...ia.propostaSugerida!,
+      motivoPrioridade: 'Outra redação para o mesmo motivo, sem mudar nada do chamado.',
+    }
+    const r = await orquestrador.processarMensagem(atual, 'entendi', CONFIG_COM_TIPO)
+
+    expect(r.alterados).toEqual(['motivoPrioridade'])
+    const linhas = await db.query(
+      `SELECT id FROM auditoria WHERE acao = 'proposta_ajustada'`,
+      [],
+    )
+    expect(linhas.rows).toHaveLength(0)
+  })
+})

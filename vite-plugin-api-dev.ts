@@ -98,6 +98,9 @@ export function apiDev(): Plugin {
         prioridade: 'alta',
         tipoChamadoId: 'rt-dev',
         area: 'Growth',
+        motivoPrioridade:
+          'O relatório de vendas do dia não carregou e há contorno manual. Nenhuma parada de venda foi relatada.',
+        campos: [],
       }
 
       // Organizations API fake — para o console de governança (T-128) ter o que
