@@ -633,6 +633,17 @@ destes reabre um vazamento que já foi fechado.
   observa** o estado sobre o qual a instrução falava — e a única vez em que a frase dele chega à
   pessoa é justamente quando o botão não existe. ⚠️ A copy do botão continua no **servidor**, nas
   três mensagens de bloqueio: o caminho de saída de `RF-13` não mudou de existência, mudou de dono.
+- 🚨 **`public/` fica FORA da varredura do Tailwind, e o motivo foi medido** (14/08/2026,
+  `tokens.css`). Acrescentar `public/favicon.svg` — um arquivo sem uma única classe — fez a
+  folha crescer **1,2 kB**: o Tailwind varre todo arquivo do projeto atrás do que pareça nome
+  de classe, e o **comentário em português** dentro do SVG vira dezenas de candidatas. Nada
+  quebrava; só a folha engordando por causa de um asset estático. `@source not "../../public"`
+  resolve, e com ele os hashes do build voltam a ser **idênticos** aos de produção — o que
+  mantém o bundle validado na staging byte a byte o mesmo.
+- ⚠️ **Comentário de SVG é comentário de XML: dois hifens seguidos quebram o arquivo inteiro**
+  e o navegador **não desenha nada e não reclama** — a aba fica com o ícone genérico, e o
+  `favicon.svg` some sem erro em lugar nenhum. Aconteceu ao citar um token de CSS (`--go-…`)
+  dentro do comentário do próprio favicon.
 - 🚨 **Token de CSS inventado não falha em NADA, e agora há varredura** (`tests/tokens-de-css-existem.test.ts`).
   Depois de `--go-surface` (`D-64`) apareceram mais dois usos de **`--go-text-body`**, que também
   não existe em `tokens.css` — e esses funcionavam **por acaso**: `var()` sem valor não pinta, a
