@@ -4651,12 +4651,50 @@ registro parava para sempre — **sem exceção, sem log**, e com a primeira lin
 parecer que funcionava. Mesma família de `{}` silencioso de `linhasComoObjetos`. O id agora é
 rotativo: cada `gravar` fecha uma requisição e abre a próxima.
 
-#### O que fica pendente
+#### ✅ Medido na staging em 14/08/2026, e a pergunta foi respondida
 
-⚠️ **Nada disto foi medido no app publicado.** O que a suíte prova é que os eventos nascem,
-que a redação e o truncamento funcionam, que o gate de admin recusa e que o expurgo não toca
-`auditoria`/`mensagens`. O que só a staging responde é se o volume real cabe no orçamento de
-`RNF-36` — e se o caso de 14/08 se explica quando acontecer de novo.
+Três defeitos apareceram **só** no app publicado — a lição de sempre, e desta vez o próprio
+instrumento denunciou o primeiro:
+
+1. 🚨 **O `INSERT` de múltiplas tuplas é recusado pelo `env.DB`.** A linha da requisição
+   entrava, o lote de eventos não, e o único sinal era `[investigador] falha ao gravar
+   eventos (Error)` no `getAppLogs` — a tabela ficava **vazia** com a lista de sessões
+   funcionando. Grava perfeitamente no `node:sqlite` da suíte. É a família de
+   `linhasComoObjetos`, na versão que a própria ferramenta de depuração sofreu. Conserto:
+   fallback linha a linha, declarado como degradação (`RNF-18`), com aviso dizendo que caiu.
+2. 🚨 **A mensagem do erro precisava estar no aviso.** A primeira versão dizia só
+   `(Error)` — provava que havia defeito e não dava um passo em direção a qual. Um
+   instrumento de investigação que não é investigável é uma contradição. Ela entra
+   **redigida e truncada** pela mesma função de todo o resto.
+3. 🚨 **Todo evento carimbado no `gravar` mostrava catorze eventos no mesmo segundo.** Numa
+   tela cujo trabalho é responder *"em que ordem, e quanto demorou entre um e outro?"*, era a
+   informação principal apagada. O carimbo passou a ser o do **evento**; a `ordem` continua,
+   porque dois no mesmo milissegundo é o caso comum.
+
+E a pergunta de 14/08 **tem resposta**, medida com modelo real na staging:
+
+> `"respostaBrutaDoModelo": "{\"pronto\":false,\"titulo\":\"\",\"descricao\":\"\",\"prioridade\":\"normal\",\"tipoChamadoId\":\"\",\"campos\":[]}"`
+
+O modelo **não se declarou pronto** — não foi allowlist, não foi bloqueio, não foi queda. É o
+comportamento projetado (`RF-28`: sem contexto, o agente continua perguntando), e agora ele é
+**visível** em vez de indistinguível das outras três recusas.
+
+#### Dois achados que o registro revelou, e que NÃO são desta spec
+
+⚠️ **A busca do Confluence devolve cinco páginas de relevância `0.00` para termo técnico.**
+Medido: `KERNEL_SECURITY_CHECK_FAILURE notebook tela azul` trouxe "Fluxo de Revisão pelo
+Printing Room", "Quiosques no Site", "Reviews - StampedIo", "Migração de Grids" e "Bipagem em
+Massa de PLPs" — nenhuma relacionada. É a ampliação de `D-41` casando qualquer palavra
+significativa, e o custo é o contexto do modelo cheio de texto irrelevante em **todo** turno.
+
+⚠️ **São seis idas à Atlassian por turno só para nomear os assuntos** — uma listagem de service
+desks mais `/servicedesk/{4,7,8,9,11}/requesttype`, ~2,6 s do turno. `D-70` já registra que
+`listarTiposChamado` varre os cinco desks; o que faltava era o número.
+
+#### O que continua pendente
+
+⚠️ **O volume real em produção não foi medido.** A staging tem um usuário; o orçamento de
+`RNF-36` sob uso real (e o tamanho da tabela em trinta dias) só a produção responde.
 
 ⚠️ **Campo de TEXTO não é registrado tecla a tecla** (`FR-8`): só campo de escolha (assunto,
 prioridade) e o payload final. O texto que a pessoa escreveu chega pelos eventos `confirmacao` e

@@ -3296,7 +3296,8 @@ var ColetaDeRequisicao = class {
       dadosJson: evento.dados ? corpoSeguro(seguroStringify(evento.dados), MAX_DADOS_EVENTO) : null,
       custoUsd: evento.custoUsd ?? null,
       duracaoMs: evento.duracaoMs ?? null,
-      ordem: this.linhas.length
+      ordem: this.linhas.length,
+      criadoEm: this.agora()
     });
   }
   /** O observador que os cinco transportes externos recebem — `FR-10b`. */
@@ -3372,43 +3373,51 @@ var ColetaDeRequisicao = class {
         dadosJson: null,
         custoUsd: null,
         duracaoMs: null,
-        ordem: linhas.length
+        ordem: linhas.length,
+        criadoEm
       });
     }
     for (let i = 0; i < linhas.length; i += EVENTOS_POR_LOTE) {
       const lote = linhas.slice(i, i + EVENTOS_POR_LOTE);
-      const params = [];
-      for (const l of lote) {
-        params.push(
-          l.id,
-          id,
-          l.conversaId,
-          desfecho.atorEmail,
-          l.tipo,
-          l.origem,
-          truncar(l.resumo, 400),
-          l.dadosJson,
-          l.custoUsd,
-          l.duracaoMs,
-          l.ordem,
-          criadoEm
-        );
-      }
+      const paramsDe = (l) => [
+        l.id,
+        id,
+        l.conversaId,
+        desfecho.atorEmail,
+        l.tipo,
+        l.origem,
+        truncar(l.resumo, 400),
+        l.dadosJson,
+        l.custoUsd,
+        l.duracaoMs,
+        l.ordem,
+        // O instante do EVENTO — ver `LinhaEvento.criadoEm`. O da requisição continua sendo
+        // `criadoEm`, e é ele que governa o expurgo.
+        l.criadoEm
+      ];
       try {
         await db.exec(
-          `INSERT INTO investigador_eventos
-             (id, requisicao_id, conversa_id, ator_email, tipo, origem, resumo,
-              dados_json, custo_usd, duracao_ms, ordem, criado_em)
-           VALUES ${lote.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`,
-          params
+          `${INSERT_EVENTO} VALUES ${lote.map(() => TUPLA).join(", ")}`,
+          lote.flatMap(paramsDe)
         );
       } catch (e) {
-        aviso("eventos", e);
-        return;
+        aviso("eventos em lote", e);
+        for (const l of lote) {
+          try {
+            await db.exec(`${INSERT_EVENTO} VALUES ${TUPLA}`, paramsDe(l));
+          } catch (individual) {
+            aviso("evento individual", individual);
+            return;
+          }
+        }
       }
     }
   }
 };
+var INSERT_EVENTO = `INSERT INTO investigador_eventos
+     (id, requisicao_id, conversa_id, ator_email, tipo, origem, resumo,
+      dados_json, custo_usd, duracao_ms, ordem, criado_em)`;
+var TUPLA = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 function seguroStringify(v) {
   try {
     return JSON.stringify(v) ?? "";
@@ -3418,7 +3427,8 @@ function seguroStringify(v) {
 }
 function aviso(etapa, e) {
   const classe = e instanceof Error ? e.name : typeof e;
-  console.warn(`[investigador] falha ao gravar ${etapa} (${classe})`);
+  const detalhe = e instanceof Error ? corpoSeguro(e.message, 200) : null;
+  console.warn(`[investigador] falha ao gravar ${etapa} (${classe}) ${detalhe ?? ""}`.trim());
 }
 
 // src/lib/investigador/fetch-observado.ts

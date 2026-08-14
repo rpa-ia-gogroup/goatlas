@@ -86,6 +86,14 @@ describe('a linha da sessão', () => {
   it('turno rápido não vira marca de lentidão', () => {
     expect(desenhar({ ...BASE, duracaoMaximaMs: 900 })).not.toContain('Turno mais lento')
   })
+
+  // ⚠️ "1 mensagens" apareceu na staging em 14/08. É o tipo de erro que nenhuma asserção de
+  // comportamento pega e que todo leitor vê — a regra 4 vale para número também.
+  it('uma mensagem é "1 mensagem", não "1 mensagens"', () => {
+    const html = desenhar({ ...BASE, mensagensDaPessoa: 1 })
+    expect(html).toContain('1 mensagem<')
+    expect(html).not.toContain('1 mensagens')
+  })
 })
 
 describe('formatação de duração', () => {

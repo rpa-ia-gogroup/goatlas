@@ -103,6 +103,18 @@ interface LinhaEvento {
   readonly custoUsd: number | null
   readonly duracaoMs: number | null
   readonly ordem: number
+  /**
+   * 🚨 **O instante em que o evento ACONTECEU, não o da gravação** (medido na staging em
+   * 14/08/2026).
+   *
+   * A primeira versão carimbava tudo no `gravar`, no fim da requisição — e a linha do tempo
+   * de um turno de 21 s mostrava **catorze eventos no mesmo segundo**. Numa tela cujo
+   * trabalho inteiro é responder *"em que ordem, e quanto demorou entre um e outro?"*, isso
+   * é a informação principal apagada. A `ordem` continua existindo e continua sendo
+   * necessária: dois eventos no mesmo milissegundo são o caso comum, e sem ela a ordenação
+   * empatada volta a ser indeterminada.
+   */
+  readonly criadoEm: string
 }
 
 /**
@@ -177,6 +189,7 @@ export class ColetaDeRequisicao implements Investigador {
       custoUsd: evento.custoUsd ?? null,
       duracaoMs: evento.duracaoMs ?? null,
       ordem: this.linhas.length,
+      criadoEm: this.agora(),
     })
   }
 
@@ -261,43 +274,69 @@ export class ColetaDeRequisicao implements Investigador {
         custoUsd: null,
         duracaoMs: null,
         ordem: linhas.length,
+        criadoEm,
       })
     }
 
     for (let i = 0; i < linhas.length; i += EVENTOS_POR_LOTE) {
       const lote = linhas.slice(i, i + EVENTOS_POR_LOTE)
-      const params: unknown[] = []
-      for (const l of lote) {
-        params.push(
-          l.id,
-          id,
-          l.conversaId,
-          desfecho.atorEmail,
-          l.tipo,
-          l.origem,
-          truncar(l.resumo, 400),
-          l.dadosJson,
-          l.custoUsd,
-          l.duracaoMs,
-          l.ordem,
-          criadoEm,
-        )
-      }
+      const paramsDe = (l: LinhaEvento): unknown[] => [
+        l.id,
+        id,
+        l.conversaId,
+        desfecho.atorEmail,
+        l.tipo,
+        l.origem,
+        truncar(l.resumo, 400),
+        l.dadosJson,
+        l.custoUsd,
+        l.duracaoMs,
+        l.ordem,
+        // O instante do EVENTO — ver `LinhaEvento.criadoEm`. O da requisição continua sendo
+        // `criadoEm`, e é ele que governa o expurgo.
+        l.criadoEm,
+      ]
       try {
         await db.exec(
-          `INSERT INTO investigador_eventos
-             (id, requisicao_id, conversa_id, ator_email, tipo, origem, resumo,
-              dados_json, custo_usd, duracao_ms, ordem, criado_em)
-           VALUES ${lote.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
-          params,
+          `${INSERT_EVENTO} VALUES ${lote.map(() => TUPLA).join(', ')}`,
+          lote.flatMap(paramsDe),
         )
       } catch (e) {
-        aviso('eventos', e)
-        return
+        /**
+         * 🚨 **O fallback linha a linha, e por que ele existe** (medido na staging em
+         * 14/08/2026, `version 21`).
+         *
+         * O `INSERT` de múltiplas tuplas grava perfeitamente no shim de teste
+         * (`node:sqlite`) e **falhou** contra o `env.DB` do GoDeploy: a linha da requisição
+         * entrava, o lote de eventos não, e o único sinal era o `console.warn` deste
+         * arquivo — a tabela ficava vazia com a lista de sessões funcionando. É a família de
+         * `linhasComoObjetos`: o dublê implementa o que a documentação diz, a plataforma faz
+         * outra coisa, e o teste fica verde.
+         *
+         * ⚠️ **Cair para uma ida por evento é degradação, não desistência** (`RNF-18`): custa
+         * o que `FR-10c` queria economizar, e ainda assim é infinitamente melhor que registro
+         * vazio — o instrumento existe para o dia em que alguém precisa dele. O aviso diz que
+         * caiu, para ninguém confundir "está barato" com "está funcionando".
+         */
+        aviso('eventos em lote', e)
+        for (const l of lote) {
+          try {
+            await db.exec(`${INSERT_EVENTO} VALUES ${TUPLA}`, paramsDe(l))
+          } catch (individual) {
+            aviso('evento individual', individual)
+            return
+          }
+        }
       }
     }
   }
 }
+
+const INSERT_EVENTO = `INSERT INTO investigador_eventos
+     (id, requisicao_id, conversa_id, ator_email, tipo, origem, resumo,
+      dados_json, custo_usd, duracao_ms, ordem, criado_em)`
+
+const TUPLA = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
 
 /**
  * `JSON.stringify` que não derruba a requisição.
@@ -316,10 +355,18 @@ function seguroStringify(v: unknown): string {
 /**
  * A falha do registro vai para o `console`, que é o que aparece em `getAppLogs`.
  *
- * ⚠️ Sem mensagem de erro do banco: ela pode carregar trecho do parâmetro, e o parâmetro
- * aqui é conteúdo de requisição (`RNF-01`, `RNF-30`).
+ * 🚨 **A mensagem entra, e a primeira versão sem ela custou uma rodada de diagnóstico.** Na
+ * staging o aviso dizia só `falha ao gravar eventos (Error)` — o que provava que havia um
+ * defeito e não dava um único passo em direção a qual. Um instrumento de investigação que
+ * não é investigável é uma contradição.
+ *
+ * ⚠️ **Ela passa pela MESMA redação de todo o resto** (`corpoSeguro`) e é truncada: a
+ * mensagem do banco pode ecoar um parâmetro, e o parâmetro aqui é conteúdo de requisição
+ * (`RNF-01`, `RNF-30`). E vai para o log da plataforma, cujo público é o mesmo do
+ * Investigador — nunca para a resposta de ninguém.
  */
 function aviso(etapa: string, e: unknown): void {
   const classe = e instanceof Error ? e.name : typeof e
-  console.warn(`[investigador] falha ao gravar ${etapa} (${classe})`)
+  const detalhe = e instanceof Error ? corpoSeguro(e.message, 200) : null
+  console.warn(`[investigador] falha ao gravar ${etapa} (${classe}) ${detalhe ?? ''}`.trim())
 }

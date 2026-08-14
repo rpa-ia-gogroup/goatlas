@@ -675,6 +675,24 @@ destes reabre um vazamento que já foi fechado.
   `tests/painel-do-console.test.ts` —, não por asserções novas naquele: os dois fazem
   perguntas diferentes (*o campo diz o efeito?* × *o painel chega à tela?*), e misturá-las
   faria a segunda morrer junto com a primeira no próximo rewrite.
+- 🚨 **O `INSERT` de MÚLTIPLAS TUPLAS é recusado pelo `env.DB`, e grava no `node:sqlite`**
+  (`D-73`, medido na staging em 14/08/2026). O lote de eventos do Investigador não entrava, a
+  linha da requisição entrava, e o único sinal era `[investigador] falha ao gravar eventos` no
+  `getAppLogs` — tabela **vazia** com a lista de sessões funcionando. Família de
+  `linhasComoObjetos`: o dublê implementa o documentado, a plataforma faz outra coisa, e a
+  suíte fica verde. Hoje há **fallback linha a linha** (degradação declarada, `RNF-18`), e o
+  aviso diz que caiu. ⚠️ **Quem for usar multi-row `VALUES` em qualquer outro lugar do app
+  precisa saber disto antes**, e não depois.
+- ⚠️ **O aviso de falha do registro carrega a MENSAGEM, redigida e truncada** (`D-73`). A
+  primeira versão dizia só `(Error)` — provava que havia defeito e não dava um passo em
+  direção a qual, e custou uma rodada inteira de diagnóstico. Instrumento de investigação que
+  não é investigável é contradição. A redação é a **mesma** de todo o resto (`corpoSeguro`), e
+  o destino é o log da plataforma, cujo público é o mesmo do Investigador.
+- ⚠️ **O carimbo do evento é o do EVENTO, nunca o da gravação** (`D-73`). Carimbando tudo no
+  `gravar`, a linha do tempo de um turno de 21 s mostrava **catorze eventos no mesmo segundo**
+  — numa tela cujo trabalho é responder *"em que ordem, e quanto demorou entre um e outro?"*.
+  A `ordem` continua e continua necessária: dois eventos no mesmo milissegundo são o caso
+  comum, e sem ela o empate volta a ser indeterminado.
 - 🚨 **A coleta do Investigador ACUMULA e grava UMA vez, e o id dela é rotativo** (`D-73`,
   `investigador/coleta.ts`). Um `INSERT` por evento faria uma rodada de polling com 100 chamados
   custar centenas de idas ao banco — o custo que `RNF-36` existe para conter, na versão que
@@ -1585,9 +1603,16 @@ modelo com os dois lados · tools executadas e recusadas · bloqueio · proposta
 resposta exibida); **por que não houve proposta** é registrado com a **resposta crua do modelo**;
 o payload entregue ao Jira e o desfecho da criação ficam gravados; e toda chamada que sai do app
 (Jira/Confluence, Organizations, IA, TeamGuide, OCR) aparece com alvo, caminho, status e duração.
-⚠️ **Nada disso foi medido no app publicado** — o que a suíte prova é que os eventos nascem, que
-a redação e o truncamento funcionam, que o gate de admin recusa e que o expurgo não toca
-`auditoria`/`mensagens`.
+✅ **MEDIDO na staging em 14/08/2026, com modelo real** (`3936ca2d`). Três defeitos só
+apareceram lá — o `INSERT` multi-tupla recusado pela plataforma, o aviso sem mensagem e o
+carimbo de todos os eventos no mesmo segundo (ver as três linhas em "Padrões de código"). E a
+pergunta que abriu a spec **foi respondida**: `respostaBrutaDoModelo` mostrou `"pronto": false`
+— o modelo não se declarou pronto, e não foi allowlist, bloqueio nem queda.
+⚠️ **O volume real em produção não foi medido**: a staging tem um usuário, e o orçamento de
+`RNF-36` sob uso real só a produção responde.
+⚠️ **Dois achados alheios apareceram no registro** e ficam anotados em `D-73`: a busca do
+Confluence devolvendo 5 páginas de relevância `0.00` para termo técnico, e **6 idas à
+Atlassian por turno** só para nomear os assuntos (~2,6 s).
 
 🚨 **A spec 008 (cartão negociável) está completa em código** (`D-71`, 14/08/2026). O resumo de
 confirmação deixou de ser um formulário congelado: a proposta é **rederivada a cada turno**, em
@@ -1741,7 +1766,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1636 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1639 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

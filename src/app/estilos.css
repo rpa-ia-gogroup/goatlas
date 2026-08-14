@@ -172,6 +172,23 @@
   }
 }
 
+/**
+ * A SÉTIMA aba (Investigador, spec 009) aperta o respiro das pílulas — para admin, e só.
+ *
+ * ⚠️ Sem isto, medido na staging em 14/08: a sétima caía sozinha numa segunda linha,
+ * **centralizada**, parecendo um botão solto acima do conteúdo. A rede de segurança acima
+ * continua valendo (quebrar é melhor que sumir, e já sumiu uma vez); o que muda é que agora
+ * ela deixa de disparar no caso comum de quem administra.
+ *
+ * `:has()` conta os filhos, então quem tem seis abas — todo mundo que não é admin — não paga
+ * nada por uma tela que não vê.
+ */
+@media (min-width: 720px) {
+  .abas:has(> :nth-child(7)) .aba {
+    padding-inline: 12px;
+  }
+}
+
 .aba {
   flex: 0 0 auto;
   font: inherit;
