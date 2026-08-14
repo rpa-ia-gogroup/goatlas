@@ -1527,8 +1527,16 @@ os campos do formulário **conversando**. Junto vieram o **motivo da prioridade*
 servidor, e morando na base da IA para o `PUT` da pessoa não o apagar), as **recusas de ajuste**
 no cartão (a prosa não pode dizê-las — ela é escrita antes de a decisão voltar) e o silêncio do
 agente sobre nível e prazo (`FR-6`), medido por auditoria em vez de recortado do texto.
-⚠️ **Falta a medição na staging** (`T-774`, regra 10): as quatro afirmações de `ScC-1`…`ScC-5`
-com modelo real, **sem confirmar a criação**.
+✅ **MEDIDO na staging em 14/08/2026 com modelo real** (`3936ca2d`, sem confirmar a criação):
+*"o Protheus está fora do ar… ninguém consegue emitir nota fiscal"* virou cartão com motivo de
+duas frases; a correção *"existe um contorno pelo portal da prefeitura, e o componente é o
+Invoices"* devolveu `alterados: [titulo, descricao, prioridade, motivoPrioridade,
+campo:components]`, com a prioridade caindo de **crítica** para **alta** e
+`camposSugeridos: {components: "10074"}` — rótulo casado contra o schema. Nenhuma linha
+`prosa_afirmou_prazo` nos três turnos. ⚠️ **Um defeito alheio apareceu junto e NÃO foi tocado:**
+o agente aponta *"Isso não resolve meu caso"* com `bloqueioPendente: false`, ou seja um botão
+que não está na tela — é o prompt de `RF-13` fora do bloqueio, e consertá-lo sem spec seria
+mudar comportamento por conta própria (`D-71`).
 
 **A spec 005 (anexo na criação) está completa em código.** `RF-61`/`RF-62`/`RF-63`/`RN-11`:
 a declaração obrigatória travada no servidor nas duas rotas de criação, o upload em dois

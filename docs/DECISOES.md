@@ -4492,10 +4492,31 @@ agente (agora afirma que **nenhuma** hora sobrou no texto) e a de *"Sugerimos al
 (agora afirma sobre o motivo). Apagá-las devolveria o furo pelo outro lado — nada impediria as
 horas de voltarem ao prompt na próxima reescrita.
 
-🚨 **Falta a medição na staging** (`T-774`, regra 10): com modelo real, (a) o motivo aparece e
-é sobre o caso · (b) argumentar muda o cartão e a mudança aparece · (c) um pedido em texto
-ajusta o campo do formulário · (d) a prosa não afirma nível nem prazo. **Sem confirmar a
-criação** — o `GN-6894` já espera alguém para apagá-lo.
+✅ **MEDIDO na staging em 14/08/2026** (`3936ca2d`, com modelo real, `somenteLeitura: false` e
+**sem confirmar a criação** — o `GN-6894` já espera alguém para apagá-lo). O caso: *"o Protheus
+está fora do ar desde as 8h e ninguém no financeiro consegue emitir nota fiscal"*, depois
+*"corrigindo: existe um contorno pelo portal da prefeitura. E o componente afetado é o
+Invoices."*
+
+| # | O que se afirmou | O que voltou |
+|---|---|---|
+| a | o motivo aparece e é sobre **este** caso | *"O financeiro inteiro ficou impedido de emitir nota fiscal, interrompendo a operação. Não foi informado contorno disponível."* — duas frases, em português, sem id interno |
+| b | argumentar muda o cartão, e a mudança aparece | `alterados: ["titulo","descricao","prioridade","motivoPrioridade","campo:components"]`; a prioridade caiu de **crítica** para **alta** e o motivo foi reescrito citando o contorno |
+| c | um pedido em texto ajusta o campo do formulário | *"o componente afetado é o Invoices"* → `camposSugeridos: {"components":"10074"}` — rótulo casado contra o schema, `fieldId` + **id da opção**, zero recusa |
+| d | a prosa não afirma nível nem prazo | nenhuma linha `prosa_afirmou_prazo` na auditoria dos três turnos — medido pelo próprio detector, não por leitura |
+
+E `proposta_ajustada` gravou `{"campos":[…]}` com os **nomes** e **nenhum valor digitado**
+(`RN-10`), como `ScC-9` pede.
+
+🚨 **`FR-17` foi medido de graça, e passou:** a prioridade não caiu por pedido, caiu porque o
+**impacto descrito** mudou (surgiu contorno). É a direção difícil da regra — a fácil (recusar
+"sobe pra crítica") já tinha caso na suíte.
+
+⚠️ **Um defeito ALHEIO apareceu na medição, e não foi tocado:** o agente mandou clicar em
+*"Isso não resolve meu caso"* nos três turnos, com `bloqueioPendente: false` — ou seja, apontando
+um botão que **não está na tela**. É o prompt de `RF-13` sendo aplicado fora do bloqueio; não é
+regressão da 008 (nada aqui toca essa seção), e consertá-lo sem spec seria mudar comportamento
+por conta própria. Fica registrado para virar tarefa.
 
 ---
 

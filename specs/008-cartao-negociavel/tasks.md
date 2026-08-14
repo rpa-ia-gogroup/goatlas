@@ -258,11 +258,16 @@ created: "2026-08-13"
       ScC-8_
 - [x] **T-773** `npm run test` · `typecheck` · `build` limpos, e o número de testes atualizado
       no `CLAUDE.md`. _Requirements: —_
-- [ ] **T-774** 🚨 **Medição na staging antes de prod** (regra 10, `D-24`): com modelo real,
+- [x] **T-774** 🚨 **Medição na staging antes de prod** (regra 10, `D-24`): com modelo real,
       (a) o motivo aparece e é sobre o caso · (b) argumentar muda o cartão e a mudança aparece
       · (c) "é o Chaplin, não o Factory" ajusta o campo · (d) a prosa não afirma nível nem
       prazo. ⚠️ **Sem confirmar a criação** — o `GN-6894` já espera alguém para apagá-lo.
       _Requirements: ScC-1, ScC-2, ScC-3, ScC-5_
+      > ✅ **Medido em 14/08/2026** (`3936ca2d`, modelo real, sem confirmar a criação). (a) motivo
+      > de duas frases sobre o caso · (b) `alterados: [titulo, descricao, prioridade,
+      > motivoPrioridade, campo:components]` com a prioridade caindo de crítica para alta ·
+      > (c) *"o componente afetado é o Invoices"* → `camposSugeridos: {components: "10074"}` ·
+      > (d) nenhuma linha `prosa_afirmou_prazo` nos três turnos. Detalhe em `D-71`.
 
 ---
 ## Coverage check (gate antes do /implement)
