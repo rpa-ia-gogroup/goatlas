@@ -4508,6 +4508,20 @@ Invoices."*
 E `proposta_ajustada` gravou `{"campos":[…]}` com os **nomes** e **nenhum valor digitado**
 (`RN-10`), como `ScC-9` pede.
 
+🚨 **A validação NA TELA (14/08, depois da medição por API) achou mais um, e ele é desta spec.**
+Pedido: *"põe a recorrência como 'De vez em quando' e preenche o campo Número do chamado
+antigo"* — nenhum dos dois existe naquele assunto. O agente respondeu *"Perfeito. Vou
+considerar: Recorrência: 'De vez em quando' · Número do chamado antigo: 4471"* e o cartão ficou
+**sem nada disso, sem explicação**. ⚠️ **E não houve recusa para mostrar:** o modelo obedeceu a
+regra ("nunca invente campo nem opção") e **não** devolveu os campos no JSON. `FR-13`/`FR-14`
+cobrem *"a IA tentou e não coube"*; este é *"a IA nem tentou, mas prometeu na prosa"* — a mesma
+família de `FR-6`, e pela mesma causa estrutural: a decisão volta **depois** do texto (`D-32`).
+O prompt passou a proibir **confirmar campo** com o porquê escrito, e a instrução manda
+reconhecer o que a pessoa contou *com as palavras dela*, deixando o cartão dizer o que entrou.
+⚠️ **Não virou detector**, ao contrário de `FR-6`: daria para medir (o servidor conhece os
+rótulos do assunto vigente e o que casou), e o custo do defeito é uma frase confusa, não um
+chamado perdido. Se a medição mostrar reincidência, o detector é o passo seguinte — com dado.
+
 🚨 **`FR-17` foi medido de graça, e passou:** a prioridade não caiu por pedido, caiu porque o
 **impacto descrito** mudou (surgiu contorno). É a direção difícil da regra — a fácil (recusar
 "sobe pra crítica") já tinha caso na suíte.

@@ -124,7 +124,9 @@ Você **não anuncia** a prioridade nem o prazo. Os dois aparecem no cartão de 
 
 Não diga o nível da prioridade e não diga quantas horas de prazo. O cartão é montado **em paralelo** com esta resposta, então qualquer número ou classificação que você escrever pode contradizer o que a pessoa está lendo alguns centímetros abaixo — e ela acredita no que você escreveu. O que você faz é descrever o **impacto** que entendeu (o que parou, quem fica sem trabalhar, se existe contorno): é dele que a sugestão sai.
 
-Se a pessoa perguntar do prazo, diga que ele está no cartão e que é de **primeira resposta**, não de resolução — alguém do time retorna antes de resolver, e o prazo mostrado é um piso garantido: muitas áreas respondem bem antes. Se ela discordar da prioridade, aceite: ela edita ali mesmo, e você não discute classificação.`,
+Se a pessoa perguntar do prazo, diga que ele está no cartão e que é de **primeira resposta**, não de resolução — alguém do time retorna antes de resolver, e o prazo mostrado é um piso garantido: muitas áreas respondem bem antes. Se ela discordar da prioridade, aceite: ela edita ali mesmo, e você não discute classificação.
+
+🚨 **Pela mesma razão, você não confirma o que entrou nos campos do formulário.** Quem os preenche é o sistema, casando o que você entendeu com os campos que aquele assunto realmente tem — e isso é decidido **depois** da sua resposta. Escrever "vou considerar: Recorrência: De vez em quando" vira uma promessa que o cartão não cumpre quando aquela opção não existe, e a pessoa fica sem entender por que o campo continua vazio. Reconheça o que ela contou, com as palavras dela ("entendi, acontece de vez em quando"), e deixe o cartão mostrar o que de fato entrou — o que não coube aparece lá, com o motivo.`,
 
     montarSecaoVerificacoes(ctx),
 
