@@ -49,6 +49,8 @@ import { areasConhecidas, dentroDoPiloto } from '../piloto/areas'
 import { resolverArea } from '../teamguide/area'
 import { garantirAreaNaProposta } from '../tickets/area-da-proposta'
 import { nomeDoTipo } from '../tickets/nome-do-tipo'
+import { motivoExibivel, SEM_MOTIVO_DE_PRIORIDADE } from '../tickets/motivo-da-prioridade'
+import type { TurnoResultado } from '../agent/orquestrador'
 import { tiposOferecidos } from '../tickets/tipos-oferecidos'
 import { aplicarRetencao, PISO_AUDITORIA_DIAS } from '../retencao'
 import { MAX_ANEXOS_POR_ENVIO, validarAnexoEnviado } from './anexo-entrada'
@@ -303,7 +305,36 @@ async function rotear(
         ? await nomeDoTipoDaProposta(ctx, depois.proposta.tipoChamadoId)
         : null,
       tetoCustoAtingido: r.tetoCustoAtingido,
+      ...negociacaoNaResposta(depois, r),
     })
+  }
+
+  /**
+   * `FR-23` — o desfecho do aviso de negociação. **Só audita.**
+   *
+   * ⚠️ Isolada por e-mail como toda rota de conversa: conversa de outra pessoa é **404**,
+   * nunca 403 — um 403 diria "existe, mas não é sua", que já é informação sobre a conversa
+   * de outro (`RF-30`).
+   *
+   * ⚠️ E o desfecho é **união fechada dos dois lados**: valor inventado é recusado aqui, e
+   * não vira uma terceira categoria muda no painel de `ScC-9`.
+   */
+  const avisoNegociacao = caminho.match(/^\/api\/conversas\/([^/]+)\/aviso-negociacao$/)
+  if (avisoNegociacao && req.method === 'POST') {
+    const conversa = await ctx.conversas.obterDoSolicitante(avisoNegociacao[1]!, eu.email)
+    if (!conversa) return ERROS.naoEncontrado()
+    const corpo = await lerJson<{ desfecho?: unknown }>(req)
+    if (corpo?.desfecho !== 'seguiu' && corpo?.desfecho !== 'voltou') {
+      return ERROS.dadosInvalidos('Desfecho inválido.')
+    }
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'aviso_negociacao',
+      recurso: `conversa:${conversa.id}`,
+      resultado: 'sucesso',
+      detalhe: { desfecho: corpo.desfecho },
+    })
+    return json({ ok: true })
   }
 
   // RF-13 / RN-07 — override. Bloqueio é orientação, não parede.
@@ -2255,6 +2286,51 @@ function decodificar(bruto: string): string | null {
     return decodeURIComponent(bruto)
   } catch {
     return null
+  }
+}
+
+/**
+ * Os campos que o cartão negociável acrescenta à resposta do turno — spec 008.
+ *
+ * ## Por que o motivo é validado AQUI, e não onde ele nasce
+ *
+ * `interpretarProposta` só **lê** o campo: texto do modelo não fica confiável por chegar
+ * tipado, e quem decide se ele pode aparecer é `tickets/motivo-da-prioridade.ts` — duas
+ * frases, em português, sem identificador interno (`FR-3`/`FR-4`/`RNF-30`). Validar dentro
+ * do parser do provedor esconderia a regra de exibição num lugar onde nenhuma tela olha.
+ *
+ * ⚠️ **O motivo vem da BASE (`propostaDaIa`), nunca da proposta vigente.** A vigente é
+ * sobrescrita inteira pelo `PUT /proposta`, e `validarProposta` é allowlist por construção:
+ * com o motivo ali, a pessoa mudar a prioridade — o gesto que `RF-16` existe para permitir —
+ * apagaria a justificativa em silêncio, e o cartão passaria a declarar `FR-5` sobre uma
+ * sugestão que veio justificada.
+ *
+ * ⚠️ **`prioridadeSugerida` viaja junto porque o motivo tem dono.** Com a pessoa em `normal`
+ * e a sugestão em `alta`, mostrar o motivo cru seria a tela justificando um nível que
+ * ninguém escolheu (`FR-2b`/`SC-2b`).
+ *
+ * ⚠️ **Recusado não vira silêncio:** vai `motivoIndisponivel` com a frase pronta, no
+ * precedente de `D-53` — ausência **declarada**, nunca disfarçada.
+ */
+function negociacaoNaResposta(
+  conversa: Conversa | null,
+  turno: TurnoResultado,
+): Record<string, unknown> {
+  const base = conversa?.propostaDaIa ?? null
+  const avaliado = motivoExibivel(base?.motivoPrioridade)
+  return {
+    motivoPrioridade: avaliado.exibivel ? avaliado.motivo : null,
+    motivoIndisponivel: avaliado.exibivel ? null : SEM_MOTIVO_DE_PRIORIDADE,
+    prioridadeSugerida: base?.prioridade ?? null,
+    camposSugeridos: turno.camposSugeridos,
+    alterados: turno.alterados,
+    recusasDeAjuste: turno.recusasDeAjuste,
+    /**
+     * `FR-21` — há o que negociar? Com bloqueio pendente **não há**: ali o único caminho é
+     * o botão de override (`D-21`), e um aviso dizendo "conversar pode reescrever o cartão"
+     * na frente de uma conversa sem cartão seria a parede que `RF-13` proíbe.
+     */
+    podeNegociar: Boolean(conversa?.proposta) && !turno.bloqueioPendente,
   }
 }
 
