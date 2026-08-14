@@ -101,27 +101,27 @@ created: "2026-08-13"
 
 ## Phase 4 — Os prompts, e o silêncio sobre prazo
 
-- [ ] **T-720** `tests/008-prosa-sem-prazo.test.ts` (Red): `prosaAfirmaPrazo` acha "prioridade
+- [x] **T-720** `tests/008-prosa-sem-prazo.test.ts` (Red): `prosaAfirmaPrazo` acha "prioridade
       Alta", "em 12h", "primeira resposta em 4 horas" · **não** acha "o prazo é de primeira
       resposta, não de solução" (a frase de `RN-08` fica) · o texto **nunca é reescrito**.
       _Requirements: FR-6_
-- [ ] **T-721** `src/lib/agent/prosa-sem-prazo.ts` + registro de `prosa_afirmou_prazo` na
+- [x] **T-721** `src/lib/agent/prosa-sem-prazo.ts` + registro de `prosa_afirmou_prazo` na
       auditoria (`{achado}`, **nunca** a frase). ⚠️ Prompt previne, auditoria **mede**: `FR-6`
       é qualidade de produto, não gate de segurança (a distinção de `D-27`), e recortar frase
       de texto gerado estraga o parágrafo. _Requirements: FR-6, ScC-2_
-- [ ] **T-722** Teste **estrutural** sobre `ia/prompts.ts`: `montarPromptAgente` não contém as
+- [x] **T-722** Teste **estrutural** sobre `ia/prompts.ts`: `montarPromptAgente` não contém as
       horas do SLA nem instrução para sugerir nível; `montarPromptExtracao` contém **rótulo e
       opções** e **nenhum** `fieldId`/`customfield_`. _Requirements: FR-6, FR-11, RNF-30_
-- [ ] **T-723** `montarPromptAgente`: a seção "## Prioridade e prazo" passa a dizer que a
+- [x] **T-723** `montarPromptAgente`: a seção "## Prioridade e prazo" passa a dizer que a
       sugestão e o prazo aparecem **no cartão**, editáveis. Sai a interpolação de
       `SLA_PRIMEIRA_RESPOSTA_HORAS`; **fica** a frase de `RN-08` sem número.
       _Requirements: FR-6_
-- [ ] **T-724** `PROMPT_EXTRACAO`: ganha `motivoPrioridade` (duas frases, sobre **este** caso,
+- [x] **T-724** `PROMPT_EXTRACAO`: ganha `motivoPrioridade` (duas frases, sobre **este** caso,
       sem id interno) e `campos` (só o que a pessoa pediu, por rótulo, nunca inventando campo
       nem opção); ganha a regra de `FR-15` (identidade e área não se ajustam por texto) e a de
       `FR-17` (a prioridade segue o **impacto descrito**, não a urgência pedida).
       _Requirements: FR-1, FR-11, FR-15, FR-17_
-- [ ] **T-725** `montarPromptExtracao`: lista os campos do assunto vigente por rótulo, tipo e
+- [x] **T-725** `montarPromptExtracao`: lista os campos do assunto vigente por rótulo, tipo e
       opções. _Requirements: FR-11_
 
 ## Phase 5 — O orquestrador rederiva (o coração de F-1)

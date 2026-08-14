@@ -23,6 +23,7 @@ import { toolAutorizada, toolsPermitidas, TOOLS } from './gate'
 import { RepositorioConversas, type Conversa } from './estado'
 import { ExecutorTools } from './tools'
 import { tiposOferecidos, type FonteDeTipos } from '../tickets/tipos-oferecidos'
+import { prosaAfirmaPrazo } from './prosa-sem-prazo'
 
 export interface TurnoResultado {
   readonly texto: string
@@ -258,6 +259,25 @@ export class Orquestrador {
     // Acrescentar o aviso ao texto do modelo, em vez de substituí-lo, produzia uma
     // resposta que se contradizia sozinha.
     const textoFinal = bloqueio?.texto ?? (bloqueioPendente ? MENSAGEM_BLOQUEIO_PENDENTE : ultimoTexto)
+
+    // `FR-6` — a prosa afirmou nível ou horas? Só MEDE: o texto vai inteiro para a pessoa,
+    // e o achado (nunca a frase, `RNF-30`) vai para a auditoria. Recortar mutilaria o
+    // parágrafo, e o defeito voltaria com outra redação — a escalada, se a medição mostrar
+    // vazamento recorrente, é com dado (§3.6 do plano da 008).
+    // ⚠️ Só o texto do MODELO é avaliado: com bloqueio quem fala é o servidor, e auditar a
+    // nossa própria mensagem mediria a nossa copy, não o que o provedor escreveu.
+    if (!bloqueio && !bloqueioPendente) {
+      for (const achado of prosaAfirmaPrazo(textoFinal)) {
+        await this.auditoria.registrar({
+          atorEmail: atual.solicitanteEmail,
+          acao: 'prosa_afirmou_prazo',
+          recurso: `conversa:${atual.id}`,
+          resultado: 'sucesso',
+          detalhe: { achado },
+        })
+      }
+    }
+
     await this.conversas.adicionarMensagem(
       this.novoId(),
       atual.id,
