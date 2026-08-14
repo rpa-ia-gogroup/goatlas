@@ -602,10 +602,28 @@ destes reabre um vazamento que já foi fechado.
   o modelo, recebendo lista vazia, escrevia a conclusão natural: *"não encontrei nada sobre
   isso"*. É a frase oposta à verdade (ninguém procurou) e manda a pessoa abrir chamado por algo
   que pode estar escrito. Os dois predicados são **reaproveitados** (`buscaConfigurada`,
-  `regra2Disponivel`), nunca reescritos ali. E as horas do SLA vêm de
-  `SLA_PRIMEIRA_RESPOSTA_HORAS`: repetidas à mão, o agente promete um prazo e o cron cobra
-  outro, sem quebrar teste nenhum. ⚠️ Continua sendo **instrução, não trava** — `RF-08`/`RF-17`
-  seguem em `agent/gate.ts`, e nenhum valor de config entra no texto (`RNF-30`).
+  `regra2Disponivel`), nunca reescritos ali. ⚠️ Continua sendo **instrução, não trava** —
+  `RF-08`/`RF-17` seguem em `agent/gate.ts`, e nenhum valor de config entra no texto (`RNF-30`).
+- 🚨 **As horas do SLA SAÍRAM do prompt do agente, e a razão mudou de lugar — não sumiu**
+  (`D-71`, `FR-6`). A regra antiga era derivá-las de `SLA_PRIMEIRA_RESPOSTA_HORAS` para o
+  agente não prometer um prazo enquanto o cron cobrava outro; hoje o agente **não promete
+  prazo nenhum**. Quem mostra nível e horas é o **cartão**, que sai da mesma decisão que os
+  escolheu — e o texto do modelo é escrito **antes** de a extração voltar (as duas chamadas
+  são paralelas, `D-32`), então tudo o que ele afirmar sobre classificação pode contradizer o
+  que a pessoa lê logo abaixo. Medido em 13/08/2026: prosa em Crítica/4h, cartão em Alta/12h.
+  ⚠️ Quem mede o vazamento é `agent/prosa-sem-prazo.ts`, que **audita e não reescreve**:
+  recortar a frase mutila o parágrafo e o defeito volta com outra redação. E há teste
+  estrutural afirmando que `montarPromptAgente` não conhece mais a constante — comentário
+  neste arquivo não alcança quem reescrever o prompt daqui a três meses.
+- 🚨 **A base do merge do cartão é a última proposta DA IA, nunca a vigente** (`D-71`,
+  `conversas.proposta_ia_json`). A vigente carrega a edição da pessoa (`PUT /proposta`):
+  diffar contra ela faz a IA "mudar" a prioridade só por **repetir** a sugestão que a pessoa
+  tinha rebaixado, e a tela atropela a escolha dela — sem erro, sem log, sem teste vermelho
+  (`SC-7`). ⚠️ Quem escreve a base é **só** a rederivação (`definirPropostaDaIa`, vigente e
+  base na mesma escrita); o `PUT` da pessoa **não a toca**, e é essa assimetria que faz
+  `alterados` significar *a IA mudou de opinião* em vez de *algo mudou*. ⚠️ E o
+  **motivo da prioridade** mora ali pelo mesmo motivo: na vigente, o `PUT` o apagaria em
+  silêncio, porque `validarProposta` é allowlist por construção.
 - 🚨 **Quando o FAKE é a única evidência de um campo que cruza a fronteira, o campo não está
   verificado** (`D-47`). Quarta ocorrência da mesma família: `D-38` (obrigatório faltando),
   `D-39` (campo de seleção), `D-43` (autor do comentário) e agora a **prioridade** —
@@ -1498,7 +1516,19 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 [002](specs/002-confluence-e-governanca/tasks.md) ·
 [003](specs/003-sla-e-notificacoes/tasks.md) ·
 [004](specs/004-piloto-e-rollout/tasks.md) ·
-[005](specs/005-anexo-na-criacao/tasks.md).
+[005](specs/005-anexo-na-criacao/tasks.md) ·
+[007](specs/007-analise-de-anexo/tasks.md) ·
+[008](specs/008-cartao-negociavel/tasks.md).
+
+🚨 **A spec 008 (cartão negociável) está completa em código** (`D-71`, 14/08/2026). O resumo de
+confirmação deixou de ser um formulário congelado: a proposta é **rederivada a cada turno**, em
+paralelo com a resposta do modelo, e a pessoa corrige título, descrição, assunto, prioridade e
+os campos do formulário **conversando**. Junto vieram o **motivo da prioridade** (validado no
+servidor, e morando na base da IA para o `PUT` da pessoa não o apagar), as **recusas de ajuste**
+no cartão (a prosa não pode dizê-las — ela é escrita antes de a decisão voltar) e o silêncio do
+agente sobre nível e prazo (`FR-6`), medido por auditoria em vez de recortado do texto.
+⚠️ **Falta a medição na staging** (`T-774`, regra 10): as quatro afirmações de `ScC-1`…`ScC-5`
+com modelo real, **sem confirmar a criação**.
 
 **A spec 005 (anexo na criação) está completa em código.** `RF-61`/`RF-62`/`RF-63`/`RN-11`:
 a declaração obrigatória travada no servidor nas duas rotas de criação, o upload em dois
@@ -1633,7 +1663,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1453 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1588 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

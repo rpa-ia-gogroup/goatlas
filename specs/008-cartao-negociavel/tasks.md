@@ -244,19 +244,19 @@ created: "2026-08-13"
 
 ## Phase 8 — Fakes, documentação e medição
 
-- [ ] **T-770** `ClienteIAFake.extrairProposta` devolve `motivoPrioridade` e `campos`, e é
+- [x] **T-770** `ClienteIAFake.extrairProposta` devolve `motivoPrioridade` e `campos`, e é
       **roteirizável**. 🚨 Verificar, campo por campo, que nenhum caso novo prova
       comportamento pelo **eco do fake** — a família de `D-47` tem cinco ocorrências, e a
       última (`D-70`) filtrava por id ignorando `nome`. _Requirements: FR-1, FR-11_
-- [ ] **T-771** `CLAUDE.md` no mesmo PR: (a) o parágrafo das horas do SLA no prompt do agente
+- [x] **T-771** `CLAUDE.md` no mesmo PR: (a) o parágrafo das horas do SLA no prompt do agente
       muda — elas **saem** de lá (§3.6 do plano), e a razão continua válida no lugar novo;
       (b) linha nova em "decisões que NÃO podem ser corrigidas por engano" sobre a **base de
       merge** (diffar contra a vigente atropela a edição da pessoa, sem sintoma).
       _Requirements: FR-6, RN-13_
-- [ ] **T-772** `docs/DECISOES.md`: `D-71` com os três achados do `/plan` (F-1, F-2, F-3), o
+- [x] **T-772** `docs/DECISOES.md`: `D-71` com os três achados do `/plan` (F-1, F-2, F-3), o
       custo aceito da ida paralela e as alternativas recusadas. _Requirements: FR-6, FR-11,
       ScC-8_
-- [ ] **T-773** `npm run test` · `typecheck` · `build` limpos, e o número de testes atualizado
+- [x] **T-773** `npm run test` · `typecheck` · `build` limpos, e o número de testes atualizado
       no `CLAUDE.md`. _Requirements: —_
 - [ ] **T-774** 🚨 **Medição na staging antes de prod** (regra 10, `D-24`): com modelo real,
       (a) o motivo aparece e é sobre o caso · (b) argumentar muda o cartão e a mudança aparece

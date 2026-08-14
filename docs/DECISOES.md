@@ -4379,6 +4379,126 @@ operação sem uma, e sem ela o caminho de degradação não tinha como ser ence
 
 ---
 
+### D-71 · O cartão de confirmação passou a acompanhar a conversa
+
+**Data:** 14/08/2026 · **Origem:** spec 008 (`/specify` → `/analyze` → `/implement`) ·
+**Contexto:** `D-21`, `D-32`, `D-36`, `D-46`, `D-47`, `D-52`, `D-53`, `D-64`, `D-70`,
+`RF-16`, `RF-18`, `RF-28`, `RN-07`, `RN-08`, `RNF-12`, `RNF-30`
+
+O chamado montado era um formulário congelado. A proposta nascia **uma vez** — a condição
+para extrair era `!atual.proposta` — e depois disso a única coisa que a pessoa podia mexer
+era o seletor de prioridade e os campos do formulário. *"Na verdade é no Protheus"* virava
+uma frase simpática do agente e um chamado idêntico ao anterior.
+
+Junto vinha um segundo defeito, na direção oposta: a prosa **afirmava** nível e prazo
+(*"vou abrir como Crítica, primeira resposta em 4h"*) enquanto o cartão logo abaixo mostrava
+**Alta / 12h**. Duas verdades diferentes na mesma tela, e a que vale é a de baixo — que a
+pessoa ainda pode editar (`RF-16`).
+
+#### Os três achados que o `/plan` e o `/analyze` derrubaram antes de existir código
+
+**F-1 — a rederivação tem de arrancar no INÍCIO do turno.** O desenho óbvio (extrair depois
+do laço de tools, como hoje) faria cada mensagem custar **duas** idas ao provedor **em
+série**, num turno que já leva 25–40 s medidos em produção. Arrancar cedo é seguro pela razão
+que já estava escrita em `orquestrador.ts` — com as duas verificações concluídas
+`toolsPermitidas` devolve lista **vazia**, então nenhum ciclo executa tool e não pode nascer
+bloqueio concorrente — mais uma que só vale aqui: bloqueio de turnos anteriores já saiu pelo
+`return` no topo do método. ⚠️ O turno em que as verificações **fecham** mantém o
+comportamento de antes: lá ainda pode nascer bloqueio, e a extração continua no fim do laço.
+
+**F-2 — a base do merge é a última proposta DA IA, nunca a vigente.** `FR-9`/`SC-7` exigem
+preservar o que a pessoa mexeu **e** adotar o que a IA mudou: isso é merge de três pontas.
+🚨 Diffar contra a proposta **vigente** é o bug óbvio, e ele é silencioso: ela carrega a
+edição da pessoa (`PUT /proposta`), então se ela baixou a prioridade para `normal` e a IA,
+**sem mudar de opinião**, devolver `alta` de novo, o diff diz *"a IA mudou a prioridade"* e a
+tela atropela a escolha dela. Nenhum erro, nenhum log, nenhum teste vermelho. Daí a coluna
+`conversas.proposta_ia_json`, escrita **só** por quem escreve proposta da IA.
+
+**F-3 — a recusa de um ajuste não pode sair pela prosa.** `SC-12`/`SC-13`, como escritos,
+pediam que a resposta do agente dissesse que o campo não existe ou quais são as opções
+válidas. Impossível sem serializar: a prosa e a decisão saem de chamadas **paralelas**
+(`D-32`), e a prosa é escrita **antes** de a extração voltar. É o mesmo motivo pelo qual
+`FR-6` proíbe a prosa de afirmar nível e prazo — ela não sabe. A recusa mora no **cartão**,
+ao lado do campo de que ela fala.
+
+#### O que mudou, em cinco peças
+
+1. **A prosa cala nível e prazo** (`FR-6`). `montarPromptAgente` deixou de instruir o modelo
+   a sugerir nível e deixou de interpolar `SLA_PRIMEIRA_RESPOSTA_HORAS`; a frase de `RN-08`
+   fica, **sem número**, e o piso garantido continua dito. A segunda camada **mede em vez de
+   mutilar**: `agent/prosa-sem-prazo.ts` registra `prosa_afirmou_prazo` na auditoria e **não
+   reescreve** o texto — recortar a frase proibida estraga o parágrafo em volta e o defeito
+   volta com outra redação. ⚠️ Isto é qualidade de produto, não gate de segurança (a
+   distinção de `D-27` para `RF-62`): quem escapa produz uma frase feia no **próprio**
+   chamado. A escalada, se a medição mostrar vazamento recorrente, é recortar — com dado.
+
+2. **O motivo da prioridade** (`FR-1`…`FR-5`) sai da **mesma** chamada que escolheu o nível,
+   como campo próprio — e é validado no servidor antes de virar tela: duas frases, português,
+   sem identificador interno. 🚨 **Ele mora na base da IA, nunca na proposta vigente:**
+   `validarProposta` é allowlist por construção e o `PUT /proposta` sobrescreve o
+   `proposta_json` inteiro, então com o motivo ali a pessoa mudar a prioridade — o gesto que
+   `RF-16` existe para permitir — **apagaria o motivo em silêncio**. ⚠️ E quando ela escolhe
+   outro nível, o motivo é **atribuído** (*"A sugestão era alta: …"*), nunca apresentado como
+   justificativa do nível escolhido (`FR-2b`).
+
+3. **O ajuste por texto é por RÓTULO** (`FR-11`…`FR-14`). O modelo recebe o formulário do
+   assunto vigente com rótulo, tipo e opções — **nenhum `fieldId`**, garantido pelo tipo
+   `CampoParaExtracao`, que não tem o campo. Além de proibido (`RNF-30`), o id seria
+   **inútil**: `D-36` mediu `customfield_10092` significando "Cargo/Função" no tipo 108 e "Em
+   que sistema o Bug está ocorrendo?" no 70. A volta é traduzida contra o schema com
+   casamento **exato** de rótulo e de opção, e o que não casa vira recusa dita na tela, com
+   os **rótulos** das opções válidas.
+
+4. **O cartão levanta o estado, e não remonta por `key`** (`FR-7`…`FR-10`). A letra de `D-46`
+   ("recomeçar é remontar") produziria aqui o defeito que ela evita lá: remontar zera
+   `valoresCampos`, `declarou` e a prioridade editada — o que `FR-9` existe para preservar — e
+   refaz a leitura de schema em **todo** turno (`R-02`). Então `prioridade`, `valoresCampos` e
+   `declarou` sobem para `ConversaEmCurso`. Isso resolve `FR-8` de graça (prop nova
+   re-renderiza; `useState(propostaInicial.prioridade)` só rodava na montagem) e é o que
+   permite `FR-7` — esconder o cartão durante o turno **desmonta** o componente, e estado
+   interno morreria com ele. ⚠️ `key` continua onde `D-46` a colocou: no "Abrir outro chamado".
+
+5. **O aviso** (`FR-18`…`FR-22`) é `<dialog>` nativo, disparado pela **exibição** e não pela
+   escolha: contar a escolha faria o aviso voltar para quem fechou no `Esc`, que é justamente
+   a saída sem efeito. Ele **não existe** sem proposta nem com bloqueio pendente — ali seria a
+   parede que `RF-13`/`RN-07` proíbem. E a linha fixa de `FR-22` fica no cartão **sem**
+   depender de a pessoa ter visto o aviso: quem recarregou a página precisa saber igual.
+
+#### O custo aceito
+
+A extração passa a rodar em **todo** turno em que há proposta, e não só no primeiro: é uma
+chamada de IA a mais por mensagem, **em paralelo** (nunca em série). `RNF-16` mede gasto, e o
+teto de custo por conversa continua sendo o freio. O teste que protege isso falha por
+**deadlock**, não por relógio — o `chat` só resolve depois de a extração começar (`D-57`).
+
+#### O que foi recusado, e por quê
+
+| Alternativa | Por que não |
+|---|---|
+| Serializar prosa e decisão para a recusa caber no texto | Non-Goal explícito: +1 ida **em série** por turno, contra `RNF-12` |
+| Diffar contra a proposta vigente | Atropela a edição da pessoa sem nenhum sintoma (`SC-7`) — é o F-2 |
+| `key={revisao}` no cartão | Zera exatamente o que `FR-9` preserva e refaz o schema todo turno |
+| Recortar da prosa a frase proibida | Mutila texto gerado, e o defeito volta com outra redação |
+| Manter *"Sugerimos alta — ajuste se não bate com o seu caso"* | Não justifica nada; **finge** justificar, e ocupava o lugar do motivo. ⚠️ `p.criterio` **fica**: ele responde *o que é Alta*, que é outra pergunta |
+| Deixar o motivo na proposta vigente | O `PUT` da pessoa o apagaria em silêncio (achado do `/analyze`) |
+
+**Testes:** `tests/008-prosa-sem-prazo.test.ts` (12) · `tests/008-prompts-da-negociacao.test.ts`
+(13) · `tests/008-cartao-negociavel.test.ts` (28, rota e tela) ·
+`tests/rn01-burla-negociacao.test.ts` (9, escrito **antes** da rota) · mais os casos novos em
+`orquestrador`, `latencia`, `rf18-recibo-confirmacao` e `fluxo-ponta-a-ponta`.
+
+⚠️ **Duas asserções mudaram de lado, e nenhuma foi apagada:** a das horas do SLA no prompt do
+agente (agora afirma que **nenhuma** hora sobrou no texto) e a de *"Sugerimos alta"* no recibo
+(agora afirma sobre o motivo). Apagá-las devolveria o furo pelo outro lado — nada impediria as
+horas de voltarem ao prompt na próxima reescrita.
+
+🚨 **Falta a medição na staging** (`T-774`, regra 10): com modelo real, (a) o motivo aparece e
+é sobre o caso · (b) argumentar muda o cartão e a mudança aparece · (c) um pedido em texto
+ajusta o campo do formulário · (d) a prosa não afirma nível nem prazo. **Sem confirmar a
+criação** — o `GN-6894` já espera alguém para apagá-lo.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

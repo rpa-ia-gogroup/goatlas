@@ -158,8 +158,28 @@ export class ClienteIAFake implements ClienteIA {
   }
   readonly extracoesRecebidas: ParametrosExtracao[] = []
 
+  /**
+   * Roteiro de extrações, **uma por turno** — spec 008, `FR-8`.
+   *
+   * A proposta agora é rederivada em **todo** turno, e o cenário que importa é a IA
+   * mudando de opinião no meio da conversa. Com um valor único, encenar isso exige mexer
+   * em `propostaSugerida` entre as chamadas — o que funciona, e não serve para o caso em
+   * que os dois turnos acontecem dentro da **mesma** chamada sob teste.
+   *
+   * Vazio (o normal), cai em `propostaSugerida`. Consumido em ordem, e o último valor
+   * **permanece** para os turnos seguintes: roteiro que acaba não pode virar "sem
+   * proposta", que é outro cenário e mediria outra coisa.
+   */
+  readonly roteiroDePropostas: (PropostaSugerida | null)[] = []
+
   async extrairProposta(params: ParametrosExtracao): Promise<ResultadoExtracao> {
     this.extracoesRecebidas.push(params)
+    if (this.roteiroDePropostas.length > 0) {
+      this.propostaSugerida =
+        this.roteiroDePropostas.length > 1
+          ? (this.roteiroDePropostas.shift() ?? null)
+          : this.roteiroDePropostas[0]!
+    }
     if (this.falharChat) {
       throw new ErroIA('fake: extração indisponível', { transitorio: true, etapa: 'extracao' })
     }
