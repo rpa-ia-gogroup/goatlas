@@ -55,6 +55,29 @@ describe('FR-6 — o prompt do agente não carrega nível nem horas', () => {
     expect(montarPromptAgente(CTX)).toMatch(/cart[ãa]o|resumo de confirma[çc][ãa]o/i)
   })
 
+  /**
+   * **A prosa também não confirma CAMPO** — medido na staging em 14/08/2026.
+   *
+   * Pedido: *"põe a recorrência como 'De vez em quando' e preenche o campo Número do chamado
+   * antigo"*. Nenhum dos dois existe naquele assunto — a opção não está na lista e o campo
+   * não é do formulário. O agente respondeu *"Perfeito. Vou considerar: Recorrência: 'De vez
+   * em quando' · Número do chamado antigo: 4471"* e o cartão ficou **sem nada disso, sem
+   * explicação**.
+   *
+   * 🚨 **E não houve recusa para mostrar**: o modelo obedeceu a regra ("nunca invente campo
+   * nem opção") e **não** devolveu os campos no JSON. `FR-13`/`FR-14` cobrem *"a IA tentou e
+   * não coube"*; este é *"a IA nem tentou, mas prometeu na prosa"* — a mesma família de
+   * `FR-6`: o texto afirmando o que ele não decide, porque a decisão volta **depois** dele
+   * (as duas chamadas são paralelas, `D-32`).
+   */
+  it('e não confirma o que entrou nos campos do formulário', () => {
+    const prompt = montarPromptAgente(CTX)
+    expect(prompt).toMatch(/n[ãa]o confirma o que entrou nos campos/i)
+    // A instrução tem de dizer o PORQUÊ — regra sem razão é a primeira a ser reescrita fora.
+    // ⚠️ `\W*` entre as palavras: o prompt é markdown, e `**depois**` não é contíguo.
+    expect(prompt).toMatch(/depois\W*da sua resposta/i)
+  })
+
   it('o módulo de prompts não importa mais as horas do SLA (teste estrutural)', () => {
     const fonte = readFileSync(join(process.cwd(), 'src/lib/ia/prompts.ts'), 'utf8')
     const codigo = fonte

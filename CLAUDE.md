@@ -604,6 +604,14 @@ destes reabre um vazamento que já foi fechado.
   que pode estar escrito. Os dois predicados são **reaproveitados** (`buscaConfigurada`,
   `regra2Disponivel`), nunca reescritos ali. ⚠️ Continua sendo **instrução, não trava** —
   `RF-08`/`RF-17` seguem em `agent/gate.ts`, e nenhum valor de config entra no texto (`RNF-30`).
+- 🚨 **A prosa não confirma CAMPO do formulário, e isso é a mesma trava de `FR-6`** (`D-71`,
+  medido na tela em 14/08/2026). O agente respondeu *"Vou considerar: Recorrência: 'De vez em
+  quando' · Número do chamado antigo: 4471"* — a opção não existe e o campo não é daquele
+  assunto —, e o cartão ficou **sem nada disso, sem explicação**. ⚠️ **E não houve recusa para
+  exibir**: o modelo obedeceu a "nunca invente campo nem opção" e não devolveu nada no JSON, então
+  `FR-13`/`FR-14` (que cobrem *tentou e não coube*) não tinham o que dizer. A causa é a de sempre:
+  a decisão volta **depois** do texto (`D-32`). O prompt proíbe confirmar campo; quem diz o que
+  entrou é o cartão.
 - 🚨 **O agente NUNCA nomeia botão da tela** (medido na staging em 14/08/2026). O prompt mandava
   apontar *"Isso não resolve meu caso"* depois de um bloqueio, e o efeito foi o oposto: em três
   turnos com `bloqueioPendente: false` ele mandou clicar num botão que **não estava lá**, e quem
@@ -1685,7 +1693,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1591 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1592 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em
