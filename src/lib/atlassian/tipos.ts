@@ -353,6 +353,19 @@ export interface ClienteAtlassian {
 
   criarChamado(dados: NovoChamado): Promise<ChamadoCriado>
 
+  /**
+   * `T-1000` — a mesma criação, devolvendo o que a Atlassian respondeu em vez de lançar.
+   *
+   * ⚠️ **Opcional de propósito.** Não é capacidade de produto: é instrumento de medição
+   * (`specs/010-anexo-obrigatorio/plan.md` §0), e obrigá-la na interface faria todo dublê
+   * ter de simular um caminho que existe justamente porque o dublê não sabe simulá-lo. A
+   * rota de admin checa a presença antes de usar.
+   */
+  diagnosticarCriacao?(
+    dados: NovoChamado,
+    idsAnexo?: readonly string[],
+  ): Promise<{ readonly status: number; readonly corpo: string; readonly corpoEnviado: unknown }>
+
   obterChamado(issueKey: string): Promise<Chamado>
 
   /**

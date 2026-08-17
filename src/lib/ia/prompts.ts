@@ -268,6 +268,28 @@ export function montarResultadoHistoricoParaModelo(
  * disparada pelo SERVIDOR quando as verificações já rodaram. O modelo não decide
  * *quando* propor, só *o que* propor.
  */
+/**
+ * `RF-81` (spec 011) — o que muda quando a pessoa clica em "montar o chamado agora".
+ *
+ * 🚨 Medido em 17/08/2026: a mesma conversa, com seis mensagens boas de ambos os lados, e
+ * `"pronto": false` em **todas** as extrações. O agente respondia bem e nunca fechava —
+ * quem estava do outro lado não tinha como saber por quê, e ia embora sem chamado.
+ *
+ * ⚠️ **Não manda inventar.** Manda escrever o que existe e dizer, na descrição, o que
+ * ficou em aberto — a lacuna vira informação para quem vai atender, em vez de virar um
+ * chamado que nunca nasce.
+ */
+export const INSTRUCAO_FECHAR_AGORA = `
+=== PEDIDO EXPLÍCITO DA PESSOA: FECHE O CHAMADO AGORA ===
+
+Ela clicou no botão "Montar o chamado agora". Isto **substitui** a regra do \`pronto: false\` acima, só desta vez.
+
+- Devolva \`pronto: true\` e **preencha** titulo, descricao, prioridade e tipoChamadoId com o que existe na conversa. Campo vazio aqui é resposta errada.
+- **Não invente** fato que ninguém disse. Escreva o que foi dito, com as palavras que foram usadas.
+- Faltou dado que você pediria? Escreva na descrição, em uma linha começando por "Em aberto:", o que não foi apurado — por exemplo: "Em aberto: a pessoa não informou a mensagem de erro exata." Quem vai atender precisa saber disso.
+- Não sabe o assunto exato? Escolha o mais **genérico** da lista (dúvidas / outras questões).
+- \`pronto: false\` aqui é aceitável **só** se a conversa não disser nem o que aconteceu.`
+
 export const PROMPT_EXTRACAO = `Você lê uma conversa entre um colaborador e o assistente de chamados, e extrai os campos do chamado a ser aberto.
 
 A conversa continua depois de o chamado estar montado: a pessoa pode pedir correções em texto ("na verdade é no Protheus", "muda o assunto para acesso"). Você lê a conversa **inteira** e devolve o chamado como ele deve estar **agora** — não um ajuste do anterior. O que a pessoa não pediu para mudar continua como estava.

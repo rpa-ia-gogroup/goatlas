@@ -598,7 +598,18 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     return { descricao: cabecalho + dados.descricao, camposExtra: {} }
   }
 
-  async criarChamado(dados: NovoChamado): Promise<ChamadoCriado> {
+  /**
+   * O corpo da criação, em UM lugar só.
+   *
+   * ⚠️ Extraído em 17/08/2026 (spec 010) porque o diagnóstico precisa medir **exatamente
+   * este** corpo. Um segundo montador para o diagnóstico responderia sobre um payload que
+   * o app não envia — a medição pareceria conclusiva e não seria.
+   *
+   * `idsAnexo` é a pergunta aberta de `M-2`: a criação do JSM aceita anexo em
+   * `requestFieldValues`? Enquanto não houver resposta medida, quem chama a criação real
+   * **não** passa nada aqui, e o comportamento fica idêntico ao de antes.
+   */
+  private montarCorpoCriacao(dados: NovoChamado, idsAnexo?: readonly string[]): unknown {
     const { descricao, camposExtra } = this.montarCamposSolicitante(dados)
     // RF-27 (T-130) — campos adicionais do request type. `camposExtra` vem DEPOIS
     // de propósito: mesmo que um `fieldId` dinâmico colida com o campo de
@@ -607,7 +618,7 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     const camposDinamicos = { ...dados.camposDinamicos }
     delete camposDinamicos.summary
     delete camposDinamicos.description
-    const corpo = {
+    return {
       serviceDeskId: dados.serviceDeskId,
       requestTypeId: dados.tipoChamadoId,
       requestFieldValues: {
@@ -615,8 +626,35 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
         description: descricao,
         ...camposDinamicos,
         ...camposExtra,
+        ...(idsAnexo && idsAnexo.length > 0 ? { attachment: [...idsAnexo] } : {}),
       },
     }
+  }
+
+  /**
+   * `T-1000` — tenta a criação e devolve **o que a Atlassian respondeu**, sem lançar.
+   *
+   * Existe para responder duas perguntas que nenhuma fonte do projeto respondia
+   * (`specs/010-anexo-obrigatorio/plan.md` §0): *o 400 do tipo `134` é mesmo pelo anexo?*
+   * e *a criação aceita anexo no corpo?*
+   *
+   * ⚠️ **Tentativa que falha não cria nada; tentativa que dá certo cria chamado REAL.**
+   * Quem chama é responsável por marcar o título — a rota exige que ele venha pronto.
+   */
+  async diagnosticarCriacao(
+    dados: NovoChamado,
+    idsAnexo?: readonly string[],
+  ): Promise<{ readonly status: number; readonly corpo: string; readonly corpoEnviado: unknown }> {
+    const corpoEnviado = this.montarCorpoCriacao(dados, idsAnexo)
+    const r = await this.transporte.requisitarDiagnostico('/rest/servicedeskapi/request', {
+      method: 'POST',
+      body: JSON.stringify(corpoEnviado),
+    })
+    return { ...r, corpoEnviado }
+  }
+
+  async criarChamado(dados: NovoChamado): Promise<ChamadoCriado> {
+    const corpo = this.montarCorpoCriacao(dados)
     const resposta = (await this.transporte.requisitar('/rest/servicedeskapi/request', {
       method: 'POST',
       body: JSON.stringify(corpo),

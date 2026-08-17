@@ -190,6 +190,20 @@ export interface ParametrosExtracao {
    * `D-27`: `RF-71` é qualidade de produto, não trava.
    */
   readonly camposDoAssunto?: readonly CampoParaExtracao[]
+  /**
+   * `RF-81` (spec 011) — a pessoa pediu para FECHAR o chamado com o que já existe.
+   *
+   * 🚨 Nasceu de um caso medido: a mesma conversa do relato de 17/08/2026, refeita em
+   * 17/08, passou por **seis** mensagens sem o cartão aparecer — `respostaBrutaDoModelo`
+   * mostrou `"pronto": false` em todas. Quem conversa não tem como saber que falta algo,
+   * porque o agente responde bem; ele só nunca fecha. O botão dá a saída.
+   *
+   * ⚠️ **Forçar afrouxa UMA coisa: a decisão do modelo sobre estar pronto.** Título curto,
+   * descrição curta, prioridade fora da união e `tipoChamadoId` fora da allowlist
+   * continuam descartando a proposta inteira (`RF-28`) — senão isto viraria o caminho de
+   * abrir chamado na fila errada, que é o pior caso que `RF-28` existe para evitar.
+   */
+  readonly forcarFechamento?: boolean
 }
 
 export interface ResultadoExtracao {

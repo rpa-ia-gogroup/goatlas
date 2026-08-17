@@ -34,6 +34,7 @@ import { ExecutorTools } from './agent/tools'
 import { Orquestrador } from './agent/orquestrador'
 import { Outbox } from './tickets/outbox'
 import { RepositorioAnexosPendentes } from './tickets/anexos-pendentes'
+import { RepositorioAnexosConteudo } from './tickets/anexos-conteudo'
 import { AnexosEnviados } from './tickets/anexos-enviados'
 import { AnalisesDeAnexo } from './tickets/analises-anexo'
 import { criarLeitorPdf } from './ocr/http'
@@ -138,6 +139,14 @@ export interface Contexto {
   readonly outbox: Outbox
   /** RF-61 (T-408) — anexos subidos antes de o chamado existir. */
   readonly anexosPendentes: RepositorioAnexosPendentes
+  /**
+   * `RF-78` (spec 010) — os BYTES do anexo, para o id temporário nascer na confirmação.
+   *
+   * ⚠️ Separado de `anexosPendentes` de propósito: aquele guarda **metadado** e é lido em
+   * toda tela; este guarda conteúdo pesado e só é tocado no upload e na criação. Juntar os
+   * dois faria toda listagem arrastar megabytes que ninguém pediu.
+   */
+  readonly anexosConteudo: RepositorioAnexosConteudo
   /**
    * `RF-31` — o registro do que o app anexou, para a pessoa ver o próprio arquivo.
    *
@@ -399,6 +408,7 @@ export async function montarContexto(
   const vinculos = new RepositorioVinculos(env.DB, agora)
   const outbox = new Outbox(env.DB, agora)
   const anexosPendentes = new RepositorioAnexosPendentes(env.DB, agora)
+  const anexosConteudo = new RepositorioAnexosConteudo(env.DB)
   const anexosEnviados = new AnexosEnviados(env.DB, agora)
   const analisesAnexo = new AnalisesDeAnexo(env.DB, agora)
   // ⚠️ O teto é **nosso**, menor que os 60 s do godocs: aqui a leitura acontece dentro da
@@ -514,6 +524,7 @@ export async function montarContexto(
     vinculos,
     outbox,
     anexosPendentes,
+    anexosConteudo,
     anexosEnviados,
     analisesAnexo,
     lerPdf,

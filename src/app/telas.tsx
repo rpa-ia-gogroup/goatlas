@@ -196,6 +196,8 @@ function ConversaEmCurso({
   ])
   const [rascunho, setRascunho] = useState('')
   const [enviando, setEnviando] = useState(false)
+  /** `RF-81` — o botão de fechar o chamado com o que já existe está em voo. */
+  const [montandoAgora, setMontandoAgora] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [confluence, setConfluence] = useState<EstadoVerificacao>('pendente')
   const [historico, setHistorico] = useState<EstadoVerificacao>('pendente')
@@ -475,6 +477,49 @@ function ConversaEmCurso({
     }
   }
 
+  /**
+   * `RF-81` (spec 011) — o botão "Montar o chamado agora".
+   *
+   * 🚨 **A razão está medida duas vezes.** 14/08/2026: 70 minutos no app, seis mensagens,
+   * nenhum cartão, e a pessoa foi embora. 17/08/2026, reproduzindo o mesmo relato: seis
+   * mensagens e `"pronto": false` em todas as extrações. O agente responde bem e **nunca
+   * fecha** — quem está do outro lado não tem como saber disso.
+   *
+   * ⚠️ **Não pula confirmação.** O cartão aparece e continua sendo `RF-17` quem autoriza.
+   */
+  async function montarAgora() {
+    if (!conversaId || montandoAgora) return
+    setMontandoAgora(true)
+    setErro(null)
+    try {
+      const r = await api.montarChamadoAgora(conversaId)
+      if (r.ok && r.proposta) {
+        setProposta(r.proposta)
+        setTipoNome(r.tipoNome ?? null)
+        setPrioridadeNaTela(r.proposta.prioridade)
+        setFalas((f) => [
+          ...f,
+          { de: 'agente', texto: 'Montei o chamado com o que já temos. Confira abaixo e ajuste o que precisar antes de abrir.' },
+        ])
+      } else {
+        // Resposta prevista, não erro: a frase do servidor diz o que falta.
+        setFalas((f) => [
+          ...f,
+          {
+            de: 'agente',
+            texto:
+              r.mensagem ??
+              'Ainda não consegui montar o chamado com o que temos aqui. Conte em uma frase o que aconteceu.',
+          },
+        ])
+      }
+    } catch (e) {
+      setErro(e instanceof ErroApi ? e.message : 'Não conseguimos montar o chamado agora.')
+    } finally {
+      setMontandoAgora(false)
+    }
+  }
+
   async function usarOverride(motivo: string) {
     if (!conversaId) return
     try {
@@ -579,6 +624,33 @@ function ConversaEmCurso({
           aoConfirmar={usarOverride}
         />
       )}
+
+      {/* `RF-81` (spec 011) — o atalho de fechar o chamado com o que já existe.
+          ⚠️ **As quatro condições valem juntas**, e cada uma tira o botão de uma tela onde
+          ele seria ruído ou mentira: a partir da 4ª mensagem da pessoa (antes disso a
+          conversa ainda está coletando) · sem cartão na tela (com cartão não há o que
+          forçar) · fora do turno (o agente pode estar montando agora) · sem bloqueio
+          pendente, porque ali o caminho de saída é o override e dois botões concorrentes
+          escondem o que de fato destrava (`D-21`). */}
+      {conversaId &&
+        !proposta &&
+        !enviando &&
+        !bloqueado &&
+        falas.filter((f) => f.de === 'usuario').length >= 4 && (
+          <div className="atalho-montar">
+            <button
+              type="button"
+              className="botao-montar-agora"
+              onClick={() => void montarAgora()}
+              disabled={montandoAgora}
+            >
+              {montandoAgora ? 'Montando…' : 'Montar o chamado agora'}
+            </button>
+            <span className="dica">
+              Fecho com o que você já contou. Você confere e ajusta antes de abrir.
+            </span>
+          </div>
+        )}
 
       {/* `FR-7` — durante o turno o cartão SAI da tela: o que está ali é o chamado de antes,
           e a IA pode estar reescrevendo-o. Conferir e confirmar um resumo prestes a mudar
@@ -1069,6 +1141,13 @@ export function ReciboConfirmacao({
   // carrega e se a leitura falhar: o mesmo fail-open do servidor (`SC-05b`), pelo mesmo
   // motivo — indisponibilidade de schema não pode virar botão que não abre chamado.
   const [aceitaAnexo, setAceitaAnexo] = useState(false)
+  /**
+   * `RF-79` — o assunto EXIGE arquivo? Vem do servidor, não é derivado de `campos`.
+   *
+   * ⚠️ O campo de anexo é filtrado da lista (`T-406c`), então procurá-lo em `campos` dá
+   * **sempre** falso — foi o defeito medido no navegador em 17/08/2026.
+   */
+  const [exigeArquivo, setExigeArquivo] = useState(false)
   const [declarouLocal, setDeclarouLocal] = useState<Declaracao>(null)
   const declarou = estado?.declarou ?? declarouLocal
   const setDeclarou = estado?.aoDeclarar ?? setDeclarouLocal
@@ -1092,6 +1171,7 @@ export function ReciboConfirmacao({
       .then((r) => {
         if (!vivo) return
         setAceitaAnexo(r.aceitaAnexo)
+        setExigeArquivo(r.anexoObrigatorio === true)
         setCampos(r.itens)
         // ⚠️ **O que já está na tela ganha do que resolvemos aqui** (`FR-9`). Este efeito
         // roda de novo quando o assunto muda, e sobrescrever produziria o pior dos dois
@@ -1150,10 +1230,17 @@ export function ReciboConfirmacao({
   //
   // ⚠️ `jaEnviados` desliga a pendência (`D-70`): arquivo enviado É a resposta, e o servidor
   // decide igual (`autorizarDeclaracaoDeAnexo`) — duas camadas, como toda trava daqui.
+  // `RF-79` (spec 010) — o assunto que EXIGE arquivo trava o botão até haver um. É a
+  // camada 1; o servidor recusa de qualquer jeito (`autorizarEvidenciaObrigatoria`).
+  //
+  // ⚠️ **Predicado derivado do schema**, o mesmo que o servidor usa — nunca uma lista de
+  // ids na tela, que funcionaria na Gocase e falharia calada em outra instalação.
   const pendencias = pendenciasParaAbrir({
     campos: campos ?? [],
     valores: valoresCampos,
     faltaDeclararAnexo: aceitaAnexo && declarou === null && jaEnviados.length === 0,
+    anexoExigido: exigeArquivo,
+    anexosEnviados: jaEnviados.length,
   })
   const falta = faltaAlgumaCoisa(pendencias)
 
@@ -1323,6 +1410,7 @@ export function ReciboConfirmacao({
           aoDeclarar={setDeclarou}
           jaEnviados={jaEnviados}
           teto={tetoAnexos}
+          exigido={exigeArquivo}
         />
       )}
 
@@ -2140,7 +2228,16 @@ function FormularioEmCurso({
   const [valoresCampos, setValoresCampos] = useState<Record<string, string>>({})
   // RF-61/RF-62 (T-417) — o schema também diz se o tipo aceita arquivo.
   const [aceitaAnexo, setAceitaAnexo] = useState(false)
+  /**
+   * `RF-79` — o assunto EXIGE arquivo? Vem do servidor, não é derivado de `campos`.
+   *
+   * ⚠️ O campo de anexo é filtrado da lista (`T-406c`), então procurá-lo em `campos` dá
+   * **sempre** falso — foi o defeito medido no navegador em 17/08/2026.
+   */
+  const [exigeArquivo, setExigeArquivo] = useState(false)
   const [declarou, setDeclarou] = useState<Declaracao>(null)
+  /** `RF-79` — quantos arquivos existem nesta tela, para travar o botão quando o assunto exige. */
+  const [anexosEnviados, setAnexosEnviados] = useState(0)
 
   useEffect(() => {
     api
@@ -2168,12 +2265,14 @@ function FormularioEmCurso({
     // tipo de chamado. Manter o "não tenho" de antes seria registrar uma resposta que
     // ninguém deu para esta pergunta.
     setAceitaAnexo(false)
+    setExigeArquivo(false)
     setDeclarou(null)
     api
       .camposDoTipo(tipoChamadoId)
       .then((r) => {
         setCampos(r.itens)
         setAceitaAnexo(r.aceitaAnexo)
+        setExigeArquivo(r.anexoObrigatorio === true)
         // Pré-preenche o que o app sabe. É PADRÃO, não imposição: a pessoa edita, e o
         // servidor respeita o que ela mandar (`FR-3`). Quem abriu continua sendo a
         // identidade da sessão, que não sai deste corpo.
@@ -2200,6 +2299,10 @@ function FormularioEmCurso({
     campos: campos ?? [],
     valores: valoresCampos,
     faltaDeclararAnexo: aceitaAnexo && declarou === null,
+    // `RF-79` — mesma trava do cartão. Aqui o arquivo é escolhido no próprio formulário,
+    // então a contagem é a dos arquivos já enviados por esta chave.
+    anexoExigido: exigeArquivo,
+    anexosEnviados,
   })
   const falta = faltaAlgumaCoisa(pendencias)
 
@@ -2379,6 +2482,8 @@ function FormularioEmCurso({
           declarou={declarou}
           aoDeclarar={setDeclarou}
           teto={MAX_ANEXOS_POR_CHAMADO}
+          aoMudarEnvios={setAnexosEnviados}
+          exigido={exigeArquivo}
         />
       )}
 

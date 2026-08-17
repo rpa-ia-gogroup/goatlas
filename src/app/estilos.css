@@ -728,6 +728,59 @@
   background: color-mix(in srgb, var(--go-lime) 18%, var(--go-white));
 }
 
+/* ---------- o atalho de fechar o chamado (`RF-81`, spec 011) ------------ */
+
+/*
+ * 🚨 **Aparece a partir da 4ª mensagem, e some assim que existe cartão.**
+ *
+ * Ele resolve um silêncio medido: conversa boa dos dois lados, `"pronto": false` em toda
+ * extração, e a pessoa indo embora sem chamado. Por isso mora **colado ao compositor**, no
+ * caminho do olho de quem acabou de escrever — e não no topo, onde ninguém está olhando.
+ *
+ * ⚠️ **`sticky`, não `fixed`**: fica no fluxo do painel, como o compositor logo abaixo
+ * (`D-68`), então não cobre a conversa nem exige `padding` compensatório em lugar nenhum.
+ * ⚠️ **Fundo explícito** pelo mesmo motivo do compositor: sem ele o texto passa por baixo.
+ * ⚠️ **Secundário de propósito** — o contorno em vez do lime cheio. O botão principal desta
+ * tela é "Abrir chamado", no cartão; dois botões cheios competindo fariam a pessoa clicar
+ * neste achando que é aquele.
+ */
+.atalho-montar {
+  position: sticky;
+  bottom: calc(var(--space-3) + 3.5rem);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  background: var(--go-bg-page);
+  text-align: center;
+}
+
+.botao-montar-agora {
+  border: 2px solid var(--go-blue);
+  border-radius: 999px;
+  background: var(--go-white);
+  color: var(--go-blue);
+  font-weight: 600;
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.botao-montar-agora:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--go-lime) 22%, var(--go-white));
+}
+
+.botao-montar-agora:disabled {
+  /* Estado nunca só por cor: o rótulo já muda para "Montando…". */
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.atalho-montar .dica {
+  font-size: 0.8125rem;
+}
+
 .compositor {
   display: flex;
   flex-direction: column;

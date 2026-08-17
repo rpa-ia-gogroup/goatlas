@@ -752,6 +752,21 @@ export const api = {
       body: JSON.stringify({ motivo }),
     }),
 
+  /**
+   * `RF-81` (spec 011) — "montar o chamado agora", com o que a conversa já tem.
+   *
+   * ⚠️ Devolve `ok: false` **com 200** quando nem forçando saiu proposta: não é erro de
+   * rede nem de permissão, é a resposta honesta de que ainda falta o essencial. Tratar
+   * como exceção faria a tela mostrar "algo deu errado" para um caso previsto.
+   */
+  montarChamadoAgora: (conversaId: string) =>
+    chamar<{
+      ok: boolean
+      proposta: Proposta | null
+      tipoNome?: string | null
+      mensagem?: string
+    }>(`/api/conversas/${encodeURIComponent(conversaId)}/montar-chamado`, { method: 'POST' }),
+
   salvarProposta: (conversaId: string, proposta: Proposta) =>
     chamar<{ proposta: Proposta; slaPrimeiraRespostaHoras: number }>(
       `/api/conversas/${encodeURIComponent(conversaId)}/proposta`,
@@ -823,7 +838,7 @@ export const api = {
   }) => chamar<ResultadoCriacao>('/api/chamados', { method: 'POST', body: JSON.stringify(dados) }),
 
   camposDoTipo: (requestTypeId: string) =>
-    chamar<{ itens: CampoRequestType[]; aceitaAnexo: boolean }>(
+    chamar<{ itens: CampoRequestType[]; aceitaAnexo: boolean; anexoObrigatorio?: boolean }>(
       `/api/tipos-chamado/${encodeURIComponent(requestTypeId)}/campos`,
     ),
 

@@ -158,6 +158,8 @@ export function PerguntaDeAnexo({
   aoDeclarar,
   jaEnviados = [],
   teto,
+  aoMudarEnvios,
+  exigido = false,
 }: {
   alvo: AlvoDoAnexo
   declarou: Declaracao
@@ -165,6 +167,24 @@ export function PerguntaDeAnexo({
   /** `D-70` — nomes que o SERVIDOR já tem para esta chave. Vazio = nada enviado ainda. */
   jaEnviados?: readonly string[]
   teto: number
+  /**
+   * `RF-79` (spec 010) — quantos arquivos existem AGORA, contando o que subiu nesta tela.
+   *
+   * ⚠️ Existe porque o formulário precisa travar o botão quando o assunto **exige**
+   * arquivo, e a contagem mora aqui dentro. Sem este aviso, a tela leria só o que o
+   * servidor já tinha — que no formulário é sempre zero, porque a chave nasce na montagem
+   * (`D-70`) — e o botão ficaria travado mesmo com o arquivo na tela.
+   */
+  aoMudarEnvios?: (quantos: number) => void
+  /**
+   * `RF-79` (spec 010) — o Jira **exige** arquivo neste assunto.
+   *
+   * ⚠️ Aqui não existe pergunta a fazer: "não tenho" não abre chamado nenhum, e oferecer
+   * essa opção seria mandar a pessoa por um caminho que termina em 400. O bloco vira o
+   * seletor com a exigência dita em português — medido na tela em 17/08/2026, quando a
+   * frase de pendência saiu com as duas coisas somadas.
+   */
+  exigido?: boolean
 }) {
   const [envios, setEnvios] = useState<readonly Envio[]>([])
   const entrada = useRef<HTMLInputElement>(null)
@@ -175,8 +195,12 @@ export function PerguntaDeAnexo({
     ...envios.filter((e) => e.estado !== 'falhou').map((e) => e.nome),
   ]
   const cabem = Math.max(0, teto - nomesOcupados.length)
+  useEffect(() => {
+    aoMudarEnvios?.(nomesOcupados.length)
+    // `nomesOcupados` é derivado; a dependência real é o que o compõe.
+  }, [aoMudarEnvios, jaEnviados.length, envios])
   /** `D-70` — já anexou: a pergunta foi respondida pelo ato, e o servidor concorda. */
-  const jaRespondeuAnexando = jaEnviados.length > 0
+  const jaRespondeuAnexando = jaEnviados.length > 0 || exigido
 
   async function enviar(recebidos: readonly File[]) {
     // O teto é do servidor também (`SC-08`); aqui ele existe para a recusa não custar uma
@@ -244,9 +268,11 @@ export function PerguntaDeAnexo({
         <legend>
           <span className="eyebrow">Evidência</span>
           <span className="pergunta-anexo-titulo">
-            {nomesOcupados.length === 1
-              ? 'Você já anexou 1 arquivo'
-              : `Você já anexou ${nomesOcupados.length} arquivos`}
+            {nomesOcupados.length === 0 && exigido
+              ? 'Este assunto exige um arquivo'
+              : nomesOcupados.length === 1
+                ? 'Você já anexou 1 arquivo'
+                : `Você já anexou ${nomesOcupados.length} arquivos`}
           </span>
         </legend>
 

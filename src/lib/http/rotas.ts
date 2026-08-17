@@ -70,7 +70,10 @@ import {
   prioridadeParaOJira,
 } from '../tickets/valores-de-campo'
 import {
+  anexoObrigatorio,
   exigeDeclaracaoDeAnexo,
+  mensagemAnexoObrigatorio,
+  rotuloDoCampoDeAnexo,
   tipoAceitaAnexo,
   validarDeclaracao,
   type SchemaDoTipo,
@@ -98,6 +101,12 @@ import { anexarTranscricaoDoChamado } from '../tickets/transcricao'
 import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
 import { buscaConfigurada } from '../config/diagnostico'
 // spec 009 — o Investigador. Ver o comentário sobre o envelope em `tratarRequisicao`.
+import { corpoSeguro } from '../investigador/coleta'
+import {
+  prepararAnexosParaCriacao,
+  registrarAnexosDaCriacao,
+  respostaDeAnexoNaCriacao,
+} from '../tickets/anexo-antes-da-criacao'
 import { corpoDaRequisicao, corpoDaResposta } from '../investigador/corpos'
 import {
   detalharSessao,
@@ -461,6 +470,68 @@ async function rotear(
     })
   }
 
+  /**
+   * `RF-81` (spec 011) — "montar o chamado agora", com o que a conversa já tem.
+   *
+   * 🚨 **A razão de existir foi medida, duas vezes.** Em 14/08/2026 alguém passou 70
+   * minutos no app, mandou seis mensagens e foi embora sem chamado; em 17/08/2026 a
+   * reprodução do mesmo relato passou por seis mensagens com `"pronto": false` em **todas**
+   * as extrações. Quem conversa não tem como saber que o agente nunca vai fechar — ele
+   * responde bem. Este é o caminho de saída, e ele é da pessoa, não do modelo.
+   *
+   * ⚠️ **Não afrouxa `RF-08` nem `RF-17`.** As duas verificações continuam sendo
+   * pré-condição (recusa 409 aqui), o bloqueio pendente continua descartando a proposta na
+   * gravação (`RN-07`), e criar o chamado continua exigindo a confirmação explícita.
+   */
+  const montarAgora = caminho.match(/^\/api\/conversas\/([^/]+)\/montar-chamado$/)
+  if (montarAgora && req.method === 'POST') {
+    const conversa = await ctx.conversas.obterDoSolicitante(montarAgora[1]!, eu.email)
+    if (!conversa) return ERROS.naoEncontrado()
+
+    const montou = await ctx.orquestrador.montarPropostaAgora(conversa, ctx.valores, {
+      forcarFechamento: true,
+    })
+    const depois = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email)
+    const propostaFinal = depois?.proposta ?? null
+
+    ctx.investigador.registrar({
+      tipo: 'proposta_rederivada',
+      origem: 'usuario',
+      conversaId: conversa.id,
+      resumo: montou
+        ? 'A pessoa pediu para montar o chamado agora — proposta fechada com o que havia'
+        : 'A pessoa pediu para montar o chamado agora e a proposta NÃO saiu',
+      dados: { forcado: true, montou, proposta: propostaFinal },
+    })
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'proposta_forcada',
+      recurso: conversa.id,
+      resultado: montou ? 'sucesso' : 'falha',
+    })
+
+    if (!montou || !depois || !propostaFinal) {
+      // ⚠️ Frase honesta: o botão foi clicado e não deu. Sem ela, a tela ficaria igual e a
+      // pessoa clicaria de novo — o mesmo silêncio que o botão existe para acabar.
+      return json(
+        {
+          ok: false,
+          proposta: null,
+          mensagem:
+            'Ainda não consegui montar o chamado com o que temos aqui. Conte em uma frase o que aconteceu — só isso já basta para eu fechar.',
+        },
+        200,
+      )
+    }
+
+    const comArea = await areaNaProposta(ctx, eu.email, depois)
+    return json({
+      ok: true,
+      proposta: comArea,
+      tipoNome: comArea ? await nomeDoTipoDaProposta(ctx, comArea.tipoChamadoId) : null,
+    })
+  }
+
   // RF-16 / RF-18 — a proposta é montada/editada antes de confirmar.
   const proposta = caminho.match(/^\/api\/conversas\/([^/]+)\/proposta$/)
   if (proposta && req.method === 'PUT') {
@@ -569,6 +640,18 @@ async function rotear(
     )
     if ('recusa' in declaracao) return declaracao.recusa
 
+    // `RF-79` (spec 010) — assunto que EXIGE arquivo não abre sem arquivo. Antes de
+    // `registrarConfirmacao`, como as três recusas abaixo: confirmação registrada sem
+    // chamado faria `confirmadoEm` significar "clicou".
+    const semEvidencia = await autorizarEvidenciaObrigatoria(
+      ctx,
+      eu.email,
+      conversa.proposta.tipoChamadoId,
+      schema,
+      chaveDaConversa,
+    )
+    if (semEvidencia) return semEvidencia
+
     // RF-27 na CONVERSA (T-505b). A tela de confirmação passou a coletar os campos extras
     // do request type, pelo mesmo caminho do formulário: filtro pelo schema, e os do
     // solicitante entrando como padrão.
@@ -653,6 +736,26 @@ async function rotear(
         auditoria: ctx.auditoria,
       }))
 
+    // `RF-79` — nos assuntos que exigem, o arquivo viaja DENTRO da criação, com id
+    // temporário criado **agora** a partir dos bytes guardados (`RF-78`, `D-74`). Nos
+    // demais, nada muda: `D-26` segue valendo e a materialização acontece depois.
+    const anexoNaCriacao = anexoObrigatorio(schema)
+    let preparados: Awaited<ReturnType<typeof prepararAnexosParaCriacao>> | null = null
+    if (anexoNaCriacao) {
+      try {
+        preparados = await prepararAnexosParaCriacao(ctx, {
+          chaveIdempotencia: chaveDaConversa,
+          solicitanteEmail: eu.email,
+          serviceDeskId,
+        })
+      } catch (e) {
+        // Falha de upload aqui é falha de criação: 5xx/429 é transitório e a pessoa lê
+        // "estamos abrindo", 4xx é definitivo e ela lê a verdade (`RNF-17`, `D-46`).
+        if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida('conversa')
+        throw e
+      }
+    }
+
     // `D-46` — falha DEFINITIVA vira a frase que diz a verdade, em vez do 500 genérico
     // que prometia reprocessamento. Ver `falhaDefinitivaDeCriacao` e `criacaoNaoConcluida`.
     let r: ResultadoCriacao
@@ -678,6 +781,7 @@ async function rotear(
         juntarCamposDaCriacao(
           paraValoresDoJira(schema, camposDaConversa),
           prioridadeNaConversa.campos,
+          preparados && preparados.ids.length > 0 ? { attachment: [...preparados.ids] } : {},
         ),
       )
     } catch (e) {
@@ -686,11 +790,27 @@ async function rotear(
     }
 
     if (r.estado === 'criado') await ctx.conversas.definirEstado(conversa.id, 'criado')
-    const anexo = await materializarAnexosDoChamado(ctx, {
-      chaveIdempotencia: chaveDaConversa,
-      solicitanteEmail: eu.email,
-      issueKey: r.issueKey,
-    })
+    // ⚠️ **Um caminho OU o outro, nunca os dois.** Com o arquivo já dentro da criação,
+    // materializar de novo colocaria o mesmo anexo duas vezes no chamado — e anexo em
+    // dobro não tem caminho de volta (`D-26`, o lock de `reivindicar`).
+    const anexo =
+      preparados && r.issueKey !== null
+        ? respostaDeAnexoNaCriacao(
+            (
+              await registrarAnexosDaCriacao(ctx, {
+                chaveIdempotencia: chaveDaConversa,
+                solicitanteEmail: eu.email,
+                issueKey: r.issueKey,
+                itens: preparados.itens,
+              })
+            ).anexados,
+            preparados.itens.map((i) => i.nomeArquivo),
+          )
+        : await materializarAnexosDoChamado(ctx, {
+            chaveIdempotencia: chaveDaConversa,
+            solicitanteEmail: eu.email,
+            issueKey: r.issueKey,
+          })
     // `RF-23` — a transcrição vai junto, e **só por este caminho**: o formulário mínimo
     // (`D-04`) não tem conversa nenhuma para transcrever. Depois da criação e fora do
     // `catch` acima pela mesma razão do anexo (`D-26`); não lança e não fala com a
@@ -762,6 +882,18 @@ async function rotear(
     )
     if ('recusa' in declaracao) return declaracao.recusa
 
+    // `RF-79` — a mesma trava da conversa, no mesmo lugar da ordem: antes de qualquer
+    // efeito. Duas rotas de criação, um predicado — condição escrita só num lado é a
+    // divergência que a spec 006 §8 nomeia.
+    const semEvidenciaNoForm = await autorizarEvidenciaObrigatoria(
+      ctx,
+      eu.email,
+      validada.proposta.tipoChamadoId,
+      schema,
+      chave,
+    )
+    if (semEvidenciaNoForm) return semEvidenciaNoForm
+
     const camposDinamicos = await filtrarCamposComSchema(
       ctx,
       eu.email,
@@ -817,9 +949,28 @@ async function rotear(
     // da proposta, e a ordem é o que impede um `camposDinamicos` do cliente de
     // sobrescrevê-la. (A primeira camada é `filtrarPeloSchema`, que só conhece os campos
     // adicionais — `priority` nunca está lá. Duas camadas, como em `agent/gate.ts`.)
+    // `RF-79` — o arquivo dentro da criação, com id temporário criado agora (`RF-78`).
+    const anexoNaCriacaoForm = anexoObrigatorio(schema)
+    let preparadosForm: Awaited<ReturnType<typeof prepararAnexosParaCriacao>> | null = null
+    if (anexoNaCriacaoForm) {
+      try {
+        preparadosForm = await prepararAnexosParaCriacao(ctx, {
+          chaveIdempotencia: chave,
+          solicitanteEmail: eu.email,
+          serviceDeskId,
+        })
+      } catch (e) {
+        if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida('formulario')
+        throw e
+      }
+    }
+
     const camposParaOJira = juntarCamposDaCriacao(
       paraValoresDoJira(schema, camposComSolicitante),
       prioridadeParaJira.campos,
+      preparadosForm && preparadosForm.ids.length > 0
+        ? { attachment: [...preparadosForm.ids] }
+        : {},
     )
 
     const area = await resolverArea({
@@ -851,11 +1002,25 @@ async function rotear(
       if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida('formulario')
       throw e
     }
-    const anexo = await materializarAnexosDoChamado(ctx, {
-      chaveIdempotencia: chave,
-      solicitanteEmail: eu.email,
-      issueKey: r.issueKey,
-    })
+    // Um caminho OU o outro — materializar de novo duplicaria o anexo (ver a conversa).
+    const anexo =
+      preparadosForm && r.issueKey !== null
+        ? respostaDeAnexoNaCriacao(
+            (
+              await registrarAnexosDaCriacao(ctx, {
+                chaveIdempotencia: chave,
+                solicitanteEmail: eu.email,
+                issueKey: r.issueKey,
+                itens: preparadosForm.itens,
+              })
+            ).anexados,
+            preparadosForm.itens.map((i) => i.nomeArquivo),
+          )
+        : await materializarAnexosDoChamado(ctx, {
+            chaveIdempotencia: chave,
+            solicitanteEmail: eu.email,
+            issueKey: r.issueKey,
+          })
     await avisarCriacao(ctx, r, {
       solicitanteEmail: eu.email,
       titulo: validada.proposta.titulo,
@@ -890,6 +1055,21 @@ async function rotear(
         // ...e a informação de que ele existe continua chegando, porque é ela que faz a
         // pergunta de `RF-62` aparecer (ou não) na tela.
         aceitaAnexo: tipoAceitaAnexo(campos),
+        /**
+         * 🚨 `RF-79` (spec 010) — e se ele é **obrigatório**, que é outra pergunta.
+         *
+         * ⚠️ **Sem esta linha a tela ficava cega, e o defeito só apareceu no navegador.**
+         * O campo de anexo é filtrado da lista logo acima (T-406c), então
+         * `campos.some(c => c.tipo === 'anexo' && c.obrigatorio)` na tela era **sempre
+         * falso**: o botão nunca travava, e a pessoa só descobriria a exigência no 400 —
+         * exatamente o que a feature veio impedir. Medido na staging em 17/08/2026 com o
+         * tipo `134`. Mesma família de `D-44`: leitor que filtra responde errado à
+         * pergunta que o filtro apagou.
+         *
+         * ⚠️ A trava **de verdade** continua no servidor (`autorizarEvidenciaObrigatoria`);
+         * isto é a camada 1, e a camada 1 sozinha nunca foi a garantia.
+         */
+        anexoObrigatorio: campos.some((c) => c.tipo === 'anexo' && c.obrigatorio),
       })
     } catch {
       return ERROS.conteudoIndisponivel()
@@ -1212,14 +1392,36 @@ async function rotear(
       return json({ ok: false, mensagem }, 503)
     }
 
-    const { duplicado } = await ctx.anexosPendentes.registrar({
-      id: ctx.novoId(),
+    const idDoAnexo = ctx.novoId()
+    const { duplicado, idExistente } = await ctx.anexosPendentes.registrar({
+      id: idDoAnexo,
       solicitanteEmail: eu.email,
       conversaId,
       chaveIdempotencia,
       temporaryAttachmentId,
       nomeArquivo: validado.nome,
+      tipoArquivo: validado.tipo,
     })
+
+    // `RF-78` (spec 010) — os BYTES ficam guardados até o chamado nascer, para o id
+    // temporário poder nascer de novo na confirmação (`D-74` mediu que 8 MB cabem,
+    // fatiados). Sem isto, o anexo dos 6 assuntos que o exigem viajaria com um id de 40
+    // minutos atrás — que é a armadilha de `D-26`.
+    //
+    // ⚠️ **Falha aqui não derruba o upload.** O arquivo já está na Atlassian e o caminho
+    // antigo (materializar depois) continua funcionando com o id que acabou de nascer;
+    // sem bytes, `prepararAnexosParaCriacao` cai para ele e diz que caiu (`RNF-18`).
+    try {
+      await ctx.anexosConteudo.guardar(idExistente ?? idDoAnexo, validado.bytes)
+    } catch {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: 'anexo_enviado',
+        recurso: chaveIdempotencia,
+        resultado: 'falha',
+        detalhe: { etapa: 'guardar_bytes', nome: validado.nome },
+      })
+    }
 
     // `FR-10` — o nome do arquivo, que a auditoria **não** carrega (é conteúdo pessoal, e
     // ela é lida por admin com piso de 180 dias). Aqui carrega: a retenção é curta, e sem o
@@ -2127,6 +2329,87 @@ async function rotear(
   }
 
   /**
+   * `T-1000` — a criação de verdade, com o corpo do erro devolvido (spec 010, `M-1`/`M-2`).
+   *
+   * 🚨 **Isto CRIA CHAMADO REAL quando dá certo.** Por isso o título é obrigatório no corpo
+   * da requisição e precisa começar com `[TESTE`: a rota não inventa um, e não deixa passar
+   * um chamado sem marca numa fila que gente de verdade trabalha (o `GN-6894` já espera
+   * alguém para apagá-lo).
+   *
+   * ⚠️ O corpo devolvido pela Atlassian passa por `corpoSeguro` — a **mesma** redação do
+   * Investigador. Ele não vai para log nem para exceção; sai só nesta resposta, para admin.
+   */
+  if (caminho === '/api/admin/diagnostico/criacao' && req.method === 'POST') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    if (typeof ctx.atlassian.diagnosticarCriacao !== 'function') {
+      return ERROS.dadosInvalidos('Este cliente Atlassian não expõe o diagnóstico de criação.')
+    }
+    const serviceDeskId = ctx.valores.service_desk_id
+    if (!serviceDeskId) return ERROS.dadosInvalidos('Service desk não configurado.')
+
+    const corpo = await lerJson<{
+      tipoChamadoId?: unknown
+      titulo?: unknown
+      descricao?: unknown
+      camposDinamicos?: unknown
+      comAnexo?: unknown
+    }>(req)
+
+    const tipoChamadoId = typeof corpo?.tipoChamadoId === 'string' ? corpo.tipoChamadoId : ''
+    const titulo = typeof corpo?.titulo === 'string' ? corpo.titulo : ''
+    if (tipoChamadoId === '') return ERROS.dadosInvalidos('Informe o tipoChamadoId.')
+    if (!titulo.startsWith('[TESTE')) {
+      return ERROS.dadosInvalidos('O título precisa começar com "[TESTE" — isto pode criar chamado real.')
+    }
+
+    let idsAnexo: string[] = []
+    if (corpo?.comAnexo === true) {
+      const bytes = new TextEncoder().encode(
+        'Arquivo de teste do goatlas — diagnostico de criacao com anexo (spec 010).',
+      )
+      idsAnexo = [
+        await ctx.atlassian.subirAnexoTemporario(serviceDeskId, {
+          nome: 'teste-goatlas.txt',
+          tipo: 'text/plain',
+          bytes: bytes.buffer as ArrayBuffer,
+        }),
+      ]
+    }
+
+    const r = await ctx.atlassian.diagnosticarCriacao(
+      {
+        serviceDeskId,
+        tipoChamadoId,
+        titulo,
+        descricao: typeof corpo?.descricao === 'string' ? corpo.descricao : 'Teste do goatlas.',
+        prioridade: 'normal',
+        solicitanteEmail: eu.email,
+        chaveIdempotencia: `diag:${tipoChamadoId}:${ctx.agora()}`,
+        ...(corpo?.camposDinamicos && typeof corpo.camposDinamicos === 'object'
+          ? { camposDinamicos: corpo.camposDinamicos as Record<string, unknown> }
+          : {}),
+      },
+      idsAnexo,
+    )
+
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'diagnostico_criacao',
+      recurso: tipoChamadoId,
+      resultado: r.status >= 200 && r.status < 300 ? 'sucesso' : 'negado',
+      detalhe: { status: r.status, comAnexo: corpo?.comAnexo === true },
+    })
+
+    return json({
+      status: r.status,
+      comAnexo: corpo?.comAnexo === true,
+      idsAnexo: idsAnexo.length,
+      corpoDaAtlassian: corpoSeguro(r.corpo, 4000),
+      corpoEnviado: corpoSeguro(JSON.stringify(r.corpoEnviado), 4000),
+    })
+  }
+
+  /**
    * --- Investigador (spec 009) — SÓ ADMIN -----------------------------------
    *
    * ⚠️ **O gate é do servidor, em cada rota.** A aba some da tela para quem não é admin, e
@@ -2789,6 +3072,38 @@ async function autorizarDeclaracaoDeAnexo(
   return { recusa: ERROS.dadosInvalidos(r.mensagem) }
 }
 
+/**
+ * A trava de `RF-79` (spec 010): assunto que EXIGE arquivo não abre sem arquivo.
+ *
+ * 🚨 Recusa **antes de qualquer efeito**, como `D-38`. Sem ela, a criação sai, o Jira
+ * responde 400, `atlassian/http.ts` classifica como definitivo e o chamado da pessoa se
+ * perde — exatamente o que aconteceu em 17/08/2026, três vezes seguidas, com o tipo `134`.
+ *
+ * ⚠️ **Quem decide é `anexoObrigatorio(schema)`**, o mesmo predicado que escolhe a ordem da
+ * criação. Duas condições diferentes produziriam o pior caso possível: a trava exigindo o
+ * arquivo e a criação saindo sem ele.
+ *
+ * ⚠️ **Olha o FATO, não a declaração** (`D-70`): o que autoriza é haver arquivo em
+ * `anexos_pendentes`, nunca a pessoa ter dito que tem.
+ */
+async function autorizarEvidenciaObrigatoria(
+  ctx: Contexto,
+  atorEmail: string,
+  tipoChamadoId: string,
+  schema: SchemaDoTipo,
+  chaveIdempotencia: string,
+): Promise<Response | null> {
+  if (!anexoObrigatorio(schema)) return null
+  if ((await ctx.anexosPendentes.contarDaChave(chaveIdempotencia, atorEmail)) > 0) return null
+  await ctx.auditoria.registrar({
+    atorEmail,
+    acao: 'anexo_obrigatorio_ausente',
+    recurso: tipoChamadoId,
+    resultado: 'negado',
+  })
+  return ERROS.dadosInvalidos(mensagemAnexoObrigatorio(rotuloDoCampoDeAnexo(schema)))
+}
+
 type ValidacaoProposta = { proposta: PropostaChamado } | { erro: string }
 
 /**
@@ -3065,6 +3380,15 @@ async function tratarCron(
     const anexosPendentesExpurgados = await ctx.anexosPendentes.expurgarAnterioresA(limite)
 
     /**
+     * `RF-78` — e os BYTES vão junto, pela mesma carona (spec 010).
+     *
+     * ⚠️ Apaga por **órfão**, não por data: fatia cujo `anexo_id` já não existe em
+     * `anexos_pendentes`. Assim a ordem entre os dois expurgos não importa e uma falha no
+     * meio nunca deixa megabytes presos para sempre — que é o risco novo desta feature.
+     */
+    const anexosConteudoExpurgado = await ctx.anexosConteudo.expurgarOrfaos()
+
+    /**
      * spec 009, `FR-19` — o expurgo do Investigador pega carona **aqui**, pelas duas razões
      * do bloco acima: `aplicarRetencao` não apaga nada com política `null` (`D-20`) e a rota
      * de retenção responde 403. Código pendurado lá nunca rodaria.
@@ -3081,9 +3405,19 @@ async function tratarCron(
       atorEmail: '(cron)',
       acao: 'submissao_reprocessada',
       resultado: 'sucesso',
-      detalhe: { ...r, anexosPendentesExpurgados, investigadorExpurgado },
+      detalhe: {
+        ...r,
+        anexosPendentesExpurgados,
+        anexosConteudoExpurgado,
+        investigadorExpurgado,
+      },
     })
-    return json({ ...r, anexosPendentesExpurgados, investigadorExpurgado })
+    return json({
+      ...r,
+      anexosPendentesExpurgados,
+      anexosConteudoExpurgado,
+      investigadorExpurgado,
+    })
   }
 
   if (caminho === '/api/cron/reconciliar-vinculos') {

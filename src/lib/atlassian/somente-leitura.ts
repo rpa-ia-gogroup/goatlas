@@ -75,6 +75,21 @@ export class ClienteAtlassianSomenteLeitura implements ClienteAtlassian {
     this.recusar('criarChamado')
   }
 
+  /**
+   * `T-1000` — o diagnóstico é **escrita**, e por isso está deste lado.
+   *
+   * ⚠️ Escrito explicitamente mesmo sendo opcional na interface: sem este método, o modo
+   * somente leitura recusaria por **ausência** (`typeof … !== 'function'` na rota), e
+   * "recusado porque a trava agiu" viraria indistinguível de "recusado porque o cliente é
+   * de outro tipo". A distinção importa justamente quando alguém estiver diagnosticando.
+   */
+  async diagnosticarCriacao(
+    _dados: NovoChamado,
+    _idsAnexo?: readonly string[],
+  ): Promise<{ readonly status: number; readonly corpo: string; readonly corpoEnviado: unknown }> {
+    this.recusar('diagnosticarCriacao')
+  }
+
   // Os parâmetros são declarados mesmo sem uso: a assinatura idêntica à da interface é o
   // que faz o compilador acusar quando um método de escrita novo aparecer em
   // `ClienteAtlassian` e ninguém decidir de que lado dele ele fica.

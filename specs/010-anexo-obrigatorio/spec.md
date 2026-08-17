@@ -2,7 +2,7 @@
 # Especificação de Feature — gerada por /specify. WHAT/WHY apenas.
 feature: "anexo-obrigatorio"
 id: "010"
-status: draft
+status: implemented
 created: "2026-08-17"
 spec_version: 1
 ---
@@ -231,13 +231,14 @@ minutos antes.
   auditoria diz o motivo.
 - Os 6 assuntos voltam à allowlist de produção **depois** dessas duas medições, não antes.
 
-## 8. Perguntas em aberto
+## 8. Perguntas em aberto — ✅ AS DUAS RESPONDIDAS (17/08/2026)
 
-- **[NEEDS CLARIFICATION: mecanismo]** A criação do JSM aceita `attachment` em
-  `requestFieldValues` com `temporaryAttachmentIds`? **Não foi medido.** É o `T-425` desta
-  spec: sem a resposta, `FR-3` não tem como ser implementado. A medição é barata e **não cria
-  chamado quando falha** — só quando dá certo, e aí o chamado é real e alguém precisa apagá-lo.
-- **[NEEDS CLARIFICATION: causa]** O 400 do tipo `134` foi **inferido**, não lido: o corpo da
-  resposta da Atlassian não é registrado, de propósito (`RNF-01`). `attachment` é o único
-  obrigatório ausente, e a correlação com os 6 tipos é exata — mas a prova por nome exige
-  capturar o corpo de uma tentativa que **se espera** que falhe.
+- ✅ **A causa (`M-1`): é o anexo, e o Jira diz isso por extenso.** Com todos os demais campos
+  preenchidos, a criação do tipo `134` respondeu **400** com uma frase só:
+  *"Por favor, adicione pelo menos um arquivo"*
+  (`i18nKey: sd.validation.request.creation.failure.required.field`). A inferência estava
+  certa, e agora está **lida**.
+- ✅ **O mecanismo (`M-2`): a criação ACEITA anexo no corpo.**
+  `requestFieldValues.attachment = [temporaryAttachmentId]` → **HTTP 201**, `GN-6916`.
+- ✅ **E o caminho inteiro foi medido na tela**: `GN-6918`, tipo `134`, aberto pelo formulário
+  com `evidencia-factory.png` (5,5 MB) — o primeiro chamado que esse assunto já produziu.

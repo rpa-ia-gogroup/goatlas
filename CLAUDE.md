@@ -142,6 +142,16 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   apagaria o chamado da pessoa. São dois passos dentro da mesma confirmação: upload ao
   escolher o arquivo, materialização **depois** da criação. Custo aceito: existe uma
   janela curta em que o chamado existe sem o anexo.
+  🚨 **CONSERTADO em `D-75` (17/08/2026), e a bifurcação é a decisão.** 6 dos 15 assuntos do
+  `GN` (`90`, `91`, `92`, `94`, `96`, `134`) **exigem** anexo — o Jira responde *"Por favor,
+  adicione pelo menos um arquivo"* — e nenhum deles jamais tinha aberto um chamado. Hoje:
+  **anexo obrigatório → o arquivo viaja DENTRO da criação** (`requestFieldValues.attachment`,
+  medido: `GN-6916` 201, `GN-6918` na tela); **anexo opcional → nada muda**, `D-26` intacto.
+  ⚠️ O que torna seguro é o id temporário nascer na **confirmação**, dos bytes guardados em
+  `anexos_conteudo` (`D-74`) — não é mais o id de 40 minutos atrás. ⚠️ **Mandar o anexo na
+  criação para TODOS foi recusado**: trocaria um caminho comprovado por um medido uma vez, com
+  chamado perdido como custo do erro. ⚠️ **Risco residual declarado**: os ids entram no payload
+  que o outbox persiste, então retentativa muito depois os reenvia vencidos.
 - **`RF-62` é fail-OPEN, e isso é desvio consciente** (`D-27`) — schema de request type
   que não pôde ser lido **não pergunta** e abre o chamado. A distinção que sustenta:
   `RF-62` é qualidade de produto, não trava de segurança; quem burla só abre o **próprio**
@@ -644,6 +654,21 @@ destes reabre um vazamento que já foi fechado.
   e o navegador **não desenha nada e não reclama** — a aba fica com o ícone genérico, e o
   `favicon.svg` some sem erro em lugar nenhum. Aconteceu ao citar um token de CSS (`--go-…`)
   dentro do comentário do próprio favicon.
+- 🚨 **Leitor que FILTRA responde errado à pergunta que o filtro apagou** (`D-75`, medido na
+  tela em 17/08/2026). `GET /api/tipos-chamado/:id/campos` tira o campo de anexo da lista de
+  propósito (`T-406c`, para não desenhar dois seletores) — então `campos.some(c => c.tipo ===
+  'anexo' && c.obrigatorio)` na tela era **sempre falso**, e o botão nunca travava num assunto
+  que exige arquivo: a pessoa só descobriria no 400. Hoje a rota devolve `anexoObrigatorio` ao
+  lado de `aceitaAnexo`. Mesma família de `D-44`. ⚠️ A trava de verdade continua no servidor.
+- 🚨 **A exigência de anexo ABSORVE a pergunta de `RN-11`, e a condição é "o assunto EXIGE",
+  nunca "falta arquivo"** (`D-75`). Escrita como *falta*, anexar o arquivo religava a
+  pergunta: *"Falta responder se você tem algo para anexar"* logo abaixo do arquivo enviado,
+  com o botão travado. Onde o Jira exige, a pergunta não existe em momento nenhum — e a opção
+  "não tenho" seria uma saída que termina em 400.
+- 🚨 **A instrução que FORÇA o modelo vai no fim da mensagem do USUÁRIO, não no system prompt**
+  (`D-76`). Anexada ao system, o modelo devolveu `{"pronto": false, "titulo": "", …}` —
+  obedeceu à regra mais antiga e mais longa do próprio prompt, e o botão "Montar o chamado
+  agora" não montou nada. No fim da tarefa real, ela é o último texto que o modelo lê.
 - 🚨 **Token de CSS inventado não falha em NADA, e agora há varredura** (`tests/tokens-de-css-existem.test.ts`).
   Depois de `--go-surface` (`D-64`) apareceram mais dois usos de **`--go-text-body`**, que também
   não existe em `tokens.css` — e esses funcionavam **por acaso**: `var()` sem valor não pinta, a

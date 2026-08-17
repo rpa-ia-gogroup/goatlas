@@ -55,6 +55,15 @@ export interface Pendencias {
   readonly campos: readonly string[]
   /** `RN-11` — o tipo aceita anexo e ninguém respondeu ainda. */
   readonly declaracaoDeAnexo: boolean
+  /**
+   * `RF-79` (spec 010) — o assunto **exige** arquivo e nenhum foi enviado.
+   *
+   * ⚠️ **Não é a mesma coisa que `declaracaoDeAnexo`, e a diferença é o que a pessoa
+   * pode fazer.** Lá, responder "não tenho" abre o chamado; aqui, não abre — o Jira
+   * recusa. Misturar as duas produziria a frase errada num dos dois casos, e a errada
+   * aqui é a que faz alguém responder "não tenho" e bater numa parede sem explicação.
+   */
+  readonly evidenciaObrigatoria: boolean
 }
 
 export function pendenciasParaAbrir(entrada: {
@@ -62,6 +71,18 @@ export function pendenciasParaAbrir(entrada: {
   readonly campos: readonly CampoPendente[]
   readonly valores: Readonly<Record<string, string>>
   readonly faltaDeclararAnexo: boolean
+  /**
+   * `RF-79` — o schema marca o campo de anexo como **obrigatório** neste assunto.
+   *
+   * ⚠️ **É "o assunto exige", não "falta arquivo".** A distinção custou uma medição na
+   * tela (17/08/2026): com a condição escrita como *falta*, anexar o arquivo desligava a
+   * absorção e a pergunta de `RN-11` voltava — *"Falta responder se você tem algo para
+   * anexar"* logo abaixo do arquivo já enviado. Onde o Jira exige, a pergunta não existe
+   * em nenhum momento.
+   */
+  readonly anexoExigido?: boolean
+  /** Quantos arquivos já existem para este chamado. */
+  readonly anexosEnviados?: number
 }): Pendencias {
   const fixosVazios = (entrada.fixos ?? [])
     .filter((f) => f.valor.trim() === '')
@@ -76,14 +97,24 @@ export function pendenciasParaAbrir(entrada: {
     )
     .map((c) => c.rotulo)
 
+  /**
+   * ⚠️ **A exigência ABSORVE a pergunta** (`RF-79`, medido na tela em 17/08/2026).
+   *
+   * Sem isto a frase saía *"Falta anexar pelo menos um arquivo (este assunto exige) e
+   * responder se você tem algo para anexar…"* — duas pendências para a mesma coisa, e a
+   * segunda oferecendo uma saída ("não tenho") que ali **não abre chamado nenhum**. Onde o
+   * Jira exige o arquivo, `RN-11` não tem o que perguntar.
+   */
+  const exigido = entrada.anexoExigido === true
   return {
     campos: [...fixosVazios, ...doSchemaVazios],
-    declaracaoDeAnexo: entrada.faltaDeclararAnexo,
+    declaracaoDeAnexo: entrada.faltaDeclararAnexo && !exigido,
+    evidenciaObrigatoria: exigido && (entrada.anexosEnviados ?? 0) === 0,
   }
 }
 
 export function faltaAlgumaCoisa(p: Pendencias): boolean {
-  return p.campos.length > 0 || p.declaracaoDeAnexo
+  return p.campos.length > 0 || p.declaracaoDeAnexo || p.evidenciaObrigatoria
 }
 
 /**
@@ -95,6 +126,9 @@ export function faltaAlgumaCoisa(p: Pendencias): boolean {
  */
 export function mensagemDePendencias(p: Pendencias): string {
   const partes: string[] = []
+  // Vem primeiro porque é a única pendência que a pessoa pode não conseguir resolver
+  // sozinha — e porque saber disso cedo evita preencher o resto para bater na parede.
+  if (p.evidenciaObrigatoria) partes.push('anexar pelo menos um arquivo (este assunto exige)')
   if (p.declaracaoDeAnexo) partes.push('responder se você tem algo para anexar')
   if (p.campos.length > 0) partes.push(`preencher: ${listar(p.campos)}`)
   if (partes.length === 0) return ''

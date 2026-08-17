@@ -4702,6 +4702,119 @@ prioridade) e o payload final. O texto que a pessoa escreveu chega pelos eventos
 
 ---
 
+### D-75 · O anexo dentro da criação: os 6 assuntos que nunca abriram chamado
+
+**17/08/2026. Medido na staging, ponta a ponta.** Spec `010-anexo-obrigatorio`.
+
+#### O que estava quebrado
+
+Uma pessoa confirmou a abertura **três vezes** e leu três vezes *"não conseguimos abrir o
+chamado"*. O Investigador (`D-73`) mostrou `POST /rest/servicedeskapi/request → 400`, e o
+`payload_final` ao lado: tipo `134`, cinco dos **seis** obrigatórios preenchidos. Faltava
+`attachment`.
+
+🚨 **6 dos 15 assuntos do `GN` exigem anexo** (`90`, `91`, `92`, `94`, `96`, `134`), e
+**nenhum deles jamais abriu um chamado**: `D-26` (o anexo não viaja na criação) mais `D-38`
+(o campo de anexo fica fora da checagem de obrigatórios) produzem, juntos, o modo de falha
+que as duas existem para evitar — 400, definitivo, chamado perdido.
+
+#### As duas medições que autorizaram o desenho
+
+✅ **`M-1` — a causa, lida em vez de inferida.** Com todos os demais campos preenchidos, a
+resposta da Atlassian foi uma frase só:
+
+> `{"errorMessage": "Não foi possível criar sua solicitação. … Por favor, adicione pelo menos um arquivo", "i18nErrorMessage": {"i18nKey": "sd.validation.request.creation.failure.required.field"}}`
+
+✅ **`M-2` — a criação ACEITA anexo no corpo.**
+`requestFieldValues.attachment = [temporaryAttachmentId]` → **HTTP 201** (`GN-6916`).
+
+⚠️ As duas saíram de uma rota de diagnóstico só-admin (`POST /api/admin/diagnostico/criacao`)
+que devolve **o corpo do erro**, redigido por `corpoSeguro`. Ela existe porque `RNF-01` manda
+o transporte **nunca** repassar esse corpo — e essa regra, certa, é o motivo de a causa ter
+ficado meses invisível. Tentativa que falha não cria nada; a que dá certo cria chamado real,
+e por isso o título precisa começar com `[TESTE`.
+
+#### O desenho, e a bifurcação declarada
+
+| Assunto | Ordem |
+|---|---|
+| anexo **obrigatório** | sobe agora → cria **com** o anexo |
+| anexo opcional/ausente | cria → materializa depois (`D-26` intacto) |
+
+🚨 **O id temporário passou a nascer na CONFIRMAÇÃO**, a partir dos bytes guardados em
+`anexos_conteudo` (`D-74`) — não é mais o id de 40 minutos atrás. É essa troca que dissolve o
+motivo de `D-26` **neste** caminho, e só nele.
+
+⚠️ **Mandar o anexo na criação para todos foi recusado**: trocaria um caminho comprovado (9
+assuntos, chamados reais nascidos) por um medido uma vez, com chamado perdido como custo do
+erro. O risco vai onde a alternativa é falha certa.
+
+⚠️ **Risco residual, declarado:** os ids entram no payload que o outbox persiste (`D-39`),
+então uma retentativa muito depois os reenviaria vencidos. É estreito (o cron roda em
+minutos) e visível na auditoria — mas não é zero. Resolver de vez é resolver os ids **dentro**
+de `processar`, e isso é trabalho seguinte.
+
+#### Dois defeitos que só a TELA revelou
+
+🚨 **`GET /api/tipos-chamado/:id/campos` não devolve o campo de anexo** — ele é filtrado da
+lista de propósito (`T-406c`), então `campos.some(c => c.tipo === 'anexo' && c.obrigatorio)`
+na tela era **sempre falso**: o botão nunca travava, e a pessoa só descobriria a exigência no
+400. Mesma família de `D-44` — leitor que filtra responde errado à pergunta que o filtro
+apagou. Hoje a rota devolve `anexoObrigatorio` ao lado de `aceitaAnexo`.
+
+🚨 **A exigência ABSORVE a pergunta de `RN-11`, e a condição é "o assunto exige", não "falta
+arquivo".** Escrita como *falta*, anexar o arquivo religava a pergunta: *"Falta responder se
+você tem algo para anexar"* logo abaixo do arquivo já enviado, com o botão travado. Onde o
+Jira exige, a pergunta não existe em momento nenhum — e a opção "não tenho" seria uma saída
+que termina em 400.
+
+#### Medido na tela
+
+✅ **`GN-6918`** — tipo `134`, aberto pelo formulário com `evidencia-factory.png` (5,5 MB),
+`anexo.estado: "anexado"`. **É o primeiro chamado que esse assunto já produziu.**
+
+⚠️ **Falta produção.** A allowlist de prod está com 9 assuntos (mitigação de 17/08); devolver
+os seis é a `T-1027`, depois do deploy.
+
+---
+
+### D-76 · O botão que fecha o chamado com o que a conversa já tem
+
+**17/08/2026.** Spec `011` (`RF-81`).
+
+#### O silêncio, medido duas vezes
+
+Em **14/08/2026** uma pessoa passou 70 minutos no app, mandou seis mensagens, nunca viu o
+cartão e foi embora sem chamado. Em **17/08/2026**, reproduzindo o mesmo relato em produção,
+foram outras seis mensagens com `"pronto": false` em **todas** as extrações.
+
+O agente responde bem. Ele só nunca fecha — e quem está do outro lado não tem como saber
+disso: não há erro, não há aviso, a conversa parece estar indo.
+
+#### O que o botão faz, e o que ele NÃO afrouxa
+
+A partir da **4ª mensagem da pessoa**, sem cartão na tela, fora do turno e sem bloqueio
+pendente, aparece *"Montar o chamado agora"*. Ele força a extração a fechar com o que existe.
+
+🚨 **Afrouxa exatamente uma coisa: a decisão do modelo sobre estar pronto.** Continuam
+valendo `RF-08` (as duas verificações são pré-condição), `RN-07` (bloqueio pendente descarta
+a proposta na gravação), `RF-28` (id fora da allowlist descarta a proposta inteira),
+título/descrição mínimos, e `RF-17` — criar continua exigindo a confirmação.
+
+⚠️ **A instrução de forçar vai no FIM da mensagem do usuário, não no system prompt.** Medido:
+anexada ao system, o modelo devolveu `{"pronto": false, "titulo": "", "descricao": "", …}` —
+obedeceu à regra mais antiga e mais longa ("`pronto: false` quando falta informação; nesse
+caso os outros campos são ignorados") e o botão não montou nada.
+
+⚠️ **Ele não manda inventar.** Manda escrever o que existe e registrar o que ficou em aberto,
+em uma linha começando por `Em aberto:` — a lacuna vira informação para quem vai atender.
+
+✅ **Medido na staging:** quatro mensagens, botão clicado, cartão montado com
+*"Em aberto: não foi informado desde quando isso acontece, nem o nome ou código do material,
+nem o que foi alterado da última vez."*
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

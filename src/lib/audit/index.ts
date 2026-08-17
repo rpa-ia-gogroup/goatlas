@@ -86,6 +86,27 @@ export type AcaoAuditada =
    */
   | 'schema_tipo_indisponivel'
   /**
+   * `RF-79` (spec 010) — a criação foi recusada porque o assunto exige arquivo e não havia
+   * nenhum. **Antes** de qualquer efeito: nada foi para a Atlassian.
+   *
+   * ⚠️ Vale medir: se aparecer muito, o problema não é a trava — é o agente escolhendo um
+   * assunto que exige evidência para quem não tem nenhuma, e aí o conserto é de roteamento.
+   */
+  | 'anexo_obrigatorio_ausente'
+  /**
+   * `RF-81` (spec 011) — a pessoa clicou em "montar o chamado agora".
+   *
+   * ⚠️ O `resultado` distingue o que importa: `falha` significa que nem forçando saiu
+   * proposta, e é esse número que diz se o botão resolve ou só adia o silêncio.
+   */
+  | 'proposta_forcada'
+  /**
+   * `T-1000` (spec 010) — alguém rodou o diagnóstico de criação, que **pode criar chamado
+   * real**. Fica auditado justamente por isso: é a única rota do app cujo efeito colateral
+   * bem-sucedido dá trabalho a outra pessoa.
+   */
+  | 'diagnostico_criacao'
+  /**
    * `RF-19` — a área do solicitante não veio da fonte organizacional.
    *
    * ⚠️ **São duas ações, não uma com um campo `motivo`.** As duas produzem o mesmo
