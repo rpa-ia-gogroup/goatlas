@@ -10559,6 +10559,295 @@ function chaveDeConfigConhecida(chave2) {
   return chave2 in CONFIG_PADRAO;
 }
 
+// src/lib/diagnostico/blob-no-banco.ts
+var SCHEMA_DIAG = `CREATE TABLE IF NOT EXISTS diag_blob (
+   id TEXT NOT NULL,
+   ordem INTEGER NOT NULL,
+   sha TEXT NOT NULL,
+   dados TEXT NOT NULL,
+   PRIMARY KEY (id, ordem)
+ )`;
+var TAMANHOS_PADRAO_MB = [0.0625, 0.25, 1, 2, 4, 6, 8];
+var FATIA_BYTES_PADRAO = 512 * 1024;
+function bytesAleatorios(total) {
+  const buf = new Uint8Array(total);
+  for (let i = 0; i < total; i += 65536) {
+    crypto.getRandomValues(buf.subarray(i, Math.min(i + 65536, total)));
+  }
+  return buf;
+}
+function paraBase642(bytes) {
+  let bruto = "";
+  for (let i = 0; i < bytes.length; i += 32768) {
+    bruto += String.fromCharCode(...bytes.subarray(i, Math.min(i + 32768, bytes.length)));
+  }
+  return btoa(bruto);
+}
+function deBase64(texto3) {
+  const bruto = atob(texto3);
+  const bytes = new Uint8Array(bruto.length);
+  for (let i = 0; i < bruto.length; i += 1) bytes[i] = bruto.charCodeAt(i);
+  return bytes;
+}
+async function sha256(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function mensagemDeErro(e) {
+  const nome = e instanceof Error ? e.name : typeof e;
+  const msg = e instanceof Error ? e.message : String(e);
+  return `${nome}: ${msg}`.slice(0, 300);
+}
+async function medirLinhaUnica(db, rotulo, bytes, esperado) {
+  const b64 = paraBase642(bytes);
+  const id = `linha-${rotulo}`;
+  const base = {
+    rotulo,
+    bytes: bytes.length,
+    bytesNaColuna: b64.length,
+    estrategia: "linha_unica"
+  };
+  let msGravacao = null;
+  const t0 = Date.now();
+  try {
+    await db.exec("DELETE FROM diag_blob WHERE id = ?", [id]);
+    await db.exec("INSERT INTO diag_blob (id, ordem, sha, dados) VALUES (?, ?, ?, ?)", [
+      id,
+      0,
+      esperado,
+      b64
+    ]);
+    msGravacao = Date.now() - t0;
+  } catch (e) {
+    return {
+      ...base,
+      gravou: false,
+      leu: false,
+      integro: false,
+      msGravacao: Date.now() - t0,
+      msLeitura: null,
+      bytesQueVoltaram: null,
+      erro: mensagemDeErro(e)
+    };
+  }
+  const t1 = Date.now();
+  try {
+    const r = await db.query("SELECT dados FROM diag_blob WHERE id = ?", [id]);
+    const msLeitura = Date.now() - t1;
+    const linha = r.rows[0];
+    const devolvido = linha !== null && typeof linha === "object" && !Array.isArray(linha) ? linha.dados : linha?.[0];
+    if (typeof devolvido !== "string") {
+      return {
+        ...base,
+        gravou: true,
+        leu: false,
+        integro: false,
+        msGravacao,
+        msLeitura,
+        bytesQueVoltaram: null,
+        erro: `a coluna voltou como ${devolvido === void 0 ? "ausente" : typeof devolvido}`
+      };
+    }
+    const volta = deBase64(devolvido);
+    const integro = await sha256(volta) === esperado;
+    return {
+      ...base,
+      gravou: true,
+      leu: true,
+      integro,
+      msGravacao,
+      msLeitura,
+      bytesQueVoltaram: volta.length,
+      erro: integro ? null : "o conte\xFAdo que voltou n\xE3o confere com o que foi gravado"
+    };
+  } catch (e) {
+    return {
+      ...base,
+      gravou: true,
+      leu: false,
+      integro: false,
+      msGravacao,
+      msLeitura: Date.now() - t1,
+      bytesQueVoltaram: null,
+      erro: mensagemDeErro(e)
+    };
+  } finally {
+    await db.exec("DELETE FROM diag_blob WHERE id = ?", [id]).catch(() => void 0);
+  }
+}
+async function medirFatiado(db, rotulo, bytes, esperado, fatiaBytes) {
+  const id = `fatia-${rotulo}`;
+  const fatias = [];
+  for (let i = 0; i < bytes.length; i += fatiaBytes) {
+    fatias.push(paraBase642(bytes.subarray(i, Math.min(i + fatiaBytes, bytes.length))));
+  }
+  const base = {
+    rotulo,
+    bytes: bytes.length,
+    bytesNaColuna: fatias.reduce((s, f) => s + f.length, 0),
+    estrategia: "fatiado",
+    fatias: fatias.length
+  };
+  let msGravacao = null;
+  const t0 = Date.now();
+  try {
+    await db.exec("DELETE FROM diag_blob WHERE id = ?", [id]);
+    for (const [ordem, fatia] of fatias.entries()) {
+      await db.exec("INSERT INTO diag_blob (id, ordem, sha, dados) VALUES (?, ?, ?, ?)", [
+        id,
+        ordem,
+        esperado,
+        fatia
+      ]);
+    }
+    msGravacao = Date.now() - t0;
+  } catch (e) {
+    return {
+      ...base,
+      gravou: false,
+      leu: false,
+      integro: false,
+      msGravacao: Date.now() - t0,
+      msLeitura: null,
+      bytesQueVoltaram: null,
+      erro: mensagemDeErro(e)
+    };
+  }
+  const t1 = Date.now();
+  try {
+    const r = await db.query("SELECT ordem, dados FROM diag_blob WHERE id = ? ORDER BY ordem", [
+      id
+    ]);
+    const msLeitura = Date.now() - t1;
+    const pedacos = r.rows.map(
+      (linha) => linha !== null && typeof linha === "object" && !Array.isArray(linha) ? linha.dados : linha?.[1]
+    );
+    if (pedacos.length !== fatias.length || pedacos.some((p) => typeof p !== "string")) {
+      return {
+        ...base,
+        gravou: true,
+        leu: false,
+        integro: false,
+        msGravacao,
+        msLeitura,
+        bytesQueVoltaram: null,
+        erro: `voltaram ${pedacos.length} fatias de ${fatias.length}`
+      };
+    }
+    const partes = pedacos.map(deBase64);
+    const volta = new Uint8Array(partes.reduce((s, p) => s + p.length, 0));
+    let off = 0;
+    for (const p of partes) {
+      volta.set(p, off);
+      off += p.length;
+    }
+    const integro = await sha256(volta) === esperado;
+    return {
+      ...base,
+      gravou: true,
+      leu: true,
+      integro,
+      msGravacao,
+      msLeitura,
+      bytesQueVoltaram: volta.length,
+      erro: integro ? null : "o conte\xFAdo remontado n\xE3o confere com o que foi gravado"
+    };
+  } catch (e) {
+    return {
+      ...base,
+      gravou: true,
+      leu: false,
+      integro: false,
+      msGravacao,
+      msLeitura: Date.now() - t1,
+      bytesQueVoltaram: null,
+      erro: mensagemDeErro(e)
+    };
+  } finally {
+    await db.exec("DELETE FROM diag_blob WHERE id = ?", [id]).catch(() => void 0);
+  }
+}
+async function gravarArquivoPersistido(db, opcoes) {
+  await db.exec(SCHEMA_DIAG, []);
+  const fatiaBytes = opcoes.fatiaKb ? Math.round(opcoes.fatiaKb * 1024) : FATIA_BYTES_PADRAO;
+  const bytes = bytesAleatorios(Math.round(opcoes.tamanhoMb * 1024 * 1024));
+  const sha = await sha256(bytes);
+  const t0 = Date.now();
+  await db.exec("DELETE FROM diag_blob WHERE id = ?", [opcoes.id]);
+  let ordem = 0;
+  for (let i = 0; i < bytes.length; i += fatiaBytes) {
+    await db.exec("INSERT INTO diag_blob (id, ordem, sha, dados) VALUES (?, ?, ?, ?)", [
+      opcoes.id,
+      ordem,
+      sha,
+      paraBase642(bytes.subarray(i, Math.min(i + fatiaBytes, bytes.length)))
+    ]);
+    ordem += 1;
+  }
+  return { id: opcoes.id, bytes: bytes.length, fatias: ordem, sha, ms: Date.now() - t0 };
+}
+async function conferirArquivoPersistido(db, id, apagar = true) {
+  const t0 = Date.now();
+  const r = await db.query("SELECT ordem, sha, dados FROM diag_blob WHERE id = ? ORDER BY ordem", [
+    id
+  ]);
+  const linhas = linhasComoObjetos(r);
+  if (linhas.length === 0) {
+    return { achou: false, fatias: 0, bytes: null, integro: false, ms: Date.now() - t0 };
+  }
+  const partes = linhas.map((l) => typeof l.dados === "string" ? deBase64(l.dados) : null);
+  if (partes.some((p) => p === null)) {
+    return {
+      achou: true,
+      fatias: linhas.length,
+      bytes: null,
+      integro: false,
+      ms: Date.now() - t0
+    };
+  }
+  const volta = new Uint8Array(partes.reduce((s, p) => s + p.length, 0));
+  let off = 0;
+  for (const p of partes) {
+    volta.set(p, off);
+    off += p.length;
+  }
+  const esperado = typeof linhas[0]?.sha === "string" ? linhas[0].sha : "";
+  const integro = await sha256(volta) === esperado;
+  const ms = Date.now() - t0;
+  if (apagar) await db.exec("DELETE FROM diag_blob WHERE id = ?", [id]).catch(() => void 0);
+  return { achou: true, fatias: linhas.length, bytes: volta.length, integro, ms };
+}
+async function medirBlobNoBanco(db, opcoes = {}) {
+  const tamanhos = opcoes.tamanhosMb?.length ? opcoes.tamanhosMb : TAMANHOS_PADRAO_MB;
+  const fatiar = opcoes.fatiar !== false;
+  const fatiaBytes = opcoes.fatiaKb ? Math.round(opcoes.fatiaKb * 1024) : FATIA_BYTES_PADRAO;
+  await db.exec(SCHEMA_DIAG, []);
+  const itens = [];
+  try {
+    for (const mb of tamanhos) {
+      const total = Math.round(mb * 1024 * 1024);
+      const rotulo = mb < 1 ? `${Math.round(mb * 1024)}kb` : `${mb}mb`;
+      const bytes = bytesAleatorios(total);
+      const esperado = await sha256(bytes);
+      itens.push(await medirLinhaUnica(db, rotulo, bytes, esperado));
+      if (fatiar) itens.push(await medirFatiado(db, rotulo, bytes, esperado, fatiaBytes));
+    }
+  } finally {
+    const sobrou = await db.query("SELECT COUNT(*) AS n FROM diag_blob", []).then((r) => Number(linhasComoObjetos(r)[0]?.n ?? 0)).catch(() => 1);
+    if (sobrou === 0) await db.exec("DROP TABLE IF EXISTS diag_blob", []).catch(() => void 0);
+  }
+  const maiorOk = (estrategia) => {
+    const ok = itens.filter((i) => i.estrategia === estrategia && i.integro);
+    return ok.length ? Math.max(...ok.map((i) => i.bytes)) / (1024 * 1024) : null;
+  };
+  return {
+    fatiaBytes,
+    itens,
+    maiorLinhaUnicaOkMb: maiorOk("linha_unica"),
+    maiorFatiadoOkMb: maiorOk("fatiado")
+  };
+}
+
 // src/lib/investigador/corpos.ts
 var MAX_CORPO_LIDO_BYTES = 64e3;
 function ehJson(tipo) {
@@ -12165,6 +12454,34 @@ async function rotear(req, ctx, eu, caminho, url) {
         }
       )
     });
+  }
+  if (caminho === "/api/admin/diagnostico/blob" && req.method === "POST") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    const corpo = await lerJson(
+      req
+    );
+    const tamanhosMb = Array.isArray(corpo?.tamanhosMb) ? corpo.tamanhosMb.filter((n) => typeof n === "number" && n > 0 && n <= 16) : void 0;
+    const fatiaKb = typeof corpo?.fatiaKb === "number" && corpo.fatiaKb > 0 && corpo.fatiaKb <= 4096 ? corpo.fatiaKb : void 0;
+    return json(
+      await medirBlobNoBanco(ctx.db, {
+        ...tamanhosMb ? { tamanhosMb } : {},
+        ...fatiaKb ? { fatiaKb } : {},
+        fatiar: corpo?.fatiar !== false
+      })
+    );
+  }
+  if (caminho === "/api/admin/diagnostico/blob-persistente" && req.method === "POST") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    const corpo = await lerJson(req);
+    const id = typeof corpo?.id === "string" && corpo.id !== "" ? corpo.id.slice(0, 60) : "persistente";
+    if (corpo?.acao === "conferir") {
+      return json(await conferirArquivoPersistido(ctx.db, id));
+    }
+    const tamanhoMb = typeof corpo?.tamanhoMb === "number" && corpo.tamanhoMb > 0 && corpo.tamanhoMb <= 16 ? corpo.tamanhoMb : 8;
+    const fatiaKb = typeof corpo?.fatiaKb === "number" && corpo.fatiaKb > 0 && corpo.fatiaKb <= 4096 ? corpo.fatiaKb : void 0;
+    return json(
+      await gravarArquivoPersistido(ctx.db, { id, tamanhoMb, ...fatiaKb ? { fatiaKb } : {} })
+    );
   }
   if (caminho === "/api/investigador/sessoes" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();

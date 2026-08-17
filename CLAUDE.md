@@ -142,6 +142,15 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   apagaria o chamado da pessoa. São dois passos dentro da mesma confirmação: upload ao
   escolher o arquivo, materialização **depois** da criação. Custo aceito: existe uma
   janela curta em que o chamado existe sem o anexo.
+  🚨 **O custo real é maior do que essa frase dizia** (`D-74`, 17/08/2026): **6 dos 15 tipos
+  do `GN` exigem anexo** — `90`, `91`, `92`, `94`, `96`, `134` —, e como o arquivo nunca vai
+  no corpo da criação **e** `attachment` fica fora da checagem de obrigatórios (`D-38`),
+  esses seis respondem **400 = definitivo = chamado perdido**, sempre. Medido no
+  Investigador: três confirmações do mesmo chamado, três `criacao_nao_concluida`. ✅ **A
+  saída está medida** — `env.DB` guarda 8 MB **em fatias** e o arquivo atravessa requisições
+  íntegro, então dá para guardar os bytes aqui e mandá-los na criação. ⚠️ **O desenho é
+  spec, não improviso**: mexer em `D-26` sem ela reabre o modo de falha que ela existe para
+  impedir.
 - **`RF-62` é fail-OPEN, e isso é desvio consciente** (`D-27`) — schema de request type
   que não pôde ser lido **não pergunta** e abre o chamado. A distinção que sustenta:
   `RF-62` é qualidade de produto, não trava de segurança; quem burla só abre o **próprio**
@@ -1539,6 +1548,15 @@ persistente.
   devolvia `{}` em produção**, sem erro nenhum: auditoria com 58 registros vazios, lista de
   chamados vazia, config caindo nos defaults. Como os defaults vêm do bootstrap por env, o
   app *parecia* funcionar. **Nunca indexe `rows` direto**; há teste das duas formas.
+- 🚨 **Um VALOR acima de ~2,2 MB é recusado com `SQLITE_TOOBIG`** (`D-74`, medido na staging
+  em 17/08/2026 por bisseção: **2.199.912 bytes gravou, 2.202.012 não**). É teto do valor no
+  `INSERT`, não do arquivo nem do banco: fatiando, **8 MB entram e voltam íntegros** (SHA-256
+  conferido), inclusive **entre requisições diferentes** — 6 linhas de 1,5 MB gravam em 4,7 s
+  e leem em 1,1 s. ⚠️ **Conteúdo binário viaja em base64 e infla 4/3**, então 1,65 MB de
+  arquivo já batem no limite; a fatia recomendada é **512 kB**, ~1/3 do teto, porque o número
+  é medição de hoje. ⚠️ E o `node:sqlite` do shim **aceita qualquer tamanho** — família de
+  `linhasComoObjetos`: quem quiser guardar conteúdo grande mede em
+  `POST /api/admin/diagnostico/blob`, nunca em teste.
 - 🚨 **Cada `await db.exec` é uma ida de REDE, e `montarContexto` roda por requisição**
   (`RNF-36`, `D-35`). `migrar` reaplicava os 32 statements de DDL (17 tabelas + 15
   índices) mais os 3 `ALTER` em série a **cada** requisição `/api/*`: **36 idas ao banco**

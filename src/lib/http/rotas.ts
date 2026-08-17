@@ -98,6 +98,11 @@ import { anexarTranscricaoDoChamado } from '../tickets/transcricao'
 import { chaveDeConfigConhecida, validarValorDeConfig } from '../config/validar'
 import { buscaConfigurada } from '../config/diagnostico'
 // spec 009 — o Investigador. Ver o comentário sobre o envelope em `tratarRequisicao`.
+import {
+  conferirArquivoPersistido,
+  gravarArquivoPersistido,
+  medirBlobNoBanco,
+} from '../diagnostico/blob-no-banco'
 import { corpoDaRequisicao, corpoDaResposta } from '../investigador/corpos'
 import {
   detalharSessao,
@@ -2124,6 +2129,68 @@ async function rotear(
             },
       ),
     })
+  }
+
+  /**
+   * Diagnóstico de plataforma: o banco aguenta guardar um ARQUIVO? (`blob-no-banco.ts`)
+   *
+   * ⚠️ **Rota temporária, e o motivo dela está no módulo.** Ela existe para responder, no app
+   * publicado, se dá para guardar os bytes do anexo aqui em vez de mandá-los à Atlassian no
+   * upload (`D-26`) — pergunta que teste nenhum responde, porque o `node:sqlite` do shim
+   * aceita valor grande e a plataforma é outra coisa (família de `linhasComoObjetos`).
+   *
+   * `POST` porque escreve, e admin porque é diagnóstico. Não passa pelo decorador de somente
+   * leitura: escreve no **nosso** banco, numa tabela própria, e apaga tudo no fim.
+   */
+  if (caminho === '/api/admin/diagnostico/blob' && req.method === 'POST') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    const corpo = await lerJson<{ tamanhosMb?: unknown; fatiar?: unknown; fatiaKb?: unknown }>(
+      req,
+    )
+    const tamanhosMb = Array.isArray(corpo?.tamanhosMb)
+      ? corpo.tamanhosMb.filter((n): n is number => typeof n === 'number' && n > 0 && n <= 16)
+      : undefined
+    const fatiaKb =
+      typeof corpo?.fatiaKb === 'number' && corpo.fatiaKb > 0 && corpo.fatiaKb <= 4096
+        ? corpo.fatiaKb
+        : undefined
+    return json(
+      await medirBlobNoBanco(ctx.db, {
+        ...(tamanhosMb ? { tamanhosMb } : {}),
+        ...(fatiaKb ? { fatiaKb } : {}),
+        fatiar: corpo?.fatiar !== false,
+      }),
+    )
+  }
+
+  /**
+   * O par persistente: uma requisição grava, OUTRA lê. É o que a bateria acima não prova —
+   * lá as duas pontas moram na mesma requisição, e no uso real quem escreve é o upload e
+   * quem lê é a confirmação, minutos depois e provavelmente em outro isolate.
+   */
+  if (caminho === '/api/admin/diagnostico/blob-persistente' && req.method === 'POST') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    const corpo = await lerJson<{
+      acao?: unknown
+      id?: unknown
+      tamanhoMb?: unknown
+      fatiaKb?: unknown
+    }>(req)
+    const id = typeof corpo?.id === 'string' && corpo.id !== '' ? corpo.id.slice(0, 60) : 'persistente'
+    if (corpo?.acao === 'conferir') {
+      return json(await conferirArquivoPersistido(ctx.db, id))
+    }
+    const tamanhoMb =
+      typeof corpo?.tamanhoMb === 'number' && corpo.tamanhoMb > 0 && corpo.tamanhoMb <= 16
+        ? corpo.tamanhoMb
+        : 8
+    const fatiaKb =
+      typeof corpo?.fatiaKb === 'number' && corpo.fatiaKb > 0 && corpo.fatiaKb <= 4096
+        ? corpo.fatiaKb
+        : undefined
+    return json(
+      await gravarArquivoPersistido(ctx.db, { id, tamanhoMb, ...(fatiaKb ? { fatiaKb } : {}) }),
+    )
   }
 
   /**

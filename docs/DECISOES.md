@@ -4702,6 +4702,106 @@ prioridade) e o payload final. O texto que a pessoa escreveu chega pelos eventos
 
 ---
 
+### D-74 · O banco da plataforma guarda arquivo de 8 MB — em fatias, e isso reabre `D-26`
+
+**17/08/2026. Medido na staging (`3936ca2d`), não deduzido.**
+
+#### O que motivou a medição
+
+Em 17/08 uma pessoa (`isaac.albano`) confirmou a abertura de um chamado **três vezes** e as
+três responderam `criacao_nao_concluida`. O Investigador (`D-73`) mostrou a causa em uma linha:
+`POST /rest/servicedeskapi/request → 400`, com o `payload_final` completo ao lado. O request
+type era o **134**, e o schema dele tem **seis** campos obrigatórios — dos quais o app enviou
+cinco. O que faltou foi **`attachment`**.
+
+🚨 **Não é um caso isolado: 6 dos 15 tipos do `GN` exigem anexo** — `90`, `91`, `92`, `94`,
+`96` e `134` (medido por `GET /api/admin/tipos-chamado/schema`, a rota de `D-44`). Sob o
+desenho atual **nenhum deles consegue abrir chamado**, porque o anexo nunca viaja na criação
+(`D-26`) e `attachment` fica **fora** da checagem de obrigatórios de propósito (`D-38`, para
+`RN-11` não virar "anexe um arquivo"). Isso explica, retroativamente, por que só os tipos
+`68`/`108`/`143`/`144` já produziram chamado.
+
+⚠️ **E os dois lados do defeito são independentes:** mesmo que a pessoa tivesse anexado, o
+arquivo continuaria não indo no corpo da criação. O caso do Isaac tem os dois — ele declarou
+não ter material, e o tipo exige.
+
+#### A pergunta que precisava de resposta antes de qualquer desenho
+
+A saída limpa é **guardar os bytes aqui** e mandá-los à Atlassian só na confirmação: sem id
+temporário, não há prazo a vencer, e o anexo pode ir junto na criação. Só que o app **não tem
+o arquivo** — hoje ele sobe para a Atlassian no upload e o que fica é o `temporaryAttachmentId`
+(`D-26`). Guardar os bytes significa guardá-los em `env.DB`, e **ninguém sabia se cabia**.
+
+Teste não responde isso: o `node:sqlite` do shim engole 8 MB sem reclamar. É a mesma família de
+`linhasComoObjetos` e do `INSERT` multi-tupla de `D-73` — o dublê implementa o documentado, a
+plataforma faz outra coisa, e a suíte fica verde. Por isso a medição roda **no app publicado**,
+por `POST /api/admin/diagnostico/blob` (`src/lib/diagnostico/blob-no-banco.ts`).
+
+#### O desenho da medição (por que ele mede o que diz medir)
+
+- Bytes **aleatórios**, nunca zeros: valor compressível passaria por qualquer transporte que
+  comprima e diria "cabe 8 MB" sobre um caso que não existe.
+- A prova é **SHA-256 do que voltou** contra o que foi gravado. Tamanho igual com conteúdo
+  truncado no meio é justamente o defeito silencioso que se procura — e há caso local
+  (`tests/diag-blob-local.test.ts`) com um banco adulterado, provando que o medidor **acusa**
+  corrupção em vez de dizer que deu certo.
+- Duas estratégias na mesma requisição: **linha única** e **fatiado**, para o resultado ser
+  comparável.
+- E um **par persistente** (`/api/admin/diagnostico/blob-persistente`): uma requisição grava,
+  **outra** lê. A bateria sozinha não provaria nada sobre o uso real — lá quem escreve é o
+  upload e quem lê é a confirmação, minutos depois e em outro isolate.
+
+#### O que foi medido
+
+| Arquivo | Linha única | Fatiado (512 kB) |
+|---|---|---|
+| 64 kB · 256 kB · 1 MB | ✅ íntegro | ✅ íntegro |
+| 2 MB | ❌ `SQLITE_TOOBIG` | ✅ íntegro |
+| 4 MB · 6 MB · 8 MB | ❌ `SQLITE_TOOBIG` | ✅ íntegro |
+
+🚨 **O teto é por VALOR, e vale ~2,2 MB** — medido por bisseção, em bytes de coluna (base64):
+**2.199.912 gravou · 2.202.012 recusou**. Não é teto de arquivo nem de banco: é do valor que
+vai no `INSERT`. Como o conteúdo viaja em base64, ele infla **4/3**, então 1,65 MB de arquivo
+já bate no limite.
+
+**8 MB, fatiado, com integridade conferida por SHA-256:**
+
+| Fatia | Linhas | Gravação | Leitura |
+|---|---|---|---|
+| 512 kB | 16 | 9,4 s | 1,2 s |
+| 1 MB | 8 | 6,7 s | 1,1 s |
+| 1,5 MB | 6 | 4,7 s | 1,1 s |
+
+✅ **E atravessa requisições:** 8 MB gravados numa chamada, lidos e conferidos em **outra**
+(`achou: true`, `integro: true`, 8.388.608 bytes, 1,3 s). É esta a medição que autoriza o
+desenho, não a bateria.
+
+#### O que isto decide, e o que NÃO decide
+
+✅ **Decide que dá para guardar o anexo em `env.DB`** — 8 MB, o teto de `http/anexo-entrada.ts`,
+cabe com folga desde que fatiado. Supabase não precisa entrar.
+
+⚠️ **A fatia é ~1/3 do teto de propósito.** 512 kB de arquivo viram ~700 kB de base64 contra um
+limite de ~2,2 MB: a folga de 3× é o que faz a escolha não depender de o teto ser exatamente
+esse número — que é medição de hoje, de uma plataforma que já mudou de comportamento antes
+(`D-73`).
+
+⚠️ **A gravação custa segundos, e o custo é do UPLOAD, não da confirmação** — a mesma razão de
+`D-64` para a análise do anexo. 4,7 s a 9,4 s numa requisição que ninguém está esperando é
+aceitável; na confirmação seria a pessoa olhando a tela.
+
+🚫 **Não decide o desenho do anexo na criação.** O que muda em `D-26` — quando gravar, quando
+apagar, o que fazer com o arquivo se o chamado nunca for confirmado, e como `RN-11` passa a se
+comportar nos 6 tipos que exigem anexo — é spec, e não foi escrito aqui. Esta decisão registra
+**a medição que destrava a spec**.
+
+⚠️ **A rota de diagnóstico FICA**, como a de `D-44`: é só-admin, não custa nada parada, apaga o
+que escreve, e a pergunta "cabe no banco?" volta toda vez que alguém pensar em guardar
+conteúdo. `DROP TABLE` só acontece se a tabela ficou vazia — incondicional apagaria o arquivo
+que o par persistente deixou de propósito.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
