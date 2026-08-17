@@ -1675,9 +1675,12 @@ tarefa aberta era **T-425** — ✅ **respondida em 11/08/2026**:
 `GET /api/tipos-chamado/68/campos` na staging devolveu **`aceitaAnexo: true`**. O request
 type expõe campo de anexo, então o anexo na criação funciona sem uma linha a mudar.
 
-**No ar: https://goatlas.devgogroup.com** (`appId 9c47f42f`, deploy de **14/08/2026** com a
-spec 008 — staging `3936ca2d` com o **mesmo bundle** (`index-Ct4jtfSS.js`), deployada e validada
-**na tela** antes, conforme a regra 10). Login Google pelo edge, admin por allowlist.
+**No ar: https://goatlas.devgogroup.com** (`appId 9c47f42f`, deploy de **17/08/2026** com as
+specs 010 e 011 — staging `3936ca2d` com o **mesmo bundle** (`index-BFZ5mRqN.js`), deployada e
+validada **na tela** antes, conforme a regra 10). Login Google pelo edge, admin por allowlist.
+✅ **Conferido em produção depois do deploy**: `GET /api/tipos-chamado/134/campos` devolve
+`anexoObrigatorio: true` (e `68` devolve `false`), e o formulário direto trava com *"Falta
+anexar pelo menos um arquivo (este assunto exige)…"*.
 ⚠️ **`updateApp` MESCLA assets**: o manifesto acumula todos os bundles hasheados dos deploys
 anteriores (33 entradas na staging). É inócuo — o `index.html` aponta para os novos —, mas quem
 for limpar precisa dos dois deploys de `assets: []` que o próprio `CLAUDE.md` descreve.
@@ -1732,15 +1735,14 @@ mostrá-lo: `RF-29`/`RF-31` seguem abertos pelo lado da superfície, não mais p
 ("Solicitação enviada por e-mail") continua fora de propósito** — `D-23`: é o canal de
 entrada por e-mail do próprio JSM, não um formulário para alguém escolher.
 
-🚨 **E ela ENCOLHEU para 9 em 17/08/2026, em produção** (`68,70,71,89,93,95,108,143,144`):
-os seis que exigem anexo — **`90`, `91`, `92`, `94`, `96`, `134`** — saíram porque **nunca
-abriram chamado nenhum** e nunca abririam (`D-74`, spec 010). Não é preferência de
-roteamento: com o anexo fora do corpo da criação (`D-26`) e fora da checagem de obrigatórios
-(`D-38`), esses seis respondem **400 = definitivo = chamado perdido**, sempre. ⚠️ **A
-mitigação tem custo**: `134` ("Relatar um problema (Sistema)") era o destino natural de
-problema técnico e o `70` ("Relatar um bug") passa a receber essa fila. ⚠️ **A staging
-continua com os 15** — a mudança foi feita pelo console, app por app, e só a de produção foi
-aplicada. Devolver os seis é a `T-1027`, **depois** da medição, nunca antes.
+🚨 **Ela encolheu para 9 e VOLTOU para 15 no mesmo dia (17/08/2026), e o meio conta.** Os seis
+que exigem anexo — **`90`, `91`, `92`, `94`, `96`, `134`** — saíram porque **nunca tinham
+aberto chamado nenhum** e nunca abririam: com o anexo fora do corpo da criação (`D-26`) e fora
+da checagem de obrigatórios (`D-38`), eles respondiam **400 = definitivo = chamado perdido**,
+sempre. Voltaram depois de `D-75` consertar a causa e de a correção ser medida na tela
+(`GN-6918`, tipo `134`, com anexo de 5,5 MB). ⚠️ **A ordem era a decisão**: devolvê-los antes
+da medição seria reabrir a perda de chamado, e mantê-los fora depois dela seria desviar as
+pessoas do assunto certo de graça.
 
 ⚠️ **Não existe fila do RPA, e o "ambiente do RPA" não serve para teste** (11/08). O site
 tem 5 service desks (`GN` 4 · `SHPF` 7 · `OMI2020` 8 · `GOSHOP` 9 · `JTK` 11) e nenhum é do
