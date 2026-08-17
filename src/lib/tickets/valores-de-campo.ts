@@ -304,7 +304,13 @@ export function prioridadeParaOJira(
 export function juntarCamposDaCriacao(
   traduzidos: Record<string, unknown> | null,
   prioridade: Record<string, unknown>,
+  /**
+   * `RF-79` (spec 010) — o campo de anexo, quando o assunto o exige. Entra por **último**
+   * pela mesma razão da prioridade: é resolvido no servidor, a partir de um upload feito
+   * neste instante, e não pode ser sobrescrito por nada vindo do cliente.
+   */
+  anexo: Record<string, unknown> = {},
 ): Record<string, unknown> | null {
-  const juntos = { ...(traduzidos ?? {}), ...prioridade }
+  const juntos = { ...(traduzidos ?? {}), ...prioridade, ...anexo }
   return Object.keys(juntos).length > 0 ? juntos : null
 }

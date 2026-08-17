@@ -72,6 +72,45 @@ export function exigeDeclaracaoDeAnexo(schema: SchemaDoTipo): boolean {
   return schema.conhecido && tipoAceitaAnexo(schema.campos)
 }
 
+/**
+ * O Jira **exige** arquivo neste assunto? — `RN-14` (spec 010).
+ *
+ * 🚨 A pergunta nasceu de um chamado perdido: em 17/08/2026 alguém confirmou três vezes e
+ * leu três vezes "não conseguimos abrir o chamado". O request type era o `134`, e a
+ * resposta da Atlassian — medida com todos os outros campos preenchidos — foi uma frase
+ * só: *"Por favor, adicione pelo menos um arquivo"*. São **6 dos 15** assuntos do `GN`
+ * assim (`90`, `91`, `92`, `94`, `96`, `134`), e nenhum deles jamais abriu um chamado.
+ *
+ * ⚠️ **Quem responde é o SCHEMA, nunca uma lista de ids** — nem no código, nem em config.
+ * Lista de ids funcionaria na Gocase e falharia calada em outra instalação; é exatamente o
+ * defeito que `ScC-4` descreve, na versão que perde chamado em vez de esconder um campo.
+ *
+ * ⚠️ **Schema desconhecido devolve `false`** (fail-open, `D-27`): sem schema não há como
+ * saber que o anexo é obrigatório, e inventar a trava transformaria uma queda de leitura
+ * na parede que `RNF-18` proíbe. Custo assumido e declarado: durante uma queda de schema,
+ * esse chamado pode tomar 400 — que é o que ele já toma hoje, sempre.
+ */
+export function anexoObrigatorio(schema: SchemaDoTipo): boolean {
+  if (!schema.conhecido) return false
+  return schema.campos.some((c) => c.tipo === 'anexo' && c.obrigatorio)
+}
+
+/** O rótulo do campo de anexo, para a mensagem falar a língua do formulário (`RNF-30`). */
+export function rotuloDoCampoDeAnexo(schema: SchemaDoTipo): string {
+  const campo = schema.conhecido ? schema.campos.find((c) => c.tipo === 'anexo') : undefined
+  return campo?.rotulo ?? 'anexo'
+}
+
+/**
+ * A mensagem da recusa — em português, nomeando o campo, e dizendo o que fazer.
+ *
+ * ⚠️ Ela **não** acusa o app nem o Jira: quem lê está a um clique de abrir o chamado, e
+ * "erro" ali faz a pessoa desistir ou abrir um segundo. Diz o que falta e onde anexar.
+ */
+export function mensagemAnexoObrigatorio(rotulo: string): string {
+  return `Este assunto exige um arquivo: "${rotulo}". Anexe pelo menos um print ou documento — o Jira recusa a abertura sem isso. Se você não tem nada para anexar, me diga o que está acontecendo que eu troco o assunto do chamado.`
+}
+
 export type ResultadoDeclaracao =
   | { readonly ok: true; readonly declarouAnexo: boolean | null }
   | { readonly ok: false; readonly mensagem: string }

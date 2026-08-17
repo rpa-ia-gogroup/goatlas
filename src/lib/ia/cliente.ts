@@ -36,6 +36,7 @@ import {
 import {
   PROMPT_CLASSIFICACAO_RESOLUCAO,
   PROMPT_DESCRICAO_ARQUIVO,
+  INSTRUCAO_FECHAR_AGORA,
   PROMPT_EXTRACAO,
   montarPromptClassificacao,
   montarPromptDescricaoArquivo,
@@ -314,7 +315,23 @@ export class ClienteIAHttp implements ClienteIA {
       {
         messages: [
           { role: 'system', content: PROMPT_EXTRACAO },
-          { role: 'user', content: montarPromptExtracao(params) },
+          {
+            role: 'user',
+            /**
+             * ⚠️ **A instrução de forçar vai no FIM da mensagem do usuário, não no system.**
+             *
+             * Medido na staging em 17/08/2026: com ela anexada ao system prompt, o modelo
+             * devolveu `{"pronto": false, "titulo": "", "descricao": "", ...}` — obedeceu à
+             * regra mais antiga e mais longa ("`pronto: false` quando falta informação;
+             * nesse caso os outros campos são ignorados") e o botão não montou nada. No fim
+             * da instrução real da tarefa ela é o último texto que o modelo lê.
+             */
+            content: params.forcarFechamento
+              ? `${montarPromptExtracao(params)}
+
+${INSTRUCAO_FECHAR_AGORA}`
+              : montarPromptExtracao(params),
+          },
         ],
         response_format: { type: 'json_object' },
       },
@@ -327,7 +344,11 @@ export class ClienteIAHttp implements ClienteIA {
     this._custoAcumuladoUsd += custo
     const bruto = dados.choices?.[0]?.message?.content
     return {
-      proposta: interpretarProposta(bruto, params.tiposPermitidos.map((t) => t.id)),
+      proposta: interpretarProposta(
+        bruto,
+        params.tiposPermitidos.map((t) => t.id),
+        { aceitarNaoPronto: params.forcarFechamento === true },
+      ),
       custoEstimadoUsd: custo,
       // spec 009, `FR-6` — só o Investigador lê isto, e só quando a proposta é recusada.
       respostaBruta: typeof bruto === 'string' ? bruto : null,
@@ -401,6 +422,14 @@ export function interpretarClassificacao(bruto: unknown): {
 export function interpretarProposta(
   bruto: unknown,
   idsPermitidos: readonly string[],
+  /**
+   * `RF-81` — `aceitarNaoPronto` ignora **só** o `pronto` do modelo (spec 011).
+   *
+   * ⚠️ As outras quatro recusas continuam valendo, e isso é o desenho: forçar é dizer
+   * "monte com o que tem", nunca "aceite qualquer coisa". Um título de três letras ou um
+   * id fora da allowlist continuam descartando a proposta inteira.
+   */
+  opcoes: { readonly aceitarNaoPronto?: boolean } = {},
 ): PropostaSugerida | null {
   if (typeof bruto !== 'string' || bruto.trim().length === 0) return null
   let v: Record<string, unknown>
@@ -412,7 +441,7 @@ export function interpretarProposta(
     return null
   }
 
-  if (v.pronto !== true) return null
+  if (v.pronto !== true && opcoes.aceitarNaoPronto !== true) return null
 
   const titulo = typeof v.titulo === 'string' ? v.titulo.trim() : ''
   const descricao = typeof v.descricao === 'string' ? v.descricao.trim() : ''

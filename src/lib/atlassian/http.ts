@@ -113,6 +113,41 @@ export class TransporteAtlassian {
   }
 
   /**
+   * Diagnóstico: **uma** requisição, sem retentativa, devolvendo status e corpo CRU.
+   *
+   * ## Por que este caminho existe, sendo o oposto do resto do arquivo
+   *
+   * `enviar` **nunca** repassa o corpo da resposta de erro (`RNF-01`, `RNF-30`) — e isso
+   * está certo, porque aquele erro sobe até o log. A consequência apareceu em 17/08/2026:
+   * a criação do tipo `134` respondeu 400 e **ninguém tinha como saber por quê**. A causa
+   * (`attachment` obrigatório) foi *inferida* pela interseção com o schema, não lida.
+   *
+   * Aqui o corpo volta porque quem chama é uma rota **de admin** que o redige antes de
+   * responder (`corpoSeguro`). O corpo não entra em log, não entra em exceção e não sai
+   * daqui por nenhum outro caminho — a única chamadora é a rota de diagnóstico.
+   *
+   * ⚠️ **Sem retentativa de propósito:** medir "o que a Atlassian responde a este corpo"
+   * com backoff no meio produziria três tentativas para uma pergunta que é sobre a
+   * primeira. E `ok` não é traduzido em exceção: 400 aqui é **resultado**, não falha.
+   */
+  async requisitarDiagnostico(
+    caminho: string,
+    init: { method?: string; body?: string },
+  ): Promise<{ readonly status: number; readonly corpo: string }> {
+    this._totalRequisicoes += 1
+    const resposta = await this.fetchImpl(`${this.opcoes.baseUrl}${caminho}`, {
+      method: init.method ?? 'GET',
+      headers: {
+        Authorization: this.cabecalhoAuth(),
+        Accept: 'application/json',
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(init.body === undefined ? {} : { body: init.body }),
+    })
+    return { status: resposta.status, corpo: await resposta.text() }
+  }
+
+  /**
    * Baixa **bytes**, não JSON — anexo de página (`RNF-02`: o navegador não fala com
    * a Atlassian, então o app re-serve).
    *

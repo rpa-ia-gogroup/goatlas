@@ -138,6 +138,37 @@ var TransporteAtlassian = class {
     return texto3.length > 0 ? JSON.parse(texto3) : null;
   }
   /**
+   * Diagnóstico: **uma** requisição, sem retentativa, devolvendo status e corpo CRU.
+   *
+   * ## Por que este caminho existe, sendo o oposto do resto do arquivo
+   *
+   * `enviar` **nunca** repassa o corpo da resposta de erro (`RNF-01`, `RNF-30`) — e isso
+   * está certo, porque aquele erro sobe até o log. A consequência apareceu em 17/08/2026:
+   * a criação do tipo `134` respondeu 400 e **ninguém tinha como saber por quê**. A causa
+   * (`attachment` obrigatório) foi *inferida* pela interseção com o schema, não lida.
+   *
+   * Aqui o corpo volta porque quem chama é uma rota **de admin** que o redige antes de
+   * responder (`corpoSeguro`). O corpo não entra em log, não entra em exceção e não sai
+   * daqui por nenhum outro caminho — a única chamadora é a rota de diagnóstico.
+   *
+   * ⚠️ **Sem retentativa de propósito:** medir "o que a Atlassian responde a este corpo"
+   * com backoff no meio produziria três tentativas para uma pergunta que é sobre a
+   * primeira. E `ok` não é traduzido em exceção: 400 aqui é **resultado**, não falha.
+   */
+  async requisitarDiagnostico(caminho, init) {
+    this._totalRequisicoes += 1;
+    const resposta = await this.fetchImpl(`${this.opcoes.baseUrl}${caminho}`, {
+      method: init.method ?? "GET",
+      headers: {
+        Authorization: this.cabecalhoAuth(),
+        Accept: "application/json",
+        ...init.body ? { "Content-Type": "application/json" } : {}
+      },
+      ...init.body === void 0 ? {} : { body: init.body }
+    });
+    return { status: resposta.status, corpo: await resposta.text() };
+  }
+  /**
    * Baixa **bytes**, não JSON — anexo de página (`RNF-02`: o navegador não fala com
    * a Atlassian, então o app re-serve).
    *
@@ -427,8 +458,8 @@ function prioridadeParaOJira(campo, prioridade) {
   if (!campo.obrigatorio) return { ok: true, campos: {} };
   return { ok: false, mensagem: mensagemPrioridadeSemCorrespondencia(campo.rotulo) };
 }
-function juntarCamposDaCriacao(traduzidos, prioridade) {
-  const juntos = { ...traduzidos ?? {}, ...prioridade };
+function juntarCamposDaCriacao(traduzidos, prioridade, anexo = {}) {
+  const juntos = { ...traduzidos ?? {}, ...prioridade, ...anexo };
   return Object.keys(juntos).length > 0 ? juntos : null;
 }
 
@@ -702,21 +733,54 @@ var ClienteAtlassianHttp = class {
 `;
     return { descricao: cabecalho + dados.descricao, camposExtra: {} };
   }
-  async criarChamado(dados) {
+  /**
+   * O corpo da criação, em UM lugar só.
+   *
+   * ⚠️ Extraído em 17/08/2026 (spec 010) porque o diagnóstico precisa medir **exatamente
+   * este** corpo. Um segundo montador para o diagnóstico responderia sobre um payload que
+   * o app não envia — a medição pareceria conclusiva e não seria.
+   *
+   * `idsAnexo` é a pergunta aberta de `M-2`: a criação do JSM aceita anexo em
+   * `requestFieldValues`? Enquanto não houver resposta medida, quem chama a criação real
+   * **não** passa nada aqui, e o comportamento fica idêntico ao de antes.
+   */
+  montarCorpoCriacao(dados, idsAnexo) {
     const { descricao, camposExtra } = this.montarCamposSolicitante(dados);
     const camposDinamicos = { ...dados.camposDinamicos };
     delete camposDinamicos.summary;
     delete camposDinamicos.description;
-    const corpo = {
+    return {
       serviceDeskId: dados.serviceDeskId,
       requestTypeId: dados.tipoChamadoId,
       requestFieldValues: {
         summary: dados.titulo,
         description: descricao,
         ...camposDinamicos,
-        ...camposExtra
+        ...camposExtra,
+        ...idsAnexo && idsAnexo.length > 0 ? { attachment: [...idsAnexo] } : {}
       }
     };
+  }
+  /**
+   * `T-1000` — tenta a criação e devolve **o que a Atlassian respondeu**, sem lançar.
+   *
+   * Existe para responder duas perguntas que nenhuma fonte do projeto respondia
+   * (`specs/010-anexo-obrigatorio/plan.md` §0): *o 400 do tipo `134` é mesmo pelo anexo?*
+   * e *a criação aceita anexo no corpo?*
+   *
+   * ⚠️ **Tentativa que falha não cria nada; tentativa que dá certo cria chamado REAL.**
+   * Quem chama é responsável por marcar o título — a rota exige que ele venha pronto.
+   */
+  async diagnosticarCriacao(dados, idsAnexo) {
+    const corpoEnviado = this.montarCorpoCriacao(dados, idsAnexo);
+    const r = await this.transporte.requisitarDiagnostico("/rest/servicedeskapi/request", {
+      method: "POST",
+      body: JSON.stringify(corpoEnviado)
+    });
+    return { ...r, corpoEnviado };
+  }
+  async criarChamado(dados) {
+    const corpo = this.montarCorpoCriacao(dados);
     const resposta = await this.transporte.requisitar("/rest/servicedeskapi/request", {
       method: "POST",
       body: JSON.stringify(corpo)
@@ -1743,6 +1807,17 @@ var ClienteAtlassianSomenteLeitura = class {
   async criarChamado(_dados) {
     this.recusar("criarChamado");
   }
+  /**
+   * `T-1000` — o diagnóstico é **escrita**, e por isso está deste lado.
+   *
+   * ⚠️ Escrito explicitamente mesmo sendo opcional na interface: sem este método, o modo
+   * somente leitura recusaria por **ausência** (`typeof … !== 'function'` na rota), e
+   * "recusado porque a trava agiu" viraria indistinguível de "recusado porque o cliente é
+   * de outro tipo". A distinção importa justamente quando alguém estiver diagnosticando.
+   */
+  async diagnosticarCriacao(_dados, _idsAnexo) {
+    this.recusar("diagnosticarCriacao");
+  }
   // Os parâmetros são declarados mesmo sem uso: a assinatura idêntica à da interface é o
   // que faz o compilador acusar quando um método de escrita novo aparecer em
   // `ClienteAtlassian` e ninguém decidir de que lado dele ele fica.
@@ -2587,6 +2662,16 @@ function montarResultadoHistoricoParaModelo(tickets) {
   return `Chamados anteriores do mesmo tipo:
 ${itens}`;
 }
+var INSTRUCAO_FECHAR_AGORA = `
+=== PEDIDO EXPL\xCDCITO DA PESSOA: FECHE O CHAMADO AGORA ===
+
+Ela clicou no bot\xE3o "Montar o chamado agora". Isto **substitui** a regra do \`pronto: false\` acima, s\xF3 desta vez.
+
+- Devolva \`pronto: true\` e **preencha** titulo, descricao, prioridade e tipoChamadoId com o que existe na conversa. Campo vazio aqui \xE9 resposta errada.
+- **N\xE3o invente** fato que ningu\xE9m disse. Escreva o que foi dito, com as palavras que foram usadas.
+- Faltou dado que voc\xEA pediria? Escreva na descri\xE7\xE3o, em uma linha come\xE7ando por "Em aberto:", o que n\xE3o foi apurado \u2014 por exemplo: "Em aberto: a pessoa n\xE3o informou a mensagem de erro exata." Quem vai atender precisa saber disso.
+- N\xE3o sabe o assunto exato? Escolha o mais **gen\xE9rico** da lista (d\xFAvidas / outras quest\xF5es).
+- \`pronto: false\` aqui \xE9 aceit\xE1vel **s\xF3** se a conversa n\xE3o disser nem o que aconteceu.`;
 var PROMPT_EXTRACAO = `Voc\xEA l\xEA uma conversa entre um colaborador e o assistente de chamados, e extrai os campos do chamado a ser aberto.
 
 A conversa continua depois de o chamado estar montado: a pessoa pode pedir corre\xE7\xF5es em texto ("na verdade \xE9 no Protheus", "muda o assunto para acesso"). Voc\xEA l\xEA a conversa **inteira** e devolve o chamado como ele deve estar **agora** \u2014 n\xE3o um ajuste do anterior. O que a pessoa n\xE3o pediu para mudar continua como estava.
@@ -2868,7 +2953,21 @@ ${m.conteudo}` : m.conteudo
       {
         messages: [
           { role: "system", content: PROMPT_EXTRACAO },
-          { role: "user", content: montarPromptExtracao(params) }
+          {
+            role: "user",
+            /**
+             * ⚠️ **A instrução de forçar vai no FIM da mensagem do usuário, não no system.**
+             *
+             * Medido na staging em 17/08/2026: com ela anexada ao system prompt, o modelo
+             * devolveu `{"pronto": false, "titulo": "", "descricao": "", ...}` — obedeceu à
+             * regra mais antiga e mais longa ("`pronto: false` quando falta informação;
+             * nesse caso os outros campos são ignorados") e o botão não montou nada. No fim
+             * da instrução real da tarefa ela é o último texto que o modelo lê.
+             */
+            content: params.forcarFechamento ? `${montarPromptExtracao(params)}
+
+${INSTRUCAO_FECHAR_AGORA}` : montarPromptExtracao(params)
+          }
         ],
         response_format: { type: "json_object" }
       },
@@ -2881,7 +2980,11 @@ ${m.conteudo}` : m.conteudo
     this._custoAcumuladoUsd += custo;
     const bruto = dados.choices?.[0]?.message?.content;
     return {
-      proposta: interpretarProposta(bruto, params.tiposPermitidos.map((t) => t.id)),
+      proposta: interpretarProposta(
+        bruto,
+        params.tiposPermitidos.map((t) => t.id),
+        { aceitarNaoPronto: params.forcarFechamento === true }
+      ),
       custoEstimadoUsd: custo,
       // spec 009, `FR-6` — só o Investigador lê isto, e só quando a proposta é recusada.
       respostaBruta: typeof bruto === "string" ? bruto : null
@@ -2924,7 +3027,7 @@ function interpretarClassificacao(bruto) {
     return { classe: "indeterminado", justificativa: "resposta n\xE3o era JSON v\xE1lido" };
   }
 }
-function interpretarProposta(bruto, idsPermitidos) {
+function interpretarProposta(bruto, idsPermitidos, opcoes = {}) {
   if (typeof bruto !== "string" || bruto.trim().length === 0) return null;
   let v;
   try {
@@ -2934,7 +3037,7 @@ function interpretarProposta(bruto, idsPermitidos) {
   } catch {
     return null;
   }
-  if (v.pronto !== true) return null;
+  if (v.pronto !== true && opcoes.aceitarNaoPronto !== true) return null;
   const titulo = typeof v.titulo === "string" ? v.titulo.trim() : "";
   const descricao = typeof v.descricao === "string" ? v.descricao.trim() : "";
   const tipoChamadoId = typeof v.tipoChamadoId === "string" ? v.tipoChamadoId : "";
@@ -4120,6 +4223,27 @@ var TABELAS = [
      materializado_em        TEXT,
      UNIQUE (chave_idempotencia, nome_arquivo)
    )`,
+  /**
+   * `RF-78` (spec 010) — os BYTES do anexo, fatiados, até o chamado nascer.
+   *
+   * 🚨 Existe porque 6 dos 15 assuntos do `GN` exigem anexo e o Jira recusa a criação sem
+   * ele (medido em 17/08/2026: *"Por favor, adicione pelo menos um arquivo"*). Com os
+   * bytes aqui, o `temporaryAttachmentId` nasce na **confirmação**, segundos antes de ser
+   * usado — e o motivo de `D-26` (id vencido derruba a criação) deixa de existir.
+   *
+   * ⚠️ **Fatiado porque a plataforma recusa valor acima de ~2,2 MB** (`D-74`,
+   * `SQLITE_TOOBIG`). A fatia é de 512 kB de arquivo (~700 kB em base64): folga de 3×.
+   *
+   * ⚠️ **Sem `solicitante_email` aqui de propósito** — o dono é `anexos_pendentes`, e toda
+   * leitura passa por lá (`RF-30`). Duplicar o e-mail criaria duas verdades sobre a mesma
+   * posse, e a errada seria a que ninguém confere.
+   */
+  `CREATE TABLE IF NOT EXISTS anexos_conteudo (
+     anexo_id TEXT NOT NULL,
+     ordem    INTEGER NOT NULL,
+     dados    TEXT NOT NULL,
+     PRIMARY KEY (anexo_id, ordem)
+   )`,
   `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_chave
      ON anexos_pendentes (chave_idempotencia, solicitante_email)`,
   `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_pessoa
@@ -4307,7 +4431,16 @@ var COLUNAS_ADICIONADAS = [
    * ⚠️ `NULL` em toda conversa anterior a esta migração, o que é o estado certo: sem base
    * não há motivo, e o cartão **declara** isso (`FR-5`) até a rederivação seguinte.
    */
-  `ALTER TABLE conversas ADD COLUMN proposta_ia_json TEXT`
+  `ALTER TABLE conversas ADD COLUMN proposta_ia_json TEXT`,
+  /**
+   * `RF-78` (spec 010) — o MIME do arquivo, para o reenvio na confirmação.
+   *
+   * ⚠️ Sem ele o segundo upload teria de **adivinhar** o tipo, e adivinhar significa mandar
+   * `application/octet-stream` para um print — o Jira aceita, e o anexo passa a chegar
+   * como binário genérico, sem preview, na única superfície onde a evidência é olhada.
+   * O tipo já foi validado no upload (`http/anexo-entrada.ts`); guardá-lo é de graça.
+   */
+  `ALTER TABLE anexos_pendentes ADD COLUMN tipo_arquivo TEXT`
 ];
 function versaoDoSchema() {
   const texto3 = [...TABELAS, ...COLUNAS_ADICIONADAS].join("\n");
@@ -5481,17 +5614,28 @@ var Orquestrador = class {
     };
   }
   /**
-   * Monta a proposta imediatamente — usado depois do override (RF-13).
+   * Monta a proposta imediatamente — usado depois do override (RF-13) e pelo botão de
+   * `RF-81` (spec 011).
    *
    * Sem isso, o agente diz "vamos seguir com o chamado" e nada acontece até a
    * pessoa digitar outra mensagem: um beco sem saída logo depois de ela ter
    * insistido. O override É o sinal de seguir.
+   *
+   * 🚨 **`forcarFechamento` não afrouxa trava nenhuma** (`RF-81`). As duas verificações de
+   * `RF-08` continuam sendo pré-condição logo abaixo, o bloqueio de `RN-07` continua
+   * descartando a proposta na gravação, a allowlist de `RF-28` continua valendo e `RF-17`
+   * — a confirmação — continua sendo o que autoriza criar. O que muda é **uma** coisa: o
+   * modelo deixa de decidir sozinho quando parar de perguntar.
+   *
+   * ⚠️ E com `forcarFechamento` a proposta é **rederivada mesmo que já exista**: o botão é
+   * o pedido de fechar com o que há agora, e devolver a proposta velha ignoraria as
+   * mensagens que vieram depois dela.
    */
-  async montarPropostaAgora(conversa, config) {
-    if (conversa.proposta) return true;
+  async montarPropostaAgora(conversa, config, opcoes = {}) {
+    if (conversa.proposta && !opcoes.forcarFechamento) return true;
     if (!this.verificacoesConcluidas(conversa)) return false;
     if (await this.conversas.temBloqueioPendente(conversa.id)) return false;
-    const { custoUsd } = await this.tentarMontarProposta(conversa, config);
+    const { custoUsd } = await this.tentarMontarProposta(conversa, config, opcoes);
     if (custoUsd > 0) await this.conversas.somarCusto(conversa.id, custoUsd);
     return Boolean((await this.conversas.obter(conversa.id))?.proposta);
   }
@@ -5520,7 +5664,7 @@ var Orquestrador = class {
    * agente segue conversando, que é o comportamento certo quando ainda falta
    * informação — inventar campos para poder propor seria pior.
    */
-  async tentarMontarProposta(conversa, config) {
+  async tentarMontarProposta(conversa, config, opcoes = {}) {
     if (config.tipos_chamado_permitidos.length === 0) {
       this.semProposta(conversa, "allowlist_de_tipos_vazia", {
         detalhe: "Nenhum tipo de chamado liberado na configura\xE7\xE3o (RF-28)."
@@ -5541,7 +5685,8 @@ var Orquestrador = class {
       const r = await this.ia.extrairProposta({
         mensagens: await this.conversas.listarMensagens(conversa.id),
         tiposPermitidos,
-        camposDoAssunto: camposParaExtracao(schema)
+        camposDoAssunto: camposParaExtracao(schema),
+        ...opcoes.forcarFechamento ? { forcarFechamento: true } : {}
       });
       if (!r.proposta) {
         this.semProposta(conversa, "extracao_sem_proposta", {
@@ -5901,8 +6046,8 @@ var RepositorioAnexosPendentes = class {
       await this.db.exec(
         `INSERT INTO anexos_pendentes
            (id, solicitante_email, conversa_id, chave_idempotencia,
-            temporary_attachment_id, nome_arquivo, criado_em)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            temporary_attachment_id, nome_arquivo, criado_em, tipo_arquivo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           dados.id,
           dados.solicitanteEmail,
@@ -5910,7 +6055,8 @@ var RepositorioAnexosPendentes = class {
           dados.chaveIdempotencia,
           dados.temporaryAttachmentId,
           dados.nomeArquivo,
-          this.agora()
+          this.agora(),
+          dados.tipoArquivo ?? null
         ]
       );
       return { duplicado: false };
@@ -5920,7 +6066,7 @@ var RepositorioAnexosPendentes = class {
         dados.solicitanteEmail,
         dados.nomeArquivo
       );
-      if (existente) return { duplicado: true };
+      if (existente) return { duplicado: true, idExistente: existente.id };
       throw erro2;
     }
   }
@@ -6007,6 +6153,121 @@ var RepositorioAnexosPendentes = class {
       []
     );
     return Number(primeiraLinha(r)?.n ?? 0);
+  }
+};
+
+// src/lib/tickets/anexos-conteudo.ts
+var FATIA_ANEXO_BYTES = 512 * 1024;
+function paraBase64(bytes) {
+  let bruto = "";
+  for (let i = 0; i < bytes.length; i += 32768) {
+    bruto += String.fromCharCode(...bytes.subarray(i, Math.min(i + 32768, bytes.length)));
+  }
+  return btoa(bruto);
+}
+function deBase64(texto3) {
+  const bruto = atob(texto3);
+  const bytes = new Uint8Array(bruto.length);
+  for (let i = 0; i < bruto.length; i += 1) bytes[i] = bruto.charCodeAt(i);
+  return bytes;
+}
+var RepositorioAnexosConteudo = class {
+  constructor(db) {
+    this.db = db;
+  }
+  /**
+   * Guarda os bytes de um anexo já registrado em `anexos_pendentes`.
+   *
+   * ⚠️ Apaga antes de gravar: reenviar o mesmo arquivo (o `UNIQUE` de `anexos_pendentes`
+   * trata como duplicado e devolve a mesma linha) não pode deixar fatias da tentativa
+   * anterior no meio das novas — o arquivo remontado sairia corrompido, e o `SHA` que
+   * `D-74` usa para provar integridade não roda em produção.
+   */
+  async guardar(anexoId, bytes) {
+    await this.db.exec("DELETE FROM anexos_conteudo WHERE anexo_id = ?", [anexoId]);
+    const todos = new Uint8Array(bytes);
+    let ordem = 0;
+    for (let i = 0; i < todos.length; i += FATIA_ANEXO_BYTES) {
+      await this.db.exec("INSERT INTO anexos_conteudo (anexo_id, ordem, dados) VALUES (?, ?, ?)", [
+        anexoId,
+        ordem,
+        paraBase64(todos.subarray(i, Math.min(i + FATIA_ANEXO_BYTES, todos.length)))
+      ]);
+      ordem += 1;
+    }
+    return { fatias: ordem };
+  }
+  /**
+   * Os arquivos de uma chave, com bytes — **sempre** com o e-mail no `WHERE` (`RF-30`).
+   *
+   * Só devolve o que ainda não foi materializado: arquivo que já entrou no chamado não
+   * pode ser reenviado numa retentativa, senão apareceria duas vezes lá dentro.
+   */
+  async lerDaChave(chaveIdempotencia, solicitanteEmail) {
+    const linhas = linhasComoObjetos(
+      await this.db.query(
+        `SELECT id, nome_arquivo, tipo_arquivo FROM anexos_pendentes
+          WHERE chave_idempotencia = ? AND solicitante_email = ? AND materializado_em IS NULL
+          ORDER BY criado_em`,
+        [chaveIdempotencia, solicitanteEmail]
+      )
+    );
+    const arquivos = [];
+    for (const linha of linhas) {
+      const anexoId = String(linha.id ?? "");
+      if (anexoId === "") continue;
+      const fatias = linhasComoObjetos(
+        await this.db.query(
+          "SELECT dados FROM anexos_conteudo WHERE anexo_id = ? ORDER BY ordem",
+          [anexoId]
+        )
+      );
+      if (fatias.length === 0) continue;
+      const partes = fatias.map((f) => deBase64(String(f.dados ?? "")));
+      const total = partes.reduce((s, p) => s + p.length, 0);
+      const inteiro2 = new Uint8Array(total);
+      let off = 0;
+      for (const p of partes) {
+        inteiro2.set(p, off);
+        off += p.length;
+      }
+      arquivos.push({
+        anexoId,
+        nomeArquivo: String(linha.nome_arquivo ?? ""),
+        tipoArquivo: String(linha.tipo_arquivo ?? "") || "application/octet-stream",
+        bytes: inteiro2.buffer
+      });
+    }
+    return arquivos;
+  }
+  /** Depois que o arquivo entrou no chamado, guardar os bytes é custo puro (`D-17`). */
+  async apagar(anexoId) {
+    await this.db.exec("DELETE FROM anexos_conteudo WHERE anexo_id = ?", [anexoId]);
+  }
+  /**
+   * Expurgo: pega carona no mesmo cron do outbox que limpa `anexos_pendentes` (T-415).
+   *
+   * ⚠️ Apaga o que **não tem mais dono** — fatia cujo `anexo_id` sumiu de
+   * `anexos_pendentes`. Assim a ordem entre os dois expurgos não importa, e uma falha no
+   * meio nunca deixa bytes órfãos para sempre.
+   */
+  async expurgarOrfaos() {
+    const quantos = Number(
+      linhasComoObjetos(
+        await this.db.query(
+          `SELECT COUNT(*) AS n FROM anexos_conteudo
+            WHERE anexo_id NOT IN (SELECT id FROM anexos_pendentes)`,
+          []
+        )
+      )[0]?.n ?? 0
+    );
+    if (quantos === 0) return 0;
+    await this.db.exec(
+      `DELETE FROM anexos_conteudo
+        WHERE anexo_id NOT IN (SELECT id FROM anexos_pendentes)`,
+      []
+    );
+    return quantos;
   }
 };
 
@@ -7841,6 +8102,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
   const vinculos = new RepositorioVinculos(env.DB, agora);
   const outbox = new Outbox(env.DB, agora);
   const anexosPendentes = new RepositorioAnexosPendentes(env.DB, agora);
+  const anexosConteudo = new RepositorioAnexosConteudo(env.DB);
   const anexosEnviados = new AnexosEnviados(env.DB, agora);
   const analisesAnexo = new AnalisesDeAnexo(env.DB, agora);
   const lerPdf = usandoFakes ? async () => ({ estado: "lido", texto: "fake: texto extra\xEDdo do PDF" }) : criarLeitorPdf({
@@ -7933,6 +8195,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     vinculos,
     outbox,
     anexosPendentes,
+    anexosConteudo,
     anexosEnviados,
     analisesAnexo,
     lerPdf,
@@ -9929,6 +10192,17 @@ function tipoAceitaAnexo(campos) {
 function exigeDeclaracaoDeAnexo(schema) {
   return schema.conhecido && tipoAceitaAnexo(schema.campos);
 }
+function anexoObrigatorio(schema) {
+  if (!schema.conhecido) return false;
+  return schema.campos.some((c) => c.tipo === "anexo" && c.obrigatorio);
+}
+function rotuloDoCampoDeAnexo(schema) {
+  const campo = schema.conhecido ? schema.campos.find((c) => c.tipo === "anexo") : void 0;
+  return campo?.rotulo ?? "anexo";
+}
+function mensagemAnexoObrigatorio(rotulo) {
+  return `Este assunto exige um arquivo: "${rotulo}". Anexe pelo menos um print ou documento \u2014 o Jira recusa a abertura sem isso. Se voc\xEA n\xE3o tem nada para anexar, me diga o que est\xE1 acontecendo que eu troco o assunto do chamado.`;
+}
 var MENSAGEM_DECLARACAO_AUSENTE = 'Antes de abrir o chamado, responda se voc\xEA tem algo para anexar \u2014 print, planilha ou log ajudam a primeira resposta a ser \xFAtil. Se n\xE3o tiver, escolha "n\xE3o tenho material para anexar" e o chamado abre do mesmo jeito.';
 function validarDeclaracao(bruto, exigida) {
   if (!exigida) return { ok: true, declarouAnexo: null };
@@ -10005,7 +10279,7 @@ async function analisarImagem(arquivo, midia, deps) {
   }
   return await descrever(
     arquivo.nome,
-    { tipo: "imagem", base64: paraBase64(arquivo.bytes), midia },
+    { tipo: "imagem", base64: paraBase642(arquivo.bytes), midia },
     deps
   );
 }
@@ -10049,7 +10323,7 @@ function comecaCom(bytes, assinatura) {
   if (bytes.byteLength < assinatura.length) return false;
   return assinatura.every((b, i) => bytes[i] === b);
 }
-function paraBase64(bytes) {
+function paraBase642(bytes) {
   const PEDACO = 8192;
   let binario = "";
   for (let i = 0; i < bytes.length; i += PEDACO) {
@@ -10557,6 +10831,87 @@ function validarValorDeConfig(chave2, valor) {
 }
 function chaveDeConfigConhecida(chave2) {
   return chave2 in CONFIG_PADRAO;
+}
+
+// src/lib/tickets/anexo-antes-da-criacao.ts
+async function prepararAnexosParaCriacao(deps, dados) {
+  const pendentes = await deps.anexosPendentes.listarNaoMaterializados(
+    dados.chaveIdempotencia,
+    dados.solicitanteEmail
+  );
+  if (pendentes.length === 0) return { ids: [], itens: [], usouIdAntigo: false };
+  const guardados = await deps.anexosConteudo.lerDaChave(
+    dados.chaveIdempotencia,
+    dados.solicitanteEmail
+  );
+  const bytesPorId = new Map(guardados.map((g) => [g.anexoId, g]));
+  const ids = [];
+  const itens = [];
+  let usouIdAntigo = false;
+  for (const pendente of pendentes) {
+    const guardado = bytesPorId.get(pendente.id);
+    if (guardado) {
+      ids.push(
+        await deps.atlassian.subirAnexoTemporario(dados.serviceDeskId, {
+          nome: guardado.nomeArquivo,
+          tipo: guardado.tipoArquivo,
+          bytes: guardado.bytes
+        })
+      );
+    } else {
+      usouIdAntigo = true;
+      ids.push(pendente.temporaryAttachmentId);
+    }
+    itens.push({ anexoId: pendente.id, nomeArquivo: pendente.nomeArquivo });
+  }
+  return { ids, itens, usouIdAntigo };
+}
+async function registrarAnexosDaCriacao(deps, dados) {
+  const anexados = [];
+  for (const item of dados.itens) {
+    try {
+      const meu = await deps.anexosPendentes.reivindicar(item.anexoId, dados.solicitanteEmail);
+      if (!meu) continue;
+      await deps.anexosEnviados?.registrar({
+        issueKey: dados.issueKey,
+        solicitanteEmail: dados.solicitanteEmail,
+        nomeArquivo: item.nomeArquivo,
+        via: "criacao"
+      });
+      await deps.anexosConteudo.apagar(item.anexoId);
+      anexados.push(item.nomeArquivo);
+    } catch {
+    }
+  }
+  if (anexados.length > 0) {
+    await deps.outbox?.registrarAnexosAnexados(dados.chaveIdempotencia, anexados.length).catch(() => void 0);
+  }
+  await deps.auditoria.registrar({
+    atorEmail: dados.solicitanteEmail,
+    acao: "anexo_enviado",
+    recurso: dados.issueKey,
+    resultado: anexados.length === dados.itens.length ? "sucesso" : "falha",
+    detalhe: {
+      etapa: "na_criacao",
+      anexados: anexados.length,
+      esperados: dados.itens.length
+    }
+  });
+  return { anexados };
+}
+function respostaDeAnexoNaCriacao(anexados, esperados) {
+  const falharam = esperados.filter((nome) => !anexados.includes(nome));
+  if (esperados.length === 0) {
+    return { estado: "sem_anexo", anexados: [], falharam: [], mensagem: "" };
+  }
+  return {
+    estado: falharam.length === 0 ? "anexado" : anexados.length === 0 ? "falhou" : "parcial",
+    anexados: [...anexados],
+    falharam,
+    // O arquivo entrou junto com o chamado: não há segunda etapa que possa ter falhado, e
+    // por isso a mensagem é vazia mesmo no caso parcial — o que a pessoa vê é a lista.
+    mensagem: ""
+  };
 }
 
 // src/lib/investigador/corpos.ts
@@ -11071,6 +11426,45 @@ async function rotear(req, ctx, eu, caminho, url) {
       tipoNome: comArea ? await nomeDoTipoDaProposta(ctx, comArea.tipoChamadoId) : null
     });
   }
+  const montarAgora = caminho.match(/^\/api\/conversas\/([^/]+)\/montar-chamado$/);
+  if (montarAgora && req.method === "POST") {
+    const conversa = await ctx.conversas.obterDoSolicitante(montarAgora[1], eu.email);
+    if (!conversa) return ERROS.naoEncontrado();
+    const montou = await ctx.orquestrador.montarPropostaAgora(conversa, ctx.valores, {
+      forcarFechamento: true
+    });
+    const depois = await ctx.conversas.obterDoSolicitante(conversa.id, eu.email);
+    const propostaFinal = depois?.proposta ?? null;
+    ctx.investigador.registrar({
+      tipo: "proposta_rederivada",
+      origem: "usuario",
+      conversaId: conversa.id,
+      resumo: montou ? "A pessoa pediu para montar o chamado agora \u2014 proposta fechada com o que havia" : "A pessoa pediu para montar o chamado agora e a proposta N\xC3O saiu",
+      dados: { forcado: true, montou, proposta: propostaFinal }
+    });
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "proposta_forcada",
+      recurso: conversa.id,
+      resultado: montou ? "sucesso" : "falha"
+    });
+    if (!montou || !depois || !propostaFinal) {
+      return json(
+        {
+          ok: false,
+          proposta: null,
+          mensagem: "Ainda n\xE3o consegui montar o chamado com o que temos aqui. Conte em uma frase o que aconteceu \u2014 s\xF3 isso j\xE1 basta para eu fechar."
+        },
+        200
+      );
+    }
+    const comArea = await areaNaProposta(ctx, eu.email, depois);
+    return json({
+      ok: true,
+      proposta: comArea,
+      tipoNome: comArea ? await nomeDoTipoDaProposta(ctx, comArea.tipoChamadoId) : null
+    });
+  }
   const proposta = caminho.match(/^\/api\/conversas\/([^/]+)\/proposta$/);
   if (proposta && req.method === "PUT") {
     const conversa = await ctx.conversas.obterDoSolicitante(proposta[1], eu.email);
@@ -11139,6 +11533,14 @@ async function rotear(req, ctx, eu, caminho, url) {
       chaveDaConversa
     );
     if ("recusa" in declaracao) return declaracao.recusa;
+    const semEvidencia = await autorizarEvidenciaObrigatoria(
+      ctx,
+      eu.email,
+      conversa.proposta.tipoChamadoId,
+      schema,
+      chaveDaConversa
+    );
+    if (semEvidencia) return semEvidencia;
     const camposDaConversa = {
       ...resolverCamposDoSolicitante(conversa.proposta.tipoChamadoId, schema, eu),
       ...await filtrarCamposComSchema(
@@ -11188,6 +11590,20 @@ async function rotear(req, ctx, eu, caminho, url) {
       areasPorEmail: ctx.valores.areas_por_email,
       auditoria: ctx.auditoria
     });
+    const anexoNaCriacao = anexoObrigatorio(schema);
+    let preparados = null;
+    if (anexoNaCriacao) {
+      try {
+        preparados = await prepararAnexosParaCriacao(ctx, {
+          chaveIdempotencia: chaveDaConversa,
+          solicitanteEmail: eu.email,
+          serviceDeskId
+        });
+      } catch (e) {
+        if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida("conversa");
+        throw e;
+      }
+    }
     let r;
     try {
       r = await ctx.chamados.abrirPorConversa(
@@ -11210,7 +11626,8 @@ async function rotear(req, ctx, eu, caminho, url) {
         // proposta, ela não pode ser sobrescrita por campo vindo do cliente.
         juntarCamposDaCriacao(
           paraValoresDoJira(schema, camposDaConversa),
-          prioridadeNaConversa.campos
+          prioridadeNaConversa.campos,
+          preparados && preparados.ids.length > 0 ? { attachment: [...preparados.ids] } : {}
         )
       );
     } catch (e) {
@@ -11218,7 +11635,15 @@ async function rotear(req, ctx, eu, caminho, url) {
       throw e;
     }
     if (r.estado === "criado") await ctx.conversas.definirEstado(conversa.id, "criado");
-    const anexo = await materializarAnexosDoChamado(ctx, {
+    const anexo = preparados && r.issueKey !== null ? respostaDeAnexoNaCriacao(
+      (await registrarAnexosDaCriacao(ctx, {
+        chaveIdempotencia: chaveDaConversa,
+        solicitanteEmail: eu.email,
+        issueKey: r.issueKey,
+        itens: preparados.itens
+      })).anexados,
+      preparados.itens.map((i) => i.nomeArquivo)
+    ) : await materializarAnexosDoChamado(ctx, {
       chaveIdempotencia: chaveDaConversa,
       solicitanteEmail: eu.email,
       issueKey: r.issueKey
@@ -11270,6 +11695,14 @@ async function rotear(req, ctx, eu, caminho, url) {
       chave2
     );
     if ("recusa" in declaracao) return declaracao.recusa;
+    const semEvidenciaNoForm = await autorizarEvidenciaObrigatoria(
+      ctx,
+      eu.email,
+      validada.proposta.tipoChamadoId,
+      schema,
+      chave2
+    );
+    if (semEvidenciaNoForm) return semEvidenciaNoForm;
     const camposDinamicos = await filtrarCamposComSchema(
       ctx,
       eu.email,
@@ -11291,9 +11724,24 @@ async function rotear(req, ctx, eu, caminho, url) {
     }
     const prioridadeParaJira = prioridadeParaOJira(campoPrioridade, validada.proposta.prioridade);
     if (!prioridadeParaJira.ok) return ERROS.dadosInvalidos(prioridadeParaJira.mensagem);
+    const anexoNaCriacaoForm = anexoObrigatorio(schema);
+    let preparadosForm = null;
+    if (anexoNaCriacaoForm) {
+      try {
+        preparadosForm = await prepararAnexosParaCriacao(ctx, {
+          chaveIdempotencia: chave2,
+          solicitanteEmail: eu.email,
+          serviceDeskId
+        });
+      } catch (e) {
+        if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida("formulario");
+        throw e;
+      }
+    }
     const camposParaOJira = juntarCamposDaCriacao(
       paraValoresDoJira(schema, camposComSolicitante),
-      prioridadeParaJira.campos
+      prioridadeParaJira.campos,
+      preparadosForm && preparadosForm.ids.length > 0 ? { attachment: [...preparadosForm.ids] } : {}
     );
     const area = await resolverArea({
       email: eu.email,
@@ -11321,7 +11769,15 @@ async function rotear(req, ctx, eu, caminho, url) {
       if (falhaDefinitivaDeCriacao(e)) return ERROS.criacaoNaoConcluida("formulario");
       throw e;
     }
-    const anexo = await materializarAnexosDoChamado(ctx, {
+    const anexo = preparadosForm && r.issueKey !== null ? respostaDeAnexoNaCriacao(
+      (await registrarAnexosDaCriacao(ctx, {
+        chaveIdempotencia: chave2,
+        solicitanteEmail: eu.email,
+        issueKey: r.issueKey,
+        itens: preparadosForm.itens
+      })).anexados,
+      preparadosForm.itens.map((i) => i.nomeArquivo)
+    ) : await materializarAnexosDoChamado(ctx, {
       chaveIdempotencia: chave2,
       solicitanteEmail: eu.email,
       issueKey: r.issueKey
@@ -11355,7 +11811,22 @@ async function rotear(req, ctx, eu, caminho, url) {
         itens: campos.filter((c) => c.tipo !== "anexo"),
         // ...e a informação de que ele existe continua chegando, porque é ela que faz a
         // pergunta de `RF-62` aparecer (ou não) na tela.
-        aceitaAnexo: tipoAceitaAnexo(campos)
+        aceitaAnexo: tipoAceitaAnexo(campos),
+        /**
+         * 🚨 `RF-79` (spec 010) — e se ele é **obrigatório**, que é outra pergunta.
+         *
+         * ⚠️ **Sem esta linha a tela ficava cega, e o defeito só apareceu no navegador.**
+         * O campo de anexo é filtrado da lista logo acima (T-406c), então
+         * `campos.some(c => c.tipo === 'anexo' && c.obrigatorio)` na tela era **sempre
+         * falso**: o botão nunca travava, e a pessoa só descobriria a exigência no 400 —
+         * exatamente o que a feature veio impedir. Medido na staging em 17/08/2026 com o
+         * tipo `134`. Mesma família de `D-44`: leitor que filtra responde errado à
+         * pergunta que o filtro apagou.
+         *
+         * ⚠️ A trava **de verdade** continua no servidor (`autorizarEvidenciaObrigatoria`);
+         * isto é a camada 1, e a camada 1 sozinha nunca foi a garantia.
+         */
+        anexoObrigatorio: campos.some((c) => c.tipo === "anexo" && c.obrigatorio)
       });
     } catch {
       return ERROS.conteudoIndisponivel();
@@ -11579,14 +12050,27 @@ async function rotear(req, ctx, eu, caminho, url) {
       const mensagem = e instanceof ErroAtlassian && !e.detalhe.transitorio ? e.message : "N\xE3o consegui enviar o arquivo agora. Tente novamente em instantes \u2014 voc\xEA tamb\xE9m pode abrir o chamado e anexar depois.";
       return json({ ok: false, mensagem }, 503);
     }
-    const { duplicado } = await ctx.anexosPendentes.registrar({
-      id: ctx.novoId(),
+    const idDoAnexo = ctx.novoId();
+    const { duplicado, idExistente } = await ctx.anexosPendentes.registrar({
+      id: idDoAnexo,
       solicitanteEmail: eu.email,
       conversaId,
       chaveIdempotencia,
       temporaryAttachmentId,
-      nomeArquivo: validado.nome
+      nomeArquivo: validado.nome,
+      tipoArquivo: validado.tipo
     });
+    try {
+      await ctx.anexosConteudo.guardar(idExistente ?? idDoAnexo, validado.bytes);
+    } catch {
+      await ctx.auditoria.registrar({
+        atorEmail: eu.email,
+        acao: "anexo_enviado",
+        recurso: chaveIdempotencia,
+        resultado: "falha",
+        detalhe: { etapa: "guardar_bytes", nome: validado.nome }
+      });
+    }
     ctx.investigador.registrar({
       tipo: "anexo_recebido",
       origem: "usuario",
@@ -12166,6 +12650,61 @@ async function rotear(req, ctx, eu, caminho, url) {
       )
     });
   }
+  if (caminho === "/api/admin/diagnostico/criacao" && req.method === "POST") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    if (typeof ctx.atlassian.diagnosticarCriacao !== "function") {
+      return ERROS.dadosInvalidos("Este cliente Atlassian n\xE3o exp\xF5e o diagn\xF3stico de cria\xE7\xE3o.");
+    }
+    const serviceDeskId = ctx.valores.service_desk_id;
+    if (!serviceDeskId) return ERROS.dadosInvalidos("Service desk n\xE3o configurado.");
+    const corpo = await lerJson(req);
+    const tipoChamadoId = typeof corpo?.tipoChamadoId === "string" ? corpo.tipoChamadoId : "";
+    const titulo = typeof corpo?.titulo === "string" ? corpo.titulo : "";
+    if (tipoChamadoId === "") return ERROS.dadosInvalidos("Informe o tipoChamadoId.");
+    if (!titulo.startsWith("[TESTE")) {
+      return ERROS.dadosInvalidos('O t\xEDtulo precisa come\xE7ar com "[TESTE" \u2014 isto pode criar chamado real.');
+    }
+    let idsAnexo = [];
+    if (corpo?.comAnexo === true) {
+      const bytes = new TextEncoder().encode(
+        "Arquivo de teste do goatlas \u2014 diagnostico de criacao com anexo (spec 010)."
+      );
+      idsAnexo = [
+        await ctx.atlassian.subirAnexoTemporario(serviceDeskId, {
+          nome: "teste-goatlas.txt",
+          tipo: "text/plain",
+          bytes: bytes.buffer
+        })
+      ];
+    }
+    const r = await ctx.atlassian.diagnosticarCriacao(
+      {
+        serviceDeskId,
+        tipoChamadoId,
+        titulo,
+        descricao: typeof corpo?.descricao === "string" ? corpo.descricao : "Teste do goatlas.",
+        prioridade: "normal",
+        solicitanteEmail: eu.email,
+        chaveIdempotencia: `diag:${tipoChamadoId}:${ctx.agora()}`,
+        ...corpo?.camposDinamicos && typeof corpo.camposDinamicos === "object" ? { camposDinamicos: corpo.camposDinamicos } : {}
+      },
+      idsAnexo
+    );
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "diagnostico_criacao",
+      recurso: tipoChamadoId,
+      resultado: r.status >= 200 && r.status < 300 ? "sucesso" : "negado",
+      detalhe: { status: r.status, comAnexo: corpo?.comAnexo === true }
+    });
+    return json({
+      status: r.status,
+      comAnexo: corpo?.comAnexo === true,
+      idsAnexo: idsAnexo.length,
+      corpoDaAtlassian: corpoSeguro(r.corpo, 4e3),
+      corpoEnviado: corpoSeguro(JSON.stringify(r.corpoEnviado), 4e3)
+    });
+  }
   if (caminho === "/api/investigador/sessoes" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();
     return json({
@@ -12509,6 +13048,17 @@ async function autorizarDeclaracaoDeAnexo(ctx, atorEmail, tipoChamadoId, schema,
   });
   return { recusa: ERROS.dadosInvalidos(r.mensagem) };
 }
+async function autorizarEvidenciaObrigatoria(ctx, atorEmail, tipoChamadoId, schema, chaveIdempotencia) {
+  if (!anexoObrigatorio(schema)) return null;
+  if (await ctx.anexosPendentes.contarDaChave(chaveIdempotencia, atorEmail) > 0) return null;
+  await ctx.auditoria.registrar({
+    atorEmail,
+    acao: "anexo_obrigatorio_ausente",
+    recurso: tipoChamadoId,
+    resultado: "negado"
+  });
+  return ERROS.dadosInvalidos(mensagemAnexoObrigatorio(rotuloDoCampoDeAnexo(schema)));
+}
 function validarProposta(corpo, tiposPermitidos) {
   const titulo = typeof corpo?.titulo === "string" ? corpo.titulo.trim() : "";
   const descricao = typeof corpo?.descricao === "string" ? corpo.descricao.trim() : "";
@@ -12675,6 +13225,7 @@ async function tratarCron(req, ctx, env, caminho) {
       Date.parse(ctx.agora()) - TTL_ANEXO_PENDENTE_HORAS * 3600 * 1e3
     ).toISOString();
     const anexosPendentesExpurgados = await ctx.anexosPendentes.expurgarAnterioresA(limite2);
+    const anexosConteudoExpurgado = await ctx.anexosConteudo.expurgarOrfaos();
     const investigadorExpurgado = await expurgarInvestigador(
       ctx.db,
       ctx.valores.investigador_retencao_dias,
@@ -12684,9 +13235,19 @@ async function tratarCron(req, ctx, env, caminho) {
       atorEmail: "(cron)",
       acao: "submissao_reprocessada",
       resultado: "sucesso",
-      detalhe: { ...r, anexosPendentesExpurgados, investigadorExpurgado }
+      detalhe: {
+        ...r,
+        anexosPendentesExpurgados,
+        anexosConteudoExpurgado,
+        investigadorExpurgado
+      }
     });
-    return json({ ...r, anexosPendentesExpurgados, investigadorExpurgado });
+    return json({
+      ...r,
+      anexosPendentesExpurgados,
+      anexosConteudoExpurgado,
+      investigadorExpurgado
+    });
   }
   if (caminho === "/api/cron/reconciliar-vinculos") {
     const recuperados = await ctx.chamados.reconciliarVinculos(50);

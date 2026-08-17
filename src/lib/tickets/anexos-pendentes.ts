@@ -112,13 +112,15 @@ export class RepositorioAnexosPendentes {
     chaveIdempotencia: string
     temporaryAttachmentId: string
     nomeArquivo: string
-  }): Promise<{ readonly duplicado: boolean }> {
+    /** `RF-78` — guardado para o reenvio na confirmação saber o MIME (spec 010). */
+    tipoArquivo?: string
+  }): Promise<{ readonly duplicado: boolean; readonly idExistente?: string }> {
     try {
       await this.db.exec(
         `INSERT INTO anexos_pendentes
            (id, solicitante_email, conversa_id, chave_idempotencia,
-            temporary_attachment_id, nome_arquivo, criado_em)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            temporary_attachment_id, nome_arquivo, criado_em, tipo_arquivo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           dados.id,
           dados.solicitanteEmail,
@@ -127,6 +129,7 @@ export class RepositorioAnexosPendentes {
           dados.temporaryAttachmentId,
           dados.nomeArquivo,
           this.agora(),
+          dados.tipoArquivo ?? null,
         ],
       )
       return { duplicado: false }
@@ -136,7 +139,10 @@ export class RepositorioAnexosPendentes {
         dados.solicitanteEmail,
         dados.nomeArquivo,
       )
-      if (existente) return { duplicado: true }
+      // ⚠️ O id da linha que **já existia** volta junto (`RF-78`): quem guarda os bytes
+      // precisa gravá-los sob o id certo, senão o reenvio do mesmo arquivo escreveria
+      // conteúdo órfão e a criação não acharia nada — arquivo "enviado", chamado sem ele.
+      if (existente) return { duplicado: true, idExistente: existente.id }
       // Qualquer outra falha de escrita é bug de schema e precisa subir: engolir tudo
       // aqui transformaria "a tabela não existe" em "arquivo enviado com sucesso".
       throw erro

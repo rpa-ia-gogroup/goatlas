@@ -475,21 +475,36 @@ export class Orquestrador {
   }
 
   /**
-   * Monta a proposta imediatamente — usado depois do override (RF-13).
+   * Monta a proposta imediatamente — usado depois do override (RF-13) e pelo botão de
+   * `RF-81` (spec 011).
    *
    * Sem isso, o agente diz "vamos seguir com o chamado" e nada acontece até a
    * pessoa digitar outra mensagem: um beco sem saída logo depois de ela ter
    * insistido. O override É o sinal de seguir.
+   *
+   * 🚨 **`forcarFechamento` não afrouxa trava nenhuma** (`RF-81`). As duas verificações de
+   * `RF-08` continuam sendo pré-condição logo abaixo, o bloqueio de `RN-07` continua
+   * descartando a proposta na gravação, a allowlist de `RF-28` continua valendo e `RF-17`
+   * — a confirmação — continua sendo o que autoriza criar. O que muda é **uma** coisa: o
+   * modelo deixa de decidir sozinho quando parar de perguntar.
+   *
+   * ⚠️ E com `forcarFechamento` a proposta é **rederivada mesmo que já exista**: o botão é
+   * o pedido de fechar com o que há agora, e devolver a proposta velha ignoraria as
+   * mensagens que vieram depois dela.
    */
-  async montarPropostaAgora(conversa: Conversa, config: ConfigValores): Promise<boolean> {
-    if (conversa.proposta) return true
+  async montarPropostaAgora(
+    conversa: Conversa,
+    config: ConfigValores,
+    opcoes: { readonly forcarFechamento?: boolean } = {},
+  ): Promise<boolean> {
+    if (conversa.proposta && !opcoes.forcarFechamento) return true
     if (!this.verificacoesConcluidas(conversa)) return false
     // Segunda camada da trava de RN-07. A rota de override já limpou os
     // bloqueios antes de chamar aqui, então em uso normal isto nunca reprova —
     // ele existe para que um caminho FUTURO que chame este método sem passar
     // pelo override não vire o bypass que acabamos de fechar.
     if (await this.conversas.temBloqueioPendente(conversa.id)) return false
-    const { custoUsd } = await this.tentarMontarProposta(conversa, config)
+    const { custoUsd } = await this.tentarMontarProposta(conversa, config, opcoes)
     if (custoUsd > 0) await this.conversas.somarCusto(conversa.id, custoUsd)
     return Boolean((await this.conversas.obter(conversa.id))?.proposta)
   }
@@ -527,6 +542,8 @@ export class Orquestrador {
   private async tentarMontarProposta(
     conversa: Conversa,
     config: ConfigValores,
+    /** `RF-81` (spec 011) — a pessoa clicou em "montar o chamado agora". */
+    opcoes: { readonly forcarFechamento?: boolean } = {},
   ): Promise<Rederivacao> {
     if (config.tipos_chamado_permitidos.length === 0) {
       this.semProposta(conversa, 'allowlist_de_tipos_vazia', {
@@ -575,6 +592,7 @@ export class Orquestrador {
         mensagens: await this.conversas.listarMensagens(conversa.id),
         tiposPermitidos,
         camposDoAssunto: camposParaExtracao(schema),
+        ...(opcoes.forcarFechamento ? { forcarFechamento: true } : {}),
       })
       /**
        * ⚠️ Segunda camada de `RN-07`, e ela passou a valer de verdade quando a extração

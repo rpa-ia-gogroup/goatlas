@@ -385,6 +385,27 @@ export const TABELAS = [
      materializado_em        TEXT,
      UNIQUE (chave_idempotencia, nome_arquivo)
    )`,
+  /**
+   * `RF-78` (spec 010) — os BYTES do anexo, fatiados, até o chamado nascer.
+   *
+   * 🚨 Existe porque 6 dos 15 assuntos do `GN` exigem anexo e o Jira recusa a criação sem
+   * ele (medido em 17/08/2026: *"Por favor, adicione pelo menos um arquivo"*). Com os
+   * bytes aqui, o `temporaryAttachmentId` nasce na **confirmação**, segundos antes de ser
+   * usado — e o motivo de `D-26` (id vencido derruba a criação) deixa de existir.
+   *
+   * ⚠️ **Fatiado porque a plataforma recusa valor acima de ~2,2 MB** (`D-74`,
+   * `SQLITE_TOOBIG`). A fatia é de 512 kB de arquivo (~700 kB em base64): folga de 3×.
+   *
+   * ⚠️ **Sem `solicitante_email` aqui de propósito** — o dono é `anexos_pendentes`, e toda
+   * leitura passa por lá (`RF-30`). Duplicar o e-mail criaria duas verdades sobre a mesma
+   * posse, e a errada seria a que ninguém confere.
+   */
+  `CREATE TABLE IF NOT EXISTS anexos_conteudo (
+     anexo_id TEXT NOT NULL,
+     ordem    INTEGER NOT NULL,
+     dados    TEXT NOT NULL,
+     PRIMARY KEY (anexo_id, ordem)
+   )`,
   `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_chave
      ON anexos_pendentes (chave_idempotencia, solicitante_email)`,
   `CREATE INDEX IF NOT EXISTS idx_anexos_pendentes_pessoa
@@ -585,6 +606,15 @@ export const COLUNAS_ADICIONADAS = [
    * não há motivo, e o cartão **declara** isso (`FR-5`) até a rederivação seguinte.
    */
   `ALTER TABLE conversas ADD COLUMN proposta_ia_json TEXT`,
+  /**
+   * `RF-78` (spec 010) — o MIME do arquivo, para o reenvio na confirmação.
+   *
+   * ⚠️ Sem ele o segundo upload teria de **adivinhar** o tipo, e adivinhar significa mandar
+   * `application/octet-stream` para um print — o Jira aceita, e o anexo passa a chegar
+   * como binário genérico, sem preview, na única superfície onde a evidência é olhada.
+   * O tipo já foi validado no upload (`http/anexo-entrada.ts`); guardá-lo é de graça.
+   */
+  `ALTER TABLE anexos_pendentes ADD COLUMN tipo_arquivo TEXT`,
 ] as const
 
 /**
