@@ -1707,6 +1707,16 @@ mostrá-lo: `RF-29`/`RF-31` seguem abertos pelo lado da superfície, não mais p
 ("Solicitação enviada por e-mail") continua fora de propósito** — `D-23`: é o canal de
 entrada por e-mail do próprio JSM, não um formulário para alguém escolher.
 
+🚨 **E ela ENCOLHEU para 9 em 17/08/2026, em produção** (`68,70,71,89,93,95,108,143,144`):
+os seis que exigem anexo — **`90`, `91`, `92`, `94`, `96`, `134`** — saíram porque **nunca
+abriram chamado nenhum** e nunca abririam (`D-74`, spec 010). Não é preferência de
+roteamento: com o anexo fora do corpo da criação (`D-26`) e fora da checagem de obrigatórios
+(`D-38`), esses seis respondem **400 = definitivo = chamado perdido**, sempre. ⚠️ **A
+mitigação tem custo**: `134` ("Relatar um problema (Sistema)") era o destino natural de
+problema técnico e o `70` ("Relatar um bug") passa a receber essa fila. ⚠️ **A staging
+continua com os 15** — a mudança foi feita pelo console, app por app, e só a de produção foi
+aplicada. Devolver os seis é a `T-1027`, **depois** da medição, nunca antes.
+
 ⚠️ **Não existe fila do RPA, e o "ambiente do RPA" não serve para teste** (11/08). O site
 tem 5 service desks (`GN` 4 · `SHPF` 7 · `OMI2020` 8 · `GOSHOP` 9 · `JTK` 11) e nenhum é do
 RPA. A área do time é `TASK`, um projeto **Jira Work Management** (`/jira/core/projects/`) —
