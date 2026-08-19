@@ -1200,6 +1200,10 @@ destes reabre um vazamento que já foi fechado.
 - ⚠️ **`not_found_handling: "single-page-application"` virou requisito** (`D-65`). É ele que
   faz recarregar em `/documentacao` servir o `index.html`; sem ele tudo fora da raiz dá 404 —
   e **não aparece em `npm run dev`**, onde o Vite já faz o fallback sozinho.
+  ⚠️ **E `fetch('/documentacao')` devolve 404 mesmo com o fallback FUNCIONANDO** (medido em prod
+  em 19/08/2026, `D-77`): a plataforma o aplica a **navegação**, não a requisição de script, que
+  manda `Accept: */*`. Quem conferir isto por `fetch` conclui que o deploy quebrou a SPA e vai
+  procurar defeito onde não tem — verifique **navegando**.
 - 🚨 **A medida do texto é uma COLUNA da grade, não o teto do bloco** (`estilos.css`, `.doc`,
   `D-65`). `max-width: 68ch` no bloco inteiro prendia a **tabela** à medida da prosa: ela
   ficava cortada, com barra de rolagem própria e 320px de creme vazio ao lado — arrastar
