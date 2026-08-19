@@ -50,7 +50,7 @@ async function montar(extras: Record<string, string> = {}, ligado = true) {
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
   if (!ligado) await config.definir('investigador_ligado', false, CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1', ...extras },
+    { DB: db, ATLAS_USAR_FAKES: '1', ...extras },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -78,7 +78,7 @@ beforeEach(async () => {
 })
 
 function req(caminho: string, corpo?: unknown, metodo = 'POST', quem = ANA): Request {
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: metodo,
     headers: { [HEADER_EMAIL]: quem, ...(corpo === undefined ? {} : { 'content-type': 'application/json' }) },
     ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
@@ -136,7 +136,7 @@ describe('SC-1 — por que o cartão não apareceu', () => {
 
   it('allowlist vazia é um motivo DIFERENTE — pede outro trabalho de quem investiga', async () => {
     await new Config(db).definir('tipos_chamado_permitidos', [], CHEFE, AGORA)
-    ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+    ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
     // ⚠️ As duas tools precisam rodar: sem as verificações concluídas o servidor nem tenta
     // montar proposta (`RF-08`), e o motivo que se quer medir é o do passo seguinte.
     ;(ctx.ia as ClienteIAFake).definirRoteiro([

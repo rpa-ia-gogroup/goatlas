@@ -44,7 +44,7 @@ descrito em `cliente.ts:400-411`: sem ele, chamado de tipo sem mapa chega como "
 robô", que é o risco `R-03` inteiro. Só a parte de campo customizado muda.
 
 **Remoções** (`campo_solicitante_id` deixa de existir):
-`config/index.ts` (tipo, default, bootstrap `GOATLAS_CAMPO_SOLICITANTE_ID`) ·
+`config/index.ts` (tipo, default, bootstrap `ATLAS_CAMPO_SOLICITANTE_ID`) ·
 `config/validar.ts` (`FAMILIA`) · `contexto.ts` · `app/api.ts` · `app/admin/campos.tsx` ·
 `tests/tela-admin.test.ts`.
 

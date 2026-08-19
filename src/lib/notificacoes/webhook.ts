@@ -19,11 +19,11 @@
  *    texto de phishing não tem como virar notificação enviada.
  * 3. **A resposta é a MESMA sempre** (`202`), com ou sem vínculo local. Um 404 para
  *    chamado desconhecido transformaria a rota em oráculo de "este chamado passou pelo
- *    goatlas?" — a mesma classe de vazamento que o 404-em-vez-de-403 de `RF-30` fecha.
+ *    atlas?" — a mesma classe de vazamento que o 404-em-vez-de-403 de `RF-30` fecha.
  */
 
 /** Cabeçalho preferido; o Jira também permite pôr o segredo na query da URL. */
-export const HEADER_WEBHOOK = 'x-goatlas-webhook'
+export const HEADER_WEBHOOK = 'x-atlas-webhook'
 export const PARAM_WEBHOOK = 'k'
 
 /**

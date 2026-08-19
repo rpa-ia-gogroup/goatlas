@@ -321,7 +321,7 @@ beforeEach(async () => {
   await config.definir('admins', [CHEFE], CHEFE, AGORA)
   await config.definir('tipos_chamado_permitidos', ['70'], CHEFE, AGORA)
   await config.definir('service_desk_id', '4', CHEFE, AGORA)
-  ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+  ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
   fake = ctx.atlassian as ClienteAtlassianFake
   fake.estado.tiposChamado = [
     { id: '70', serviceDeskId: '4', nome: 'Relatar um bug', descricao: null },
@@ -329,7 +329,7 @@ beforeEach(async () => {
 })
 
 function req(caminho: string, corpo: unknown): Request {
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: 'POST',
     headers: { [HEADER_EMAIL]: ANA },
     body: JSON.stringify(corpo),

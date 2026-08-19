@@ -1,4 +1,4 @@
-# goatlas
+# atlas
 
 Porta de entrada interna para a Atlassian: um app no **GoDeploy** onde o
 colaborador da Gocase conversa com um agente de IA que **investiga antes de deixar
@@ -10,7 +10,7 @@ Substitui duas iniciativas que eram o mesmo produto: o custo de assentos de uso
 único e a falta de padrão no fluxo de tickets do time de tech. O N8N está fora —
 classificar, priorizar e criar acontecem dentro do app, via API de IA.
 
-- **Infra:** GoDeploy (Cloudflare Workers) · app `goatlas`
+- **Infra:** GoDeploy (Cloudflare Workers) · app `atlas`
 - **Autor dos requisitos:** João Victor Esteves
 - **Dev:** Kaique Breno (principal), Luis Eduardo (apoio pontual)
 
@@ -37,9 +37,9 @@ checklist de deploy. Detalhe em [`CLAUDE.md`](CLAUDE.md).
 
 ## Estado
 
-**No ar em somente leitura**, em produção (`goatlas.devgogroup.com`) e em staging. As
+**No ar em somente leitura**, em produção (`atlas.devgogroup.com`) e em staging. As
 quatro fases estão completas em código; o que falta para o go-live não é código — é
-desligar `GOATLAS_SOMENTE_LEITURA`, a decisão que `D-24` condiciona à staging validada.
+desligar `ATLAS_SOMENTE_LEITURA`, a decisão que `D-24` condiciona à staging validada.
 
 Faseamento na seção 12 dos requisitos: Fase 0 diagnóstico (sem código) → Fase 1 MVP (auth
 + agente + acompanhamento) → Fase 2 conhecimento e governança → Fase 3 SLA e notificações

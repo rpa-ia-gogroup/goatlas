@@ -1430,7 +1430,7 @@ function converterMacro(bruto: ElementoBruto, coletor: Coletor): No[] {
    * O critério deste arquivo para "dá para renderizar?" era ter `ac:rich-text-body`. O
    * `status` não tem: o texto dele mora num **parâmetro** (`title`), como a linguagem do
    * bloco de código. Então a macro mais usada para marcar "CONCLUÍDO"/"EM ANDAMENTO" caía
-   * no placeholder de `RF-43` dizendo *"o goatlas ainda não sabe mostrar este bloco"* —
+   * no placeholder de `RF-43` dizendo *"o atlas ainda não sabe mostrar este bloco"* —
    * acusando limitação nossa sobre um texto que estava ali, a um `parametroDaMacro` de
    * distância. Visto no app real em 10/08/2026, duas vezes na mesma página.
    *

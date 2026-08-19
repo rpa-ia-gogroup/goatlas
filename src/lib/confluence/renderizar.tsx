@@ -577,7 +577,7 @@ const BLOCOS_CONHECIDOS: Readonly<Record<string, { nome: string; natureza: Natur
  * restrição de cada item, uma chamada por página (`R-02`, `RN-06`).
  *
  * `livesearch` não é resultado — é uma **caixa de busca**. E busca no espaço é exatamente
- * o que o goatlas já faz melhor que o Confluence para este público: sem assento, com a
+ * o que o atlas já faz melhor que o Confluence para este público: sem assento, com a
  * allowlist aplicada no servidor, e registrando lacuna de documentação (`RF-42`). Aqui não
  * há nada a reproduzir: há um caminho nosso a oferecer.
  *
@@ -613,7 +613,7 @@ function BuscaDoEspaco({ aoBuscar }: { aoBuscar: (termo: string) => void }): Rea
         </button>
       </div>
       <span className="dica">
-        Procura só nas páginas deste espaço que o goatlas pode mostrar.
+        Procura só nas páginas deste espaço que o atlas pode mostrar.
       </span>
     </div>
   )
@@ -679,12 +679,12 @@ function MacroNaoSuportada({ nome }: { nome: string }): ReactNode {
           // dinâmico (o arquivo existe), não é de outra página, e não está na tela. O nome do
           // arquivo fica de fora — é parâmetro de macro (`RNF-30`), e a frase funciona sem ele.
           <>
-            Este bloco mostra um arquivo anexado à página. O goatlas ainda não desenha essa
+            Este bloco mostra um arquivo anexado à página. O atlas ainda não desenha essa
             pré-visualização — se houver um link para o arquivo no texto, ele funciona.
           </>
         ) : (
           <>
-            O goatlas ainda não sabe mostrar este bloco (
+            O atlas ainda não sabe mostrar este bloco (
             <code className="doc-codigo-inline">{nome}</code>). O texto ao redor está completo.
           </>
         )}
@@ -704,7 +704,7 @@ function MacroNaoSuportada({ nome }: { nome: string }): ReactNode {
  * `CargaEspacos`, na tela que mais gente abre.
  *
  * ⚠️ **Isto NÃO é o placeholder de `RF-43`.** Lá falta um bloco no meio de um texto; aqui
- * não há texto nenhum, e o problema é de quem escreve, não do goatlas. A frase diz de quem
+ * não há texto nenhum, e o problema é de quem escreve, não do atlas. A frase diz de quem
  * é o trabalho sem acusar o app de estar quebrado.
  */
 function PaginaSemTexto(): ReactNode {

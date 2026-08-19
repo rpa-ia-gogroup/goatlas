@@ -1,5 +1,5 @@
 /**
- * Os blocos que o goatlas não desenha — `RF-43`, `RNF-30`, regra 4 (PT-BR).
+ * Os blocos que o atlas não desenha — `RF-43`, `RNF-30`, regra 4 (PT-BR).
  *
  * ## O que estava errado, visto no app real em 10/08/2026
  *
@@ -7,7 +7,7 @@
  *
  * ```
  * Bloco não exibido
- * Esta página tem um bloco livesearch que o goatlas ainda não sabe mostrar.
+ * Esta página tem um bloco livesearch que o atlas ainda não sabe mostrar.
  * O resto do conteúdo está completo.          ← três vezes, em inglês técnico
  * ```
  *

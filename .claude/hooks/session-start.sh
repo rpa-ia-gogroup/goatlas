@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# SessionStart — injeta o protocolo operacional do goatlas em toda sessão.
+# SessionStart — injeta o protocolo operacional do atlas em toda sessão.
 # Re-dispara em resume/clear/compact para o protocolo sobreviver à compactação.
 # Falha em silêncio; nunca bloqueia o início da sessão.
 
 set -uo pipefail
 
 read -r -d '' CTX <<'PROTOCOLO' || true
-[goatlas — protocolo do projeto, injetado por hook]
+[atlas — protocolo do projeto, injetado por hook]
 
 Este projeto usa Spec-Driven Development. A lei é `.specify/memory/constitution.md`
 e a fonte da verdade dos requisitos é `docs/REQUISITOS.md` (IDs RF/RNF/RN/R/Q).

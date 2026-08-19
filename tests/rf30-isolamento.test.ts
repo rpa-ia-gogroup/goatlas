@@ -127,15 +127,15 @@ describe('RF-30 — isolamento por vínculo', () => {
     // acima da consulta, este teste continuaria passando — mas o método sem
     // e-mail nem existe na classe, e é isso que fecha o caminho.
     await vinculos.criar({
-      issueKey: 'GOATLAS-99',
+      issueKey: 'ATLAS-99',
       solicitanteEmail: ANA,
       conversaId: null,
       via: 'conversa',
       verificadoRegras: true,
     })
-    expect(await vinculos.obterDoSolicitante('GOATLAS-99', BRUNO)).toBeNull()
-    expect(await vinculos.obterDoSolicitante('GOATLAS-99', ANA)).not.toBeNull()
+    expect(await vinculos.obterDoSolicitante('ATLAS-99', BRUNO)).toBeNull()
+    expect(await vinculos.obterDoSolicitante('ATLAS-99', ANA)).not.toBeNull()
     // A via de reconciliação é explícita no nome, e não é rota de usuário.
-    expect(await vinculos.obterSemIsolamento_apenasReconciliacao('GOATLAS-99')).not.toBeNull()
+    expect(await vinculos.obterSemIsolamento_apenasReconciliacao('ATLAS-99')).not.toBeNull()
   })
 })

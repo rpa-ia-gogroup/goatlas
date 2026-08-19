@@ -9,7 +9,7 @@
  *
  * ```
  * JOÃO VICTOR TAVARES ESTEVES            ← nome da conta de serviço
- * **Kaique Breno** (kaique.breno@gocase.com) via goatlas:
+ * **Kaique Breno** (kaique.breno@gocase.com) via atlas:
  * Comentário de teste…
  * ```
  *
@@ -34,8 +34,8 @@
  * 1. **`doSolicitante` vem do prefixo, nunca do autor.** Ver acima.
  * 2. **O prefixo sai do corpo exibido.** Ele existe para ser lido no **Jira nativo**
  *    (`D-13`), onde o time trabalha e onde não há linha de autor nossa. Dentro do
- *    goatlas a linha de autor já diz de quem é, então o prefixo vira repetição — e
- *    repetição em Markdown cru (`**Nome** (email) via goatlas:`), porque
+ *    atlas a linha de autor já diz de quem é, então o prefixo vira repetição — e
+ *    repetição em Markdown cru (`**Nome** (email) via atlas:`), porque
  *    `TextoDoAgente` não interpreta negrito. Quem remove é `removerPrefixoAutoria`,
  *    a mesma função que `RF-48` usa: um `replace` novo aqui divergiria do de lá no
  *    dia em que o formato mudar (a spec 001 §10 diz que ele pode mudar).
@@ -62,7 +62,7 @@ export interface ComentarioExibido {
   readonly autorNome: string
   readonly criadoEm: string
   /**
-   * `true` = escrito pelo solicitante, pelo goatlas.
+   * `true` = escrito pelo solicitante, pelo atlas.
    *
    * ⚠️ E o solicitante é **quem está lendo**: `UNIQUE (vinculos.issue_key)` dá um
    * vínculo por chamado, e colisão com outro solicitante é recusa definitiva — logo

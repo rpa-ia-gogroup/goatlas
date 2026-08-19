@@ -166,7 +166,7 @@ export class RepositorioVinculos {
    * `{"issue":{"key":"TECH-1"}}`. O que impede o abuso é que a chave só serve para
    * **achar o vínculo local** — sem vínculo, não há a quem notificar e nada acontece —
    * e que a resposta do webhook é a mesma nos dois casos (`202`), para não virar
-   * oráculo de "este chamado está no goatlas?".
+   * oráculo de "este chamado está no atlas?".
    */
   async obterParaNotificacao_semIsolamento(issueKey: string): Promise<Vinculo | null> {
     return this.obterSemIsolamento_apenasReconciliacao(issueKey)
@@ -197,7 +197,7 @@ export class RepositorioVinculos {
    *
    * Recebe a lista de chaves que a Atlassian disse ter mudado e devolve **só** as que
    * têm vínculo local. É o mesmo raciocínio do webhook: chamado do time de tech que
-   * nunca passou pelo goatlas não gera notificação para ninguém.
+   * nunca passou pelo atlas não gera notificação para ninguém.
    */
   async filtrarComVinculo(issueKeys: readonly string[]): Promise<readonly Vinculo[]> {
     if (issueKeys.length === 0) return []

@@ -11,7 +11,7 @@
  *
  * ## 🚨 Este SLA NÃO é o nosso, e a distinção é a única coisa que importa aqui
  *
- * `notificacoes/sla.ts` calcula o **compromisso do goatlas** (`RN-08`, `R-05`): primeira
+ * `notificacoes/sla.ts` calcula o **compromisso do atlas** (`RN-08`, `R-05`): primeira
  * resposta, hora corrida, e as 24h são **piso garantido**. O que este arquivo lê é o
  * relógio que o **JSM** mantém, com o calendário e as metas que o time de tech
  * configurou lá.

@@ -63,14 +63,14 @@ beforeEach(async () => {
   ia = new ClienteIAFake(ROTEIRO)
 
   let n = 0
-  ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`, {
+  ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`, {
     atlassian,
     ia,
   })
 })
 
 function req(caminho: string, opcoes: { metodo?: string; corpo?: unknown } = {}): Request {
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: opcoes.metodo ?? 'GET',
     headers: { [HEADER_EMAIL]: ANA },
     ...(opcoes.corpo === undefined ? {} : { body: JSON.stringify(opcoes.corpo) }),
@@ -119,7 +119,7 @@ describe('Definição de Pronto — o fluxo completo pela conversa', () => {
 
     // RF-17 — confirmação explícita cria o chamado.
     const criado = await (await chamar(req(`/api/conversas/${id}/confirmar`, { metodo: 'POST' }))).json()
-    expect(criado.issueKey).toMatch(/^GOATLAS-/)
+    expect(criado.issueKey).toMatch(/^ATLAS-/)
     expect(criado.estado).toBe('criado')
     expect(criado.verificadoRegras).toBe(true)
     expect(criado.slaPrimeiraRespostaHoras).toBe(24)

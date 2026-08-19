@@ -98,7 +98,7 @@ describe('o número é DURÁVEL — sobrevive ao expurgo dos pendentes', () => {
     await config.definir('tipos_chamado_permitidos', ['rt-1'], CHEFE, AGORA)
     await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
     ctx = await montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      { DB: db, ATLAS_USAR_FAKES: '1' },
       () => AGORA,
       () => `id-${++n}`,
     )
@@ -119,7 +119,7 @@ describe('o número é DURÁVEL — sobrevive ao expurgo dos pendentes', () => {
       form.append('chaveIdempotencia', chave)
       form.append('arquivo', new File(['print'], 'print.png', { type: 'image/png' }))
       await chamar(
-        new Request('https://goatlas.devgogroup.com/api/anexos-pendentes', {
+        new Request('https://atlas.devgogroup.com/api/anexos-pendentes', {
           method: 'POST',
           headers: { [HEADER_EMAIL]: ANA },
           body: form,
@@ -127,7 +127,7 @@ describe('o número é DURÁVEL — sobrevive ao expurgo dos pendentes', () => {
       )
     }
     return chamar(
-      new Request('https://goatlas.devgogroup.com/api/chamados', {
+      new Request('https://atlas.devgogroup.com/api/chamados', {
         method: 'POST',
         headers: { [HEADER_EMAIL]: ANA },
         body: JSON.stringify({
@@ -167,7 +167,7 @@ describe('o número é DURÁVEL — sobrevive ao expurgo dos pendentes', () => {
     form.append('chaveIdempotencia', 'k3')
     form.append('arquivo', new File(['print'], 'print.png', { type: 'image/png' }))
     await chamar(
-      new Request('https://goatlas.devgogroup.com/api/anexos-pendentes', {
+      new Request('https://atlas.devgogroup.com/api/anexos-pendentes', {
         method: 'POST',
         headers: { [HEADER_EMAIL]: ANA },
         body: form,
@@ -175,7 +175,7 @@ describe('o número é DURÁVEL — sobrevive ao expurgo dos pendentes', () => {
     )
     fake.estado.falhas.materializarAnexos = 'indisponivel'
     await chamar(
-      new Request('https://goatlas.devgogroup.com/api/chamados', {
+      new Request('https://atlas.devgogroup.com/api/chamados', {
         method: 'POST',
         headers: { [HEADER_EMAIL]: ANA },
         body: JSON.stringify({

@@ -314,9 +314,9 @@ created: "2026-08-03"
       `summary`, `description` e `priority` de `requestFieldValues` (`cliente.ts:524-536`).
 - [x] **T-082** Comentar publicamente, atribuído de forma legível ao solicitante real.
       _Requirements: RF-33_
-      → **Resolvida (D-13):** prefixo `**Nome** (email) via goatlas:` no corpo do
+      → **Resolvida (D-13):** prefixo `**Nome** (email) via atlas:` no corpo do
       comentário, com nome/e-mail do login corporativo Google — visível no Jira
-      nativo, sem precisar do console do goatlas. A função pura já existia
+      nativo, sem precisar do console do atlas. A função pura já existia
       (`atlassian/comentarios.ts#prefixarAutoria`, escrita quando a pergunta ainda
       estava aberta); faltava a rota passar `eu.nome`, não só `eu.email` — sem
       isso o prefixo saía com o e-mail duplicado. 1 teste novo em
@@ -423,7 +423,7 @@ created: "2026-08-03"
       _Requirements: RNF-18, RNF-25, D-04, D-05, D-14_
       → Achado ao conferir os secrets de `D-14`: `!env.LLM_API_KEY` caía em
       `ClienteIAFake` **mesmo com `usandoFakes === false`**, então remover
-      `GOATLAS_MODO_DEMO` sem a chave de IA rodaria com **Atlassian real e IA falsa**
+      `ATLAS_MODO_DEMO` sem a chave de IA rodaria com **Atlassian real e IA falsa**
       — roteiro de demonstração na tela e chamado de verdade no JSM. Agora o fake só
       é alcançável por `usandoFakes`; sem chave vem `ia/indisponivel.ts`
       (`ClienteIAIndisponivel`), que recusa como **definitivo** (`transitorio: false`
@@ -488,7 +488,7 @@ created: "2026-08-03"
       O prompt do sistema e o **conteúdo** das tools ficam de fora (`D-33`; `RN-06` decide
       exposição na leitura, e anexo ninguém reavalia); o registro de que rodaram fica.
       A falha é silenciosa na tela e auditada em `transcricao_anexada`, e a origem na tela
-      ganhou uma terceira palavra — *gerado pelo goatlas* —, porque "você enviou" e "do
+      ganhou uma terceira palavra — *gerado pelo atlas* —, porque "você enviou" e "do
       time" seriam autoria falsa (`D-43` na versão arquivo).
       ⚠️ O teste que vale é o dos **bytes entregues à Atlassian**: o fake registra só nome e
       tipo, então um caso contra ele passaria com o arquivo vazio (`D-47`).

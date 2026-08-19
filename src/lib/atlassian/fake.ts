@@ -38,7 +38,7 @@ import { prefixarAutoria } from './comentarios'
  * O nome fictício aqui existe para o teste não depender de quem é essa pessoa hoje,
  * mas o papel é o mesmo: é a conta que registra, nunca quem escreveu.
  */
-export const NOME_CONTA_DE_SERVICO_FAKE = 'Conta de serviço goatlas'
+export const NOME_CONTA_DE_SERVICO_FAKE = 'Conta de serviço atlas'
 
 /** Comentário como o JSM devolve: com a flag `public` que RF-32 obriga a filtrar. */
 export interface ComentarioBruto {
@@ -157,7 +157,7 @@ export interface EstadoFake {
    * ninguém viu acontecer.
    *
    * ⚠️ E ele **não** é derivado de `SLA_PRIMEIRA_RESPOSTA_HORAS`: aquele é o compromisso
-   * do goatlas (`RN-08`), este é o relógio do JSM. Misturá-los dentro do fake é a
+   * do atlas (`RN-08`), este é o relógio do JSM. Misturá-los dentro do fake é a
    * confusão que `D-20` proíbe, com a agravante de virar teste verde.
    */
   slaDoJsm: Chamado['slaPrimeiraResposta']
@@ -353,7 +353,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
    * Avança o contador de chaves para além do que já existe — só demonstração/teste.
    *
    * ⚠️ O Worker é **stateless**: `contadorIssue` volta a zero a cada requisição, então o
-   * segundo chamado aberto na demonstração também nascia `GOATLAS-1` e batia no
+   * segundo chamado aberto na demonstração também nascia `ATLAS-1` e batia no
    * `UNIQUE (vinculos.issue_key)`. Pego no app real em 07/08/2026.
    *
    * Em produção nada disto existe: a chave é do JSM, que não repete.
@@ -467,7 +467,7 @@ export class ClienteAtlassianFake implements ClienteAtlassian {
 
     this.contadorIssue += 1
     const criado: ChamadoCriado = {
-      issueKey: `GOATLAS-${this.contadorIssue}`,
+      issueKey: `ATLAS-${this.contadorIssue}`,
       issueId: String(10000 + this.contadorIssue),
     }
     this.porChave.set(dados.chaveIdempotencia, criado)

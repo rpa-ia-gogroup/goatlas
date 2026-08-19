@@ -49,7 +49,7 @@ let n = 0
 
 async function montar() {
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
     { atlassian, organizacao: org },
@@ -87,7 +87,7 @@ function req(caminho: string, o: { metodo?: string; email?: string; headers?: Re
   const headers: Record<string, string> = { ...o.headers }
   if (o.email) headers[HEADER_EMAIL] = o.email
   if (o.corpo !== undefined) headers['content-type'] = 'application/json'
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: o.metodo ?? 'GET',
     headers,
     ...(o.corpoBruto !== undefined
@@ -503,7 +503,7 @@ describe('T-243 / RNF-33 — retenção', () => {
       `INSERT INTO notificacoes
          (id, issue_key, destinatario_email, tipo_evento, carimbo_mudanca, fonte, titulo, corpo,
           estado, criado_em, atualizado_em)
-       VALUES ('n-velha', 'GOATLAS-1', ?, 'chamado_criado', '2020-01-01T00:00:00.000Z', 'app',
+       VALUES ('n-velha', 'ATLAS-1', ?, 'chamado_criado', '2020-01-01T00:00:00.000Z', 'app',
                't', 'c', 'enviada', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z')`,
       [ANA],
     )
@@ -511,12 +511,12 @@ describe('T-243 / RNF-33 — retenção', () => {
       `INSERT INTO notificacoes
          (id, issue_key, destinatario_email, tipo_evento, carimbo_mudanca, fonte, titulo, corpo,
           estado, criado_em, atualizado_em)
-       VALUES ('n-pendente', 'GOATLAS-2', ?, 'chamado_criado', '2020-01-02T00:00:00.000Z', 'app',
+       VALUES ('n-pendente', 'ATLAS-2', ?, 'chamado_criado', '2020-01-02T00:00:00.000Z', 'app',
                't', 'c', 'pendente', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z')`,
       [ANA],
     )
     await ctx.vinculos.criar({
-      issueKey: 'GOATLAS-1',
+      issueKey: 'ATLAS-1',
       solicitanteEmail: ANA,
       conversaId: null,
       via: 'formulario',

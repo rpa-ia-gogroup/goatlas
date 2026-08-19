@@ -5,12 +5,12 @@
  * override, recibo, acompanhamento. Nada toca a Atlassian nem uma API de IA real.
  *
  * ⚠️ **A tarja de aviso é obrigatória, não cosmética.** Sem ela alguém abre um
- * "chamado" aqui, vê a chave `GOATLAS-3` na tela e acredita que o pedido chegou ao
+ * "chamado" aqui, vê a chave `ATLAS-3` na tela e acredita que o pedido chegou ao
  * time de tech. Isso é pior que o app não existir: a pessoa espera uma resposta que
  * nunca vem, e o problema dela fica sem tratamento. Por isso `modoDemo` é exposto em
  * `/api/auth/me` e em `/api/health`, e a UI o mostra de forma persistente.
  *
- * Ativação: secret `GOATLAS_MODO_DEMO=1`. Em produção de verdade, o secret sai.
+ * Ativação: secret `ATLAS_MODO_DEMO=1`. Em produção de verdade, o secret sai.
  */
 
 import type { ClienteAtlassianFake } from './atlassian/fake'

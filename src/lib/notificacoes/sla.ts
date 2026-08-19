@@ -3,7 +3,7 @@
  *
  * ## Três coisas que este arquivo NÃO faz, de propósito
  *
- * 1. **Não é prazo de resolução.** O SLA do goatlas é de **primeira resposta**
+ * 1. **Não é prazo de resolução.** O SLA do atlas é de **primeira resposta**
  *    (`RN-08`). "Respondido" é o primeiro comentário público de alguém que não é o
  *    solicitante; o chamado pode seguir aberto por semanas depois disso sem violar
  *    nada.
@@ -96,7 +96,7 @@ export function avaliarSla(dados: {
  *
  * ⚠️ Sob proxy total (`D-01`) o autor da API não distingue ninguém: todo comentário
  * sai da conta de serviço. O que distingue é o prefixo que o próprio app escreve nos
- * comentários do solicitante (`D-13`, `**Nome** (email) via goatlas:`). Comentário
+ * comentários do solicitante (`D-13`, `**Nome** (email) via atlas:`). Comentário
  * **sem** esse prefixo veio do Jira nativo — ou seja, do time de tech.
  *
  * Isso torna a contagem de SLA dependente de um formato que o app controla, o que é

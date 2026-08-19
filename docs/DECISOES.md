@@ -1,4 +1,4 @@
-# Decisões — goatlas
+# Decisões — atlas
 
 Registro das decisões conscientes do projeto (constituição, Princípio XIV) e das
 respostas às perguntas em aberto de [`REQUISITOS.md`](REQUISITOS.md) seção 10.
@@ -67,13 +67,13 @@ requisição seguinte.
 
 ---
 
-### D-03 · Repositório: `rpa-ia-gogroup/goatlas` (privado)
+### D-03 · Repositório: `rpa-ia-gogroup/atlas` (privado)
 **Data:** 03/08/2026 · **Quem:** Kaique · **Status:** fechada
 
 Como os requisitos pediam, o repo vive na organização de RPA:
-**`rpa-ia-gogroup/goatlas`**, privado. Kaique é admin da org.
+**`rpa-ia-gogroup/atlas`**, privado. Kaique é admin da org.
 
-Nasceu em `while-kaique/goatlas` (a org ainda não aparecia para o token) e foi
+Nasceu em `while-kaique/atlas` (a org ainda não aparecia para o token) e foi
 **transferido** no mesmo dia; o remote local aponta para a org. Nada no código
 depende do host — o app irmão `godocs-main` continua na conta pessoal.
 
@@ -124,7 +124,7 @@ já está em produção no `godocs`: `ai-proxy.gogroupbr.com`, compatível com a
 OpenAI, configurado por `LLM_BASE_URL` + `API_PROXY_TOKEN`, com fallback direto ao
 provedor quando o gateway demora ou erra.
 
-**Decisão:** a camada de IA do goatlas (`RNF-23`) é planejada contra esse proxy. O
+**Decisão:** a camada de IA do atlas (`RNF-23`) é planejada contra esse proxy. O
 app **não** contrata acesso novo.
 
 **Continua em aberto, e é do João:** a política de **retenção e treinamento** do
@@ -160,7 +160,7 @@ Aceita conscientemente para ter a visão completa do trabalho antes de começar.
 ### D-07 - Publicar em modo demonstracao antes de existir credencial
 **Data:** 04/08/2026 · **Quem:** Kaique · **Status:** fechada
 
-O app está no ar em **https://goatlas.devgogroup.com** (`appId 9c47f42f`,
+O app está no ar em **https://atlas.devgogroup.com** (`appId 9c47f42f`,
 `visibility: authenticated`) rodando em **modo demonstração**: fakes semeados com
 dados fictícios, nenhuma chamada à Atlassian ou a provedor de IA. Publicado antes
 de **Q1** de propósito — dá para mostrar o produto funcionando (login, deflexão,
@@ -174,8 +174,8 @@ que o app não existir. Por isso `modoDemo` é exposto em `/api/auth/me` e
 
 **Bootstrap por env, porque o app é fail-closed.** Toda allowlist nasce vazia e
 vazio significa negar (`RNF-07`), então um app recém-deployado negaria **todo
-mundo** — inclusive quem entraria para configurá-lo. `GOATLAS_DOMINIOS` e
-`GOATLAS_ADMINS` resolvem o ovo e a galinha: valem enquanto a chave **não existe**
+mundo** — inclusive quem entraria para configurá-lo. `ATLAS_DOMINIOS` e
+`ATLAS_ADMINS` resolvem o ovo e a galinha: valem enquanto a chave **não existe**
 no banco; no instante em que um admin salva pelo console, o banco manda (`RF-49`).
 Isso **não** afrouxa o fail-closed — env vazio e banco vazio continua negando, e há
 teste para as duas metades.
@@ -343,12 +343,12 @@ a menos; o contrário custa conteúdo restrito na tela de quem não devia ver.
 **Data:** 05/08/2026 · **Quem:** Kaique · **Status:** fechada
 
 Resolve o `[NEEDS CLARIFICATION]` de `spec.md` §10 (interage com R-03 e Q10): o
-comentário público que o goatlas posta no Jira, partindo sempre da conta de
+comentário público que o atlas posta no Jira, partindo sempre da conta de
 serviço (`D-01`), leva um **prefixo visível no corpo** identificando quem pediu de
-verdade — formato `**Nome** (email) via goatlas:`.
+verdade — formato `**Nome** (email) via atlas:`.
 
 **Por quê este caminho, e não só o rastro interno:** quem resolve o chamado
-trabalha no Jira **nativo**, não no console do goatlas. Deixar a identidade só em
+trabalha no Jira **nativo**, não no console do atlas. Deixar a identidade só em
 `vinculos.solicitante_email` (visível apenas na auditoria do admin) obrigaria o
 time de tech a abrir uma segunda ferramenta para saber quem pediu cada coisa —
 exatamente o atrito que `RF-33`/`R-03` existem para evitar.
@@ -375,12 +375,12 @@ campo que já existia**, não criar um novo.
 **Data:** 05/08/2026 · **Quem:** Kaique · **Status:** parcial — Q1 **continua aberta**
 
 Primeira metade de **Q1**. Registrados como secrets em `9c47f42f`
-(`ATLASSIAN_API_TOKEN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_BASE_URL`, `GOATLAS_ORG_ID`);
+(`ATLASSIAN_API_TOKEN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_BASE_URL`, `ATLAS_ORG_ID`);
 ainda **ausentes** `ATLASSIAN_ORG_API_KEY`, `LLM_API_KEY` e `GODEPLOY_CRON_KEY`.
 Nenhum valor aparece aqui nem em nenhum outro arquivo do repo — a checagem é sempre
 por **nome**, via `listAppSecrets` (regra 5).
 
-**Nada disso mudou comportamento**, porque `GOATLAS_MODO_DEMO=1` segue configurado
+**Nada disso mudou comportamento**, porque `ATLAS_MODO_DEMO=1` segue configurado
 e é o primeiro termo do `||` em `contexto.ts` (`usandoFakes`). O terreno ficou
 pronto; o app continua nos fakes.
 
@@ -411,14 +411,14 @@ antes de ser registrado. Rotacionar é `setAppSecret` na mesma chave, sem redepl
 as instâncias pegam o valor novo.
 
 **O que isto NÃO destravou:** `T-063` (`criarChamado` contra a Atlassian real) segue
-bloqueada — falta um projeto **JSM** (`GOATLAS_SERVICE_DESK_ID`,
-`GOATLAS_TIPOS_CHAMADO`), e o projeto oferecido (`TASK`) é `jira/core`, que não tem
+bloqueada — falta um projeto **JSM** (`ATLAS_SERVICE_DESK_ID`,
+`ATLAS_TIPOS_CHAMADO`), e o projeto oferecido (`TASK`) é `jira/core`, que não tem
 service desk nem request type. `T-122`/`T-123`/`T-131` seguem bloqueadas pela
 ausência de `ATLASSIAN_ORG_API_KEY`.
 
 **O que isto revelou — um fail-open real, corrigido no mesmo PR:** com o trio da
 Atlassian configurado, `!env.LLM_API_KEY` caía em `ClienteIAFake` **fora dos
-fakes**. Ou seja: no instante em que `GOATLAS_MODO_DEMO` saísse sem a chave de IA
+fakes**. Ou seja: no instante em que `ATLAS_MODO_DEMO` saísse sem a chave de IA
 existir, o app rodaria com **Atlassian real e IA falsa** — agente respondendo
 roteiro de demonstração e chamado nascendo de verdade no JSM, sem nada na tela
 distinguindo uma coisa da outra. Agora o fake só é alcançável por `usandoFakes`, e a
@@ -427,10 +427,10 @@ o motivo (`RF-59`), o caminho do agente recusa, e o formulário mínimo (`D-04`)
 abrindo chamado (`RNF-18`). Ver `T-132`.
 
 **Ordem para virar produção** (a sequência importa — cada item silencia uma parte
-diferente do app, todos fail-closed): `LLM_API_KEY` → `GOATLAS_TIPOS_CHAMADO` +
-`GOATLAS_SERVICE_DESK_ID` → `GOATLAS_ESPACOS_CONFLUENCE` (**Q5**) →
+diferente do app, todos fail-closed): `LLM_API_KEY` → `ATLAS_TIPOS_CHAMADO` +
+`ATLAS_SERVICE_DESK_ID` → `ATLAS_ESPACOS_CONFLUENCE` (**Q5**) →
 `GODEPLOY_CRON_KEY` → criar o app de **staging** (regra 10, `T-096`) → só então
-remover `GOATLAS_MODO_DEMO`.
+remover `ATLAS_MODO_DEMO`.
 
 ---
 
@@ -463,8 +463,8 @@ enviada, porque a mensagem é montada com o comentário que o app releu.
 **O que sustenta a rota pública:** segredo em comparação de **tempo constante** (um `===`
 num endpoint público vaza o prefixo correto pelo tempo de resposta); resposta **sempre
 202**, com ou sem vínculo local (um 404 para chamado desconhecido seria oráculo de "este
-chamado passou pelo goatlas?", a mesma classe de vazamento que o 404-em-vez-de-403 de
-`RF-30` fecha); e fail-closed — sem `GOATLAS_WEBHOOK_SEGREDO` a rota não funciona.
+chamado passou pelo atlas?", a mesma classe de vazamento que o 404-em-vez-de-403 de
+`RF-30` fecha); e fail-closed — sem `ATLAS_WEBHOOK_SEGREDO` a rota não funciona.
 
 **Custo aceito.** O polling faz duas chamadas à Atlassian por chamado alterado, e o
 webhook faz as mesmas duas de novo se chegar depois. Sob `R-02` (credencial única) isso é
@@ -476,7 +476,7 @@ qualquer envio.
 
 ### D-16 · `emails_piloto` é a única allowlist do projeto cujo VAZIO libera
 
-**Contexto.** Em todo lugar do goatlas, allowlist vazia **nega** — é `RNF-07`, e é o que
+**Contexto.** Em todo lugar do atlas, allowlist vazia **nega** — é `RNF-07`, e é o que
 impede o app de expor um espaço do Confluence no dia em que alguém esquecer de configurar.
 
 **A exceção.** `config.emails_piloto` (`R-06`, T-302) faz o oposto: **vazia = piloto
@@ -609,7 +609,7 @@ enviar, porque enche a fila de erro e some com o aviso.
 ⚠️ **`nenhum` decidido ≠ ninguém decidiu**, e a distinção é visível: a tela mostra "os
 avisos vivem aqui" no primeiro caso e "o canal ainda não foi definido nesta instalação" no
 segundo. É por isso que `CONFIG_PADRAO` **continua** `null` — instalação nova não pode
-afirmar que alguém escolheu. A decisão entra por `GOATLAS_CANAL_NOTIFICACAO`, por ambiente.
+afirmar que alguém escolheu. A decisão entra por `ATLAS_CANAL_NOTIFICACAO`, por ambiente.
 
 #### 2 · Q13 → o piloto começa DESLIGADO
 
@@ -650,7 +650,7 @@ quando perguntar sem virar mais um formulário.
 
 **Por quê:** alertar o time de tech exige saber quem é dono da fila, e isso é `T-331`
 (automação de roteamento no Jira, dono ainda indefinido). Pior: o **Jira nativo já tem SLA
-para agentes** — mandar um segundo alerta pelo goatlas criaria duas fontes de verdade sobre
+para agentes** — mandar um segundo alerta pelo atlas criaria duas fontes de verdade sobre
 o mesmo prazo, e a que o time olha é a do Jira.
 
 O solicitante é o único destinatário que o app conhece com certeza e para quem o aviso é
@@ -878,7 +878,7 @@ Continua sendo decisão de exposição (`RN-06`, `D-01`) e revisável sem deploy
   com escopo nenhum, opera sobre conta não gerenciada. Só reivindicar o domínio
   `gocase.com` destrava — ou mudar grupo via `ATATT` + `/rest/api/3/group/user`.
   Suspender continua fora dos dois caminhos.
-- ~~**`GOATLAS_ORG_ID` provavelmente está corrompido.**~~ 🚨 **Falso — refutado por teste
+- ~~**`ATLAS_ORG_ID` provavelmente está corrompido.**~~ 🚨 **Falso — refutado por teste
   em `D-23`.** O org id está correto; org id da Atlassian não é UUID estrito.
 - **Os códigos HTTP são de 31/07** e não foram reexecutados em 07/08 (o sandbox do João
   bloqueou o `curl`). ✅ **Reexecutados por mim em 07/08 à tarde — ver `D-23`.**
@@ -995,7 +995,7 @@ Exatamente como o João mediu em 31/07. A troca de endpoint do `D-22` estava cer
 | 7 | `SHPF` | SHPF |
 | 8 | `OMI2020` | Opsgenie Migrated Incidents |
 
-O `GN` tem **16 tipos de solicitação**. `GOATLAS_SERVICE_DESK_ID=4` foi registrado.
+O `GN` tem **16 tipos de solicitação**. `ATLAS_SERVICE_DESK_ID=4` foi registrado.
 **`T-063` sai do bloqueio de Q1**: falta escolher quais tipos entram na allowlist
 (`RF-28`) — decisão de roteamento, não de credencial.
 
@@ -1024,7 +1024,7 @@ documentação de engenharia. E ficaram de fora os que mais parecem certos:
 service desk — feito para deflexão. `GT`, `IO`, `IA`, `Protheus`, `CG1`, `GLPI` e
 `Goconnect360` são desse tipo.
 
-~~**A allowlist NÃO foi definida ainda** — `GOATLAS_ESPACOS_CONFLUENCE` segue vazio de
+~~**A allowlist NÃO foi definida ainda** — `ATLAS_ESPACOS_CONFLUENCE` segue vazio de
 propósito.~~ **Desatualizado desde 07/08/2026 17:35**, quando o secret foi criado
 (`listAppSecrets`). O `CLAUDE.md` registra o valor como `GT,DTE,GN` — ⚠️ **registra, não
 mede**: a API do GoDeploy nunca devolve valor de secret, então o conteúdo é documentação, e
@@ -1049,28 +1049,28 @@ cortar** — exatamente o número que o console usa para recomendar rebaixamento
 #### 9. Nomes de variável: não mudamos nenhum lado
 
 O `.env` do João usa `ATLASSIAN_USER_TOKEN` e `ATLASSIAN_ORG_ID`; nós lemos
-`ATLASSIAN_API_TOKEN` e `GOATLAS_ORG_ID`. **Decisão: manter os dois como estão** e mapear
+`ATLASSIAN_API_TOKEN` e `ATLAS_ORG_ID`. **Decisão: manter os dois como estão** e mapear
 no momento de registrar o secret.
 
 `ATLASSIAN_USER_TOKEN` é um nome melhor — nomearia a família e teria evitado o 401. Mas
 renomear o nosso tem um risco concreto e assimétrico: `usandoFakes` é
-`modoDemo || GOATLAS_USAR_FAKES || !env.ATLASSIAN_API_TOKEN`. Se o código passar a ler o
+`modoDemo || ATLAS_USAR_FAKES || !env.ATLASSIAN_API_TOKEN`. Se o código passar a ler o
 nome novo e o secret antigo for removido antes do deploy, o worker publicado vê
 `!ATLASSIAN_API_TOKEN` e **cai nos fakes silenciosamente, com credencial real
 configurada** — a falha de `T-132` de novo, pela porta dos nomes. O ganho é de clareza e
 já foi obtido documentando a família; o risco é operacional.
 
-E `GOATLAS_*` × `ATLASSIAN_*` distingue **bootstrap de config** (editável depois no console,
+E `ATLAS_*` × `ATLASSIAN_*` distingue **bootstrap de config** (editável depois no console,
 `RF-49`) de **credencial** — apagar essa distinção para casar com o `.env` de outro projeto
 seria trocar uma convenção interna por uma coincidência externa.
 
 ⚠️ **O `LEIA-ME` do pacote diz "copie o `.env` para a raiz do app". Isso não se aplica
-aqui:** em produção o goatlas não lê `.env` nenhum (são secrets do GoDeploy), e dois nomes
+aqui:** em produção o atlas não lê `.env` nenhum (são secrets do GoDeploy), e dois nomes
 divergem.
 
 #### 10. O pacote NÃO entra no repositório
 
-`goatlas-kaique/` foi adicionado ao `.gitignore` **inteiro**, não só o `.env`. O
+`atlas-kaique/` foi adicionado ao `.gitignore` **inteiro**, não só o `.env`. O
 `HANDOFF-GODEPLOY.md` traz nome de funcionário, composição de grupo e valor de licença; o
 `.gitignore` cobria `.env` e deixaria os `.md` e o `.json` commitáveis. O que vale do
 pacote está destilado aqui.
@@ -1091,7 +1091,7 @@ criado (`3936ca2d`) e **não** foi terminado; o deploy foi direto na produção
 
 **Por que o desvio se sustenta hoje:** a regra 10 existe para proteger o time de tech de
 chamado indevido e a fila real de efeito colateral. O que impede isso agora **não é a
-staging** — é `GOATLAS_SOMENTE_LEITURA=1`, que recusa **toda** escrita no decorador do
+staging** — é `ATLAS_SOMENTE_LEITURA=1`, que recusa **toda** escrita no decorador do
 cliente (`atlassian/somente-leitura.ts`), não com um `if` espalhado por rota. Somando a
 isso: a produção já rodava código com o bug do 412, e nenhum usuário real depende dela
 ainda. O pior caso do deploy era a tela que já estava quebrada.
@@ -1103,7 +1103,7 @@ justamente a parte mais nova. Uma staging que valida login, Confluence e console
 a conversa, custa um segundo app para manter em sincronia e não cobre o risco que importa.
 
 🚨 **O prazo é explícito: a staging passa a ser obrigatória ANTES de desligar
-`GOATLAS_SOMENTE_LEITURA`.** É naquele instante que a regra 10 volta a ter dente — o
+`ATLAS_SOMENTE_LEITURA`.** É naquele instante que a regra 10 volta a ter dente — o
 primeiro chamado real nasce na fila do time de tech, e `criarChamado` (`T-063`) nunca
 executou contra o JSM. Terminar a staging exige o `LLM_API_KEY` em mãos.
 
@@ -1216,7 +1216,7 @@ pode aparecer segundos antes do arquivo. É barato perto de perder chamado.
 
 **Data:** 10/08/2026 · **Contexto:** spec `005`, `plan.md` §6 e §9
 
-Em todo o resto do goatlas, ausência de informação **nega**. Aqui, schema de request type
+Em todo o resto do atlas, ausência de informação **nega**. Aqui, schema de request type
 que **não pôde ser lido** faz a pergunta de `RF-62` não existir e o chamado abrir.
 
 **Por que o desvio é legítimo:** `RF-62` é **qualidade de produto, não trava de
@@ -1270,7 +1270,7 @@ perder campo extra numa indisponibilidade é aceitável — perder o chamado nã
 João, HTTP **200**): a API devolve **128 espaços numa página só**, sendo **97 pessoais**
 (`~712020…`) e **31 reais**. Idêntico à medição de 07/08 — a lista não mudou.
 
-**Aplicados (`GOATLAS_ESPACOS_CONFLUENCE`):**
+**Aplicados (`ATLAS_ESPACOS_CONFLUENCE`):**
 
 | Key | Nome | Tipo |
 |---|---|---|
@@ -1319,7 +1319,7 @@ então essa gravação é a que fica.
 
 **O pedido:** o bloco `livesearch` do Confluence é uma caixa de "buscar neste espaço", e
 aparecia como placeholder ("não há o que trazer"). Diferente dos outros blocos dinâmicos, ele
-não é um **resultado** a reproduzir — é um **caminho**, e busca no espaço é o que o goatlas
+não é um **resultado** a reproduzir — é um **caminho**, e busca no espaço é o que o atlas
 já faz melhor que o Confluence para este público: sem assento, com allowlist no servidor e
 registrando lacuna de documentação (`RF-42`).
 
@@ -1507,7 +1507,7 @@ existem para mover. "Como posso ajudar?" gasta a mensagem afirmando o que a pess
 **O que mudou:**
 
 1. **`PROMPT_AGENTE` virou `montarPromptAgente(ctx)`.** O texto ganhou identidade
-   ("assistente do goatlas", "não é um assistente de uso geral"), a lista do que o app
+   ("assistente do atlas", "não é um assistente de uso geral"), a lista do que o app
    **consegue fazer** (documentação, histórico, proposta editável, acompanhamento, resposta,
    anexo, aviso, formulário), instrução explícita para cumprimento e para "o que você faz?",
    a regra de evidência de `RN-11` ("não tenho material para anexar" não se insiste), o
@@ -1713,7 +1713,7 @@ sendo Poppins; o que mudou é o que se vê antes dela chegar. Voltar a um `<link
 - **Cachear `config.carregar()` entre requisições.** É 1 ida ao banco e é a ida que faz o
   console de admin ter efeito **sem deploy** (`RF-49`). Guardá-la em memória do isolate
   reintroduziria o no-op silencioso que o `CLAUDE.md` já descreve para
-  `GOATLAS_ESPACOS_CONFLUENCE`, agora do outro lado.
+  `ATLAS_ESPACOS_CONFLUENCE`, agora do outro lado.
 
 ### D-36 · Config é para o que VARIA — o mapeamento de campo customizado vira código
 
@@ -1806,7 +1806,7 @@ três das quatro, e a de fora seria justo a mais nova.
 
 🚨 **Custo aceito, e ele precisa estar escrito: o token é o MESMO do godocs.** Decisão do
 mantenedor. Os dois apps passam a depender de uma credencial só, então **rotacionar por causa
-de um quebra o outro sem aviso** — e no goatlas quebra **em silêncio**, porque a derivação é
+de um quebra o outro sem aviso** — e no atlas quebra **em silêncio**, porque a derivação é
 fail-open: a área simplesmente para de vir e cai no mapa. É o primeiro item a revisitar no dia
 em que o godocs rotacionar.
 
@@ -1875,7 +1875,7 @@ O corpo que a tela mandou:
 
 ```json
 {"tipoChamadoId":"70","prioridade":"alta",
- "camposDinamicos":{"customfield_10092":"goatlas (staging) - teste automatizado",
+ "camposDinamicos":{"customfield_10092":"atlas (staging) - teste automatizado",
                     "customfield_10071":"10127"},
  "declarouAnexo":false}
 ```
@@ -2214,7 +2214,7 @@ acabou de escrever aparecia assim:
 
 ```
 JOÃO VICTOR TAVARES ESTEVES                                  ← linha de autor
-**Kaique Breno** (kaique.breno@gocase.com) via goatlas:      ← prefixo do D-13
+**Kaique Breno** (kaique.breno@gocase.com) via atlas:      ← prefixo do D-13
 Comentário de TESTE da bateria E2E …
 ```
 
@@ -2226,7 +2226,7 @@ serviço**, e o JSM devolve o `displayName` dela. A tela imprimia esse nome como
 conta que gerou o `ATATT` é **pessoal do João** (pendência já registrada em `Q1`), então o
 nome impresso é o de um colaborador de verdade — o que transforma um defeito de rótulo numa
 acusação. ⚠️ **Trocar a conta de serviço não conserta:** com uma conta dedicada a tela
-passaria a assinar o comentário da pessoa como "goatlas bot", que continua não sendo quem
+passaria a assinar o comentário da pessoa como "atlas bot", que continua não sendo quem
 escreveu.
 
 **A decisão, em três partes.**
@@ -2240,7 +2240,7 @@ conta como resposta do time, ou o contrário, e nenhum teste cairia. Mesmo racio
 
 A tradução mora em `tickets/comentario-exibicao.ts`, é **pura** e é o **único** caminho de
 "corpo cru da Atlassian" para "o que a tela mostra". Um teste estrutural varre `src/app/`
-atrás do literal `via goatlas` e dos nomes das três funções do par — a tela remontar a regra
+atrás do literal `via atlas` e dos nomes das três funções do par — a tela remontar a regra
 passa a ser suíte vermelha, não revisão atenta.
 
 ⚠️ **"O solicitante" é quem está lendo, e isso é propriedade, não coincidência.**
@@ -2250,9 +2250,9 @@ chamado passou pela pessoa que a rota já isolou por e-mail (`RF-30`). É isso q
 "Você" sem comparação nenhuma.
 
 **2 · O prefixo do `D-13` sai do corpo exibido.** Ele existe para ser lido no **Jira nativo**,
-onde o time trabalha e onde não há linha de autor nossa. Dentro do goatlas a linha de autor já
+onde o time trabalha e onde não há linha de autor nossa. Dentro do atlas a linha de autor já
 diz de quem é, então ele vira repetição — e repetição em **Markdown cru**
-(`**Nome** (email) via goatlas:`, com os asteriscos à vista), porque `TextoDoAgente` não
+(`**Nome** (email) via atlas:`, com os asteriscos à vista), porque `TextoDoAgente` não
 interpreta negrito. Quem remove é `removerPrefixoAutoria`, a mesma função que `RF-48` usa: um
 `replace` novo aqui divergiria do de lá no dia em que o formato mudar — e a spec 001 §10 diz
 que ele **pode** mudar.
@@ -2284,7 +2284,7 @@ quebrou **nenhum** teste existente — ninguém afirmava nada sobre aquilo. Mesm
 **Custo aceito.** Um comentário do time que **cole o prefixo à mão** no Jira seria rotulado
 "Você". Não se resolve comparando o e-mail dentro do prefixo com o do leitor: seria a segunda
 regra que a parte 1 existe para não ter, pelo ganho de barrar um colega que digitou
-`**Fulano** (x@y) via goatlas:` de propósito. O estrago é confusão, não vazamento — o texto
+`**Fulano** (x@y) via atlas:` de propósito. O estrago é confusão, não vazamento — o texto
 já era público e já era do chamado dela (`RF-32`/`RN-05` seguem intactos: a classificação roda
 **depois** do filtro por `public`, e há teste com um interno prefixado que não chega à tela).
 
@@ -2778,7 +2778,7 @@ um prazo de dias onde a pessoa lê "alguém te responde até" — prazo errado �
 ausente (`D-42`), agravado por a pessoa planejar em cima dele. ⚠️ Os nomes reais do site
 **não foram medidos**; a lista cobre os defaults do JSM em inglês e português. E o módulo se
 chama `sla-do-jsm` porque **não é o nosso**: `notificacoes/sla.ts` calcula o compromisso do
-goatlas (`RN-08`, `R-05`), e `D-20` já decidiu que duas fontes de verdade sobre o mesmo
+atlas (`RN-08`, `R-05`), e `D-20` já decidiu que duas fontes de verdade sobre o mesmo
 prazo é pior que uma — quem mostrar este valor na tela tem de dizer de quem ele é.
 
 **O que só a staging fecha.** Abrir um chamado do tipo **71** (prioridade obrigatória, sem
@@ -2890,7 +2890,7 @@ mesma chamada, no mesmo GoDeploy, contra o mesmo host, com o mesmo token — e f
 `process.env` populado a partir de `env` no `fetch` do módulo. Logo o egress existe, e a
 diferença entre os dois estava no **nosso** lado. Comparando as duas chamadas linha a linha:
 
-| | godocs (funciona) | goatlas (falhava) | Veredito |
+| | godocs (funciona) | atlas (falhava) | Veredito |
 |---|---|---|---|
 | Receptor do `fetch` | chamada direta ao global | propriedade **sem `bind`** | 🚨 **a causa** |
 | `Accept: application/json` | ausente | presente | inócuo — cabeçalho não impede a conexão, e a fase medida foi `conexao` |
@@ -3150,12 +3150,12 @@ classifica falha de submissão, pela razão exata de `D-26`: dentro dele, um upl
    reavaliado por ninguém** — `RN-06` decide exposição na leitura, e um `.md` no chamado
    não volta a passar pelas três condições. O que o time precisa saber é que a verificação
    **aconteceu** antes de o chamado nascer; o conteúdo a pessoa já leu na conversa.
-4. **A origem na tela é uma TERCEIRA palavra: `goatlas`.** A transcrição não é "você
+4. **A origem na tela é uma TERCEIRA palavra: `atlas`.** A transcrição não é "você
    enviou" (a pessoa não mandou arquivo nenhum) nem "do time" (sugere que um agente anexou
    algo ao chamado dela) — as duas seriam a tela afirmando autoria falsa, que é o defeito
    de `D-43` na versão arquivo. Ela é gravada em `anexos_enviados` com `via: 'transcricao'`
    — a tabela **permanente**, não `anexos_pendentes`, que é expurgada em 12 h (`D-51`,
-   armadilha de `T-422`) — e a tela diz *gerado pelo goatlas*.
+   armadilha de `T-422`) — e a tela diz *gerado pelo atlas*.
 
 **Truncamento é denunciado dentro do próprio arquivo.** Teto de 256 KB; passou, o corte vem
 com o aviso escrito ao fim. Corte silencioso é `SC-08` na versão que ninguém veria nunca:
@@ -3253,7 +3253,7 @@ com a `main` de `D-50`…`D-55`) · **Contexto:** `RF-31`, `RF-42`, `RF-46`, `RF
 | `D-52`/`D-37` — área do solicitante | **`RPA`**, gravada no vínculo. Nunca funcionara no app publicado |
 | `D-48`/`T-525` — prioridade obrigatória | `GN-6904` (tipo **71**) e `GN-6905` (tipo **70**): `201`, e a prioridade faz **round-trip**. Em 11/08 o `GN-6894` voltava `null` |
 | `D-41`/`D-42` — busca | `"processo de deploy na Gocase"` devolvia **0**, devolve **10**; `espaco` preenchido |
-| `D-54`/`D-51` — anexos | `conversa-GN-6903.md` (origem `goatlas`) e `log-de-teste.txt` (origem `você enviou`) |
+| `D-54`/`D-51` — anexos | `conversa-GN-6903.md` (origem `atlas`) e `log-de-teste.txt` (origem `você enviou`) |
 
 ⚠️ A staging estava na **version 7**, anterior ao `D-50` — medir antes do redeploy teria
 respondido sobre código de cinco decisões atrás.
@@ -3613,7 +3613,7 @@ de ser *"Quanto a IA pode gastar"* — o "pode" era o teto — e virou *"Quanto 
 **Contexto:** `Q5`, `RN-06`, `RNF-07`, `D-29`, `D-01`
 
 **Aplicado agora** (`setAppSecret`, prod `9c47f42f` e staging `3936ca2d`, 13/08 12:16):
-`GOATLAS_ESPACOS_CONFLUENCE=GT,DTE,GN`. Saem os quatro que o `D-29` havia acrescentado —
+`ATLAS_ESPACOS_CONFLUENCE=GT,DTE,GN`. Saem os quatro que o `D-29` havia acrescentado —
 **`DE`** (Devops), **`GI`** (GO INFRA), **`datateam`** (GO Data) e **`Protheus`**.
 
 **O que mudou é o CRITÉRIO.** O `D-29` escolheu por *"isto é documentação técnica?"*, e por
@@ -3777,12 +3777,12 @@ lê tenta de novo, desiste e abre chamado — o contrário do que a aba existe p
 par de `comentariosIndisponiveis` e dos três estados de `CargaEspacos`.
 
 ⚠️ **A frase NÃO é o placeholder de `RF-43`.** Lá falta um bloco no meio de um texto que
-existe; aqui não há texto nenhum, e o trabalho é de quem escreve. Dizer "o goatlas ainda não
+existe; aqui não há texto nenhum, e o trabalho é de quem escreve. Dizer "o atlas ainda não
 sabe mostrar" acusaria o app de um defeito que não é dele.
 
 **4. Bloco conhecido caindo em `desconhecido`, com o nome técnico em inglês.** `view-file`
 (11 ocorrências, "Typesense - Documentação" e outras) e `adf:decision-list` ("Notas de
-Reunião") imprimiam `view-file` e `adf:decision-list` dentro da caixa que diz *"o goatlas
+Reunião") imprimiam `view-file` e `adf:decision-list` dentro da caixa que diz *"o atlas
 ainda não sabe mostrar este bloco"*. O nome técnico existe para o caso em que ele é a **única
 pista** (`D-34`); quando se sabe o que o bloco é, imprimi-lo é despejar jargão da Atlassian em
 cima de quem só quer resolver um problema.
@@ -4367,7 +4367,7 @@ lista, sempre desenhada, e o contador soma as duas origens.
 **Medido no navegador em 13/08:** dois prints colados na conversa → cartão sem rádio, *"Você já
 anexou 2 arquivos"* com os dois nomes e *"Ainda cabem 1 de 3"* · terceiro anexo pelo cartão →
 *"Você já anexou 3 arquivos"* com os três e *"Este é o limite de 3 arquivos"*, botão fora ·
-abertura sem declarar nada → `GOATLAS-1` com *"✓ Anexado: image.png, print-do-erro.png,
+abertura sem declarar nada → `ATLAS-1` com *"✓ Anexado: image.png, print-do-erro.png,
 terceiro.png"* · e a tela do formulário intacta, com os dois rádios e a frase composta de `D-46`.
 
 **Testes:** `tests/d70-assunto-com-nome.test.ts` (10 casos — o que atravessa a fronteira, o
@@ -4813,6 +4813,101 @@ em uma linha começando por `Em aberto:` — a lacuna vira informação para que
 *"Em aberto: não foi informado desde quando isso acontece, nem o nome ou código do material,
 nem o que foi alterado da última vez."*
 
+### D-77 · O app deixou de se chamar `goatlas` e passou a se chamar `atlas`
+
+**19/08/2026.** Pedido do dono do produto: trocar o nome em todo lugar — site, design, código
+e documento —, e no GoDeploy também.
+
+Foram **266 ocorrências em 102 arquivos**. A troca em si é mecânica; o que exigiu decisão são
+as **duas fronteiras por onde o nome antigo já saiu do repositório** e não pode ser reescrito
+por nós.
+
+#### 🚨 O prefixo `via goatlas:` está gravado dentro de comentários que já existem no Jira
+
+`D-13` põe a autoria no **corpo** do comentário, porque sob proxy total (`D-01`) o autor
+perante a API é sempre a conta de serviço. Três leitores dependem de reconhecer esse prefixo
+de volta: o SLA de primeira resposta (`RF-46`), a autoria na tela (`D-43`) e a supressão de
+ação própria (`RF-48`) — e todos os três passam pelo **mesmo** predicado, o regex
+`PREFIXO_ATLAS` em `atlassian/comentarios.ts`.
+
+Trocar o regex para só a forma nova faria **todo comentário antigo do solicitante** deixar de
+ser reconhecido. As consequências são exatamente as três que este projeto já pagou uma vez:
+
+| O que quebraria | Defeito idêntico ao de |
+|---|---|
+| Comentário da pessoa passa a contar como **primeira resposta do time** → aderência ao SLA infla, alerta de `RF-46` nunca dispara | `D-56` |
+| Na tela, o comentário que a pessoa escreveu aparece assinado pela **conta de serviço** | `D-43` |
+| A impressão digital não casa → cada pessoa é notificada do **próprio** comentário | `RF-48` |
+
+**Decisão: lê `atlas` E `goatlas`, escreve só `atlas`** — `via (?:go)?atlas:`. É a forma de
+`linhasComoObjetos`: duas leituras, uma escrita.
+
+#### 🚨 Os nove secrets do GoDeploy ainda se chamam `GOATLAS_*`, e ninguém consegue lê-los
+
+`listAppSecrets` devolve **só o nome** do secret; o valor não é legível por nenhuma
+ferramenta. Renomear no código sem uma ponte deixaria o app publicado sem `dominios_permitidos`,
+sem `admins` e sem `service_desk_id` — e como quase toda allowlist do projeto é **fail-closed**
+(`RNF-07`), o sintoma não seria um erro: seria o app **negando tudo para todo mundo**, com
+HTTP 200 e nada no log dizendo por quê.
+
+**Decisão: `src/lib/env-do-app.ts`** — o **único** lugar do código que conhece a palavra
+`GOATLAS`. `valorDoApp(env, 'ATLAS_X')` devolve `ATLAS_X` e cai para `GOATLAS_X`; o resto do
+código conhece só o nome novo. Vazio (`''`) conta como ausência, senão um secret recriado em
+branco mascararia o antigo que ainda funciona.
+
+⚠️ **Não alcança as credenciais**: a troca é ancorada no início e exige o `_`, e
+`ATLASSIAN_API_TOKEN` não tem underscore depois de `ATLAS`. As cinco credenciais nunca tiveram
+prefixo do app e continuam lidas em `contexto.ts`, num lugar só (`RNF-01`).
+
+⚠️ **Quando remover a ponte:** depois de recriar os nove secrets como `ATLAS_*` em prod
+(`9c47f42f`) e na staging (`3936ca2d`) — os valores têm de ser **recolados à mão**.
+`tests/env-do-app.test.ts` é o que reprova a remoção feita pela metade.
+
+#### O design: o corte bicolor perdeu o que codificava
+
+A marca era `go` em branco + `atlas` em lime, e o corte separava o **prefixo da família
+GoGroup** do nome do app — é o mesmo desenho de `godocs` e `godaily`. Sem o `go`, esse corte
+não codifica mais nada, e `atlas` **todo** em lime contraria a identidade (§1 regra 3: lime é
+acento pontual, ~10% da página, *"mais poderoso quando escasso"*).
+
+**Decisão: `a` em lime + `tlas` em branco.** O acento marca a **inicial** — a mesma letra que
+o favicon recorta dentro do balão —, então as duas marcas passam a apontar para o mesmo lugar
+em vez de cada uma inventar o seu destaque. Lime em 1 de 5 letras mantém a escassez.
+
+No favicon, o `g` geométrico virou `a`: **o mesmo anel**, com a haste reta do topo à base e
+**sem descendente**. Ficou mais legível a 16 px do que o desenho anterior, porque a cauda do
+`g` era a primeira coisa a virar borrão. A escala subiu de 4,51 para 5,4 justamente por causa
+da descendente que saiu: mantendo a escala antiga a letra ocuparia 55% da altura do balão
+contra os 77% do `g`.
+
+✅ **Medido no navegador em 19/08/2026** (não estimado): centro óptico do `a` em (256, 223),
+o centro do balão, com folgas simétricas de 81,7 px na horizontal e 40,7 px na vertical; e a
+letra lida como `a` em 16, 24, 32, 48, 64, 128 e 256 px.
+
+⚠️ **A folha de estilo não engordou**: o hash do CSS ficou **idêntico** depois de redesenhar o
+favicon, o que confirma que o `@source not "../../public"` de `D-61` continua tirando `public/`
+da varredura do Tailwind.
+
+#### O que mudou de fora, e o que ficou
+
+- **A URL mudou para `https://atlas.devgogroup.com`**, e `goatlas.devgogroup.com` **morreu** —
+  decisão explícita do dono do produto, com a alternativa de um app de redirecionamento no slug
+  antigo oferecida e recusada. ⚠️ Link salvo e endereço escrito em página do Confluence param de
+  funcionar; quem depender deles precisa ser avisado.
+- **O header do webhook virou `x-atlas-webhook`**, sem ponte. É seguro porque o webhook **nunca
+  funcionou**: o edge autenticado devolve 302 antes de a requisição chegar ao worker, e ele nunca
+  foi registrado no Jira. Quem for registrá-lo agora usa o nome novo.
+- **O remetente default de e-mail virou `atlas@gocase.com`.** ⚠️ **Nenhum dos dois endereços foi
+  verificado como caixa existente**, e hoje isso é inócuo porque o canal é `nenhum` (`D-56`) —
+  vira pendência no dia em que alguém ligar o e-mail.
+- **`ATLAS_ALLOW_MAIN_EDIT`** é o novo escape hatch do hook de worktree, e o nome antigo continua
+  valendo: quem o tem decorado não fica de fora.
+- **O diretório local e o repositório no GitHub continuam `goatlas`.** Renomear o diretório
+  quebraria o caminho das **51 worktrees** vivas; renomear o repo é ação de fora do código. Nenhum
+  dos dois é visível para quem usa o app.
+
+---
+
 ---
 
 ## Perguntas em aberto
@@ -4822,7 +4917,7 @@ implementado antes da resposta.
 
 | # | Pergunta | Quem decide | Bloqueia |
 |---|---|---|---|
-| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | ✅ **RESPONDIDA na parte de credencial — `D-23`, 07/08/2026.** `ATATT` clássico validado (`/rest/api/3/myself` → 200), `ATCTT` em `ATLASSIAN_ORG_API_KEY`, org id validado, `GOATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"). **T-063 saiu do bloqueio** — falta escolher os tipos da allowlist de `RF-28`, que é roteamento. ⚠️ **Pendências que não são "qual credencial":** a conta é **pessoal do João** (contra `RNF-03` — conta de serviço dedicada continua a fazer), o `ATCTT` precisa de **rotação** e pode virar chave só-leitura, e a **escrita** de governança exige reivindicar o domínio, não credencial |
+| Q1 | Qual conta de serviço será criada, e quais privilégios exatos em cada uma das três credenciais? | João | ✅ **RESPONDIDA na parte de credencial — `D-23`, 07/08/2026.** `ATATT` clássico validado (`/rest/api/3/myself` → 200), `ATCTT` em `ATLASSIAN_ORG_API_KEY`, org id validado, `ATLAS_SERVICE_DESK_ID=4` (`GN`, "Tickets Engenharia"). **T-063 saiu do bloqueio** — falta escolher os tipos da allowlist de `RF-28`, que é roteamento. ⚠️ **Pendências que não são "qual credencial":** a conta é **pessoal do João** (contra `RNF-03` — conta de serviço dedicada continua a fazer), o `ATCTT` precisa de **rotação** e pode virar chave só-leitura, e a **escrita** de governança exige reivindicar o domínio, não credencial |
 | Q2 | Qual campo do Jira delimita "mesmo tipo de ticket" para a Regra 2 — label, componente ou tipo de issue? | João + time de tech | RF-10, RF-11 (o agrupamento do `check_jira_history`) |
 | Q3 | Quais são os exemplos reais de "ajuste operacional" da Gocase para o prompt de classificação? | João + tech/dados | ✂️ **CORTADA em `D-60`, 13/08/2026: a Regra 2 fica desligada por decisão.** O campo saiu do console — caixa vazia na tela cobra um trabalho que ninguém vai fazer. `RF-14` continua descrito e `regra2Disponivel` continua sendo o predicado; a tool `check_jira_history` continua rodando e **se declarando indisponível**, que é o que `RF-08` exige. Reabrir é preencher a chave por `PUT /api/admin/config` (sem deploy) e reabrir `D-60` para devolver a tela |
 | Q4 | O campo customizado "Solicitante" já existe no projeto do portal, ou precisa ser criado? | João + time de tech | ✅ **RESPONDIDA pela medição — `D-36`, 11/08/2026.** Não existe um campo "Solicitante": o que existe é um par **`customfield_10089` (Nome do Colaborador)** + **`customfield_10091` (E-mail)**, obrigatórios, **só no request type 108**. 🚨 E o mesmo id significa outra coisa em outro tipo (`10092`: cargo no 108, sistema do bug no 70), então `campo_solicitante_id` — um id **global** — tinha a forma errada: sai da config e vira mapeamento **por request type**, fixo no código. RF-21, RNF-21 (reconciliação) |

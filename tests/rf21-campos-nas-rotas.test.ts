@@ -32,7 +32,7 @@ async function ctxCom(config: Record<string, unknown>) {
   for (const [chave, valor] of Object.entries(config)) {
     await c.definir(chave as never, valor as never, 'chefe@gocase.com', '2026-08-11T00:00:00.000Z')
   }
-  return montarContexto({ DB: db, GOATLAS_DOMINIOS: 'gocase.com' })
+  return montarContexto({ DB: db, ATLAS_DOMINIOS: 'gocase.com' })
 }
 
 async function chamar(ctx: Awaited<ReturnType<typeof montarContexto>>, caminho: string, opcoes: {
@@ -40,7 +40,7 @@ async function chamar(ctx: Awaited<ReturnType<typeof montarContexto>>, caminho: 
   corpo?: unknown
 } = {}) {
   const r = await tratarRequisicao(
-    new Request(`https://goatlas.devgogroup.com${caminho}`, {
+    new Request(`https://atlas.devgogroup.com${caminho}`, {
       method: opcoes.metodo ?? 'GET',
       headers: { [HEADER_EMAIL]: ANA },
       ...(opcoes.corpo === undefined ? {} : { body: JSON.stringify(opcoes.corpo) }),

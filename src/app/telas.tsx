@@ -1,5 +1,5 @@
 /**
- * As telas do goatlas.
+ * As telas do atlas.
  *
  * Quatro superfícies, uma coluna, mobile-first (RNF-28): conversa com o agente,
  * meus chamados, detalhe do chamado e o formulário sem IA (D-04).
@@ -734,7 +734,7 @@ export function EntradaConversa({ fala }: { fala: Fala }) {
   if (fala.de === 'agente') {
     return (
       <div>
-        <span className="autor">goatlas</span>
+        <span className="autor">atlas</span>
         <TextoDoAgente texto={fala.texto} />
       </div>
     )
@@ -2077,15 +2077,15 @@ function ArquivosDoChamado({
             // A origem é dita em **palavras**, nunca só por posição ou cor (regra 9): quem
             // mandou o arquivo precisa reconhecê-lo, e "o time respondeu com um anexo" é
             // outra notícia. Ausente = resposta antiga do servidor; aí não se afirma nada.
-            // ⚠️ `goatlas` **não** é uma das duas: a transcrição de `RF-23` não foi
+            // ⚠️ `atlas` **não** é uma das duas: a transcrição de `RF-23` não foi
             // enviada por ninguém, e chamá-la de "você enviou" ou "do time" seria a tela
             // afirmando autoria falsa — o defeito de `D-43`, na versão arquivo.
             a.origem === 'voce'
               ? 'você enviou'
               : a.origem === 'time'
                 ? 'do time'
-                : a.origem === 'goatlas'
-                  ? 'gerado pelo goatlas'
+                : a.origem === 'atlas'
+                  ? 'gerado pelo atlas'
                   : null,
             extensaoLegivel(a.nomeArquivo),
             tamanhoLegivel(a.tamanhoBytes),
@@ -2132,7 +2132,7 @@ function ArquivosDoChamado({
  * ## O que esta tela pode afirmar, e o que não pode
  *
  * Sob proxy total (`D-01`) o `autorNome` que volta do JSM é o da conta que
- * **registrou** o comentário, e para tudo que sai do goatlas essa conta é a de
+ * **registrou** o comentário, e para tudo que sai do atlas essa conta é a de
  * serviço. A tela imprimia esse nome como autor: o comentário da própria pessoa
  * aparecia assinado por um colega, com o prefixo de `D-13` logo abaixo dizendo
  * outro nome. A leitura natural — *alguém escreveu em meu nome* — é a pior possível.

@@ -133,8 +133,17 @@ export function App() {
   return (
     <div className="app">
       <header className="cabecalho">
+        {/*
+          ⚠️ **O acento marca a INICIAL, e isso não é o mesmo split de antes.** Até
+          19/08/2026 a marca era `go` em branco + `atlas` em lime, e o corte separava o
+          prefixo da família GoGroup do nome do app. Sem o `go`, esse corte não diz mais
+          nada — e `atlas` todo em lime contraria a identidade (§1 regra 3: lime é acento
+          pontual, ~10% da página, "mais poderoso quando escasso"). O `a` é a mesma letra
+          que o favicon recorta dentro do balão, então as duas marcas passam a apontar
+          para o mesmo lugar em vez de cada uma inventar o seu destaque.
+        */}
         <span className="marca">
-          go<span>atlas</span>
+          <span>a</span>tlas
         </span>
         {/*
           A identidade no canto existe só para a pessoa saber COM QUAL CONTA está

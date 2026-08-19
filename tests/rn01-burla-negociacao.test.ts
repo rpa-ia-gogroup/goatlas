@@ -54,7 +54,7 @@ beforeEach(async () => {
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
   // Threshold alto: a Regra 1 não bloqueia sozinha, e cada caso escolhe o que exercitar.
   await config.definir('regra1_threshold_score', 0.99, CHEFE, AGORA)
-  ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+  ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
   fake = ctx.atlassian as ClienteAtlassianFake
   ia = ctx.ia as ClienteIAFake
   fake.estado.tiposChamado = [
@@ -73,7 +73,7 @@ beforeEach(async () => {
 })
 
 function req(caminho: string, corpo?: unknown, metodo = 'POST', quem = ANA): Request {
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: metodo,
     headers: { [HEADER_EMAIL]: quem },
     ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),

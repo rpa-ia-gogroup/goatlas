@@ -261,7 +261,7 @@ describe('a rota da busca (RF-37) amplia, e a auditoria mostra o que foi consult
     await config.definir('dominios_permitidos', ['gocase.com'], ANA, AGORA)
     await config.definir('espacos_confluence', ['GT'], ANA, AGORA)
     ctx = await montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      { DB: db, ATLAS_USAR_FAKES: '1' },
       () => AGORA,
       () => `id-${++n}`,
     )
@@ -276,7 +276,7 @@ describe('a rota da busca (RF-37) amplia, e a auditoria mostra o que foi consult
 
   const buscar = (query: string): Promise<Response> =>
     tratarRequisicao(
-      new Request(`https://goatlas.devgogroup.com/api/confluence/busca${query}`, {
+      new Request(`https://atlas.devgogroup.com/api/confluence/busca${query}`, {
         headers: { [HEADER_EMAIL]: ANA },
       }),
       ctx,

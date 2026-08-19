@@ -156,7 +156,7 @@ describe('RF-12 / RNF-31 — a mensagem de bloqueio tem os três elementos e soa
     const msg = montarMensagemBloqueio(v)
 
     expect(msg).toContain('Reprocessar pipeline')
-    // T-118 — o link é a leitura DENTRO do app. Quem usa o goatlas não tem assento
+    // T-118 — o link é a leitura DENTRO do app. Quem usa o atlas não tem assento
     // Atlassian: `atlassian.net` seria uma parede no momento do clique.
     expect(msg).toContain('/documentacao?pagina=')
     expect(msg).not.toContain('atlassian.net')

@@ -57,7 +57,7 @@ beforeEach(async () => {
   await config.definir('dominios_permitidos', ['gocase.com'], CHEFE, AGORA)
   await config.definir('tipos_chamado_permitidos', ['rt-1'], CHEFE, AGORA)
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
-  ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+  ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
 })
 
 function req(
@@ -66,7 +66,7 @@ function req(
 ): Request {
   const headers: Record<string, string> = {}
   if (opcoes.email) headers[HEADER_EMAIL] = opcoes.email
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: opcoes.metodo ?? 'GET',
     headers,
     ...(opcoes.corpo === undefined ? {} : { body: JSON.stringify(opcoes.corpo) }),
@@ -99,7 +99,7 @@ async function anexar(issueKey: string, nome: string, email = ANA): Promise<void
   const form = new FormData()
   form.append('arquivo', new File([new Uint8Array([1, 2, 3, 4])], nome, { type: 'image/png' }))
   const r = await tratarRequisicao(
-    new Request(`https://goatlas.devgogroup.com/api/chamados/${issueKey}/anexos`, {
+    new Request(`https://atlas.devgogroup.com/api/chamados/${issueKey}/anexos`, {
       method: 'POST',
       headers: { [HEADER_EMAIL]: email },
       body: form,
@@ -173,7 +173,7 @@ describe('T-084 — o anexo do solicitante volta na leitura do chamado', () => {
       {
         id: 'c1',
         corpo: '',
-        autorNome: 'Conta de serviço goatlas',
+        autorNome: 'Conta de serviço atlas',
         criadoEm: AGORA,
         publico: true,
         anexos: [{ nome: 'armadilha.png', tipo: 'text/html', tamanho: 4 }],

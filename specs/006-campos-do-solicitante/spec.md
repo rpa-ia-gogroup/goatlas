@@ -70,7 +70,7 @@ chamado pelo formulário sem IA (`D-04`) ou pela confirmação da conversa com o
 (`RF-17`). O app conhece nome e e-mail da pessoa desde o primeiro clique; a Atlassian não
 conhece nenhum dos dois.
 
-Administrador do goatlas, que hoje vê no console um campo de configuração de id de campo
+Administrador do atlas, que hoje vê no console um campo de configuração de id de campo
 customizado — e que, por decisão do mantenedor, deixará de vê-lo.
 
 ## 4. User Stories
@@ -80,9 +80,9 @@ customizado — e que, por decisão do mantenedor, deixará de vê-lo.
   meu login.
 - **US-2** — As a agente do time de tech, I want que o nome e o e-mail no chamado sejam os
   da pessoa autenticada, so that eu não precise confiar no que alguém digitou.
-- **US-3** — As a mantenedor do goatlas, I want que o mapeamento de campo seja por tipo de
+- **US-3** — As a mantenedor do atlas, I want que o mapeamento de campo seja por tipo de
   chamado, so that um id reusado com outro significado não escreva dado no campo errado.
-- **US-4** — As a mantenedor do goatlas, I want a área do solicitante derivada da fonte
+- **US-4** — As a mantenedor do atlas, I want a área do solicitante derivada da fonte
   organizacional viva, so that ela continue correta quando alguém muda de time, sem ninguém
   editar tabela.
 - **US-5** — As a colaborador, I want abrir meu chamado mesmo quando a fonte de área está
@@ -251,7 +251,7 @@ customizado — e que, por decisão do mantenedor, deixará de vê-lo.
       feita, como `RF-19` já define.
 - [x] **Os campos aparecem na tela?** — *sim, visíveis*. ⚠️ **Editáveis**, não somente leitura
       — ver a tensão registrada em `FR-12`.
-- [ ] [NEEDS CLARIFICATION: quem é o dono da credencial da fonte organizacional no goatlas e
+- [ ] [NEEDS CLARIFICATION: quem é o dono da credencial da fonte organizacional no atlas e
       qual a política de rotação? A que existe hoje pertence a outro app. **Não bloqueia
       código:** ausência de credencial cai em `SC-5` (fail-open), mas bloqueia o go-live da
       derivação de área.]

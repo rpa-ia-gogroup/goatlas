@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="goatlas">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="atlas">
   <!--
-    A marca do goatlas, na mesma família do godocs: fundo azul com canto generoso, um
+    A marca do atlas, na mesma família do godocs: fundo azul com canto generoso, um
     OBJETO CONCRETO em branco, um acento lime na quina desse objeto, e a inicial
     recortada em azul dentro dele.
 
     Lá o objeto é uma folha com o canto dobrado, porque o godocs é sobre documento.
-    Aqui é um balão de conversa, porque o goatlas é uma conversa que vira chamado: a
+    Aqui é um balão de conversa, porque o atlas é uma conversa que vira chamado: a
     tela principal é o agente, e o formulário existe como caminho alternativo. Um ícone
     de ticket descreveria o resultado; o balão descreve o que a pessoa faz.
 
@@ -40,24 +40,33 @@
   </g>
 
   <!--
-    O "g" recortado, geométrico (anel mais haste) em vez de um recorte da Poppins: o
+    O "a" recortado, geométrico (anel mais haste) em vez de um recorte da Poppins: o
     traço da fonte afina demais para sobreviver a 16 px, e um SVG com texto dependeria
     de a fonte estar instalada em quem abre a aba.
 
-    O anel ABRE onde a haste passa, como o bowl de um "g" de verdade encontra a haste.
-    Sem essa abertura a forma se lê como "c" com um traço ao lado.
+    ⚠️ É o MESMO anel que desenhava o "g" até 19/08/2026 — só a haste mudou. O anel
+    ABRE à direita, onde a haste passa, como o bowl de um "a" de caixa baixa de uma
+    linha encontra a haste; fechado, a forma se lê como "o" com um traço ao lado.
 
-    O `translate`/`scale` foi medido no navegador, não estimado: o centro do "g" cai
-    exatamente no centro do balão, com folga igual nos quatro lados.
+    A haste vai do topo à base do anel e NÃO desce: descendente era do "g". É o que
+    torna este desenho mais legível a 16 px do que o anterior, porque a cauda do "g"
+    era a primeira coisa a virar borrão.
+
+    O `translate`/`scale` foi medido no navegador, não estimado: o centro óptico do
+    "a" (26.5, 27 em unidades locais) cai no centro do balão (256, 223), com folga
+    igual nos quatro lados — 81,7 px na horizontal e 40,7 px na vertical. E a escala
+    subiu de 4,51 para 5,4 justamente porque o "a" perdeu a descendente: mantendo a
+    escala antiga, a letra ocuparia 55% da altura do balão contra os 77% do "g", e
+    sobraria branco demais em volta.
   -->
   <g
-    transform="translate(136.5 74.8) scale(4.51)"
+    transform="translate(112.9 77.2) scale(5.4)"
     fill="none"
     stroke="#0059A9"
     stroke-width="7"
     stroke-linecap="round"
   >
     <path d="M34.9 19.9A11 11 0 1 0 34.9 34.1" />
-    <path d="M37.5 18v22.5c0 5.9-3.9 9.2-9.2 9.2-3.3 0-6-1-7.9-2.7" />
+    <path d="M37.5 16v22" />
   </g>
 </svg>

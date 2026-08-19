@@ -43,7 +43,7 @@ const EMAIL = 'ana@gocase.com'
 const AGORA = '2026-08-12T18:40:00.000Z'
 
 const DIALOGO: MensagemIA[] = [
-  { papel: 'system', conteudo: 'Você é o agente do goatlas. Espaços permitidos: GT, DTE.' },
+  { papel: 'system', conteudo: 'Você é o agente do atlas. Espaços permitidos: GT, DTE.' },
   { papel: 'user', conteudo: 'Minha VPN não conecta desde ontem à tarde.' },
   {
     papel: 'tool',
@@ -142,7 +142,7 @@ describe('montarTranscricao — o que entra e o que fica de fora', () => {
   it('🚨 NÃO leva o prompt do sistema — ele é configuração da instalação (D-33)', () => {
     const md = montarTranscricao(DIALOGO, DADOS)
     expect(md).not.toContain('Espaços permitidos')
-    expect(md).not.toContain('Você é o agente do goatlas')
+    expect(md).not.toContain('Você é o agente do atlas')
   })
 
   it('🚨 registra que a tool rodou, e NÃO o que ela devolveu', () => {
@@ -298,14 +298,14 @@ describe('pela rota real: confirmar a conversa leva a transcrição ao chamado',
       ],
     })
     let n = 0
-    ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`, {
+    ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`, {
       atlassian,
       ia: new ClienteIAFake(ROTEIRO),
     })
   })
 
   const req = (caminho: string, corpo?: unknown) =>
-    new Request(`https://goatlas.devgogroup.com${caminho}`, {
+    new Request(`https://atlas.devgogroup.com${caminho}`, {
       method: 'POST',
       headers: { [HEADER_EMAIL]: ANA },
       ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
@@ -359,7 +359,7 @@ describe('pela rota real: confirmar a conversa leva a transcrição ao chamado',
 describe('a tela não inventa autoria para a transcrição (D-43 aplicado a arquivo)', () => {
   const base = { tamanhoBytes: 10, tipoDeclarado: 'text/markdown', criadoEm: AGORA }
 
-  it('`via: transcricao` sai como `goatlas`, e o envio da pessoa continua `voce`', () => {
+  it('`via: transcricao` sai como `atlas`, e o envio da pessoa continua `voce`', () => {
     const r = anexosParaExibir(
       'GN-6903',
       [],
@@ -370,7 +370,7 @@ describe('a tela não inventa autoria para a transcrição (D-43 aplicado a arqu
       ],
     )
     expect(r.itens.map((i) => [i.nomeArquivo, i.origem])).toEqual([
-      ['conversa-GN-6903.md', 'goatlas'],
+      ['conversa-GN-6903.md', 'atlas'],
       ['print.png', 'voce'],
     ])
   })

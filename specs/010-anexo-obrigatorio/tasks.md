@@ -39,7 +39,7 @@ Cobertura conferida `spec` → `plan` → `tasks`:
 
 - [x] **T-1000** Rota de diagnóstico só-admin que tenta uma criação e devolve o **corpo do
       erro** da Atlassian, redigido por `corpoSeguro` e truncado. Título com
-      `[TESTE goatlas - ignorar]`. ⚠️ Tentativa que falha não cria nada; a que der certo cria
+      `[TESTE atlas - ignorar]`. ⚠️ Tentativa que falha não cria nada; a que der certo cria
       chamado **real** — e alguém do time de tech precisa apagá-lo. _Requirements: M-1_
 - [x] **T-1001** Medir na staging: (a) tipo `134` **sem** anexo → ler o corpo do 400 e
       confirmar que ele nomeia o campo de anexo · (b) tipo `134` **com**
@@ -138,7 +138,7 @@ Cobertura conferida `spec` → `plan` → `tasks`:
 
 - [ ] **T-1025** Deploy na staging (regra 10) e abrir **dois** chamados reais: um do `134`
       **com** anexo e um do `70` (anexo opcional) **com** anexo — o segundo é a prova de não
-      regressão. Ambos `[TESTE goatlas - ignorar]`. _Requirements: SC-02, SC-04_
+      regressão. Ambos `[TESTE atlas - ignorar]`. _Requirements: SC-02, SC-04_
 - [ ] **T-1026** Tentar o `134` **sem** anexo pela rota, na staging, e conferir a linha
       `anexo_obrigatorio_ausente` na auditoria. _Requirements: ScB-01_
 - [ ] **T-1027** Devolver `90, 91, 92, 94, 96, 134` à allowlist de **produção** — só depois de

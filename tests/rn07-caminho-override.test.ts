@@ -154,13 +154,13 @@ describe('RF-42 — a justificativa aparece na conversa, e não como mensagem', 
     expect(saida).not.toContain('Justificativa registrada')
   })
 
-  it('o agente continua sem balão, assinando como goatlas', () => {
+  it('o agente continua sem balão, assinando como atlas', () => {
     const saida = html(
       createElement(EntradaConversa, {
         fala: { de: 'agente', texto: 'Achei documentação sobre isso.' },
       }),
     )
-    expect(saida).toContain('goatlas')
+    expect(saida).toContain('atlas')
     expect(saida).not.toContain('fala-usuario')
     expect(saida).not.toContain('fala-justificativa')
   })

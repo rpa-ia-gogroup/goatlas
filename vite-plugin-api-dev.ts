@@ -20,7 +20,7 @@ import { migrar } from './src/lib/db/schema'
 import { ClienteIAFake } from './src/lib/ia/fake'
 import { ClienteOrganizacaoFake } from './src/lib/atlassian/organizacao-fake'
 
-const EMAIL_DEV = process.env.GOATLAS_DEV_EMAIL ?? 'dev@gocase.com'
+const EMAIL_DEV = process.env.ATLAS_DEV_EMAIL ?? 'dev@gocase.com'
 const CRON_KEY_DEV = 'dev-cron'
 
 /**
@@ -50,11 +50,11 @@ const ROTEIRO_DEV = [
 
 export function apiDev(): Plugin {
   return {
-    name: 'goatlas-api-dev',
+    name: 'atlas-api-dev',
     apply: 'serve',
     async configureServer(server) {
       // Banco em arquivo, para o estado sobreviver ao hot reload.
-      const db = new SqliteLocal('.goatlas-dev.db')
+      const db = new SqliteLocal('.atlas-dev.db')
 
       // ⚠️ A config é semeada ANTES de montar o contexto: `montarContexto` lê os
       // valores uma vez, e semear depois deixaria o app fechado até reiniciar.
@@ -83,7 +83,7 @@ export function apiDev(): Plugin {
           new Date().toISOString(),
         )
         server.config.logger.info(
-          `[goatlas] config de dev semeada · domínio ${dominio} · usuário ${EMAIL_DEV}`,
+          `[atlas] config de dev semeada · domínio ${dominio} · usuário ${EMAIL_DEV}`,
         )
       }
 
@@ -141,7 +141,7 @@ export function apiDev(): Plugin {
       // entre requisições — o contexto em si é remontado a cada uma, como o Worker
       // faz, para que config alterada pelo console valha na requisição seguinte.
       const inicial = await montarContexto(
-        { DB: db, GOATLAS_USAR_FAKES: '1' },
+        { DB: db, ATLAS_USAR_FAKES: '1' },
         undefined,
         undefined,
         { ia: iaDev, organizacao: organizacaoDev },
@@ -381,7 +381,7 @@ export function apiDev(): Plugin {
           '<ol><li>Abra o painel de tarefas</li><li>Procure a rotina <code>vendas_diario</code></li><li>Execute o reprocessamento manual</li></ol>',
           '<ac:structured-macro ac:name="info"><ac:rich-text-body><p>O reprocessamento leva cerca de 10 minutos.</p></ac:rich-text-body></ac:structured-macro>',
           '<h2>Se não resolver</h2>',
-          '<p>Abra chamado pelo goatlas com o horário da última execução.</p>',
+          '<p>Abra chamado pelo atlas com o horário da última execução.</p>',
           '<ac:structured-macro ac:name="jira-chart"><ac:parameter ac:name="jql">project = EXEMPLO</ac:parameter></ac:structured-macro>',
         ].join(''),
       })
@@ -424,7 +424,7 @@ export function apiDev(): Plugin {
 
         try {
           const ctx = await montarContexto(
-            { DB: db, GOATLAS_USAR_FAKES: '1' },
+            { DB: db, ATLAS_USAR_FAKES: '1' },
             undefined,
             undefined,
             clientes,
@@ -436,7 +436,7 @@ export function apiDev(): Plugin {
           resposta.headers.forEach((valor, chave) => res.setHeader(chave, valor))
           res.end(await resposta.text())
         } catch (erro) {
-          server.config.logger.error(`[goatlas] erro em ${req.url}: ${String(erro)}`)
+          server.config.logger.error(`[atlas] erro em ${req.url}: ${String(erro)}`)
           res.statusCode = 500
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ erro: 'Erro no servidor de desenvolvimento.', codigo: 'dev' }))

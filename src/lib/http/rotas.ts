@@ -1189,7 +1189,7 @@ async function rotear(
     const filtrados = itens.filter((i) => {
       if (filtroStatus && (i.status ?? '').toLowerCase() !== filtroStatus) return false
       if (!termo) return true
-      // O `issueKey` entra na busca de propósito: procurar por "GOATLAS-12" é o caso
+      // O `issueKey` entra na busca de propósito: procurar por "ATLAS-12" é o caso
       // mais comum de quem tem o número numa conversa de chat.
       return normalizarBusca(`${i.issueKey} ${i.titulo ?? ''}`).includes(termo)
     })
@@ -2365,11 +2365,11 @@ async function rotear(
     let idsAnexo: string[] = []
     if (corpo?.comAnexo === true) {
       const bytes = new TextEncoder().encode(
-        'Arquivo de teste do goatlas — diagnostico de criacao com anexo (spec 010).',
+        'Arquivo de teste do atlas — diagnostico de criacao com anexo (spec 010).',
       )
       idsAnexo = [
         await ctx.atlassian.subirAnexoTemporario(serviceDeskId, {
-          nome: 'teste-goatlas.txt',
+          nome: 'teste-atlas.txt',
           tipo: 'text/plain',
           bytes: bytes.buffer as ArrayBuffer,
         }),
@@ -2381,7 +2381,7 @@ async function rotear(
         serviceDeskId,
         tipoChamadoId,
         titulo,
-        descricao: typeof corpo?.descricao === 'string' ? corpo.descricao : 'Teste do goatlas.',
+        descricao: typeof corpo?.descricao === 'string' ? corpo.descricao : 'Teste do atlas.',
         prioridade: 'normal',
         solicitanteEmail: eu.email,
         chaveIdempotencia: `diag:${tipoChamadoId}:${ctx.agora()}`,
@@ -3153,7 +3153,7 @@ function validarProposta(
  * - Segredo inválido → **403 sempre igual**, e o registro na auditoria. É a tentativa de
  *   burla, e ela precisa deixar rastro.
  * - Segredo válido → **202 sempre igual**, com ou sem vínculo local. Um 404 para chamado
- *   desconhecido diria "este chamado não passou pelo goatlas", que já é informação sobre
+ *   desconhecido diria "este chamado não passou pelo atlas", que já é informação sobre
  *   o chamado de outro (mesmo raciocínio do 404-em-vez-de-403 de `RF-30`).
  * - O corpo do evento é **ponteiro**: sai dele uma chave de chamado e nada mais. O que a
  *   pessoa vai ler é relido da Atlassian (`servico.ts`), então evento forjado com texto

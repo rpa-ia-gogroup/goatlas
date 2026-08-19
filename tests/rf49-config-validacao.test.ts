@@ -43,7 +43,7 @@ beforeEach(async () => {
   await config.definir('dominios_permitidos', ['gocase.com'], CHEFE, AGORA)
   await config.definir('admins', [CHEFE], CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -51,7 +51,7 @@ beforeEach(async () => {
 
 function salvar(chave: string, valor: unknown): Promise<Response> {
   return tratarRequisicao(
-    new Request('https://goatlas.devgogroup.com/api/admin/config', {
+    new Request('https://atlas.devgogroup.com/api/admin/config', {
       method: 'PUT',
       headers: { [HEADER_EMAIL]: CHEFE },
       body: JSON.stringify({ chave, valor }),

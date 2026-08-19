@@ -34,8 +34,8 @@ import { linhasComoObjetos, primeiraLinha, type ResultadoQuery } from '@/lib/db/
 const FORMA_DOCUMENTADA: ResultadoQuery = {
   columns: ['issue_key', 'solicitante_email', 'verificado_regras'],
   rows: [
-    ['GOATLAS-1', 'ana@gocase.com', 1],
-    ['GOATLAS-2', 'bruno@gocase.com', 0],
+    ['ATLAS-1', 'ana@gocase.com', 1],
+    ['ATLAS-2', 'bruno@gocase.com', 0],
   ],
   rowsRead: 2,
 }
@@ -44,15 +44,15 @@ const FORMA_DOCUMENTADA: ResultadoQuery = {
 const FORMA_DA_PLATAFORMA: ResultadoQuery = {
   columns: ['issue_key', 'solicitante_email', 'verificado_regras'],
   rows: [
-    { issue_key: 'GOATLAS-1', solicitante_email: 'ana@gocase.com', verificado_regras: 1 },
-    { issue_key: 'GOATLAS-2', solicitante_email: 'bruno@gocase.com', verificado_regras: 0 },
+    { issue_key: 'ATLAS-1', solicitante_email: 'ana@gocase.com', verificado_regras: 1 },
+    { issue_key: 'ATLAS-2', solicitante_email: 'bruno@gocase.com', verificado_regras: 0 },
   ],
   rowsRead: 2,
 }
 
 const ESPERADO = [
-  { issue_key: 'GOATLAS-1', solicitante_email: 'ana@gocase.com', verificado_regras: 1 },
-  { issue_key: 'GOATLAS-2', solicitante_email: 'bruno@gocase.com', verificado_regras: 0 },
+  { issue_key: 'ATLAS-1', solicitante_email: 'ana@gocase.com', verificado_regras: 1 },
+  { issue_key: 'ATLAS-2', solicitante_email: 'bruno@gocase.com', verificado_regras: 0 },
 ]
 
 describe('linhasComoObjetos entende as DUAS formas de `rows`', () => {
