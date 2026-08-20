@@ -755,6 +755,19 @@ destes reabre um vazamento que já foi fechado.
   ⚠️ E as `chamada_externa` saem da narrativa e viram **agregado do turno**: seis idas à
   Atlassian no meio da conversa eram o ruído que fazia a tela parecer log, e o total no
   cabeçalho é o achado de `D-73` (~2,6 s só para nomear os assuntos) visível de relance.
+- 🚨 **Slug chega à tela pelo VALOR, não só pelo rótulo** (`D-79`, medido no navegador em
+  20/08/2026). Com a suíte verde e a varredura de `snake_case` passando, o título do evento
+  saía *"Bloqueio pela regra1_confluence"*: a varredura olhava **rótulos**, e o slug veio de
+  `dados.regra`. Existe `REGRAS` traduzindo os dois valores de `rules/index.ts#Regra`, e um
+  caso afirmando o par. ⚠️ **Nome de FERRAMENTA continua cru de propósito** — ali o
+  identificador é a coisa investigada (casa com `toolsPermitidas` em `agent/gate.ts`), e há um
+  contra-exemplo escrito para ninguém "consertar" isso.
+- 🚨 **Item de grade tem `min-width: auto`, e um `<pre>` dentro dele rola a PÁGINA** (`D-79`,
+  mesmo dia). O registro cru usa `white-space: pre`; sem `min-width: 0` no turno e no evento, a
+  largura vazava para fora e a página inteira ganhava barra horizontal — o defeito que `D-65`
+  corrigiu na tabela do Confluence, agora pela grade. ⚠️ E o separador entre rótulo e tamanho
+  vive no **markup**, nunca num `gap`: `gap` separa na tela e some no nome acessível
+  (`DADOS DO EVENTO750 BYTES`, medido).
 - 🚨 **Todo `TipoDeEvento` tem TRADUÇÃO, e o JSON cru mora dentro de um `<details>`**
   (`D-79`, `app/investigador/eventos.ts`). Duas coisas que valem sozinhas. A primeira é
   `Record<TipoDeEvento, Descritor>`: tipo novo sem tradução **não compila** (mesmo desenho de
@@ -1836,7 +1849,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1707 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1710 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

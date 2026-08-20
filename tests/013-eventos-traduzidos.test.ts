@@ -166,6 +166,32 @@ describe('as traduções que carregam o caso', () => {
     expect(d.blocos.map((b) => b.rotulo)).toContain('Resposta crua do modelo')
   })
 
+  // 🚨 Achado no NAVEGADOR em 20/08, com a suíte verde: o título saía "Bloqueio pela
+  // regra1_confluence". A varredura de `snake_case` olha os RÓTULOS; o slug veio pelo VALOR.
+  it('o bloqueio nomeia a regra em português, nunca o identificador dela', () => {
+    const d = descreverEvento(
+      'bloqueio',
+      JSON.stringify({ regra: 'regra1_confluence', motivo: '1 página com score alto' }),
+      null,
+    )
+    expect(d.titulo).not.toContain('regra1_confluence')
+    expect(d.titulo).toContain('Regra 1')
+    const r2 = descreverEvento('bloqueio', JSON.stringify({ regra: 'regra2_ajuste_operacional' }), null)
+    expect(r2.titulo).toContain('Regra 2')
+  })
+
+  it('regra desconhecida volta crua — feio, e melhor que uma tela sem a regra', () => {
+    const d = descreverEvento('bloqueio', JSON.stringify({ regra: 'regra3_nova' }), null)
+    expect(d.titulo).toContain('regra3_nova')
+  })
+
+  // ⚠️ O contra-exemplo, escrito de propósito: nome de FERRAMENTA continua cru. Ali o
+  // identificador é a coisa investigada — é ele que se casa com `toolsPermitidas`.
+  it('nome de ferramenta NÃO é traduzido', () => {
+    const d = descreverEvento('tool_executada', JSON.stringify({ tool: 'search_confluence' }), null)
+    expect(d.titulo).toContain('search_confluence')
+  })
+
   it('motivo desconhecido volta cru em vez de sumir', () => {
     const d = descreverEvento('ia_extracao_recusada', JSON.stringify({ motivo: 'algo_novo' }), null)
     expect(d.linhas[0]?.valor).toBe('algo_novo')

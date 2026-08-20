@@ -88,8 +88,15 @@ created: "2026-08-20"
       `CLAUDE.md` ganha as travas novas (o `Record<TipoDeEvento, …>`, o JSON dentro de
       `<details>`, o turno vindo de `requisicao_id`), e `specs/009-investigador/tasks.md`
       aponta para esta spec.
-- [ ] **T-1314** ✅ **Medir no navegador** (`SC-4`): uma sessão real lida de ponta a ponta sem
+- [x] **T-1314** ✅ **Medir no navegador** (`SC-4`): uma sessão real lida de ponta a ponta sem
       abrir nenhum bloco cru. Staging antes de prod (regra 10).
+      ✅ **Feito em 20/08/2026, em `npm run dev`** — e achou **três** defeitos que a suíte
+      não pegava: o título do bloqueio saía *"Bloqueio pela regra1_confluence"* (slug pelo
+      **valor**, não pelo rótulo — a varredura olhava só os rótulos), o `<pre>` do registro
+      cru dava barra horizontal na **página inteira** (item de grade tem `min-width: auto`) e
+      o topo do JSON lia *"DADOS DO EVENTO750 BYTES"* (o `gap` do flex não entra no nome
+      acessível). Os três corrigidos, com teste no primeiro.
+      ⚠️ **Falta a staging** (regra 10), com modelo real.
       _Requirements: SC-4_
 
 ---

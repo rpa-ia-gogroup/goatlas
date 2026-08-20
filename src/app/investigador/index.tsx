@@ -535,9 +535,15 @@ function ItemDoTempo({ evento }: { evento: EventoRegistrado }) {
 
       {descrito.blocos.map((b) => (
         <details key={b.rotulo} className="inv-bloco-texto">
+          {/*
+            ⚠️ O separador vive DENTRO do `inv-medida`, não num `gap` de CSS. O `gap` separa
+            na tela e some no **nome acessível**: `textContent` concatena, e o leitor de tela
+            anunciava "O que voltou ao modelo444 bytes" (medido em 20/08/2026, junto com o
+            "DADOS DO EVENTO750 BYTES" do topo do JSON).
+          */}
           <summary>
             {b.rotulo}
-            <span className="inv-medida">{tamanho(b.texto.length)}</span>
+            <span className="inv-medida">{` · ${tamanho(b.texto.length) ?? ''}`}</span>
           </summary>
           <pre>{b.texto}</pre>
         </details>
@@ -716,7 +722,7 @@ function BlocoJson({ rotulo, json }: { rotulo: string; json: string }) {
       <div className="inv-json-topo">
         <span>
           {rotulo}
-          <span className="inv-medida">{tamanho(texto.length)}</span>
+          <span className="inv-medida">{` · ${tamanho(texto.length) ?? ''}`}</span>
         </span>
         <button
           type="button"

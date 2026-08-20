@@ -149,6 +149,24 @@ const ESTADOS: Readonly<Record<string, string>> = {
   encerrado: 'encerrada',
 }
 
+/**
+ * As duas regras de deflexão, como se fala.
+ *
+ * 🚨 **Medido no navegador em 20/08/2026:** o título do evento saía
+ * *"Bloqueio pela regra1_confluence"* — o `regra` vem do dado (`rules/index.ts#Regra`), e
+ * interpolá-lo cru reabre o defeito de `D-63` **pelo valor**, não pelo rótulo. A varredura de
+ * `snake_case` do teste olhava só os rótulos e passou verde.
+ *
+ * ⚠️ **Nome de FERRAMENTA continua cru de propósito** (`search_confluence`,
+ * `check_jira_history`): ali o identificador é a coisa investigada — é ele que se casa com
+ * `toolsPermitidas` em `agent/gate.ts` —, e traduzi-lo obrigaria a tradução de volta na cabeça
+ * de quem lê o código.
+ */
+const REGRAS: Readonly<Record<string, string>> = {
+  regra1_confluence: 'Regra 1 — a documentação parece resolver',
+  regra2_ajuste_operacional: 'Regra 2 — o histórico do Jira parece resolver',
+}
+
 /** Os seis estados da leitura de anexo (spec 007). `irrelevante` é sucesso (`D-64`). */
 const ESTADOS_DE_ANEXO: Readonly<Record<string, string>> = {
   analisando: 'ainda lendo',
@@ -348,7 +366,7 @@ const DESCRITORES: Readonly<Record<TipoDeEvento, Descritor>> = {
   }),
 
   bloqueio: (d) => ({
-    titulo: `Bloqueio pela ${texto(d.regra) ?? 'regra'} — a conversa fica parada até o override`,
+    titulo: `Bloqueio · ${traduzir(REGRAS, d.regra) ?? 'regra não identificada'} — a conversa fica parada até o override`,
     linhas: linha('motivo', texto(d.motivo)),
     blocos: bloco('A evidência que o app usou', comoJson(d.evidencia)),
   }),

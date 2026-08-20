@@ -246,7 +246,12 @@
 .inv-evento {
   position: relative;
   display: grid;
+  min-width: 0;
   gap: var(--space-2);
+}
+.inv-cru,
+.inv-json {
+  min-width: 0;
 }
 /*
   O marcador. A FORMA é o que distingue a origem — a cor é a mesma nas seis.
@@ -393,6 +398,13 @@
 }
 .inv-turno {
   display: grid;
+  /*
+    🚨 `min-width: 0` NÃO é zelo — medido no navegador em 20/08/2026. Item de grade tem
+    `min-width: auto`, então o `<pre>` de `white-space: pre` do registro cru empurrava a
+    largura do turno e a **página inteira** ganhava barra horizontal, o defeito que `D-65`
+    corrigiu na tabela do Confluence. A rolagem tem de ficar dentro do `<pre>`.
+  */
+  min-width: 0;
   gap: var(--space-3);
   padding: var(--space-4);
   background: var(--go-white);
@@ -468,6 +480,11 @@
   font-size: var(--fs-caption);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+/* O separador entre rótulo e tamanho vive no MARKUP (ver `index.tsx`), porque `gap` de
+   CSS não entra no nome acessível. Aqui é só o respiro. */
+.inv-json-topo .inv-medida {
+  margin-left: var(--space-1);
 }
 .inv-json-topo button {
   font: inherit;
