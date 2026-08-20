@@ -4906,6 +4906,125 @@ da varredura do Tailwind.
   quebraria o caminho das **51 worktrees** vivas; renomear o repo é ação de fora do código. Nenhum
   dos dois é visível para quem usa o app.
 
+### D-78 · A aba Avisos saiu da interface
+
+**20/08/2026.** Pedido do dono do produto, no dia seguinte ao anúncio do app para a empresa:
+*"remova rapidamente o que não funciona, se possível, essa aba toda"* — e, em seguida, a razão:
+*"não quero ninguém confuso sobre isso que não funciona"*.
+
+A aba oferecia **três coisas, e a única que funcionava não era dela**: a escolha de canal (que
+não entrega), o histórico de avisos (com data crua) e a promessa de que "os avisos vivem aqui"
+— que "Meus chamados" já cumpre melhor, com o estado atual em vez de um registro de eventos.
+
+#### 🚨 A escolha de canal era um beco sem saída, e salvava com sucesso
+
+Escolher "Google Chat" ou "E-mail" e clicar em salvar **gravava a preferência** e respondia
+`200`. Mas `canalPor` (`contexto.ts`) devolve `CanalGoogleChat` só se `chat_webhook_url`
+estiver configurado, e `CanalEmail` só com `email_endpoint`; sem eles vem
+`CanalIndisponivel`, que **recusa todo envio** com erro definitivo. Nenhum dos dois está
+configurado, e `Q11` está fechada em `nenhum` (`D-56`). Ou seja: a pessoa escolhia como quer
+ser avisada, o app confirmava, e nada seria enviado nunca — o aviso ficava `suprimida` e a
+tela dizia "Não enviado" para sempre.
+
+Isto é pior que a ausência do controle. `D-19` já dizia que `Q11` em aberto **não vira canal
+inventado**; oferecer a escolha era inventá-lo na superfície, com o agravante de a confirmação
+parecer sucesso.
+
+#### Os outros dois defeitos, que sozinhos seriam conserto e não remoção
+
+- **A data ia crua para a tela** — `{a.criadoEm}` sem formatação, então a lista mostrava
+  `2026-08-17T13:57:24.073Z`: ISO, em UTC, três horas atrás do horário de quem lê, num app
+  que é todo em português (regra 4).
+- **`GOATLAS-1` e `GOATLAS-2` aparecem na lista de produção.** São chaves do
+  `ClienteAtlassianFake` (`fake.ts`: `GOATLAS-${contador}`), sobra da fase de demonstração —
+  chamados que **não existem no Jira**. Eles seguem em `vinculos`, então continuam em "Meus
+  chamados": a remoção da aba **não** os apaga, e apagá-los é operação de banco que o app não
+  expõe.
+
+#### O que NÃO foi removido, e por que isso importa
+
+Só a **interface** saiu: `src/app/avisos.tsx`, a entrada na barra de abas e a linha
+`avisos: '/avisos'` da tabela de rotas. Todo o servidor fica de pé — webhook (`RF-48`),
+polling (`RF-47`), dedupe, a tabela `notificacoes` e a contagem de `suprimida` no console de
+admin. Duas consequências disso:
+
+- **`/avisos` não dá 404.** `telaDoCaminho` manda todo caminho desconhecido para a conversa
+  (`D-65`), então link salvo e link de notificação antigo chegam em lugar útil.
+- **`RF-45` (preferência de aviso por pessoa) perdeu a superfície, não a implementação.** O
+  dia em que houver canal configurado, devolver a tela é reabrir esta decisão — e devolvê-la
+  **antes** disso é repor o beco sem saída.
+
+⚠️ **O que a pessoa perde:** o registro de eventos por chamado ("chamado aberto", "status
+alterado"). O estado atual continua em "Meus chamados", que é o que ela abre para saber onde
+está o chamado dela; o histórico de eventos era instrumento de depuração numa tela de usuário.
+
+#### No mesmo movimento: o mapa de lacunas ganhou descarte
+
+**20/08/2026, mesma sessão.** *"limpe isso que foi só de teste"* — o mapa de `RF-42` abria com
+`ap` (2 buscas), `tehc` e `aa` no topo de "procuraram e não existe": termos digitados durante o
+desenvolvimento em 07 e 10/08. Backlog de escrita cuja primeira linha é lixo é backlog que
+ninguém lê, e não havia operação nenhuma para tirá-los.
+
+Entrou `POST /api/admin/lacunas/descartar` (`descartarTermo_apenasAdmin`), e duas escolhas:
+
+- **Apaga as linhas de `buscas`, não "esconde o termo".** Uma lista de exclusão à parte
+  deixaria o termo fora do backlog e **dentro** da taxa de deflexão, porque `metricas.ts` lê a
+  mesma tabela (`SELECT resultados FROM buscas`) — dois números discordando sobre o mesmo fato,
+  que é exatamente o defeito que `config/diagnostico.ts` existe para não repetir.
+- **Casa por `termo_normalizado`**, a chave pela qual o mapa agrupa e exibe. Pelo termo cru,
+  `AP` e `ap` são uma linha só na tela e apenas uma sairia — o teste afirma sobre as duas.
+
+Aplicado em produção: `ap` (2), `tehc` (1), `aa` (1). 🚨 **E sobrou lixo que era meu:** as oito
+buscas feitas minutos antes para medir "a documentação cobre gobeaute?" (`beaute`, `helpdesk`,
+`goservices`, `protheus`, `shopify`, `gocase`, `nota fiscal`) já estavam no mapa. Medir a busca
+em produção **suja o mapa** — quem medir descarta depois. A lista "procuraram e não existe"
+ficou vazia.
+
+⚠️ **`gobeaute` (3 ocorrências) ficou de pé**, em "acharam e ninguém abriu": duas são minhas e
+ao menos uma não é, e não há como separá-las por termo. Apagar as três descartaria a busca real
+de um colega — o único sinal de `RF-42` sobre esse assunto.
+
+#### A limpeza inteira: `GET`/`POST /api/admin/limpeza`
+
+*"limpe todos os dados que tem de teste, até nas estatísticas e tal"* — e o banco de produção
+carrega duas semanas de desenvolvimento **dentro do mesmo banco** que passou a ter gente de
+verdade no dia do anúncio. `governanca/limpeza.ts` faz o inventário e o descarte.
+
+🚨 **Apaga por CHAVE EXPLÍCITA, nunca por heurística.** As duas heurísticas óbvias apagariam
+dado real: *criado antes do anúncio* (havia colegas usando desde 12/08) e *e-mail de quem
+desenvolveu* (quem desenvolveu também usa o app de verdade). Quem decide é uma lista montada
+olhando o inventário — daí a rota `GET` existir.
+
+🚨 **`auditoria` e `config` ficam fora por construção** (`D-17`, `RNF-33`). A auditoria é
+append-only com piso de 180 dias e é o **único** rastro que sobra de uma operação que apaga o
+dado; apagá-la junto seria apagar a prova da limpeza. Há teste afirmando as duas ausências.
+
+⚠️ **A conversa de um chamado descartado vai junto, automaticamente.** Apagar o vínculo e
+deixar a conversa produziria o pior estado: ela continuaria nas estatísticas de deflexão como
+uma conversa que **não** virou chamado — o oposto do que aconteceu. O contrário não vale:
+conversa sem chamado é fato legítimo.
+
+⚠️ **`anexos_conteudo` é apagada por subconsulta, antes de `anexos_pendentes`** — ela é chaveada
+pelo id do anexo, não pela conversa, e a ordem inversa deixaria fatias de até 8 MB órfãs para
+sempre.
+
+**Executado em produção em 20/08/2026:** 3 chamados (`GOATLAS-1`, `GOATLAS-2` — chaves do fake —
+e `GN-6915`), 37 conversas, 72 mensagens, 3 bloqueios (com os 2 overrides encenados de 07/08),
+10 buscas, 4 submissões e o rastro de anexo, SLA e Investigador correspondente. **Tudo da conta
+de quem desenvolveu.**
+
+🚨 **`GN-6929` foi PRESERVADO, e a verificação é o registro, não a impressão.** A pergunta era
+*"foi teste nosso ou uso real?"*: a auditoria respondeu `chamado_criado GN-6929 · via:
+formulario`, de um e-mail que não é o de quem desenvolveu, às 18:11 UTC do dia do anúncio.
+Preservadas também as 5 conversas de outros três colegas — inclusive as 3 de 14–17/08 que são o
+caso medido em `D-73` (70 minutos no app, nenhum chamado), o único sinal de comportamento real
+anterior ao lançamento.
+
+⚠️ **Duas coisas ficaram de fora, declaradas:** `paginas_lidas` (248 linhas) não é chaveada por
+chamado nem por conversa, e `investigador_requisicoes` (~6 mil) só é alcançada pela conversa —
+o resto tem retenção própria de 30 dias e se resolve sozinho. E `gobeaute (3)` continua no mapa,
+pelo motivo do parágrafo anterior.
+
 ---
 
 ---

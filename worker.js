@@ -4793,6 +4793,37 @@ var RegistroConhecimento = class {
     );
   }
   /**
+   * Descarta um termo do mapa de lacunas — `RF-42`, operação de limpeza.
+   *
+   * ⚠️ **Apaga as buscas, não "esconde o termo".** O mapa é derivado de `buscas`, e uma
+   * lista de exclusão à parte faria o mesmo termo voltar a contar na taxa de deflexão
+   * (`metricas.ts` lê `SELECT resultados FROM buscas`) enquanto desaparecia do backlog —
+   * dois números discordando sobre o mesmo fato, que é o defeito que `config/diagnostico.ts`
+   * existe para não repetir.
+   *
+   * ⚠️ **Casa por `termo_normalizado`**, que é a chave pela qual o mapa agrupa e exibe:
+   * casar pelo `termo` cru deixaria para trás as variações de caixa e acento que o
+   * agrupamento já tinha somado na mesma linha.
+   *
+   * ⚠️ **É irreversível e cruza o isolamento por e-mail** — daí o `_apenasAdmin` no nome,
+   * como em `agregarLacunas_apenasAdmin`. Existe porque o backlog de escrita nasceu sujo:
+   * os termos de teste do próprio desenvolvimento (`ap`, `tehc`, `aa`) ficam no topo da
+   * lista de "procuraram e não existe", e backlog cuja primeira linha é lixo é backlog que
+   * ninguém lê.
+   */
+  async descartarTermo_apenasAdmin(termo) {
+    const normalizado = normalizarTermo(termo);
+    if (normalizado === "") return 0;
+    const antes = await this.db.query(
+      "SELECT COUNT(*) AS n FROM buscas WHERE termo_normalizado = ?",
+      [normalizado]
+    );
+    const quantas = Number(primeiraLinha(antes)?.n ?? 0);
+    if (quantas === 0) return 0;
+    await this.db.exec("DELETE FROM buscas WHERE termo_normalizado = ?", [normalizado]);
+    return quantas;
+  }
+  /**
    * O mapa de lacunas — **agregado e entre usuários**.
    *
    * O nome carrega o `_apenasAdmin` de propósito, como
@@ -6664,9 +6695,9 @@ var RepositorioVinculos = class {
    */
   async filtrarComVinculo(issueKeys) {
     if (issueKeys.length === 0) return [];
-    const marcadores = issueKeys.map(() => "?").join(", ");
+    const marcadores2 = issueKeys.map(() => "?").join(", ");
     const r = await this.db.query(
-      `SELECT ${COLUNAS3} FROM vinculos WHERE issue_key IN (${marcadores})`,
+      `SELECT ${COLUNAS3} FROM vinculos WHERE issue_key IN (${marcadores2})`,
       issueKeys
     );
     return linhasComoObjetos(r).map(daLinha4);
@@ -8393,6 +8424,149 @@ async function lerJson(req) {
   } catch {
     return null;
   }
+}
+
+// src/lib/governanca/limpeza.ts
+var TABELAS_DE_USO = [
+  "vinculos",
+  "submissoes",
+  "conversas",
+  "mensagens",
+  "bloqueios",
+  "classificacoes_ticket",
+  "buscas",
+  "paginas_lidas",
+  "notificacoes",
+  "acoes_proprias",
+  "alertas_sla",
+  "avaliacoes_sla",
+  "anexos_pendentes",
+  "anexos_enviados",
+  "analises_anexo",
+  "investigador_requisicoes",
+  "investigador_eventos"
+];
+var PREFIXO_CHAVE_DE_FAKE = "GOATLAS-";
+async function contar(db, tabela) {
+  const r = await db.query(`SELECT COUNT(*) AS n FROM ${tabela}`, []);
+  return Number(primeiraLinha(r)?.n ?? 0);
+}
+async function inventariar(db) {
+  const contagens = {};
+  for (const t of TABELAS_DE_USO) contagens[t] = await contar(db, t);
+  const v = await db.query(
+    `SELECT issue_key, solicitante_email, conversa_id, criado_em
+       FROM vinculos ORDER BY criado_em ASC`,
+    []
+  );
+  const vinculos = linhasComoObjetos(v).map((l) => ({
+    issueKey: l.issue_key,
+    solicitanteEmail: l.solicitante_email,
+    conversaId: l.conversa_id,
+    criadoEm: l.criado_em,
+    ehChaveDeFake: l.issue_key.startsWith(PREFIXO_CHAVE_DE_FAKE)
+  }));
+  const c = await db.query(
+    `SELECT c.id, c.solicitante_email, c.criado_em,
+            (SELECT COUNT(*) FROM mensagens m WHERE m.conversa_id = c.id) AS mensagens,
+            (SELECT v2.issue_key FROM vinculos v2 WHERE v2.conversa_id = c.id) AS issue_key
+       FROM conversas c ORDER BY c.criado_em ASC`,
+    []
+  );
+  const conversas = linhasComoObjetos(c).map((l) => ({
+    id: l.id,
+    solicitanteEmail: l.solicitante_email,
+    criadoEm: l.criado_em,
+    mensagens: Number(l.mensagens),
+    issueKey: l.issue_key
+  }));
+  const o = await db.query(
+    `SELECT regra, override_motivo, override_em
+       FROM bloqueios
+      WHERE houve_override = 1 AND override_motivo IS NOT NULL
+      ORDER BY override_em DESC`,
+    []
+  );
+  const overrides = linhasComoObjetos(o).map((l) => ({ regra: l.regra, motivo: l.override_motivo, em: l.override_em }));
+  const b = await db.query(
+    `SELECT termo_normalizado, COUNT(*) AS n, MAX(criado_em) AS ultima
+       FROM buscas GROUP BY termo_normalizado ORDER BY n DESC, ultima DESC`,
+    []
+  );
+  const termosBuscados = linhasComoObjetos(b).map((l) => ({ termo: l.termo_normalizado, buscas: Number(l.n), ultimaEm: l.ultima }));
+  return { contagens, vinculos, conversas, overrides, termosBuscados };
+}
+function marcadores(n) {
+  return Array.from({ length: n }, () => "?").join(", ");
+}
+async function descartar(db, alvo) {
+  const chaves = [...new Set(alvo.issueKeys ?? [])];
+  const termos = [...new Set(alvo.termos ?? [])];
+  const overrides = [...new Set(alvo.overridesEm ?? [])];
+  const conversas = new Set(alvo.conversaIds ?? []);
+  if (chaves.length > 0) {
+    const r = await db.query(
+      `SELECT conversa_id FROM vinculos WHERE issue_key IN (${marcadores(chaves.length)})
+         AND conversa_id IS NOT NULL`,
+      [...chaves]
+    );
+    for (const l of linhasComoObjetos(r)) conversas.add(l.conversa_id);
+  }
+  const ids = [...conversas];
+  const resultado = {};
+  const apagar = async (tabela, sql, params) => {
+    const antes = await db.query(
+      `SELECT COUNT(*) AS n FROM ${tabela} WHERE ${sql}`,
+      params
+    );
+    const n = Number(primeiraLinha(antes)?.n ?? 0);
+    if (n === 0) return;
+    await db.exec(`DELETE FROM ${tabela} WHERE ${sql}`, params);
+    resultado[tabela] = (resultado[tabela] ?? 0) + n;
+  };
+  if (chaves.length > 0) {
+    const m = marcadores(chaves.length);
+    const p = [...chaves];
+    for (const tabela of [
+      "vinculos",
+      "submissoes",
+      "classificacoes_ticket",
+      "notificacoes",
+      "acoes_proprias",
+      "alertas_sla",
+      "avaliacoes_sla",
+      "anexos_enviados"
+    ]) {
+      await apagar(tabela, `issue_key IN (${m})`, p);
+    }
+  }
+  if (ids.length > 0) {
+    const m = marcadores(ids.length);
+    const p = [...ids];
+    await apagar(
+      "anexos_conteudo",
+      `anexo_id IN (SELECT id FROM anexos_pendentes WHERE conversa_id IN (${m}))`,
+      p
+    );
+    for (const tabela of [
+      "mensagens",
+      "bloqueios",
+      "anexos_pendentes",
+      "analises_anexo",
+      "investigador_eventos",
+      "investigador_requisicoes"
+    ]) {
+      await apagar(tabela, `conversa_id IN (${m})`, p);
+    }
+    await apagar("conversas", `id IN (${m})`, p);
+  }
+  if (termos.length > 0) {
+    await apagar("buscas", `termo_normalizado IN (${marcadores(termos.length)})`, [...termos]);
+  }
+  if (overrides.length > 0) {
+    await apagar("bloqueios", `override_em IN (${marcadores(overrides.length)})`, [...overrides]);
+  }
+  return resultado;
 }
 
 // src/lib/http/limite.ts
@@ -11204,6 +11378,7 @@ async function expurgarInvestigador(db, dias, agoraIso) {
 }
 
 // src/lib/http/rotas.ts
+var ehTexto = (v) => typeof v === "string" && v.trim() !== "";
 var PRIORIDADES = ["critica", "alta", "normal"];
 var ehPrioridade = (v) => typeof v === "string" && PRIORIDADES.includes(v);
 async function tratarRequisicao(req, ctx, env) {
@@ -12597,6 +12772,50 @@ async function rotear(req, ctx, eu, caminho, url) {
   if (caminho === "/api/admin/lacunas" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();
     return json(await ctx.conhecimento.agregarLacunas_apenasAdmin());
+  }
+  if (caminho === "/api/admin/limpeza" && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    return json(await inventariar(ctx.db));
+  }
+  if (caminho === "/api/admin/limpeza" && req.method === "POST") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    const corpo = await lerJson(req);
+    const alvo = {
+      issueKeys: Array.isArray(corpo?.issueKeys) ? corpo.issueKeys.filter(ehTexto) : [],
+      conversaIds: Array.isArray(corpo?.conversaIds) ? corpo.conversaIds.filter(ehTexto) : [],
+      termos: Array.isArray(corpo?.termos) ? corpo.termos.filter(ehTexto) : [],
+      overridesEm: Array.isArray(corpo?.overridesEm) ? corpo.overridesEm.filter(ehTexto) : []
+    };
+    const vazio = (alvo.issueKeys?.length ?? 0) + (alvo.conversaIds?.length ?? 0) + (alvo.termos?.length ?? 0) + (alvo.overridesEm?.length ?? 0) === 0;
+    if (vazio) return ERROS.dadosInvalidos("Informe o que descartar.");
+    const apagadas = await descartar(ctx.db, alvo);
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "limpeza_executada",
+      recurso: [
+        ...alvo.issueKeys ?? [],
+        ...alvo.conversaIds ?? [],
+        ...alvo.termos ?? []
+      ].join(" ").slice(0, 300),
+      resultado: "sucesso",
+      detalhe: { apagadas }
+    });
+    return json({ ok: true, apagadas });
+  }
+  if (caminho === "/api/admin/lacunas/descartar" && req.method === "POST") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    const corpo = await lerJson(req);
+    const termo = typeof corpo?.termo === "string" ? corpo.termo.trim() : "";
+    if (termo === "") return ERROS.dadosInvalidos("Informe o termo a descartar.");
+    const apagadas = await ctx.conhecimento.descartarTermo_apenasAdmin(termo);
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: "lacuna_descartada",
+      recurso: termo,
+      resultado: apagadas > 0 ? "sucesso" : "falha",
+      detalhe: { buscas_apagadas: apagadas }
+    });
+    return json({ ok: true, termo, buscasApagadas: apagadas });
   }
   if (caminho === "/api/admin/metricas" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();

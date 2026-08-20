@@ -316,6 +316,30 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   projeto cujo default não é fail-closed (a outra é `emails_piloto`, `D-16`): ela não governa
   exposição, governa se existe registro — e registro que nasce desligado não existe no dia em que
   alguém precisa dele. Sem campo no console, como TTL e rate limit (`D-25`).
+- 🚨 **A aba Avisos SAIU da interface, e devolvê-la sem canal configurado repõe um beco sem
+  saída** (`D-78`, 20/08/2026). Escolher "Google Chat" ou "E-mail" **gravava a preferência e
+  respondia 200** — e `canalPor` devolve `CanalIndisponivel` sem `chat_webhook_url`/
+  `email_endpoint`, que **recusa todo envio**: a pessoa dizia como quer ser avisada, o app
+  confirmava, e nada sairia nunca. Isso é `D-19` ("`Q11` em aberto não vira canal inventado")
+  violado na superfície, com a confirmação parecendo sucesso. ⚠️ **Só a tela saiu** — webhook,
+  polling, dedupe, tabela `notificacoes` e a contagem de `suprimida` no console continuam de
+  pé, e `RF-45` perdeu a superfície, não a implementação. ⚠️ **`/avisos` não dá 404**:
+  `telaDoCaminho` manda desconhecido para a conversa (`D-65`). ⚠️ E os dois defeitos menores
+  ficam registrados porque voltariam junto com a tela: a data ia **crua** para o DOM
+  (`2026-08-17T13:57:24.073Z`, UTC, em português) e `GOATLAS-1`/`GOATLAS-2` — chaves do
+  **fake** — aparecem na lista de produção; eles seguem em `vinculos`, então continuam em
+  "Meus chamados", e apagá-los é operação de banco que o app não expõe.
+- ⚠️ **O mapa de lacunas tem operação de DESCARTE, e ela apaga `buscas` — não esconde termo**
+  (`POST /api/admin/lacunas/descartar`, `D-78`). O backlog de `RF-42` nasceu sujo (`ap`,
+  `tehc`, `aa` do próprio desenvolvimento no topo de "procuraram e não existe"), e backlog
+  cuja primeira linha é lixo ninguém lê. ⚠️ **Uma lista de exclusão à parte foi recusada**: o
+  mapa é derivado de `buscas` e `metricas.ts` lê a MESMA tabela (`SELECT resultados FROM
+  buscas`), então o termo sairia do backlog e continuaria contando na taxa de deflexão — dois
+  números discordando sobre o mesmo fato. ⚠️ Casa por **`termo_normalizado`**, a chave pela
+  qual o mapa agrupa: pelo termo cru, `AP` e `ap` são a mesma linha na tela e só uma sairia.
+  ⚠️ **Buscar para diagnosticar SUJA o mapa** — as oito buscas feitas em 20/08 para responder
+  "a documentação cobre gobeaute?" viraram oito linhas de lacuna, e tiveram de ser descartadas
+  em seguida. Quem for medir a busca em produção descarta depois.
 - **N8N está descartado.** Não propor voltar a ele.
 - **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
   olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe
@@ -1952,7 +1976,8 @@ valer contra a API real. **Q5** não trava código, só o dado de
 tempo constante e resposta sempre `202`; polling incremental com marca-d'água (`RF-47`);
 dedupe pela constraint com o carimbo do Jira; supressão de ação própria (`RF-48`); camada
 de canal isolada com Google Chat, e-mail, fake e `CanalIndisponivel`; preferência por
-pessoa (`RF-45`) com a tela **Avisos**; SLA de primeira resposta como função pura
+pessoa (`RF-45`) — ⚠️ **a tela Avisos saiu da interface em `D-78`**, o servidor ficou;
+SLA de primeira resposta como função pura
 (`RF-46`), cron de alerta sem repetição e retrato gravado para o painel; painel completo de
 `RF-55` com calibragem, aderência ao SLA, telemetria de 429 (`RF-60`) e custo de IA;
 anexos (`RF-25`/`RF-34`), filtro e busca na lista (`RF-35`), resolver/reabrir quando o
@@ -1983,7 +2008,7 @@ espaço `TECH` que circulava **nunca existiu**.
 
 | O que | Quem | Por que não dá para adiantar |
 |---|---|---|
-| ~~Escolher o canal (**Q11**)~~ | — | ✅ **FECHADA em `D-56`: `nenhum`** — e `nenhum` não é "sem aviso": a aba Avisos lista inclusive as `suprimidas`. Chat vaza (`RF-30`); e-mail exige secret |
+| ~~Escolher o canal (**Q11**)~~ | — | ✅ **FECHADA em `D-56`: `nenhum`** — e `nenhum` não é "sem aviso": as `suprimidas` são contadas no console (a aba Avisos saiu em `D-78`). Chat vaza (`RF-30`); e-mail exige secret |
 | ~~Lista do piloto (**Q13**)~~ | — | ✅ **FECHADA em `D-56`: piloto desligado.** Ligar é um campo, sem deploy |
 | ~~Secrets~~ | — | ✅ **Conferido em 12/08 por `listAppSecrets`: prod tem todos**, menos `ATLAS_WEBHOOK_SEGREDO` — inócuo, porque o edge bloqueia o webhook de qualquer forma |
 | Registrar o webhook no Jira | time de tech | Opcional: o polling notifica sozinho, com atraso de uma janela de cron |
