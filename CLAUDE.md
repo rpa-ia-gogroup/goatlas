@@ -329,6 +329,17 @@ Escolhas intencionais. Se parecerem erradas, reabra a decisão em
   (`2026-08-17T13:57:24.073Z`, UTC, em português) e `GOATLAS-1`/`GOATLAS-2` — chaves do
   **fake** — aparecem na lista de produção; eles seguem em `vinculos`, então continuam em
   "Meus chamados", e apagá-los é operação de banco que o app não expõe.
+- ⚠️ **O mapa de lacunas tem operação de DESCARTE, e ela apaga `buscas` — não esconde termo**
+  (`POST /api/admin/lacunas/descartar`, `D-78`). O backlog de `RF-42` nasceu sujo (`ap`,
+  `tehc`, `aa` do próprio desenvolvimento no topo de "procuraram e não existe"), e backlog
+  cuja primeira linha é lixo ninguém lê. ⚠️ **Uma lista de exclusão à parte foi recusada**: o
+  mapa é derivado de `buscas` e `metricas.ts` lê a MESMA tabela (`SELECT resultados FROM
+  buscas`), então o termo sairia do backlog e continuaria contando na taxa de deflexão — dois
+  números discordando sobre o mesmo fato. ⚠️ Casa por **`termo_normalizado`**, a chave pela
+  qual o mapa agrupa: pelo termo cru, `AP` e `ap` são a mesma linha na tela e só uma sairia.
+  ⚠️ **Buscar para diagnosticar SUJA o mapa** — as oito buscas feitas em 20/08 para responder
+  "a documentação cobre gobeaute?" viraram oito linhas de lacuna, e tiveram de ser descartadas
+  em seguida. Quem for medir a busca em produção descarta depois.
 - **N8N está descartado.** Não propor voltar a ele.
 - **Webhook e polling NÃO têm lógica própria** (`D-15`) — os dois só dizem *qual chamado
   olhar*, e `sincronizarChamado` relê da Atlassian. É o que torna a chave de dedupe

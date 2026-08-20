@@ -4958,6 +4958,32 @@ admin. Duas consequências disso:
 alterado"). O estado atual continua em "Meus chamados", que é o que ela abre para saber onde
 está o chamado dela; o histórico de eventos era instrumento de depuração numa tela de usuário.
 
+#### No mesmo movimento: o mapa de lacunas ganhou descarte
+
+**20/08/2026, mesma sessão.** *"limpe isso que foi só de teste"* — o mapa de `RF-42` abria com
+`ap` (2 buscas), `tehc` e `aa` no topo de "procuraram e não existe": termos digitados durante o
+desenvolvimento em 07 e 10/08. Backlog de escrita cuja primeira linha é lixo é backlog que
+ninguém lê, e não havia operação nenhuma para tirá-los.
+
+Entrou `POST /api/admin/lacunas/descartar` (`descartarTermo_apenasAdmin`), e duas escolhas:
+
+- **Apaga as linhas de `buscas`, não "esconde o termo".** Uma lista de exclusão à parte
+  deixaria o termo fora do backlog e **dentro** da taxa de deflexão, porque `metricas.ts` lê a
+  mesma tabela (`SELECT resultados FROM buscas`) — dois números discordando sobre o mesmo fato,
+  que é exatamente o defeito que `config/diagnostico.ts` existe para não repetir.
+- **Casa por `termo_normalizado`**, a chave pela qual o mapa agrupa e exibe. Pelo termo cru,
+  `AP` e `ap` são uma linha só na tela e apenas uma sairia — o teste afirma sobre as duas.
+
+Aplicado em produção: `ap` (2), `tehc` (1), `aa` (1). 🚨 **E sobrou lixo que era meu:** as oito
+buscas feitas minutos antes para medir "a documentação cobre gobeaute?" (`beaute`, `helpdesk`,
+`goservices`, `protheus`, `shopify`, `gocase`, `nota fiscal`) já estavam no mapa. Medir a busca
+em produção **suja o mapa** — quem medir descarta depois. A lista "procuraram e não existe"
+ficou vazia.
+
+⚠️ **`gobeaute` (3 ocorrências) ficou de pé**, em "acharam e ninguém abriu": duas são minhas e
+ao menos uma não é, e não há como separá-las por termo. Apagar as três descartaria a busca real
+de um colega — o único sinal de `RF-42` sobre esse assunto.
+
 ---
 
 ---

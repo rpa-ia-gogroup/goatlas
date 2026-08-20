@@ -2204,6 +2204,34 @@ async function rotear(
     return json(await ctx.conhecimento.agregarLacunas_apenasAdmin())
   }
 
+  /**
+   * Descarta um termo do mapa de lacunas (`RF-42`).
+   *
+   * O backlog de escrita nasceu sujo: os termos de teste do próprio desenvolvimento ficavam
+   * no topo de "procuraram e não existe", e backlog cuja primeira linha é lixo é backlog que
+   * ninguém lê. Apaga as **buscas** daquele termo, nunca esconde o termo — ver
+   * `descartarTermo_apenasAdmin`.
+   *
+   * ⚠️ É **escrita** e é irreversível, então passa pelo decorador de somente leitura como
+   * qualquer outra: em modo de leitura ela recusa, em vez de responder "descartei" sem
+   * descartar.
+   */
+  if (caminho === '/api/admin/lacunas/descartar' && req.method === 'POST') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    const corpo = (await lerJson(req)) as { termo?: unknown } | null
+    const termo = typeof corpo?.termo === 'string' ? corpo.termo.trim() : ''
+    if (termo === '') return ERROS.dadosInvalidos('Informe o termo a descartar.')
+    const apagadas = await ctx.conhecimento.descartarTermo_apenasAdmin(termo)
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'lacuna_descartada',
+      recurso: termo,
+      resultado: apagadas > 0 ? 'sucesso' : 'falha',
+      detalhe: { buscas_apagadas: apagadas },
+    })
+    return json({ ok: true, termo, buscasApagadas: apagadas })
+  }
+
   // T-095 / O1, R-04 — taxa de deflexão, taxa de override, via de abertura e
   // buscas sem resultado, agregado desde o dia 1. É o subconjunto viável de
   // RF-55 na Fase 1 (sem aderência a SLA, que só existe a partir da Fase 3).
