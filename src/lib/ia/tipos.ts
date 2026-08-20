@@ -204,6 +204,27 @@ export interface ParametrosExtracao {
    * abrir chamado na fila errada, que é o pior caso que `RF-28` existe para evitar.
    */
   readonly forcarFechamento?: boolean
+  /**
+   * `FR-1` (spec 012) — **já existe cartão nesta conversa.**
+   *
+   * 🚨 Medido em 20/08/2026 e reproduzido na staging com modelo real: no turno 1 a extração
+   * fechou o cartão ("Solicitação de acesso ao Nexus"); no turno 2, quando a pessoa contou
+   * *por que* precisava do acesso, a mesma extração devolveu
+   * `{"pronto":false,"titulo":"","descricao":""}` — o cartão **congelou** na versão
+   * anterior, sem o motivo que ela acabou de dar, e nada na tela disse isso. Ela foi embora
+   * sem chamado com `podeConfirmar: true` na tela.
+   *
+   * A causa é o gabarito de prontidão do `PROMPT_EXTRACAO` ser de **incidente** ("o que
+   * aconteceu, desde quando, qual sistema"): pedido de acesso nunca casa com ele. Depois de
+   * o cartão existir, essa pergunta não tem mais trabalho — a decisão de ter cartão já foi
+   * tomada no turno anterior, e o que importa é **o que muda**.
+   *
+   * ⚠️ **Não é a flag do botão, e não deve ser unificada com ela.** As duas usam o mesmo
+   * mecanismo (`aceitarNaoPronto`) e mandam textos **diferentes**: `INSTRUCAO_FECHAR_AGORA`
+   * afirma *"Ela clicou no botão"*, e dizer isso quando ninguém clicou é mentir para o
+   * modelo sobre o próprio turno. Precedência: o botão ganha, porque é pedido explícito.
+   */
+  readonly cartaoVigente?: boolean
 }
 
 export interface ResultadoExtracao {

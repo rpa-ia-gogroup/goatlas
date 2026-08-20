@@ -452,6 +452,7 @@ function ConversaEmCurso({
           prioridadeSugerida: r.prioridadeSugerida ?? null,
           recusasDeAjuste: r.recusasDeAjuste ?? [],
           assuntoMudou: r.assuntoMudou ?? false,
+          atualizacaoDoCartao: r.atualizacaoDoCartao ?? 'nao_havia',
         })
       }
       setFalas((f) => [...f, { de: 'agente', texto: r.texto }])
@@ -990,6 +991,14 @@ interface NegociacaoNaTela {
   readonly prioridadeSugerida: Prioridade | null
   readonly recusasDeAjuste: readonly RecusaNaTela[]
   readonly assuntoMudou: boolean
+  /**
+   * `FR-2`/`FR-3` (spec 012) — só `nao_conseguiu` fala na tela.
+   *
+   * ⚠️ **Opcional pelo mesmo motivo da interface inteira:** o formulário (`D-04`) e a rota
+   * de override montam este cartão sem ter passado por um turno de conversa, e ali não houve
+   * rederivação nenhuma sobre a qual avisar.
+   */
+  readonly atualizacaoDoCartao?: 'atualizado' | 'sem_mudanca' | 'nao_conseguiu' | 'nao_havia'
 }
 
 /** `FR-13`/`FR-14` — um ajuste pedido em texto que não coube, como a tela o recebe. */
@@ -1289,6 +1298,23 @@ export function ReciboConfirmacao({
         <Aviso>
           O assunto do chamado mudou, então o formulário abaixo é outro — os campos do
           assunto anterior não vieram junto.
+        </Aviso>
+      )}
+
+      {negociacao?.atualizacaoDoCartao === 'nao_conseguiu' && (
+        /**
+         * `FR-2` (spec 012) — o resumo **não** incorporou a última mensagem.
+         *
+         * 🚨 Medido em 20/08/2026: a pessoa explicou o motivo do pedido, a extração daquele
+         * turno devolveu `pronto: false`, o cartão ficou com o texto do turno anterior e a
+         * tela não disse nada. Ela leu um resumo velho como se fosse o atual.
+         *
+         * ⚠️ Só aqui, e **só** neste estado: `sem_mudanca` é silêncio de propósito — aviso
+         * que aparece em todo turno ninguém lê (o par de `anexosIndisponiveis`, `D-56`).
+         */
+        <Aviso atencao>
+          Não consegui atualizar o resumo com a sua última mensagem. Confira o que está aqui
+          e ajuste o que precisar antes de abrir o chamado.
         </Aviso>
       )}
 

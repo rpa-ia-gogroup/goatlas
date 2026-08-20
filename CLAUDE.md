@@ -693,6 +693,32 @@ destes reabre um vazamento que já foi fechado.
   (`D-76`). Anexada ao system, o modelo devolveu `{"pronto": false, "titulo": "", …}` —
   obedeceu à regra mais antiga e mais longa do próprio prompt, e o botão "Montar o chamado
   agora" não montou nada. No fim da tarefa real, ela é o último texto que o modelo lê.
+- 🚨 **Cartão que EXISTE não volta a "não estou pronto"** (`D-78`, `spec 012`, medido e
+  reproduzido com modelo real em 20/08/2026). O critério de prontidão do `PROMPT_EXTRACAO` é
+  de **incidente** (*"o que aconteceu, desde quando, qual sistema"*) e a extração o reavaliava
+  **do zero a cada turno**: num pedido de acesso ele nunca casa, então a pessoa explicou o
+  motivo, a extração devolveu `{"pronto":false,"titulo":"","descricao":""}` e o cartão
+  **congelou** na versão do turno anterior — sem a mensagem dela, `alterados: []`, nada na
+  tela, `podeConfirmar: true`. Hoje, com proposta vigente, a extração roda em modo fechamento
+  (`cartaoVigente` → `aceitarNaoPronto`, o mecanismo de `RF-81`). ⚠️ **São DUAS flags de
+  propósito**: `INSTRUCAO_FECHAR_AGORA` afirma *"Ela clicou no botão"* e mentir para o modelo
+  sobre o turno apagaria a distinção do registro — `instrucaoDeFechamento` declara a
+  precedência (botão ganha). ⚠️ **Nada afrouxou além do `pronto`**: `RF-08`, `RN-07`, `RF-28`,
+  `RF-17` e os mínimos de título/descrição têm caso de teste cada um. ⚠️ **O gate de "≥ 4
+  mensagens" do botão NÃO é a causa e não foi mexido** — com cartão na tela ele não aparece
+  por desenho.
+- 🚨 **"A IA não mudou nada" e "não consegui atualizar" são frases OPOSTAS** (`D-78`,
+  `atualizacaoDoCartao`). As duas chegavam à tela como o mesmo `alterados: []` — e a segunda
+  é a que apagou a mensagem de alguém em silêncio. São **quatro** estados, não um booleano:
+  `nao_conseguiu` (o único que fala na tela) · `sem_mudanca` e `nao_havia` (silêncio de
+  propósito — aviso em todo turno ninguém lê, `D-56`) · `atualizado`. ⚠️ O discriminante vem
+  do orquestrador, **nunca** derivado de `alterados` na rota ou na tela. Mesma família de
+  `anexosIndisponiveis` × `[]` (`D-45`).
+- 🚨 **O agente NÃO pede e-mail, login, nome nem área** (`D-78`, `FR-4`). Eles vêm do login
+  corporativo e já vão carimbados na descrição (`D-13`), e o `PROMPT_EXTRACAO` **já** proibia
+  tirá-los da conversa — faltava a metade que a pessoa lê, e o custo foi um chamado perdido:
+  ela respondeu tudo menos o e-mail, e o que ela responderia seria descartado. ⚠️ Continua
+  sendo **instrução, não trava** (`D-33`); o pior caso é uma pergunta redundante.
 - 🚨 **Token de CSS inventado não falha em NADA, e agora há varredura** (`tests/tokens-de-css-existem.test.ts`).
   Depois de `--go-surface` (`D-64`) apareceram mais dois usos de **`--go-text-body`**, que também
   não existe em `tokens.css` — e esses funcionavam **por acaso**: `var()` sem valor não pinta, a
@@ -1680,7 +1706,8 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 [005](specs/005-anexo-na-criacao/tasks.md) ·
 [007](specs/007-analise-de-anexo/tasks.md) ·
 [008](specs/008-cartao-negociavel/tasks.md) ·
-[009](specs/009-investigador/tasks.md).
+[009](specs/009-investigador/tasks.md) ·
+[012](specs/012-rederivacao-que-nao-regride/tasks.md).
 
 🚨 **A spec 009 (Investigador) está completa em código** (`D-73`, 14/08/2026). Uma aba nova, só
 admin, que responde *"o que aconteceu com esta pessoa?"*: toda requisição `/api/*` vira uma linha
@@ -1716,6 +1743,25 @@ campo:components]`, com a prioridade caindo de **crítica** para **alta** e
 `prosa_afirmou_prazo` nos três turnos. ⚠️ **Um defeito alheio apareceu junto** — o agente
 apontando *"Isso não resolve meu caso"* com `bloqueioPendente: false` — e foi ✅ **corrigido em
 seguida**, junto com o token de CSS inexistente (ver as duas linhas em "Padrões de código").
+
+🚨 **A spec 012 (rederivação que não regride) está completa em código** (`D-78`, 20/08/2026).
+Três defeitos de um caso real medido no Investigador e **reproduzido na staging com modelo
+real**: o cartão pronto voltando a `pronto: false` e apagando a última mensagem da pessoa · a
+tela sem como distinguir "nada mudou" de "não consegui atualizar" · o agente pedindo o e-mail
+que o app já tem. **21 casos novos**, suíte em **1692 testes**, typecheck e build limpos.
+✅ **MEDIDO na staging em 20/08/2026 com modelo real** (`3936ca2d`, conversa `1c37b740`): o
+turno 2 saiu com `modo: cartao_vigente`, `alterados: [titulo, descricao, motivoPrioridade]` e
+a descrição incorporando o motivo da pessoa mais *"Em aberto: desde quando a necessidade de
+acesso ocorre"* — `ScC-1` e `FR-5` juntos. Zero `ia_extracao_recusada`, nenhuma pergunta por
+e-mail/login em quatro turnos.
+🚨 **Dois defeitos apareceram só lá** e estão corrigidos: o **timeout de 25 s da extração**
+com cartão na tela devolvia `nao_havia` (o silêncio original de volta, por outra porta — hoje
+`cartaoVigente` mora no topo de `tentarMontarProposta` e todo caminho sem proposta passa por
+`semRederivacao()`), e o **primeiro cartão** era registrado como `sem_mudanca` quando base
+nula é `atualizado`. ⚠️ **Risco declarado:** o modo fechamento escreve um chamado inteiro em
+vez de um `pronto: false` de três linhas, então custa mais tempo — 8–10 s nos turnos que
+passaram, 25 s no que estourou. Se virar rotina, o conserto é o teto da chamada, não desligar
+o modo. ⚠️ **Produção continua sem isto** (`T-1234`).
 
 **A spec 005 (anexo na criação) está completa em código.** `RF-61`/`RF-62`/`RF-63`/`RN-11`:
 a declaração obrigatória travada no servidor nas duas rotas de criação, o upload em dois
@@ -1869,7 +1915,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1639 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1692 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em
