@@ -4889,9 +4889,40 @@ caso de teste para cada.
   com prazo). `FR-4` é instrução, e o pior caso é uma pergunta redundante — não é trava de
   segurança. Só entra se a medição mostrar que a instrução não basta.
 
-⚠️ **Falta medir na staging** com modelo real: as duas mensagens de novo, esperando a
-descrição **com** o motivo (`ScC-1`), nenhuma linha `ia_extracao_recusada` no segundo turno
-(`ScC-2`) e nenhuma pergunta por identificador (`ScC-3`).
+#### ✅ MEDIDO na staging em 20/08/2026, com modelo real
+
+Conversa `1c37b740` (`3936ca2d`, deploy de 19:23):
+
+- **Turno 1** — cartão nasce: *"Solicita acesso ao sistema Nexus para conseguir trabalhar."*,
+  registro com `modo: primeiro_cartao`.
+- **Turno 2** — `modo: cartao_vigente`, `alterados: [titulo, descricao, motivoPrioridade]`, e
+  a descrição passa a ser *"Solicita acesso ao Nexus para investigar a integração Nexus x
+  Factory. Sem esse acesso, não consegue conferir os dados das duas pontas. **Em aberto:**
+  desde quando a necessidade de acesso ocorre."* — `ScC-1` e `FR-5` na mesma frase.
+- **Zero** `ia_extracao_recusada` (`ScC-2`) e **nenhuma** pergunta por e-mail, login ou nome
+  em quatro turnos de duas conversas (`ScC-3`).
+
+#### 🚨 Dois defeitos que só a staging mostrou
+
+**1. Timeout da extração com cartão na tela devolvia `nao_havia` — o defeito original de
+volta, por outra porta.** Medido na conversa `1784e797`: a extração do turno 2 estourou o
+teto de **25 s** (`TIMEOUT_PADRAO_MS`), caiu em `excecao_na_extracao`, e o `catch` devolvia
+`SEM_REDERIVACAO` — cartão velho na tela, tela calada, a mensagem da pessoa perdida. A spec
+previa esse caminho no edge case de indisponibilidade e o código não o cobria. Hoje
+`cartaoVigente` vive no **topo** de `tentarMontarProposta`, não dentro do `try`, e **todo**
+caminho sem proposta passa por `semRederivacao()`. ⚠️ **A exceção é o bloqueio pendente**,
+que continua `nao_havia` de propósito: ali o único caminho de saída é o override (`D-21`), e
+um aviso sobre o resumo disputa atenção com o que de fato destrava.
+⚠️ **Risco declarado:** o modo fechamento faz a extração escrever um chamado inteiro em vez
+de um `pronto: false` de três linhas, então ela **custa mais tokens e mais tempo**. O turno
+que estourou levava 25 s; os que passaram, 8–10 s. Se isto virar rotina, o conserto é o teto
+da chamada — não desligar o modo fechamento.
+
+**2. O primeiro cartão era registrado como `sem_mudanca`.** Base nula chega com
+`alterados: []` (`diffDeProposta`), e chamar isso de "não mudou nada" descreve o cartão que
+acabou de nascer como se já estivesse lá. Na tela as duas são silêncio; no registro, uma
+delas é falsa — e o registro é o que responde *"o que aconteceu com esta pessoa?"*. Hoje base
+nula é `atualizado`.
 
 ---
 

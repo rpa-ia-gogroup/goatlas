@@ -232,6 +232,33 @@ describe('FR-2/FR-3 — "não mudou nada" ≠ "não consegui atualizar"', () => 
     expect(segundo.alterados).toContain('titulo')
   })
 
+  it('🚨 queda do provedor COM cartão na tela também é `nao_conseguiu`', async () => {
+    /**
+     * Medido na staging em 20/08/2026: a extração do turno estourou o timeout de 25 s, o
+     * `catch` devolvia `nao_havia` e a tela ficava calada com o resumo velho — o defeito
+     * original de volta por outra porta. Indisponibilidade informa e segue (`RNF-18`).
+     */
+    const id = await conversaVerificada()
+    await enviar(id, 'quero solicitar meu acesso ao nexus')
+    ia.falharExtracao = true
+    const segundo = await enviar(id, 'é para investigar a integração nexus x factory')
+    expect(segundo.atualizacaoDoCartao).toBe('nao_conseguiu')
+    // O cartão continua na tela e continua confirmável — nada virou parede.
+    expect((segundo.proposta as Record<string, unknown>).titulo).toBe(
+      'Solicitação de acesso ao Nexus',
+    )
+    expect(segundo.podeConfirmar).toBe(true)
+  })
+
+  it('o PRIMEIRO cartão é `atualizado`, nunca `sem_mudanca`', async () => {
+    // Base nula chega com `alterados: []` (`diffDeProposta`); chamar isso de "não mudou
+    // nada" descreveria o cartão que acabou de nascer como se já estivesse lá.
+    const id = await conversaVerificada()
+    const primeiro = await enviar(id, 'quero solicitar meu acesso ao nexus')
+    expect(primeiro.alterados).toEqual([])
+    expect(primeiro.atualizacaoDoCartao).toBe('atualizado')
+  })
+
   it('sem cartão e sem proposta é `nao_havia` — nada a avisar', async () => {
     const id = await conversaVerificada()
     ia.propostaSugerida = null

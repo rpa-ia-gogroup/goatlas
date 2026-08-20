@@ -79,6 +79,6 @@ Ordem: teste antes do código. Cada tarefa rastreia a um FR da spec.
       (cartão vigente não reavalia prontidão; "não mudou" ≠ "não consegui") e atualização do
       estado do projeto. _Requirements: Princípio XIII_
 - [x] **T-1232** — `npm run test` · `npm run typecheck` · `npm run build` limpos.
-- [ ] **T-1233** — Staging `3936ca2d`: repetir as duas mensagens medidas e conferir
+- [x] **T-1233** — Staging `3936ca2d`: repetir as duas mensagens medidas e conferir
       `ScC-1`/`ScC-2`/`ScC-3` no Investigador e na tela. _Requirements: ScC-1, ScC-2, ScC-3_
 - [ ] **T-1234** — Produção só depois de `T-1233` verde (regra 10).

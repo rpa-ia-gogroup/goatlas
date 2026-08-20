@@ -1698,10 +1698,20 @@ seguida**, junto com o token de CSS inexistente (ver as duas linhas em "Padrões
 Três defeitos de um caso real medido no Investigador e **reproduzido na staging com modelo
 real**: o cartão pronto voltando a `pronto: false` e apagando a última mensagem da pessoa · a
 tela sem como distinguir "nada mudou" de "não consegui atualizar" · o agente pedindo o e-mail
-que o app já tem. **19 casos novos**, suíte em **1690 testes**, typecheck e build limpos.
-⚠️ **Falta medir na staging** — as duas mensagens de novo, esperando a descrição **com** o
-motivo (`ScC-1`), zero `ia_extracao_recusada` no segundo turno (`ScC-2`) e nenhuma pergunta
-por identificador (`ScC-3`).
+que o app já tem. **21 casos novos**, suíte em **1692 testes**, typecheck e build limpos.
+✅ **MEDIDO na staging em 20/08/2026 com modelo real** (`3936ca2d`, conversa `1c37b740`): o
+turno 2 saiu com `modo: cartao_vigente`, `alterados: [titulo, descricao, motivoPrioridade]` e
+a descrição incorporando o motivo da pessoa mais *"Em aberto: desde quando a necessidade de
+acesso ocorre"* — `ScC-1` e `FR-5` juntos. Zero `ia_extracao_recusada`, nenhuma pergunta por
+e-mail/login em quatro turnos.
+🚨 **Dois defeitos apareceram só lá** e estão corrigidos: o **timeout de 25 s da extração**
+com cartão na tela devolvia `nao_havia` (o silêncio original de volta, por outra porta — hoje
+`cartaoVigente` mora no topo de `tentarMontarProposta` e todo caminho sem proposta passa por
+`semRederivacao()`), e o **primeiro cartão** era registrado como `sem_mudanca` quando base
+nula é `atualizado`. ⚠️ **Risco declarado:** o modo fechamento escreve um chamado inteiro em
+vez de um `pronto: false` de três linhas, então custa mais tempo — 8–10 s nos turnos que
+passaram, 25 s no que estourou. Se virar rotina, o conserto é o teto da chamada, não desligar
+o modo. ⚠️ **Produção continua sem isto** (`T-1234`).
 
 **A spec 005 (anexo na criação) está completa em código.** `RF-61`/`RF-62`/`RF-63`/`RN-11`:
 a declaração obrigatória travada no servidor nas duas rotas de criação, o upload em dois
@@ -1848,7 +1858,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1690 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1692 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

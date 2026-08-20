@@ -41,6 +41,15 @@ export class ClienteIAFake implements ClienteIA {
   readonly classificacoesRecebidas: ParametrosClassificacao[] = []
 
   falharChat = false
+  /**
+   * Só a **extração** falha — `FR-2` da spec 012.
+   *
+   * ⚠️ `falharChat` derruba as duas chamadas e o turno inteiro responde 500: é o cenário
+   * errado para medir "o cartão ficou e a tela avisou", porque nesse caso não há tela. O
+   * caso real medido na staging foi o timeout de 25 s **na extração**, com a resposta do
+   * modelo já entregue à pessoa.
+   */
+  falharExtracao = false
   /** Reinicia o roteiro quando ele acaba — só para desenvolvimento. */
   repetirRoteiro = false
   falharClassificacao = false
@@ -180,7 +189,7 @@ export class ClienteIAFake implements ClienteIA {
           ? (this.roteiroDePropostas.shift() ?? null)
           : this.roteiroDePropostas[0]!
     }
-    if (this.falharChat) {
+    if (this.falharChat || this.falharExtracao) {
       throw new ErroIA('fake: extração indisponível', { transitorio: true, etapa: 'extracao' })
     }
     const p = this.propostaSugerida
