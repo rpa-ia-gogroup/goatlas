@@ -4815,6 +4815,83 @@ nem o que foi alterado da última vez."*
 
 ---
 
+### D-79 · O Investigador vira leitura: o turno, a tradução e o JSON atrás de um clique
+
+**20/08/2026.** Spec `013` (`FR-21` a `FR-24`).
+
+#### O relato
+
+> *"a visualização do histórico é inexistente (apenas um conjunto de logs bizarros) e não é
+> uma página útil"*
+
+A `D-73` entregou o **registro**, e ele funciona — foi ele que respondeu, em quatro linhas,
+por que três chamados se perderam em 17/08 (`D-74`). A **tela** não. Cinco defeitos, todos em
+`src/app/investigador.tsx`:
+
+| # | O defeito | Por que doía |
+|---|---|---|
+| 1 | `BlocoJson` renderizava um `<pre>` **fora de qualquer `<details>`** | Sempre aberto, em **todo** evento; um turno tem ~14, e `ia_chat` carrega o histórico inteiro da conversa a cada ciclo |
+| 2 | `<span className="inv-tipo">{evento.tipo}</span>` | `ia_extracao_recusada` na tela: regra 4 quebrada na superfície feita para ler, mesma família de `D-63` |
+| 3 | Lista **plana** de eventos | ~80 itens sem agrupamento; *"por que este turno levou 40 s?"* exigia contar com o dedo |
+| 4 | Conversa num `<details>` fechado, como `<p>{conteudo}</p>` | Mensagem `tool` são milhares de caracteres sem corte, sem tamanho e sem rótulo |
+| 5 | `if (erro) return <Aviso/>` | Falha do resumo trocava a **tela inteira**, inclusive listas que talvez tivessem respondido |
+
+#### 🚨 O achado que barateia tudo: o agrupamento já estava gravado
+
+`coleta.ts#gravar` escreve **`requisicao_id` em todo evento** (segundo parâmetro de cada
+tupla), e `detalharSessao` já devolve eventos **e** requisições da conversa. Uma requisição
+`/api/*` **é** um turno, por construção: a coleta acumula em memória durante a requisição e
+grava tudo de uma vez (`FR-10c`).
+
+Agrupar não custou uma consulta nova, uma coluna nova nem um byte a mais no payload. Custou
+não ter sido feito.
+
+#### O que foi trazido do godocs, e o que foi recusado
+
+O Investigador do godocs (`godocs-main/src/routes/_authenticated/investigador.tsx`, 3.224
+linhas) foi lido inteiro. **Vieram as ideias, nunca o código:**
+
+- `linhasDoEvento(tipo, dados)` — função **pura** que traduz um evento em pares
+  `rótulo → valor`. Aqui virou `app/investigador/eventos.ts#descreverEvento`.
+- `PhaseDivider` — lá separa fases do formulário; aqui virou **divisor de turno**, com
+  duração, custo, ferramentas e idas para fora.
+- `JsonBodyViewer` com tamanho declarado, e a conversa em bolhas.
+
+**Recusados, e o motivo:** Tailwind e `lucide-react` (o app é CSS próprio sobre `tokens.css`)
+· a paleta de **seis cores** (a identidade GoGroup tem duas de acento, e a regra 9 proíbe
+estado só por cor — origem aqui continua **forma + palavra**) · fases `doc/saving/receita` e
+o versionamento por `projeto_versions` (domínio deles) · `MiniMarkdown` (o app já tem
+`TextoDoAgente`, com allowlist de forma de link — um segundo renderizador divergiria).
+
+#### As três travas que sobraram no código
+
+1. 🚨 **`Record<TipoDeEvento, Descritor>`** — tipo de evento novo **sem tradução não
+   compila**. Mesmo desenho de `FAMILIA` (`config/validar.ts`) e de `PAINEIS_DO_CONSOLE`
+   (`D-49`). E como um descritor que devolvesse o slug *compila*,
+   `tests/013-eventos-traduzidos.test.ts` varre os 21 tipos procurando `snake_case` em título
+   e rótulo.
+2. ⚠️ **Tipo desconhecido em tempo de execução NÃO some** — cai no `resumo` gravado (que já
+   era português) e, sem ele, no rótulo cru. Dado escrito por versão anterior é o caso normal
+   numa tabela com 30 dias de retenção e deploy semanal. Mesma escolha de `ORIGENS`.
+3. ⚠️ **Evento sem `requisicao_id` casado vai para "fora de turno"**, com a frase dizendo o
+   que ele é. Sumir seria a tela afirmar que o app não fez nada.
+
+#### O que NÃO mudou, de propósito
+
+**Nada do que é gravado.** `coleta.ts`, `registro.ts`, `fetch-observado.ts` e o schema estão
+intactos: todo dado que faltava na tela já estava no banco. Nada virou editável (`FR-11`), o
+Investigador continua separado da auditoria (`D-73`), e a latência do agente segue fora do
+escopo (`D-72`).
+
+#### Ainda em aberto (fases 2 a 4 da spec 013)
+
+Diff antes×depois do `proposta_rederivada` (o dado — `baseAnterior`, `alterados` — já está
+gravado desde `D-71`) · deep link `/investigador/<conversaId>` · `Promise.allSettled` com
+banner de falha · polling com guarda de requisição em voo · corpos de requisição **sob
+demanda** · exportar a sessão em JSON enxuto.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser
