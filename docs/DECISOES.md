@@ -4984,6 +4984,47 @@ ficou vazia.
 ao menos uma não é, e não há como separá-las por termo. Apagar as três descartaria a busca real
 de um colega — o único sinal de `RF-42` sobre esse assunto.
 
+#### A limpeza inteira: `GET`/`POST /api/admin/limpeza`
+
+*"limpe todos os dados que tem de teste, até nas estatísticas e tal"* — e o banco de produção
+carrega duas semanas de desenvolvimento **dentro do mesmo banco** que passou a ter gente de
+verdade no dia do anúncio. `governanca/limpeza.ts` faz o inventário e o descarte.
+
+🚨 **Apaga por CHAVE EXPLÍCITA, nunca por heurística.** As duas heurísticas óbvias apagariam
+dado real: *criado antes do anúncio* (havia colegas usando desde 12/08) e *e-mail de quem
+desenvolveu* (quem desenvolveu também usa o app de verdade). Quem decide é uma lista montada
+olhando o inventário — daí a rota `GET` existir.
+
+🚨 **`auditoria` e `config` ficam fora por construção** (`D-17`, `RNF-33`). A auditoria é
+append-only com piso de 180 dias e é o **único** rastro que sobra de uma operação que apaga o
+dado; apagá-la junto seria apagar a prova da limpeza. Há teste afirmando as duas ausências.
+
+⚠️ **A conversa de um chamado descartado vai junto, automaticamente.** Apagar o vínculo e
+deixar a conversa produziria o pior estado: ela continuaria nas estatísticas de deflexão como
+uma conversa que **não** virou chamado — o oposto do que aconteceu. O contrário não vale:
+conversa sem chamado é fato legítimo.
+
+⚠️ **`anexos_conteudo` é apagada por subconsulta, antes de `anexos_pendentes`** — ela é chaveada
+pelo id do anexo, não pela conversa, e a ordem inversa deixaria fatias de até 8 MB órfãs para
+sempre.
+
+**Executado em produção em 20/08/2026:** 3 chamados (`GOATLAS-1`, `GOATLAS-2` — chaves do fake —
+e `GN-6915`), 37 conversas, 72 mensagens, 3 bloqueios (com os 2 overrides encenados de 07/08),
+10 buscas, 4 submissões e o rastro de anexo, SLA e Investigador correspondente. **Tudo da conta
+de quem desenvolveu.**
+
+🚨 **`GN-6929` foi PRESERVADO, e a verificação é o registro, não a impressão.** A pergunta era
+*"foi teste nosso ou uso real?"*: a auditoria respondeu `chamado_criado GN-6929 · via:
+formulario`, de um e-mail que não é o de quem desenvolveu, às 18:11 UTC do dia do anúncio.
+Preservadas também as 5 conversas de outros três colegas — inclusive as 3 de 14–17/08 que são o
+caso medido em `D-73` (70 minutos no app, nenhum chamado), o único sinal de comportamento real
+anterior ao lançamento.
+
+⚠️ **Duas coisas ficaram de fora, declaradas:** `paginas_lidas` (248 linhas) não é chaveada por
+chamado nem por conversa, e `investigador_requisicoes` (~6 mil) só é alcançada pela conversa —
+o resto tem retenção própria de 30 dias e se resolve sozinho. E `gobeaute (3)` continua no mapa,
+pelo motivo do parágrafo anterior.
+
 ---
 
 ---

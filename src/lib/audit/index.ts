@@ -31,6 +31,12 @@ export type AcaoAuditada =
    * quê, já que o próprio dado apagado deixa de existir.
    */
   | 'lacuna_descartada'
+  /**
+   * Limpeza de dado de teste (`D-78`). Apaga linhas de uso em várias tabelas de uma vez, e é
+   * irreversível — o registro aqui é o **único** rastro que sobra, porque o dado apagado deixa
+   * de existir. É também por isso que `auditoria` nunca entra na própria limpeza (`D-17`).
+   */
+  | 'limpeza_executada'
   /** Leitura direta de página (RF-39) — toca a Atlassian, e a recusa é o registro de burla. */
   | 'pagina_confluence_lida'
   /** Anexo servido pelo proxy (RNF-02) — mesma razão. */
