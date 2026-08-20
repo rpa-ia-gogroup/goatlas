@@ -4815,6 +4815,86 @@ nem o que foi alterado da última vez."*
 
 ---
 
+### D-78 · A rederivação que não regride, e as duas frases que a tela não tinha
+
+**20/08/2026.** Spec `012` (`FR-1`…`FR-7`).
+
+#### O caso, medido no Investigador e reproduzido com modelo real
+
+Uma pessoa entrou no atlas às 14:57, pediu **acesso a um sistema**, explicou o motivo em
+duas mensagens e foi embora **sem chamado** — com o cartão pronto na tela e
+`podeConfirmar: true` desde o primeiro turno. Sessão `7d909d36`.
+
+1. **Turno 1** — a extração fechou o cartão: *"Solicitação de acesso ao Nexus"*, assunto
+   `Solicitar acesso/permissão a um Sistema`.
+2. **Turno 2** — ela contou *por que* precisava do acesso (investigar a integração Nexus ×
+   Factory). A extração do mesmo turno devolveu
+   `{"pronto": false, "titulo": "", "descricao": ""}`, foi recusada na interpretação, e o
+   cartão **congelou** na versão do turno 1 — sem o motivo dela. `alterados: []`, nada na
+   tela.
+3. A prosa pediu *"qual e-mail/login deve ser usado como referência"* — dado que o app **já
+   tem** (identidade do login, carimbada na descrição por `D-13`) e que o próprio
+   `PROMPT_EXTRACAO` **proíbe** tirar da conversa.
+
+✅ **Reproduzido na staging na mesma tarde** (conversa `16fc8d75`, modelo real, as duas
+mensagens exatas): mesma resposta crua `pronto: false`, mesma descrição congelada em *"O
+colaborador solicita acesso ao sistema Nexus."*, e a prosa pedindo de novo o identificador.
+Determinístico, não azar de sorteio.
+
+#### A causa: um gabarito de incidente aplicado a um pedido
+
+O critério de prontidão do `PROMPT_EXTRACAO` é *"falta informação essencial (o que
+aconteceu, desde quando, qual sistema)"*. Pedido de acesso não tem "o que aconteceu" nem
+"desde quando" — então a extração reavalia a prontidão **do zero a cada turno** e um pedido
+nunca casa. O primeiro turno passou porque a frase de abertura era limpa.
+
+🚨 **Depois que o cartão existe, essa pergunta não tem mais trabalho.** A decisão de ter
+cartão foi tomada no turno anterior; o que importa é *o que muda*. Por isso, com proposta
+vigente, a extração passa a rodar em modo fechamento — o mesmo mecanismo de `RF-81`
+(`aceitarNaoPronto`).
+
+#### As três coisas que mudaram, e as três que não
+
+- **`FR-1`** — `cartaoVigente` em `ParametrosExtracao`, e `INSTRUCAO_ATUALIZAR_CARTAO` no
+  **fim da mensagem do usuário** (`D-76`: no system ela perde para a regra mais antiga do
+  prompt e o modelo devolve o JSON vazio).
+- **`FR-2`/`FR-3`** — `atualizacaoDoCartao` com **quatro** estados. "A IA não mudou nada" e
+  "não consegui atualizar" chegavam à tela como o mesmo `alterados: []`; agora só
+  `nao_conseguiu` fala, e ela diz *"Não consegui atualizar o resumo com a sua última
+  mensagem"*. `sem_mudanca` é silêncio de propósito — aviso em todo turno ninguém lê
+  (`D-56`).
+- **`FR-4`** — o prompt do agente proíbe pedir e-mail, login, nome e área. A regra já
+  existia no prompt de **extração**; faltava a metade que a pessoa lê.
+
+⚠️ **Duas flags, não uma.** `forcarFechamento` (botão) e `cartaoVigente` usam o mesmo
+mecanismo e mandam textos **diferentes**: `INSTRUCAO_FECHAR_AGORA` afirma *"Ela clicou no
+botão"*, e dizer isso quando ninguém clicou é mentir para o modelo sobre o próprio turno —
+e apagaria a distinção no registro (`FR-7`, `modo: botao | cartao_vigente |
+primeiro_cartao`). Precedência declarada em `instrucaoDeFechamento`: o botão ganha.
+
+⚠️ **Nada afrouxou além do `pronto`.** Título e descrição curtos continuam descartando,
+`RF-28` continua descartando a proposta inteira, `RF-08` continua sendo pré-condição,
+`RN-07` continua descartando na gravação e `RF-17` continua sendo quem autoriza criar — um
+caso de teste para cada.
+
+#### O que foi recusado
+
+- **Baixar o gate de "≥ 4 mensagens" do botão `RF-81`.** Não é a causa: com cartão na tela
+  o botão **não aparece por desenho** (`!proposta`), e a pessoa tinha cartão desde o turno
+  1. Baixar o limite não a salvaria e devolveria ruído.
+- **Reescrever o critério de prontidão do primeiro cartão** para cobrir pedidos. Ajudaria o
+  turno que já funciona e não garante nada no segundo — a regressão volta na primeira frase
+  ambígua. Fica no Out of Scope da spec, condicionado à medição.
+- **Auditar em código que o agente não pediu identificação** (como `prosa-sem-prazo.ts` faz
+  com prazo). `FR-4` é instrução, e o pior caso é uma pergunta redundante — não é trava de
+  segurança. Só entra se a medição mostrar que a instrução não basta.
+
+⚠️ **Falta medir na staging** com modelo real: as duas mensagens de novo, esperando a
+descrição **com** o motivo (`ScC-1`), nenhuma linha `ia_extracao_recusada` no segundo turno
+(`ScC-2`) e nenhuma pergunta por identificador (`ScC-3`).
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

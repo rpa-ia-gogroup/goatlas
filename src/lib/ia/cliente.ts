@@ -36,6 +36,7 @@ import {
 import {
   PROMPT_CLASSIFICACAO_RESOLUCAO,
   PROMPT_DESCRICAO_ARQUIVO,
+  INSTRUCAO_ATUALIZAR_CARTAO,
   INSTRUCAO_FECHAR_AGORA,
   PROMPT_EXTRACAO,
   montarPromptClassificacao,
@@ -326,10 +327,10 @@ export class ClienteIAHttp implements ClienteIA {
              * nesse caso os outros campos são ignorados") e o botão não montou nada. No fim
              * da instrução real da tarefa ela é o último texto que o modelo lê.
              */
-            content: params.forcarFechamento
+            content: instrucaoDeFechamento(params)
               ? `${montarPromptExtracao(params)}
 
-${INSTRUCAO_FECHAR_AGORA}`
+${instrucaoDeFechamento(params)}`
               : montarPromptExtracao(params),
           },
         ],
@@ -347,7 +348,9 @@ ${INSTRUCAO_FECHAR_AGORA}`
       proposta: interpretarProposta(
         bruto,
         params.tiposPermitidos.map((t) => t.id),
-        { aceitarNaoPronto: params.forcarFechamento === true },
+        // `FR-1`/`FR-6` — os dois modos afrouxam **só** o `pronto` do modelo. As outras
+        // quatro recusas de `interpretarProposta` continuam valendo nos dois.
+        { aceitarNaoPronto: instrucaoDeFechamento(params) !== null },
       ),
       custoEstimadoUsd: custo,
       // spec 009, `FR-6` — só o Investigador lê isto, e só quando a proposta é recusada.
@@ -419,6 +422,22 @@ export function interpretarClassificacao(bruto: unknown): {
  * Na dúvida, sem proposta: o agente continua perguntando, que é o pior caso
  * aceitável. Criar na fila errada não é.
  */
+/**
+ * Qual instrução de fechamento vai no fim da mensagem do usuário — `FR-1` (spec 012).
+ *
+ * 🚨 **A precedência é declarada, não acidental:** o botão de `RF-81` ganha do cartão
+ * vigente, porque é pedido explícito da pessoa naquele turno. Os dois textos não podem ser
+ * fundidos — `INSTRUCAO_FECHAR_AGORA` **afirma** que alguém clicou num botão.
+ *
+ * `null` é o caminho normal: primeiro cartão da conversa, onde `pronto: false` ainda é a
+ * resposta certa e é o que evita cartão desenhado cedo demais.
+ */
+function instrucaoDeFechamento(params: ParametrosExtracao): string | null {
+  if (params.forcarFechamento === true) return INSTRUCAO_FECHAR_AGORA
+  if (params.cartaoVigente === true) return INSTRUCAO_ATUALIZAR_CARTAO
+  return null
+}
+
 export function interpretarProposta(
   bruto: unknown,
   idsPermitidos: readonly string[],

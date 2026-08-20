@@ -2817,6 +2817,14 @@ function negociacaoNaResposta(
     camposSugeridos: turno.camposSugeridos,
     alterados: turno.alterados,
     recusasDeAjuste: turno.recusasDeAjuste,
+    /**
+     * `FR-2`/`FR-3` (spec 012) — o que aconteceu com o cartão neste turno.
+     *
+     * ⚠️ Vem do orquestrador, **nunca** derivado aqui de `alterados`: `[]` significa "nada
+     * mudou" e também "não deu para atualizar", e foi exatamente essa indistinção que
+     * apagou a mensagem de uma pessoa em silêncio (20/08/2026).
+     */
+    atualizacaoDoCartao: turno.atualizacaoDoCartao,
     // `FR-10` — derivado aqui, do mesmo `alterados`: um segundo produtor faria a tela
     // apagar os campos numa condição e o merge preservá-los em outra.
     assuntoMudou: turno.alterados.includes('tipoChamadoId'),

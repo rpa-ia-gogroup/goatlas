@@ -117,6 +117,14 @@ export interface RespostaTurno {
   /** O assunto mudou neste turno — a tela diz, e os campos do anterior somem (`FR-10`). */
   readonly assuntoMudou?: boolean
   /**
+   * O que aconteceu com o cartão neste turno — `FR-2`/`FR-3` (spec 012).
+   *
+   * ⚠️ **Não é derivável de `alterados`**: lista vazia significa "a IA não mudou nada" **e**
+   * "a IA não conseguiu rederivar", e as duas frases são opostas. Só `nao_conseguiu` vira
+   * aviso na tela; `sem_mudanca` e `nao_havia` são silêncio.
+   */
+  readonly atualizacaoDoCartao?: 'atualizado' | 'sem_mudanca' | 'nao_conseguiu' | 'nao_havia'
+  /**
    * A frase de `FR-5`, pronta, quando o motivo não pôde ser exibido.
    *
    * ⚠️ Vem do servidor em vez de a tela inventá-la porque **a rota do override** mostra o
