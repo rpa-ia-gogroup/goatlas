@@ -21,7 +21,7 @@
  *    vazia" e "não carregou" são frases opostas, e o vazio é indistinguível das duas.
  * 4. **Bloco conhecido caindo em `desconhecido`** — `view-file` (arquivo anexado) e
  *    `adf:decision-list` imprimiam o **nome técnico em inglês** dentro de uma caixa que diz
- *    "o goatlas ainda não sabe mostrar este bloco".
+ *    "o atlas ainda não sabe mostrar este bloco".
  *
  * As asserções são sobre o HTML que chegaria ao navegador, como em `rf43-adf-e-status.test.ts`:
  * árvore certa que o renderizador desenha errado não conserta nada.
@@ -216,7 +216,7 @@ describe('QA 13/08 — página sem conteúdo nenhum', () => {
     // "Não conseguimos carregar" mandaria a pessoa tentar de novo para sempre. A distinção
     // é a mesma de `comentariosIndisponiveis` × "não há respostas".
     expect(html).not.toContain('Não conseguimos')
-    expect(html).not.toContain('goatlas ainda não sabe')
+    expect(html).not.toContain('atlas ainda não sabe')
   })
 
   it('página COM conteúdo não ganha o aviso', () => {

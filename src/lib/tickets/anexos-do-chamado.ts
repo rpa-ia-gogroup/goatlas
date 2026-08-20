@@ -44,14 +44,14 @@ export interface AnexoExibivel extends AnexoDoChamado {
    *
    * `voce` — o app o enviou a pedido desta pessoa; a prova é a nossa própria linha.
    * `time` — veio da Atlassian e passou pela interseção de `D-45`.
-   * `goatlas` — o app o **gerou** (hoje só a transcrição de `RF-23`). Ninguém o enviou.
+   * `atlas` — o app o **gerou** (hoje só a transcrição de `RF-23`). Ninguém o enviou.
    *
    * ⚠️ O terceiro valor existe porque os dois primeiros mentiriam sobre a transcrição:
    * "você enviou" é falso (a pessoa não mandou arquivo nenhum) e "do time" é falso do
    * jeito pior (sugere que um agente do time anexou algo ao chamado dela). Afirmar
    * autoria errada na tela é exatamente o defeito que `D-43` corrigiu no comentário.
    */
-  readonly origem: 'voce' | 'time' | 'goatlas'
+  readonly origem: 'voce' | 'time' | 'atlas'
 }
 
 export interface AnexosParaExibir {
@@ -146,7 +146,7 @@ export function anexosParaExibir(
     ...a,
     url: urlDoAnexoNoApp(issueKey, a.nomeArquivo),
     // `via` ausente = os caminhos antigos, que só gravavam envio da pessoa.
-    origem: via === 'transcricao' ? ('goatlas' as const) : ('voce' as const),
+    origem: via === 'transcricao' ? ('atlas' as const) : ('voce' as const),
   }))
   const jaListado = (a: AnexoDoChamado) => meus.some((m) => mesmoArquivo(m, a))
 

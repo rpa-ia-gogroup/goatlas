@@ -1,4 +1,4 @@
-# Roadmap SDD — goatlas
+# Roadmap SDD — atlas
 
 Traduz o faseamento da seção 12 de [`REQUISITOS.md`](REQUISITOS.md) em specs.
 Cada fase é **uma** spec (`specs/<NNN>-<slug>/`) com seu `plan.md` e `tasks.md`;
@@ -31,7 +31,7 @@ projeto funcionou.
 
 **Estado em 04/08/2026:** a Fase 1 está completa no que não depende de credencial —
 49 de 58 tarefas, 166 testes, e o app **no ar em modo demonstração** em
-https://goatlas.devgogroup.com (`D-07`).
+https://atlas.devgogroup.com (`D-07`).
 
 **O que dá para fazer sem nenhuma resposta nova:**
 - **Fase 2:** a trava da fase inteira (sanitização, renderização, proxy de anexo) e

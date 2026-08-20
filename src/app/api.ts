@@ -180,7 +180,7 @@ export interface ComentarioPublico {
   readonly autorNome: string
   readonly criadoEm: string
   /**
-   * `true` = a pessoa que está lendo escreveu este comentário, pelo goatlas.
+   * `true` = a pessoa que está lendo escreveu este comentário, pelo atlas.
    *
    * Vem do servidor, do **mesmo** predicado que o SLA de `RF-46` usa. A tela não
    * recalcula: condição escrita só aqui divergiria em silêncio da de lá.
@@ -231,12 +231,12 @@ export interface AnexoDoChamado {
    * `RF-31` — de onde veio a certeza de que este arquivo pode aparecer.
    *
    * `voce` = o app o enviou a pedido desta pessoa · `time` = veio da Atlassian e passou
-   * pela interseção de `D-45` · `goatlas` = o app o **gerou** (a transcrição de `RF-23`).
+   * pela interseção de `D-45` · `atlas` = o app o **gerou** (a transcrição de `RF-23`).
    * A tela **diz** isso em palavras: quem mandou o print precisa reconhecê-lo, "o time
    * respondeu com um arquivo" é outra notícia, e nenhuma das duas descreve um arquivo
    * que ninguém enviou.
    */
-  readonly origem?: 'voce' | 'time' | 'goatlas'
+  readonly origem?: 'voce' | 'time' | 'atlas'
 }
 
 export interface TipoChamado {

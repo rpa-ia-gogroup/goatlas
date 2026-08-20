@@ -93,7 +93,7 @@ async function montar(espacos: readonly string[] = ['TECH']): Promise<void> {
   await config.definir('dominios_permitidos', ['gocase.com'], ANA, AGORA)
   await config.definir('espacos_confluence', [...espacos], ANA, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -111,7 +111,7 @@ function buscar(idPagina: string, nome: string, email: string | null = ANA): Pro
   if (email) headers[HEADER_EMAIL] = email
   const caminho = `/api/confluence/anexo/${idPagina}/${encodeURIComponent(nome)}`
   return tratarRequisicao(
-    new Request(`https://goatlas.devgogroup.com${caminho}`, { headers }),
+    new Request(`https://atlas.devgogroup.com${caminho}`, { headers }),
     ctx,
     {},
   )

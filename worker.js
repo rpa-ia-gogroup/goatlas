@@ -46,16 +46,16 @@ function filtrarPublicos(itens) {
   return saida;
 }
 function prefixarAutoria(corpo, autorNome, autorEmail) {
-  return `**${autorNome}** (${autorEmail}) via goatlas:
+  return `**${autorNome}** (${autorEmail}) via atlas:
 
 ${corpo}`;
 }
 function ehComentarioDoSolicitante(corpo) {
-  return PREFIXO_GOATLAS.test(corpo.trimStart());
+  return PREFIXO_ATLAS.test(corpo.trimStart());
 }
-var PREFIXO_GOATLAS = /^\*\*.+?\*\* \(.+?@.+?\) via goatlas:\s*/;
+var PREFIXO_ATLAS = /^\*\*.+?\*\* \(.+?@.+?\) via (?:go)?atlas:\s*/;
 function removerPrefixoAutoria(corpo) {
-  return corpo.trimStart().replace(PREFIXO_GOATLAS, "");
+  return corpo.trimStart().replace(PREFIXO_ATLAS, "");
 }
 
 // src/lib/atlassian/tipos.ts
@@ -725,7 +725,7 @@ var ClienteAtlassianHttp = class {
    */
   montarCamposSolicitante(dados) {
     const cabecalho = `**Solicitante:** ${dados.solicitanteEmail}
-**Aberto via:** goatlas
+**Aberto via:** atlas
 **Ref:** ${dados.chaveIdempotencia}
 
 ---
@@ -1290,7 +1290,7 @@ var ClienteAtlassianHttp = class {
 };
 
 // src/lib/atlassian/fake.ts
-var NOME_CONTA_DE_SERVICO_FAKE = "Conta de servi\xE7o goatlas";
+var NOME_CONTA_DE_SERVICO_FAKE = "Conta de servi\xE7o atlas";
 var FALHAS = Object.freeze({
   indisponivel: { status: 503, transitorio: true },
   rate_limit: { status: 429, transitorio: true },
@@ -1361,7 +1361,7 @@ var ClienteAtlassianFake = class {
    * Avança o contador de chaves para além do que já existe — só demonstração/teste.
    *
    * ⚠️ O Worker é **stateless**: `contadorIssue` volta a zero a cada requisição, então o
-   * segundo chamado aberto na demonstração também nascia `GOATLAS-1` e batia no
+   * segundo chamado aberto na demonstração também nascia `ATLAS-1` e batia no
    * `UNIQUE (vinculos.issue_key)`. Pego no app real em 07/08/2026.
    *
    * Em produção nada disto existe: a chave é do JSM, que não repete.
@@ -1442,7 +1442,7 @@ var ClienteAtlassianFake = class {
     if (existente) return existente;
     this.contadorIssue += 1;
     const criado = {
-      issueKey: `GOATLAS-${this.contadorIssue}`,
+      issueKey: `ATLAS-${this.contadorIssue}`,
       issueId: String(1e4 + this.contadorIssue)
     };
     this.porChave.set(dados.chaveIdempotencia, criado);
@@ -1785,7 +1785,7 @@ var ClienteAtlassianFake = class {
 };
 
 // src/lib/atlassian/somente-leitura.ts
-var MENSAGEM_SOMENTE_LEITURA = "O goatlas est\xE1 em modo somente leitura: consulta \xE0 documenta\xE7\xE3o e aos chamados funciona, mas nada \xE9 criado ou alterado no Jira. Fale com o time de tech se precisar abrir um chamado agora.";
+var MENSAGEM_SOMENTE_LEITURA = "O atlas est\xE1 em modo somente leitura: consulta \xE0 documenta\xE7\xE3o e aos chamados funciona, mas nada \xE9 criado ou alterado no Jira. Fale com o time de tech se precisar abrir um chamado agora.";
 var ClienteAtlassianSomenteLeitura = class {
   constructor(real) {
     this.real = real;
@@ -2542,7 +2542,7 @@ function regra2Disponivel(exemplos) {
 // src/lib/ia/prompts.ts
 function montarPromptAgente(ctx) {
   const secoes = [
-    `Voc\xEA \xE9 o assistente do goatlas \u2014 a porta de entrada da Gocase para pedir ajuda ao time de tech.
+    `Voc\xEA \xE9 o assistente do atlas \u2014 a porta de entrada da Gocase para pedir ajuda ao time de tech.
 
 Voc\xEA n\xE3o \xE9 um assistente de uso geral. Voc\xEA existe para uma coisa: entender o que a pessoa precisa, verificar se a resposta j\xE1 existe e, quando n\xE3o existe, abrir com ela um chamado bem escrito. Fale portugu\xEAs do Brasil, com acentua\xE7\xE3o, de forma direta e cordial. Voc\xEA trabalha para quem est\xE1 pedindo ajuda \u2014 n\xE3o para o processo.`,
     `## O que voc\xEA consegue fazer
@@ -3586,6 +3586,23 @@ var InvestigadorDesligado = class {
 };
 var INVESTIGADOR_DESLIGADO = new InvestigadorDesligado();
 
+// src/lib/env-do-app.ts
+var PREFIXO_ATUAL = "ATLAS_";
+var PREFIXO_LEGADO = "GOATLAS_";
+function nomeLegado(chave2) {
+  if (!chave2.startsWith(PREFIXO_ATUAL)) return null;
+  return PREFIXO_LEGADO + chave2.slice(PREFIXO_ATUAL.length);
+}
+function valorDoApp(env, chave2) {
+  const bruto = env;
+  const novo = bruto[chave2];
+  if (novo !== void 0 && novo !== "") return novo;
+  const legado = nomeLegado(chave2);
+  if (legado === null) return novo;
+  const antigo = bruto[legado];
+  return antigo !== void 0 && antigo !== "" ? antigo : novo;
+}
+
 // src/lib/config/index.ts
 var CONFIG_PADRAO = Object.freeze({
   dominios_permitidos: [],
@@ -3630,20 +3647,23 @@ function lista(bruto) {
 }
 function valoresDoBootstrap(env) {
   const parcial = {};
-  const dominios = lista(env.GOATLAS_DOMINIOS);
+  const dominios = lista(valorDoApp(env, "ATLAS_DOMINIOS"));
   if (dominios.length > 0) parcial.dominios_permitidos = dominios;
-  const admins = lista(env.GOATLAS_ADMINS);
+  const admins = lista(valorDoApp(env, "ATLAS_ADMINS"));
   if (admins.length > 0) parcial.admins = admins;
-  const tipos = lista(env.GOATLAS_TIPOS_CHAMADO);
+  const tipos = lista(valorDoApp(env, "ATLAS_TIPOS_CHAMADO"));
   if (tipos.length > 0) parcial.tipos_chamado_permitidos = tipos;
-  const espacos = (env.GOATLAS_ESPACOS_CONFLUENCE ?? "").split(",").map((v) => v.trim()).filter((v) => v.length > 0);
+  const espacos = (valorDoApp(env, "ATLAS_ESPACOS_CONFLUENCE") ?? "").split(",").map((v) => v.trim()).filter((v) => v.length > 0);
   if (espacos.length > 0) parcial.espacos_confluence = espacos;
-  if (env.GOATLAS_SERVICE_DESK_ID) parcial.service_desk_id = env.GOATLAS_SERVICE_DESK_ID;
-  if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID;
-  if (env.GOATLAS_BASE_PUBLICA) {
-    parcial.base_publica_app = env.GOATLAS_BASE_PUBLICA.trim().replace(/\/+$/, "");
+  const serviceDesk = valorDoApp(env, "ATLAS_SERVICE_DESK_ID");
+  if (serviceDesk) parcial.service_desk_id = serviceDesk;
+  const orgId = valorDoApp(env, "ATLAS_ORG_ID");
+  if (orgId) parcial.org_id = orgId;
+  const basePublica = valorDoApp(env, "ATLAS_BASE_PUBLICA");
+  if (basePublica) {
+    parcial.base_publica_app = basePublica.trim().replace(/\/+$/, "");
   }
-  const canal = (env.GOATLAS_CANAL_NOTIFICACAO ?? "").trim().toLowerCase();
+  const canal = (valorDoApp(env, "ATLAS_CANAL_NOTIFICACAO") ?? "").trim().toLowerCase();
   if (canal === "chat" || canal === "email" || canal === "nenhum") {
     parcial.canal_notificacao_padrao = canal;
   }
@@ -6614,7 +6634,7 @@ var RepositorioVinculos = class {
    * `{"issue":{"key":"TECH-1"}}`. O que impede o abuso é que a chave só serve para
    * **achar o vínculo local** — sem vínculo, não há a quem notificar e nada acontece —
    * e que a resposta do webhook é a mesma nos dois casos (`202`), para não virar
-   * oráculo de "este chamado está no goatlas?".
+   * oráculo de "este chamado está no atlas?".
    */
   async obterParaNotificacao_semIsolamento(issueKey) {
     return this.obterSemIsolamento_apenasReconciliacao(issueKey);
@@ -6640,7 +6660,7 @@ var RepositorioVinculos = class {
    *
    * Recebe a lista de chaves que a Atlassian disse ter mudado e devolve **só** as que
    * têm vínculo local. É o mesmo raciocínio do webhook: chamado do time de tech que
-   * nunca passou pelo goatlas não gera notificação para ninguém.
+   * nunca passou pelo atlas não gera notificação para ninguém.
    */
   async filtrarComVinculo(issueKeys) {
     if (issueKeys.length === 0) return [];
@@ -6709,7 +6729,7 @@ function anexosParaExibir(issueKey, doChamado, prova, enviadosPeloApp = []) {
     ...a,
     url: urlDoAnexoNoApp(issueKey, a.nomeArquivo),
     // `via` ausente = os caminhos antigos, que só gravavam envio da pessoa.
-    origem: via === "transcricao" ? "goatlas" : "voce"
+    origem: via === "transcricao" ? "atlas" : "voce"
   }));
   const jaListado = (a) => meus.some((m) => mesmoArquivo(m, a));
   if (doChamado === null) return { itens: meus, indisponivel: true };
@@ -8012,7 +8032,7 @@ var CanalEmail = class {
         ...this.opcoes.apiKey ? { Authorization: `Bearer ${this.opcoes.apiKey}` } : {}
       },
       body: JSON.stringify({
-        from: this.opcoes.remetente ?? "goatlas@gocase.com",
+        from: this.opcoes.remetente ?? "atlas@gocase.com",
         to: destino,
         subject: mensagem.titulo,
         text: textoPlano(mensagem)
@@ -8049,13 +8069,13 @@ var cachesAtlassianDoIsolate = novasCachesAtlassian();
 var cacheTeamGuideDoIsolate = novaCacheTeamGuide();
 async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).toISOString(), novoId = novoIdPadrao, reaproveitar = {}) {
   await garantirMigracao(env.DB);
-  const modoDemo = env.GOATLAS_MODO_DEMO === "1";
+  const modoDemo = valorDoApp(env, "ATLAS_MODO_DEMO") === "1";
   const bootstrap = { ...modoDemo ? configDemo() : {}, ...valoresDoBootstrap(env) };
   const config = new Config(env.DB, bootstrap);
   const valores = await config.carregar();
   const auditoria = new AuditoriaBanco(env.DB, agora, novoId);
-  const usandoFakes = modoDemo || env.GOATLAS_USAR_FAKES === "1" || !env.ATLASSIAN_API_TOKEN;
-  const somenteLeitura = env.GOATLAS_SOMENTE_LEITURA === "1";
+  const usandoFakes = modoDemo || valorDoApp(env, "ATLAS_USAR_FAKES") === "1" || !env.ATLASSIAN_API_TOKEN;
+  const somenteLeitura = valorDoApp(env, "ATLAS_SOMENTE_LEITURA") === "1";
   const coleta = valores.investigador_ligado ? new ColetaDeRequisicao(novoId(), agora, novoId) : null;
   const investigador = coleta ?? INVESTIGADOR_DESLIGADO;
   const observarChamada = investigador.observador();
@@ -8152,7 +8172,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     if (nome === "email") {
       return valores.email_endpoint ? new CanalEmail({
         endpoint: valores.email_endpoint,
-        remetente: valores.email_remetente ?? "goatlas@gocase.com",
+        remetente: valores.email_remetente ?? "atlas@gocase.com",
         apiKey: env.EMAIL_API_KEY ?? null
       }) : new CanalIndisponivel();
     }
@@ -8212,7 +8232,7 @@ async function montarContexto(env, agora = () => (/* @__PURE__ */ new Date()).to
     notificador,
     canalPor,
     valoresNotificacao,
-    segredoWebhook: env.GOATLAS_WEBHOOK_SEGREDO,
+    segredoWebhook: valorDoApp(env, "ATLAS_WEBHOOK_SEGREDO"),
     agora,
     novoId,
     usandoFakes,
@@ -9831,7 +9851,7 @@ function recomendacoesParaCsv(recomendacoes) {
 }
 
 // src/lib/notificacoes/webhook.ts
-var HEADER_WEBHOOK = "x-goatlas-webhook";
+var HEADER_WEBHOOK = "x-atlas-webhook";
 var PARAM_WEBHOOK = "k";
 function segredoConfere(enviado, esperado) {
   if (!esperado || esperado.length === 0) return false;
@@ -9946,7 +9966,7 @@ async function verificarCron(dados) {
 }
 
 // src/lib/piloto/areas.ts
-var MENSAGEM_FORA_DO_PILOTO = "O goatlas est\xE1 em piloto e ainda n\xE3o abrange a sua \xE1rea. Enquanto isso, siga pedindo pelo canal que voc\xEA j\xE1 usa hoje com o time de tech \u2014 e a gente avisa quando chegar a sua vez. A consulta \xE0 documenta\xE7\xE3o continua liberada para voc\xEA aqui mesmo.";
+var MENSAGEM_FORA_DO_PILOTO = "O atlas est\xE1 em piloto e ainda n\xE3o abrange a sua \xE1rea. Enquanto isso, siga pedindo pelo canal que voc\xEA j\xE1 usa hoje com o time de tech \u2014 e a gente avisa quando chegar a sua vez. A consulta \xE0 documenta\xE7\xE3o continua liberada para voc\xEA aqui mesmo.";
 function dentroDoPiloto(email, emailsPiloto) {
   if (emailsPiloto.length === 0) return { dentro: true };
   const alvo = email.trim().toLowerCase();
@@ -10241,7 +10261,7 @@ async function analisarAnexo(arquivo, deps) {
       // ⚠️ O tipo **não** aparece na frase: `Content-Type` vem do cliente e pode ser
       // qualquer string (`RNF-30`). O nome do arquivo, que a pessoa reconhece, é dito por
       // quem monta a tela.
-      descricao: "este formato de arquivo n\xE3o \xE9 lido pelo goatlas",
+      descricao: "este formato de arquivo n\xE3o \xE9 lido pelo atlas",
       custoUsd: 0
     };
   }
@@ -10539,7 +10559,7 @@ function rotuloDoPapel(m) {
 }
 function montarTranscricao(mensagens, dados) {
   const cabecalho = [
-    "# Conversa com o agente do goatlas",
+    "# Conversa com o agente do atlas",
     "",
     `- **Chamado:** ${dados.issueKey}`,
     `- **Solicitante:** ${dados.solicitanteEmail}`,
@@ -10585,12 +10605,12 @@ function montarSecaoDeAnexos(analises) {
 }
 var FRASE_DO_ESTADO = {
   analisando: "a leitura n\xE3o havia terminado quando o chamado foi aberto",
-  tipo_nao_suportado: "o goatlas n\xE3o l\xEA este formato de arquivo",
+  tipo_nao_suportado: "o atlas n\xE3o l\xEA este formato de arquivo",
   sem_conteudo: "n\xE3o havia texto ou imagem leg\xEDvel neste arquivo",
   falhou: "a leitura falhou \u2014 o arquivo n\xE3o foi analisado"
 };
 function recortar(texto3) {
-  const aviso2 = "\n\n---\n\n_\u26A0\uFE0F Transcri\xE7\xE3o truncada: a conversa passou do limite de arquivo do goatlas. O di\xE1logo completo continua registrado no app._\n";
+  const aviso2 = "\n\n---\n\n_\u26A0\uFE0F Transcri\xE7\xE3o truncada: a conversa passou do limite de arquivo do atlas. O di\xE1logo completo continua registrado no app._\n";
   const codificador = new TextEncoder();
   if (codificador.encode(texto3).length <= LIMITE_TRANSCRICAO_BYTES) return texto3;
   const sobra = LIMITE_TRANSCRICAO_BYTES - codificador.encode(aviso2).length;
@@ -12667,11 +12687,11 @@ async function rotear(req, ctx, eu, caminho, url) {
     let idsAnexo = [];
     if (corpo?.comAnexo === true) {
       const bytes = new TextEncoder().encode(
-        "Arquivo de teste do goatlas \u2014 diagnostico de criacao com anexo (spec 010)."
+        "Arquivo de teste do atlas \u2014 diagnostico de criacao com anexo (spec 010)."
       );
       idsAnexo = [
         await ctx.atlassian.subirAnexoTemporario(serviceDeskId, {
-          nome: "teste-goatlas.txt",
+          nome: "teste-atlas.txt",
           tipo: "text/plain",
           bytes: bytes.buffer
         })
@@ -12682,7 +12702,7 @@ async function rotear(req, ctx, eu, caminho, url) {
         serviceDeskId,
         tipoChamadoId,
         titulo,
-        descricao: typeof corpo?.descricao === "string" ? corpo.descricao : "Teste do goatlas.",
+        descricao: typeof corpo?.descricao === "string" ? corpo.descricao : "Teste do atlas.",
         prioridade: "normal",
         solicitanteEmail: eu.email,
         chaveIdempotencia: `diag:${tipoChamadoId}:${ctx.agora()}`,

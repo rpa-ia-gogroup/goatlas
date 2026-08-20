@@ -5,7 +5,7 @@
  *
  * O bloco `livesearch` do Confluence é uma **caixa de busca do espaço**. Diferente dos
  * outros blocos dinâmicos, ele não é um *resultado* a reproduzir: é um caminho, e busca é o
- * que o goatlas já faz melhor que o Confluence para este público (sem assento, com allowlist
+ * que o atlas já faz melhor que o Confluence para este público (sem assento, com allowlist
  * no servidor, registrando lacuna de documentação). Para o bloco funcionar, a busca precisa
  * aceitar "só neste espaço".
  *
@@ -58,7 +58,7 @@ beforeEach(async () => {
   await config.definir('admins', [CHEFE], CHEFE, AGORA)
   await config.definir('espacos_confluence', ['GT', 'DTE'], CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -74,7 +74,7 @@ beforeEach(async () => {
 
 async function buscar(query: string) {
   const r = await tratarRequisicao(
-    new Request(`https://goatlas.devgogroup.com/api/confluence/busca?${query}`, {
+    new Request(`https://atlas.devgogroup.com/api/confluence/busca?${query}`, {
       headers: { [HEADER_EMAIL]: ANA },
     }),
     ctx,
@@ -154,7 +154,7 @@ describe('RF-42 — zero por ESCOPO não envenena o mapa de lacunas', () => {
 
   it('e a busca com escopo inválido não gera `buscaId` — não houve busca a atribuir', async () => {
     const r = await tratarRequisicao(
-      new Request('https://goatlas.devgogroup.com/api/confluence/busca?q=abc&espaco=RH', {
+      new Request('https://atlas.devgogroup.com/api/confluence/busca?q=abc&espaco=RH', {
         headers: { [HEADER_EMAIL]: ANA },
       }),
       ctx,

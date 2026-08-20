@@ -35,7 +35,7 @@ const COMPLETO = { buscaDocumentacaoDisponivel: true, historicoDisponivel: true 
 describe('prompt do agente — identidade e escopo', () => {
   it('se apresenta como o agente de chamados, não como assistente genérico', () => {
     const p = montarPromptAgente(COMPLETO)
-    expect(p).toContain('goatlas')
+    expect(p).toContain('atlas')
     expect(p).toMatch(/chamado/i)
     // A frase que fecha o buraco do "Olá! Como posso te ajudar hoje?": o prompt tem de
     // dizer o que fazer quando a pessoa só cumprimenta.
@@ -194,7 +194,7 @@ describe('prompt do agente — é ele que chega ao provedor', () => {
       espacos_confluence: ['TECH'],
       regra2_exemplos_ajuste_operacional: ['Rodei o pipeline manualmente'],
     })
-    expect(conteudo).toContain('goatlas')
+    expect(conteudo).toContain('atlas')
     expect(conteudo).not.toMatch(/não está disponível/i)
   })
 

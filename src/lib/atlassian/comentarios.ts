@@ -133,7 +133,7 @@ export function filtrarPublicos(itens: readonly unknown[]): readonly ComentarioP
  * linha.
  */
 export function prefixarAutoria(corpo: string, autorNome: string, autorEmail: string): string {
-  return `**${autorNome}** (${autorEmail}) via goatlas:\n\n${corpo}`
+  return `**${autorNome}** (${autorEmail}) via atlas:\n\n${corpo}`
 }
 
 /**
@@ -150,10 +150,21 @@ export function prefixarAutoria(corpo: string, autorNome: string, autorEmail: st
  * `prefixarAutoria` e lê com esta função, para que divergência quebre a suíte.
  */
 export function ehComentarioDoSolicitante(corpo: string): boolean {
-  return PREFIXO_GOATLAS.test(corpo.trimStart())
+  return PREFIXO_ATLAS.test(corpo.trimStart())
 }
 
-const PREFIXO_GOATLAS = /^\*\*.+?\*\* \(.+?@.+?\) via goatlas:\s*/
+/**
+ * ⚠️ **Lê `atlas` E `goatlas`; escreve só `atlas`.** O app chamou-se `goatlas` até
+ * 19/08/2026, e o prefixo antigo está gravado dentro de **todo comentário que já
+ * existe no Jira** — não há como reescrevê-los. Regex só com a forma nova faria cada
+ * comentário antigo do solicitante deixar de ser reconhecido: pelo SLA de `RF-46` ele
+ * passaria a contar como **primeira resposta do time** (aderência inflada, alerta que
+ * nunca dispara — o defeito de `D-56`), e na tela voltaria a aparecer assinado pela
+ * conta de serviço (`D-43`). O `(?:go)?` é o que impede as duas coisas.
+ *
+ * Mesma forma de `linhasComoObjetos`: aceitar as duas leituras, produzir uma escrita.
+ */
+const PREFIXO_ATLAS = /^\*\*.+?\*\* \(.+?@.+?\) via (?:go)?atlas:\s*/
 
 /**
  * Remove o prefixo de autoria, deixando só o que a pessoa escreveu.
@@ -169,5 +180,5 @@ const PREFIXO_GOATLAS = /^\*\*.+?\*\* \(.+?@.+?\) via goatlas:\s*/
  * Corpo sem prefixo volta inalterado: comentário do time de tech não tem o que remover.
  */
 export function removerPrefixoAutoria(corpo: string): string {
-  return corpo.trimStart().replace(PREFIXO_GOATLAS, '')
+  return corpo.trimStart().replace(PREFIXO_ATLAS, '')
 }

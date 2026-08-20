@@ -17,7 +17,7 @@
  *
  * ## ⚠️ Isto é fail-OPEN, e é um desvio consciente do padrão do projeto
  *
- * Em todo o resto do goatlas, ausência de informação nega (`CLAUDE.md`). Aqui,
+ * Em todo o resto do atlas, ausência de informação nega (`CLAUDE.md`). Aqui,
  * schema que **não pôde ser lido** faz a pergunta não existir e o chamado abrir.
  * Registrado em `plan.md` §9, e a razão é a natureza do requisito:
  *

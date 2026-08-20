@@ -118,7 +118,7 @@ export const SECOES: readonly DescritorSecao[] = [
   {
     id: 'entrada',
     rotulo: 'Quem entra',
-    titulo: 'Quem entra no goatlas',
+    titulo: 'Quem entra no atlas',
     resumo: 'O login é do Google corporativo; aqui se decide de quem ele é aceito.',
     grupo: 'configurar',
     campos: [

@@ -1,13 +1,13 @@
 ---
 # Constituição do Projeto — regras inegociáveis que governam todo o SDD.
-project: "goatlas"
+project: "atlas"
 version: 1.1.0
 ratified: "2026-08-03"
 amended: "2026-08-11"
 requirements_source: "docs/REQUISITOS.md"
 ---
 
-# Constituição — goatlas
+# Constituição — atlas
 
 > Este é o **"DNA arquitetural"** do projeto: princípios que **toda** spec, plano,
 > tarefa e implementação geradas pelo Claude devem respeitar.

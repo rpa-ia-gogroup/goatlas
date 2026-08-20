@@ -16,7 +16,7 @@ scope_ids: "RF-61 · RF-62 · RF-63 · RN-11 — apoiando-se em RF-17, RF-24, RF
 
 ## 1. Problem & Why
 
-Hoje o goatlas só anexa **depois** que o chamado existe (`RF-34`), porque a rota
+Hoje o atlas só anexa **depois** que o chamado existe (`RF-34`), porque a rota
 precisa da `issueKey`. Isso não é uma limitação de implementação: é o que o
 requisito diz, e diverge do JSM.
 
@@ -198,7 +198,7 @@ contra a Atlassian real que o request type do portal expõe campo de anexo. Isso
 spec** (a antiga `T-425`) porque é verificação de go-live: sem o campo o código cai em
 `SC-05` e a feature fica **dormente** sem quebrar nada, e com o campo ela funciona sem uma
 linha a mudar. O item vive na tabela "o que falta não é código" do `CLAUDE.md`, junto das
-outras verificações que dependem de desligar `GOATLAS_SOMENTE_LEITURA` (`D-24`).
+outras verificações que dependem de desligar `ATLAS_SOMENTE_LEITURA` (`D-24`).
 
 ## 5. Dependências e o que fica pendente
 

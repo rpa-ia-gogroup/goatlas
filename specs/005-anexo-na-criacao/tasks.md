@@ -137,7 +137,7 @@ revised: "2026-08-07 — v2, depois do /analyze"
 > **O fato não desapareceu, mudou de lugar:** ninguém confirmou que o request type expõe
 > anexo, e `criarChamado` (`T-063`) nunca executou contra o JSM. Isso está na tabela "o que
 > falta não é código" do `CLAUDE.md`, junto das outras verificações que só acontecem quando
-> `GOATLAS_SOMENTE_LEITURA` for desligado (`D-24`). Fechar a spec sem essa transferência seria
+> `ATLAS_SOMENTE_LEITURA` for desligado (`D-24`). Fechar a spec sem essa transferência seria
 > declarar completude que ela não tem.
 
 ## Estado

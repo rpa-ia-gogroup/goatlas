@@ -9,7 +9,7 @@ INPUT="$(cat)"
 APP_ID="$(echo "$INPUT" | jq -r '.tool_input.appId // "novo app"' 2>/dev/null)"
 
 read -r -d '' MSG <<EOF || true
-[goatlas] Deploy no GoDeploy — appId: $APP_ID
+[atlas] Deploy no GoDeploy — appId: $APP_ID
 
 1. STAGING ANTES DE PROD (CLAUDE.md, regra 10). Confirme qual appId é este antes de
    seguir; mudança de código só chega a produção depois de validada na staging.

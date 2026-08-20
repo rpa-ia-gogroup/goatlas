@@ -1,4 +1,4 @@
-# Deploy e operação — goatlas
+# Deploy e operação — atlas
 
 Atende **RNF-10** (rotação e revogação de emergência das três credenciais, sem
 downtime) e **RNF-27** (privilégios de cada credencial, variáveis, como rodar
@@ -25,10 +25,10 @@ O dev server serve `/api/*` com o **mesmo código do Worker**, via
 navegador**, para não existir caminho em que a identidade venha do cliente
 (`RF-04`, `RNF-05`).
 
-- Usuário de dev: `dev@gocase.com` (mude com `GOATLAS_DEV_EMAIL`).
-- Clientes: **fakes** (`GOATLAS_USAR_FAKES=1`), com o fake de IA roteirizado para
+- Usuário de dev: `dev@gocase.com` (mude com `ATLAS_DEV_EMAIL`).
+- Clientes: **fakes** (`ATLAS_USAR_FAKES=1`), com o fake de IA roteirizado para
   o fluxo completo passar. Nenhuma credencial é necessária.
-- Banco: `.goatlas-dev.db` (gitignored). Apague o arquivo para começar do zero.
+- Banco: `.atlas-dev.db` (gitignored). Apague o arquivo para começar do zero.
 - A config é semeada no primeiro boot. **Sem ela o app é fechado** — allowlist
   vazia nega tudo (`RNF-07`), e é assim que uma instalação nova se comporta.
 
@@ -36,39 +36,72 @@ navegador**, para não existir caminho em que a identidade venha do cliente
 
 | Ambiente | appId | Uso |
 |---|---|---|
-| **demo / futura produção** | **`9c47f42f`** — https://goatlas.devgogroup.com | No ar em **modo demonstração** (`D-07`). Vira produção quando as credenciais reais entrarem |
+| **demo / futura produção** | **`9c47f42f`** — https://atlas.devgogroup.com | No ar em **modo demonstração** (`D-07`). Vira produção quando as credenciais reais entrarem |
 | **staging** | *(a criar)* | ⚠️ **Criar ANTES do primeiro deploy com credencial real** — regra 10 |
+
+### 🚨 Os secrets no GoDeploy ainda têm o prefixo `GOATLAS_` (19/08/2026)
+
+O app foi renomeado de `goatlas` para `atlas` em **19/08/2026** (`D-77`). O código passou a
+falar `ATLAS_*`; os **nove secrets no GoDeploy continuam `GOATLAS_*`**, em prod (`9c47f42f`) e
+na staging (`3936ca2d`):
+
+```
+GOATLAS_ADMINS   GOATLAS_BASE_PUBLICA   GOATLAS_CANAL_NOTIFICACAO   GOATLAS_DOMINIOS
+GOATLAS_ESPACOS_CONFLUENCE   GOATLAS_ORG_ID   GOATLAS_SERVICE_DESK_ID   GOATLAS_TIPOS_CHAMADO
+```
+
+Isso **funciona hoje** por causa de `src/lib/env-do-app.ts`: `valorDoApp(env, 'ATLAS_X')` lê o
+nome novo e cai para o antigo. É o único lugar do código que conhece a palavra `GOATLAS`.
+
+⚠️ **Por que não foram renomeados junto:** `listAppSecrets` devolve **nome, nunca valor** — não
+existe ferramenta que leia um secret de volta. Renomear é **recriar**, e recriar exige ter o
+valor à mão. Sete deles são deriváveis desta página; **`GOATLAS_ADMINS` e `GOATLAS_ORG_ID` não
+são**, e errar um deles é pior que não mexer: allowlist vazia **nega** (`RNF-07`), então o
+sintoma seria o app negando acesso a todo mundo com HTTP 200 e nada no log.
+
+**Para migrar de verdade** (opcional — nada quebra sem isso):
+
+1. `setAppSecret` com o nome novo, valor recolado à mão, nos **dois** apps.
+2. Confira no console de admin que o valor efetivo não mudou (o valor não é legível de fora).
+3. `deleteAppSecret` no nome antigo.
+4. Só então tire `PREFIXO_LEGADO` de `env-do-app.ts` — `tests/env-do-app.test.ts` reprova a
+   remoção feita pela metade.
+
+⚠️ **As cinco credenciais nunca tiveram prefixo do app** (`ATLASSIAN_*`, `LLM_*`, `TG_API_TOKEN`,
+`OCR_WORKER_TOKEN`, `GODEPLOY_CRON_KEY`) e **não** entram nessa migração — a ponte não as
+alcança de propósito, e elas seguem lidas em `contexto.ts`, num lugar só (`RNF-01`).
 
 ### Secrets já configurados em `9c47f42f`
 
 Estado em **07/08/2026** (conferido por `listAppSecrets` — que devolve **nomes**,
-nunca valores):
+nunca valores). ⚠️ **Os nomes abaixo estão na forma NOVA (`ATLAS_*`), que é a que o código lê;
+no GoDeploy eles ainda existem com o prefixo antigo** — ver a seção acima:
 
 | Secret | Estado | Por quê |
 |---|---|---|
-| `GOATLAS_SOMENTE_LEITURA` | `1` | Lê Confluence/Jira de verdade e **recusa toda escrita**. É a trava que sustenta o app hoje |
-| `GOATLAS_DOMINIOS` | `gocase.com` | Bootstrap — sem ele o app nega todo mundo (`RNF-07`). **[SUPOSIÇÃO: Q7]** |
-| `GOATLAS_ADMINS` | *(registrado)* | Bootstrap do primeiro admin (`RF-02`) |
+| `ATLAS_SOMENTE_LEITURA` | `1` | Lê Confluence/Jira de verdade e **recusa toda escrita**. É a trava que sustenta o app hoje |
+| `ATLAS_DOMINIOS` | `gocase.com` | Bootstrap — sem ele o app nega todo mundo (`RNF-07`). **[SUPOSIÇÃO: Q7]** |
+| `ATLAS_ADMINS` | *(registrado)* | Bootstrap do primeiro admin (`RF-02`) |
 | `ATLASSIAN_API_TOKEN` · `ATLASSIAN_EMAIL` · `ATLASSIAN_BASE_URL` | *(registrados)* | 🚨 **O token é da família ERRADA** — `ATCTT` onde `/rest/api/3/*` exige `ATATT`. É o 401. Ver `D-22` |
 | `LLM_API_KEY` · `LLM_BASE_URL` · `LLM_MODEL` | *(registrados)* | Proxy de IA (`D-05`). ⚠️ Rotação pendente: a chave transitou por chat |
 | `GODEPLOY_CRON_KEY` | *(registrado)* | 6 das 7 rotas de cron respondem **200** (medido por `listCronJobs` em 07/08). A `retencao` dá **403 de propósito** — ver a seção de cron |
-| `GOATLAS_BASE_PUBLICA` · `GOATLAS_CANAL_NOTIFICACAO` | *(registrados)* | Bootstrap dos defaults de `D-20` |
-| `GOATLAS_ORG_ID` | *(registrado e **VALIDADO**)* | Bootstrap do `org_id`. Não é secret. ✅ `GET /admin/v1/orgs/{id}` responde 200 (`D-23`). ⚠️ Ele tem `j`/`k` e **está certo** — org id da Atlassian não é UUID estrito; quem é UUID estrito é o `cloudId` |
+| `ATLAS_BASE_PUBLICA` · `ATLAS_CANAL_NOTIFICACAO` | *(registrados)* | Bootstrap dos defaults de `D-20` |
+| `ATLAS_ORG_ID` | *(registrado e **VALIDADO**)* | Bootstrap do `org_id`. Não é secret. ✅ `GET /admin/v1/orgs/{id}` responde 200 (`D-23`). ⚠️ Ele tem `j`/`k` e **está certo** — org id da Atlassian não é UUID estrito; quem é UUID estrito é o `cloudId` |
 
 Ainda **ausentes**: `ATLASSIAN_ORG_API_KEY` (e o valor certo para ela é o `ATCTT` que
-hoje está em `ATLASSIAN_API_TOKEN`), `GOATLAS_WEBHOOK_SEGREDO`,
-`GOATLAS_SERVICE_DESK_ID`, `GOATLAS_TIPOS_CHAMADO`, `GOATLAS_ESPACOS_CONFLUENCE`
-(**Q5**, valores escolhidos em `D-22`) e `GOATLAS_CAMPO_SOLICITANTE_ID` (**Q4**).
+hoje está em `ATLASSIAN_API_TOKEN`), `ATLAS_WEBHOOK_SEGREDO`,
+`ATLAS_SERVICE_DESK_ID`, `ATLAS_TIPOS_CHAMADO`, `ATLAS_ESPACOS_CONFLUENCE`
+(**Q5**, valores escolhidos em `D-22`) e `ATLAS_CAMPO_SOLICITANTE_ID` (**Q4**).
 
-#### ⚠️ `GOATLAS_MODO_DEMO` já NÃO está configurado — o app não está nos fakes
+#### ⚠️ `ATLAS_MODO_DEMO` já NÃO está configurado — o app não está nos fakes
 
-`usandoFakes` (em `contexto.ts`) é `modoDemo || GOATLAS_USAR_FAKES || !ATLASSIAN_API_TOKEN`.
+`usandoFakes` (em `contexto.ts`) é `modoDemo || ATLAS_USAR_FAKES || !ATLASSIAN_API_TOKEN`.
 Os três termos são falsos hoje: o modo demo saiu, e o token está registrado. **O app
 roda com os clientes reais**, e o que impede efeito colateral é
-`GOATLAS_SOMENTE_LEITURA`, não o modo demo.
+`ATLAS_SOMENTE_LEITURA`, não o modo demo.
 
 ⚠️ Isso desloca onde mora a segurança: enquanto o modo demo existia, nenhum secret
-mudava comportamento. Agora **remover `GOATLAS_SOMENTE_LEITURA` vale na hora** — é o
+mudava comportamento. Agora **remover `ATLAS_SOMENTE_LEITURA` vale na hora** — é o
 único passo entre o estado atual e escrita real no JSM. Ver a ordem abaixo antes de
 tocar nele.
 
@@ -78,20 +111,20 @@ e só então remova o modo demo:
 | Falta | O que acontece com o modo demo fora |
 |---|---|
 | `LLM_API_KEY` | `ClienteIAIndisponivel`: `/api/health` responde **503** dizendo o motivo, o agente recusa, e o formulário mínimo (`D-04`) segue abrindo chamado. **Antes de T-132 isto era `ClienteIAFake` — Atlassian real com IA falsa** |
-| `GOATLAS_TIPOS_CHAMADO` + `GOATLAS_SERVICE_DESK_ID` | Allowlist vazia → `RF-28` descarta toda proposta → ninguém abre chamado |
-| `GOATLAS_ESPACOS_CONFLUENCE` (**Q5**) | Busca devolve zero com `buscaConfigurada: false`; a deflexão da Regra 1 morre |
+| `ATLAS_TIPOS_CHAMADO` + `ATLAS_SERVICE_DESK_ID` | Allowlist vazia → `RF-28` descarta toda proposta → ninguém abre chamado |
+| `ATLAS_ESPACOS_CONFLUENCE` (**Q5**) | Busca devolve zero com `buscaConfigurada: false`; a deflexão da Regra 1 morre |
 | `GODEPLOY_CRON_KEY` | **Todas** as rotas de cron ficam fechadas — inclusive o polling do Jira e o envio de notificação, que são o que faz a Fase 3 funcionar |
-| `GOATLAS_WEBHOOK_SEGREDO` | `POST /api/webhook/jira` responde 403 a tudo (fail-closed). O polling sozinho continua notificando — é por isso que `RF-47` pede duas fontes |
+| `ATLAS_WEBHOOK_SEGREDO` | `POST /api/webhook/jira` responde 403 a tudo (fail-closed). O polling sozinho continua notificando — é por isso que `RF-47` pede duas fontes |
 | `EMAIL_API_KEY` | Só importa se o canal escolhido for e-mail. Sem ela o canal recusa em vez de fingir envio |
-| `GOATLAS_CANAL_NOTIFICACAO` (**Q11**) | Sem ele, o aviso é registrado e suprimido e a tela diz "ninguém definiu canal". **Com `nenhum`** (a decisão de `D-20`) o efeito é o mesmo, mas a tela passa a dizer "os avisos vivem aqui" — a diferença é a decisão, não o comportamento. Não é secret: é URL/enum |
-| `GOATLAS_BASE_PUBLICA` | As notificações saem **sem link**. O cron não tem `Request` de onde derivar o host, então este valor não é descobrível. Barra final é tolerada |
+| `ATLAS_CANAL_NOTIFICACAO` (**Q11**) | Sem ele, o aviso é registrado e suprimido e a tela diz "ninguém definiu canal". **Com `nenhum`** (a decisão de `D-20`) o efeito é o mesmo, mas a tela passa a dizer "os avisos vivem aqui" — a diferença é a decisão, não o comportamento. Não é secret: é URL/enum |
+| `ATLAS_BASE_PUBLICA` | As notificações saem **sem link**. O cron não tem `Request` de onde derivar o host, então este valor não é descobrível. Barra final é tolerada |
 | `LLM_BASE_URL` + `LLM_MODEL` | Sem eles a chave de IA sozinha não liga nada. **Valor medido em 07/08/2026, não inferido:** `https://ai-proxy.gogroupbr.com/v1` — `/v1/chat/completions` responde **401** (rota existe, pede auth) e `/chat/completions` responde **404**. A URL **sem** `/v1` daria 404 parecendo "a IA caiu". Barra final é tolerada (`D-20`) |
 
 **Os valores não sensíveis, para copiar** (já registrados em `9c47f42f`):
 
 ```
-GOATLAS_BASE_PUBLICA      = https://goatlas.devgogroup.com
-GOATLAS_CANAL_NOTIFICACAO = nenhum
+ATLAS_BASE_PUBLICA      = https://atlas.devgogroup.com
+ATLAS_CANAL_NOTIFICACAO = nenhum
 LLM_BASE_URL              = https://ai-proxy.gogroupbr.com/v1
 LLM_MODEL                 = gpt-5.4-mini
 
@@ -111,7 +144,7 @@ significa "não é aqui". Distinguir os dois com um `curl` é mais rápido que d
 ambiente (staging tem outro host), não porque sejam sensíveis.
 
 Os dois do meio dão para preencher no console de admin depois, sem deploy (`RF-49`).
-`LLM_API_KEY`, `GODEPLOY_CRON_KEY`, `GOATLAS_WEBHOOK_SEGREDO` e `EMAIL_API_KEY` são
+`LLM_API_KEY`, `GODEPLOY_CRON_KEY`, `ATLAS_WEBHOOK_SEGREDO` e `EMAIL_API_KEY` são
 secret — exigem `setAppSecret`.
 
 **Confira o health antes de anunciar o app:** `GET /api/health` devolve 503 com
@@ -122,7 +155,7 @@ O env é **bootstrap**: vale enquanto a chave não existe no banco. Assim que um
 salva pelo console, o banco manda (`RF-49`).
 
 Ambos precisam de `visibility: authenticated`: é isso que faz o edge injetar
-`x-godeploy-user-email`. Um app `public` **não** recebe o header, e o goatlas
+`x-godeploy-user-email`. Um app `public` **não** recebe o header, e o atlas
 nega todo acesso sem identidade — ou seja, ficaria inutilizável.
 
 ### Deploy
@@ -285,7 +318,7 @@ eles é o que fez este bug custar uma noite.
 
 Com `visibility: authenticated`, o edge do GoDeploy intercepta **tudo** antes do worker e
 responde **302** para o OAuth — inclusive `/api/webhook/jira` e `/api/health`. Conferido
-com `curl` contra `https://goatlas.devgogroup.com`: a requisição **não aparece nos logs do
+com `curl` contra `https://atlas.devgogroup.com`: a requisição **não aparece nos logs do
 app**, porque nunca chegou ao worker. A Atlassian não faz o OAuth do GoDeploy, então ela
 receberia o mesmo 302 e o evento se perderia.
 
@@ -306,16 +339,16 @@ Quando a exceção existir, quem registra é o **time de tech**, no Jira: `Confi
 sistema → Webhooks`, apontando para
 
 ```
-https://<dominio-do-app>/api/webhook/jira?k=<GOATLAS_WEBHOOK_SEGREDO>
+https://<dominio-do-app>/api/webhook/jira?k=<ATLAS_WEBHOOK_SEGREDO>
 ```
 
 Eventos: criação e atualização de issue, e criação de comentário. O segredo também é
-aceito no cabeçalho `x-goatlas-webhook`, para quem preferir não pôr nada na URL.
+aceito no cabeçalho `x-atlas-webhook`, para quem preferir não pôr nada na URL.
 
 ⚠️ **Três coisas para não estranhar quando testar:**
 
 1. **A resposta é sempre `202`**, com ou sem vínculo local. Um 404 para chamado
-   desconhecido seria oráculo de "este chamado passou pelo goatlas?" (`D-15`).
+   desconhecido seria oráculo de "este chamado passou pelo atlas?" (`D-15`).
 2. **Segredo errado dá `403` com corpo idêntico ao de segredo ausente**, e a comparação é
    de tempo constante. A tentativa fica na auditoria — **sem** o segredo enviado.
 3. **O corpo do evento é ponteiro, não conteúdo.** O app tira dele só a chave do chamado
@@ -352,15 +385,15 @@ de mexer nela:
   de `areas_por_email`, exatamente como antes da feature (`FR-13`). Não há tela dizendo
   "indisponível" porque não há degradação visível — é dado de apoio.
 - 🚨 **Hoje é o MESMO token do godocs** (decisão do mantenedor, 11/08/2026). Consequência a
-  não esquecer: **rotacionar por causa de um app quebra o outro**, e no goatlas a quebra é
+  não esquecer: **rotacionar por causa de um app quebra o outro**, e no atlas a quebra é
   **silenciosa** — a derivação é fail-open, então a área simplesmente para de vir e cai no
   mapa de configuração. Se um dia o godocs rotacionar, este é o primeiro lugar a conferir.
-  Um token próprio de leitura para o goatlas resolve, e custa um cadastro.
+  Um token próprio de leitura para o atlas resolve, e custa um cadastro.
 - **O que ele lê:** a base de funcionários inteira numa requisição (~440 pessoas, com nome,
   e-mail, cargo e times). Só o registro da pessoa que abre o chamado é consultado, em
   memória, e **só a área é persistida** — o cargo não (`FR-11`).
 
-`GOATLAS_ORG_ID` (bootstrap do `org_id` — `RNF-25`, não é secret) identifica a
+`ATLAS_ORG_ID` (bootstrap do `org_id` — `RNF-25`, não é secret) identifica a
 organização Atlassian alvo da Organizations API. Sem `ATLASSIAN_ORG_API_KEY` **e**
 `org_id`, `ctx.organizacao` é `null` e a governança de assentos se declara
 indisponível (fail-closed, não erro) — ver T-120/T-122/T-123.

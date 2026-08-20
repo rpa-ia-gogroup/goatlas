@@ -51,7 +51,7 @@ import type { CampoDoSchema } from './schema-diagnostico'
 
 /** Mensagem única, em linguagem de negócio — ela chega ao usuário (RNF-30). */
 export const MENSAGEM_SOMENTE_LEITURA =
-  'O goatlas está em modo somente leitura: consulta à documentação e aos chamados funciona, mas nada é criado ou alterado no Jira. Fale com o time de tech se precisar abrir um chamado agora.'
+  'O atlas está em modo somente leitura: consulta à documentação e aos chamados funciona, mas nada é criado ou alterado no Jira. Fale com o time de tech se precisar abrir um chamado agora.'
 
 export class ClienteAtlassianSomenteLeitura implements ClienteAtlassian {
   constructor(private readonly real: ClienteAtlassian) {}

@@ -1,5 +1,5 @@
 /**
- * Schema do goatlas. Idempotente (`CREATE TABLE IF NOT EXISTS`); `env.DB` é
+ * Schema do atlas. Idempotente (`CREATE TABLE IF NOT EXISTS`); `env.DB` é
  * persistente entre deploys.
  *
  * Decisão de desenho: as invariantes críticas vivem no SCHEMA, não na aplicação.

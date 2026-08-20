@@ -45,7 +45,7 @@ let n = 0
 
 async function montar() {
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
     { atlassian },
@@ -72,7 +72,7 @@ function req(caminho: string, o: { metodo?: string; email?: string; headers?: Re
   const headers: Record<string, string> = { ...o.headers }
   if (o.email) headers[HEADER_EMAIL] = o.email
   if (o.corpo !== undefined) headers['content-type'] = 'application/json'
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: o.metodo ?? 'GET',
     headers,
     ...(o.corpo === undefined ? {} : { body: JSON.stringify(o.corpo) }),
@@ -251,15 +251,15 @@ describe('CanalGoogleChat — T-222', () => {
       }) as unknown as typeof fetch,
     })
     await canal.enviar('', {
-      titulo: 'Chamado GOATLAS-1 aberto',
+      titulo: 'Chamado ATLAS-1 aberto',
       corpo: 'Prazo de **primeira resposta**: até 12h.',
-      link: 'https://goatlas.devgogroup.com/?chamado=GOATLAS-1',
+      link: 'https://atlas.devgogroup.com/?chamado=ATLAS-1',
     })
     expect(chamadas[0]?.url).toContain('chat.googleapis.com')
     const enviado = JSON.parse(chamadas[0]!.corpo) as { text: string }
-    expect(enviado.text).toContain('GOATLAS-1')
+    expect(enviado.text).toContain('ATLAS-1')
     expect(enviado.text).toContain('primeira resposta')
-    expect(enviado.text).toContain('goatlas.devgogroup.com')
+    expect(enviado.text).toContain('atlas.devgogroup.com')
   })
 
   it('sem endpoint configurado, é DEFINITIVO — não retenta contra config inexistente', async () => {
@@ -308,7 +308,7 @@ describe('CanalEmail — T-223', () => {
     let auth: string | null = null
     const canal = new CanalEmail({
       endpoint: 'https://api.provedor.example/send',
-      remetente: 'goatlas@gocase.com',
+      remetente: 'atlas@gocase.com',
       apiKey: 'chave-de-teste',
       fetchImpl: (async (_u: string, init?: RequestInit) => {
         corpo = String(init?.body ?? '')
@@ -317,14 +317,14 @@ describe('CanalEmail — T-223', () => {
       }) as unknown as typeof fetch,
     })
     await canal.enviar('ana@gocase.com', {
-      titulo: 'Chamado GOATLAS-1 aberto',
+      titulo: 'Chamado ATLAS-1 aberto',
       corpo: 'Prazo de primeira resposta: 12h.',
       link: null,
     })
     const enviado = JSON.parse(corpo) as { to: string; from: string; subject: string }
     expect(enviado.to).toBe('ana@gocase.com')
-    expect(enviado.from).toBe('goatlas@gocase.com')
-    expect(enviado.subject).toContain('GOATLAS-1')
+    expect(enviado.from).toBe('atlas@gocase.com')
+    expect(enviado.subject).toContain('ATLAS-1')
     expect(auth).toBe('Bearer chave-de-teste')
   })
 

@@ -64,7 +64,7 @@ export interface OpcoesCanalHttp {
  * Google Chat (T-222).
  *
  * Entrega por **webhook de espaço**: é o caminho que não exige o app ter identidade no
- * Workspace de cada pessoa, o que casa com o desenho do goatlas (o app não é o
+ * Workspace de cada pessoa, o que casa com o desenho do atlas (o app não é o
  * usuário). O `destino` é o webhook do espaço, e ele vem de **config de admin**, nunca
  * do usuário final — ver `validarPreferencia`.
  */
@@ -147,7 +147,7 @@ export class CanalEmail implements Canal {
         ...(this.opcoes.apiKey ? { Authorization: `Bearer ${this.opcoes.apiKey}` } : {}),
       },
       body: JSON.stringify({
-        from: this.opcoes.remetente ?? 'goatlas@gocase.com',
+        from: this.opcoes.remetente ?? 'atlas@gocase.com',
         to: destino,
         subject: mensagem.titulo,
         text: textoPlano(mensagem),

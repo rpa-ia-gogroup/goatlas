@@ -26,20 +26,20 @@ const AGORA = '2026-08-06T12:00:00.000Z'
 const CRON_KEY = 'chave-cron'
 
 describe('bootstrap por env — o que D-20 configura sem deploy', () => {
-  it('`GOATLAS_BASE_PUBLICA` entra na config, sem a barra final', () => {
+  it('`ATLAS_BASE_PUBLICA` entra na config, sem a barra final', () => {
     // Quem copia URL do navegador copia COM barra. Sem normalizar, o link sai
     // `https://host//?chamado=X`.
-    const v = valoresDoBootstrap({ GOATLAS_BASE_PUBLICA: 'https://goatlas.devgogroup.com/' })
-    expect(v.base_publica_app).toBe('https://goatlas.devgogroup.com')
+    const v = valoresDoBootstrap({ ATLAS_BASE_PUBLICA: 'https://atlas.devgogroup.com/' })
+    expect(v.base_publica_app).toBe('https://atlas.devgogroup.com')
   })
 
-  it('`GOATLAS_CANAL_NOTIFICACAO` aceita os três valores válidos', () => {
+  it('`ATLAS_CANAL_NOTIFICACAO` aceita os três valores válidos', () => {
     for (const canal of ['chat', 'email', 'nenhum'] as const) {
-      expect(valoresDoBootstrap({ GOATLAS_CANAL_NOTIFICACAO: canal }).canal_notificacao_padrao).toBe(
+      expect(valoresDoBootstrap({ ATLAS_CANAL_NOTIFICACAO: canal }).canal_notificacao_padrao).toBe(
         canal,
       )
     }
-    expect(valoresDoBootstrap({ GOATLAS_CANAL_NOTIFICACAO: ' EMAIL ' }).canal_notificacao_padrao).toBe(
+    expect(valoresDoBootstrap({ ATLAS_CANAL_NOTIFICACAO: ' EMAIL ' }).canal_notificacao_padrao).toBe(
       'email',
     )
   })
@@ -50,7 +50,7 @@ describe('bootstrap por env — o que D-20 configura sem deploy', () => {
     for (const errado of ['e-mail', 'emails', 'slack', 'sim', '']) {
       expect(
         'canal_notificacao_padrao' in
-          valoresDoBootstrap({ GOATLAS_CANAL_NOTIFICACAO: errado }),
+          valoresDoBootstrap({ ATLAS_CANAL_NOTIFICACAO: errado }),
       ).toBe(false)
     }
   })
@@ -73,7 +73,7 @@ describe('`nenhum` DECIDIDO ≠ ninguém decidiu — os dois não enviam, e a te
 
   async function montar(env: Record<string, string> = {}) {
     ctx = await montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1', ...env },
+      { DB: db, ATLAS_USAR_FAKES: '1', ...env },
       () => AGORA,
       () => `id-${++n}`,
     )
@@ -106,7 +106,7 @@ describe('`nenhum` DECIDIDO ≠ ninguém decidiu — os dois não enviam, e a te
   })
 
   it('com `nenhum`: mesmo canal, mas `canalPadraoDefinido: true`', async () => {
-    await montar({ GOATLAS_CANAL_NOTIFICACAO: 'nenhum' })
+    await montar({ ATLAS_CANAL_NOTIFICACAO: 'nenhum' })
     const p = await preferencia()
     expect(p.canal).toBe('nenhum')
     // É este bit que muda a frase da tela de "ninguém definiu" para "os avisos vivem aqui".
@@ -134,7 +134,7 @@ describe('T-235 — o proxy de deflexão, e o viés declarado com ele', () => {
     await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
     await config.definir('tipos_chamado_permitidos', ['rt-1'], CHEFE, AGORA)
     ctx = await montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      { DB: db, ATLAS_USAR_FAKES: '1' },
       () => AGORA,
       () => `id-${++n}`,
       { atlassian },
@@ -189,7 +189,7 @@ describe('T-235 — o proxy de deflexão, e o viés declarado com ele', () => {
 
   it('bloqueado e abriu chamado DENTRO da janela: não conta', async () => {
     await semearBloqueio('b1', ANA, '2026-08-01T10:00:00.000Z')
-    await semearChamado('GOATLAS-1', ANA, '2026-08-03T10:00:00.000Z')
+    await semearChamado('ATLAS-1', ANA, '2026-08-03T10:00:00.000Z')
     const d = (await painel()).painel.deflexaoAparente
     expect(d.bloqueiosSemOverride).toBe(1)
     expect(d.semChamadoDepois).toBe(0)
@@ -199,14 +199,14 @@ describe('T-235 — o proxy de deflexão, e o viés declarado com ele', () => {
   it('chamado FORA da janela não desconta — a janela é o que dá sentido ao número', async () => {
     await semearBloqueio('b1', ANA, '2026-08-01T10:00:00.000Z')
     // Vinte dias depois: outro assunto, não "o bloqueio não resolveu".
-    await semearChamado('GOATLAS-1', ANA, '2026-08-21T10:00:00.000Z')
+    await semearChamado('ATLAS-1', ANA, '2026-08-21T10:00:00.000Z')
     expect((await painel()).painel.deflexaoAparente.semChamadoDepois).toBe(1)
     expect(JANELA_DEFLEXAO_DIAS).toBe(7)
   })
 
   it('chamado de OUTRA pessoa não desconta o bloqueio da Ana', async () => {
     await semearBloqueio('b1', ANA, '2026-08-01T10:00:00.000Z')
-    await semearChamado('GOATLAS-1', 'bruno@gocase.com', '2026-08-02T10:00:00.000Z')
+    await semearChamado('ATLAS-1', 'bruno@gocase.com', '2026-08-02T10:00:00.000Z')
     expect((await painel()).painel.deflexaoAparente.semChamadoDepois).toBe(1)
   })
 

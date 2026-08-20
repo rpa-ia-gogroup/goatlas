@@ -301,14 +301,14 @@ describe('colisão de vínculo: idempotente para o mesmo, recusa para outro', ()
       tiposChamado: [{ id: 'rt-1', serviceDeskId: 'sd-1', nome: 'S', descricao: null }],
     })
     const ctx = await montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      { DB: db, ATLAS_USAR_FAKES: '1' },
       () => AGORA,
       () => `id-${++contador}`,
       { atlassian },
     )
     // O vínculo já existe (é o estado depois de um reprocessamento parcial).
     await ctx.vinculos.criar({
-      issueKey: 'GOATLAS-1',
+      issueKey: 'ATLAS-1',
       solicitanteEmail: ANA,
       conversaId: null,
       via: 'formulario',
@@ -329,7 +329,7 @@ describe('colisão de vínculo: idempotente para o mesmo, recusa para outro', ()
 
     // ⚠️ `criado`, não `pendente`. Pendente aqui é retentativa infinita.
     expect(r.estado).toBe('criado')
-    expect(r.issueKey).toBe('GOATLAS-1')
+    expect(r.issueKey).toBe('ATLAS-1')
   })
 
   it('OUTRA pessoa: recusa DEFINITIVA e auditada — nunca aceita em silêncio', async () => {
@@ -337,13 +337,13 @@ describe('colisão de vínculo: idempotente para o mesmo, recusa para outro', ()
       tiposChamado: [{ id: 'rt-1', serviceDeskId: 'sd-1', nome: 'S', descricao: null }],
     })
     const ctx = await montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      { DB: db, ATLAS_USAR_FAKES: '1' },
       () => AGORA,
       () => `id-${++contador}`,
       { atlassian },
     )
     await ctx.vinculos.criar({
-      issueKey: 'GOATLAS-1',
+      issueKey: 'ATLAS-1',
       solicitanteEmail: 'outra@gocase.com',
       conversaId: null,
       via: 'formulario',
@@ -365,7 +365,7 @@ describe('colisão de vínculo: idempotente para o mesmo, recusa para outro', ()
     ).rejects.toThrow(/já vinculada a outro solicitante/)
 
     // O vínculo da outra pessoa continua intacto — nada foi sobrescrito.
-    const dono = await ctx.vinculos.obterSemIsolamento_apenasReconciliacao('GOATLAS-1')
+    const dono = await ctx.vinculos.obterSemIsolamento_apenasReconciliacao('ATLAS-1')
     expect(dono?.solicitanteEmail).toBe('outra@gocase.com')
 
     const negado = linhasComoObjetos<{ detalhe_json: string }>(

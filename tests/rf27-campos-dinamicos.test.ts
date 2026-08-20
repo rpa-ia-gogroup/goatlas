@@ -43,7 +43,7 @@ beforeEach(async () => {
   await config.definir('tipos_chamado_permitidos', ['rt-1', 'rt-livre'], CHEFE, AGORA)
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -88,7 +88,7 @@ function req(
 ): Request {
   const headers: Record<string, string> = {}
   if (opcoes.email) headers[HEADER_EMAIL] = opcoes.email
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: opcoes.metodo ?? 'GET',
     headers,
     ...(opcoes.corpo === undefined ? {} : { body: JSON.stringify(opcoes.corpo) }),
@@ -119,7 +119,7 @@ describe('GET /api/tipos-chamado/:id/campos', () => {
   it('sem service_desk_id configurado: dados inválidos, não 500', async () => {
     await new Config(db).definir('service_desk_id', null, CHEFE, AGORA)
     const semSd = await montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      { DB: db, ATLAS_USAR_FAKES: '1' },
       () => AGORA,
       () => `id-${++n}`,
     )

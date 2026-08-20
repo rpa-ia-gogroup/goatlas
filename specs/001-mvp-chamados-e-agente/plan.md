@@ -54,7 +54,7 @@ Navegador (SPA React)
   │  cookie de sessão do edge GoDeploy
   ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ Worker goatlas                                               │
+│ Worker atlas                                               │
 │                                                              │
 │  auth/        identidade do header do edge + allowlist de     │
 │               domínio, revalidada A CADA requisição           │

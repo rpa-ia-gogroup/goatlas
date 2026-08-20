@@ -18,6 +18,7 @@
 
 import type { Banco } from '../db/tipos'
 import { linhasComoObjetos } from '../db/tipos'
+import { valorDoApp } from '../env-do-app'
 
 export interface ConfigValores {
   /** Q7. Lista vazia = ninguém entra (fail-closed), nunca "todos entram". */
@@ -223,13 +224,13 @@ export type ChaveConfig = keyof ConfigValores
  */
 export interface BootstrapEnv {
   /** Lista separada por vírgula. Ex.: `gocase.com,gobeaute.com.br` (Q7). */
-  readonly GOATLAS_DOMINIOS?: string
+  readonly ATLAS_DOMINIOS?: string
   /** Lista separada por vírgula de e-mails admin (RF-02, RN-09). */
-  readonly GOATLAS_ADMINS?: string
-  readonly GOATLAS_SERVICE_DESK_ID?: string
-  readonly GOATLAS_TIPOS_CHAMADO?: string
-  readonly GOATLAS_ESPACOS_CONFLUENCE?: string
-  readonly GOATLAS_ORG_ID?: string
+  readonly ATLAS_ADMINS?: string
+  readonly ATLAS_SERVICE_DESK_ID?: string
+  readonly ATLAS_TIPOS_CHAMADO?: string
+  readonly ATLAS_ESPACOS_CONFLUENCE?: string
+  readonly ATLAS_ORG_ID?: string
   /**
    * Endereço público do app, para o link das notificações (`D-20`).
    *
@@ -237,7 +238,7 @@ export interface BootstrapEnv {
    * maioria das notificações nasce. E é por ambiente — staging e produção têm hosts
    * diferentes, então hardcodar um deles quebraria o outro em silêncio.
    */
-  readonly GOATLAS_BASE_PUBLICA?: string
+  readonly ATLAS_BASE_PUBLICA?: string
   /**
    * Canal de aviso padrão — `chat`, `email` ou `nenhum` (`D-20`, Q11).
    *
@@ -245,7 +246,7 @@ export interface BootstrapEnv {
    * não enviam nada. Ausente = ninguém decidiu (a tela diz isso); `nenhum` = alguém decidiu
    * que o aviso vive na aba Avisos. Ver `notificacoes/preferencias.ts`.
    */
-  readonly GOATLAS_CANAL_NOTIFICACAO?: string
+  readonly ATLAS_CANAL_NOTIFICACAO?: string
 }
 
 function lista(bruto: string | undefined): string[] {
@@ -257,25 +258,28 @@ function lista(bruto: string | undefined): string[] {
 
 export function valoresDoBootstrap(env: BootstrapEnv): Partial<ConfigValores> {
   const parcial: Partial<ConfigValores> = {}
-  const dominios = lista(env.GOATLAS_DOMINIOS)
+  const dominios = lista(valorDoApp(env, 'ATLAS_DOMINIOS'))
   if (dominios.length > 0) parcial.dominios_permitidos = dominios
-  const admins = lista(env.GOATLAS_ADMINS)
+  const admins = lista(valorDoApp(env, 'ATLAS_ADMINS'))
   if (admins.length > 0) parcial.admins = admins
-  const tipos = lista(env.GOATLAS_TIPOS_CHAMADO)
+  const tipos = lista(valorDoApp(env, 'ATLAS_TIPOS_CHAMADO'))
   if (tipos.length > 0) parcial.tipos_chamado_permitidos = tipos
-  const espacos = (env.GOATLAS_ESPACOS_CONFLUENCE ?? '')
+  const espacos = (valorDoApp(env, 'ATLAS_ESPACOS_CONFLUENCE') ?? '')
     .split(',')
     .map((v) => v.trim())
     .filter((v) => v.length > 0)
   if (espacos.length > 0) parcial.espacos_confluence = espacos
-  if (env.GOATLAS_SERVICE_DESK_ID) parcial.service_desk_id = env.GOATLAS_SERVICE_DESK_ID
-  if (env.GOATLAS_ORG_ID) parcial.org_id = env.GOATLAS_ORG_ID
-  if (env.GOATLAS_BASE_PUBLICA) {
+  const serviceDesk = valorDoApp(env, 'ATLAS_SERVICE_DESK_ID')
+  if (serviceDesk) parcial.service_desk_id = serviceDesk
+  const orgId = valorDoApp(env, 'ATLAS_ORG_ID')
+  if (orgId) parcial.org_id = orgId
+  const basePublica = valorDoApp(env, 'ATLAS_BASE_PUBLICA')
+  if (basePublica) {
     // Barra final removida aqui pelo mesmo motivo de `LLM_BASE_URL`: quem copia URL do
     // navegador copia com barra, e `linkDoChamado` já concatena.
-    parcial.base_publica_app = env.GOATLAS_BASE_PUBLICA.trim().replace(/\/+$/, '')
+    parcial.base_publica_app = basePublica.trim().replace(/\/+$/, '')
   }
-  const canal = (env.GOATLAS_CANAL_NOTIFICACAO ?? '').trim().toLowerCase()
+  const canal = (valorDoApp(env, 'ATLAS_CANAL_NOTIFICACAO') ?? '').trim().toLowerCase()
   // Valor desconhecido é **ignorado**, não corrigido para um canal qualquer: um typo
   // (`e-mail`, `emails`) que virasse `email` mandaria aviso por um caminho que ninguém
   // pediu. Ignorar deixa o estado em "ninguém decidiu", que é visível na tela.

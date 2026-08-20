@@ -35,7 +35,7 @@ beforeEach(async () => {
   await config.definir('dominios_permitidos', ['gocase.com'], CHEFE, AGORA)
   await config.definir('admins', [CHEFE], CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -44,7 +44,7 @@ beforeEach(async () => {
 function req(caminho: string, email: string | null): Request {
   const headers: Record<string, string> = {}
   if (email) headers[HEADER_EMAIL] = email
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, { headers })
+  return new Request(`https://atlas.devgogroup.com${caminho}`, { headers })
 }
 
 const chamar = (r: Request) => tratarRequisicao(r, ctx, {})

@@ -440,7 +440,7 @@ beforeEach(async () => {
   await config.definir('tipos_chamado_permitidos', ['70', '71', '68'], CHEFE, AGORA)
   await config.definir('service_desk_id', '4', CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -455,7 +455,7 @@ beforeEach(async () => {
 })
 
 function req(caminho: string, corpo: unknown): Request {
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: 'POST',
     headers: { [HEADER_EMAIL]: ANA },
     ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),

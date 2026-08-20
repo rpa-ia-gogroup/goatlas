@@ -127,7 +127,7 @@ export function montarTranscricao(
   dados: DadosDaTranscricao,
 ): string {
   const cabecalho = [
-    '# Conversa com o agente do goatlas',
+    '# Conversa com o agente do atlas',
     '',
     `- **Chamado:** ${dados.issueKey}`,
     `- **Solicitante:** ${dados.solicitanteEmail}`,
@@ -208,14 +208,14 @@ function montarSecaoDeAnexos(
 /** As frases dos estados sem descrição. Espelham as da tela, e por isso são curtas. */
 const FRASE_DO_ESTADO: Readonly<Record<string, string>> = {
   analisando: 'a leitura não havia terminado quando o chamado foi aberto',
-  tipo_nao_suportado: 'o goatlas não lê este formato de arquivo',
+  tipo_nao_suportado: 'o atlas não lê este formato de arquivo',
   sem_conteudo: 'não havia texto ou imagem legível neste arquivo',
   falhou: 'a leitura falhou — o arquivo não foi analisado',
 }
 
 function recortar(texto: string): string {
   const aviso =
-    '\n\n---\n\n_⚠️ Transcrição truncada: a conversa passou do limite de arquivo do goatlas. O diálogo completo continua registrado no app._\n'
+    '\n\n---\n\n_⚠️ Transcrição truncada: a conversa passou do limite de arquivo do atlas. O diálogo completo continua registrado no app._\n'
   const codificador = new TextEncoder()
   if (codificador.encode(texto).length <= LIMITE_TRANSCRICAO_BYTES) return texto
 

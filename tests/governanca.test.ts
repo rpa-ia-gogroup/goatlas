@@ -37,7 +37,7 @@ beforeEach(async () => {
   await config.definir('admins', [CHEFE], CHEFE, AGORA)
   await config.definir('org_id', 'org-1', CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -68,7 +68,7 @@ function req(
 ): Request {
   const headers: Record<string, string> = { ...opcoes.headers }
   if (opcoes.email) headers[HEADER_EMAIL] = opcoes.email
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: opcoes.metodo ?? 'GET',
     headers,
   })
@@ -187,7 +187,7 @@ describe('RF-51/RF-52 — GET /api/admin/assentos lê o cache, não a API ao viv
       },
     ]
     ctx = await montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      { DB: db, ATLAS_USAR_FAKES: '1' },
       () => '2026-08-06T12:00:00.000Z',
       () => `id-${++n}`,
       { organizacao: org },

@@ -25,7 +25,7 @@ Teste antes do código em toda tarefa que muda comportamento (`Princípio III`).
       de `D-13` **permanece**. _Requirements: RF-21, R-03_
 - [x] **T-507** — Remover `campo_solicitante_id` de `config/index.ts`, `config/validar.ts`,
       `contexto.ts`, `app/api.ts`, `app/admin/campos.tsx` e do bootstrap
-      `GOATLAS_CAMPO_SOLICITANTE_ID`. _Requirements: RNF-25, D-36, D-25_
+      `ATLAS_CAMPO_SOLICITANTE_ID`. _Requirements: RNF-25, D-36, D-25_
 - [x] **T-508** — Testes de config/console atualizados; `bootstrap-e-demo` passa a **provar
       que a chave não existe** em vez de exercitá-la. _Requirements: D-25, D-36_
 - [x] **T-509** — Teste + fix: `GET /api/tipos-chamado` devolve **só** o service desk
@@ -54,7 +54,7 @@ Teste antes do código em toda tarefa que muda comportamento (`Princípio III`).
 
 ⚠️ **Decisão do mantenedor (11/08/2026): reusar o MESMO token do godocs.** Custo aceito e
 que precisa estar escrito: os dois apps passam a depender de uma credencial só, então
-**rotacionar por causa de um quebra o outro sem aviso** — e o goatlas falharia em silêncio,
+**rotacionar por causa de um quebra o outro sem aviso** — e o atlas falharia em silêncio,
 porque a derivação de área é fail-open (`SC-05`). Vai para `docs/DEPLOY.md` junto do secret,
 e é o primeiro item a revisitar se um dia o godocs rotacionar.
 
@@ -251,4 +251,4 @@ faz a mesma chamada, no mesmo GoDeploy, contra o mesmo host, com o mesmo token �
   abrir chamado só no 68 que o defeito passou. `slaPrimeiraResposta: null` era um terceiro
   defeito independente, também fechado.
 - **Mostrar o SLA na tela** (`RF-29`, `RF-31`) — o dado existe desde `T-535`; a superfície
-  não, e ela precisa distinguir o SLA do JSM do compromisso do goatlas (`D-20`).
+  não, e ela precisa distinguir o SLA do JSM do compromisso do atlas (`D-20`).

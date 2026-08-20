@@ -53,6 +53,7 @@ import { RepositorioPreferencias } from './notificacoes/preferencias'
 import { ServicoNotificacoes, type ValoresNotificacao } from './notificacoes/servico'
 import { CanalEmail, CanalFake, CanalGoogleChat, CanalIndisponivel } from './notificacoes/canais'
 import type { Canal, NomeCanal } from './notificacoes/tipos'
+import { valorDoApp } from './env-do-app'
 
 /** O que o GoDeploy injeta. `DB` é a plataforma; o resto são secrets. */
 export interface EnvGoDeploy extends BootstrapEnv {
@@ -86,27 +87,27 @@ export interface EnvGoDeploy extends BootstrapEnv {
    * webhook **não funciona** (fail-closed): o contrário deixaria aberta justamente a
    * única superfície pública do app.
    */
-  readonly GOATLAS_WEBHOOK_SEGREDO?: string
+  readonly ATLAS_WEBHOOK_SEGREDO?: string
   /** Q11 — chave do provedor de e-mail transacional (Workers não têm SMTP). */
   readonly EMAIL_API_KEY?: string
   /** `1` usa os fakes — para desenvolvimento antes de Q1. Nunca em produção real. */
-  readonly GOATLAS_USAR_FAKES?: string
+  readonly ATLAS_USAR_FAKES?: string
   /**
    * `1` publica o app em **modo demonstração**: fakes semeados com dados fictícios
    * e tarja de aviso permanente na interface. Ver `demo.ts` — a tarja não é
    * cosmética: sem ela alguém acredita que o chamado chegou ao time de tech.
    */
-  readonly GOATLAS_MODO_DEMO?: string
+  readonly ATLAS_MODO_DEMO?: string
   /**
    * `1` liga o **modo somente leitura**: o app lê o Confluence e o Jira de verdade e
    * **recusa toda escrita** (chamado, comentário, anexo, transição).
    *
-   * ⚠️ É o estado do meio que faltava entre "fakes em tudo" (`GOATLAS_MODO_DEMO`) e
+   * ⚠️ É o estado do meio que faltava entre "fakes em tudo" (`ATLAS_MODO_DEMO`) e
    * "produção". Serve para desenvolver e demonstrar com dado real sem que um clique
    * errado abra chamado na fila do time de tech. A trava é um decorador do cliente
    * (`atlassian/somente-leitura.ts`), não um `if` espalhado pelas rotas.
    */
-  readonly GOATLAS_SOMENTE_LEITURA?: string
+  readonly ATLAS_SOMENTE_LEITURA?: string
 }
 
 export interface Contexto {
@@ -203,7 +204,7 @@ export interface Contexto {
   readonly novoId: () => string
   readonly usandoFakes: boolean
   readonly modoDemo: boolean
-  /** Lê de verdade, recusa toda escrita. Ver `GOATLAS_SOMENTE_LEITURA`. */
+  /** Lê de verdade, recusa toda escrita. Ver `ATLAS_SOMENTE_LEITURA`. */
   readonly somenteLeitura: boolean
 }
 
@@ -271,7 +272,7 @@ export async function montarContexto(
   // sequencial cobrados de toda rota, inclusive do turno do agente.
   await garantirMigracao(env.DB)
 
-  const modoDemo = env.GOATLAS_MODO_DEMO === '1'
+  const modoDemo = valorDoApp(env, 'ATLAS_MODO_DEMO') === '1'
   // Bootstrap: padrão fail-closed → env → banco. A demo acrescenta o mínimo para o
   // app ser clicável; domínios e admins vêm SEMPRE do env/banco, nunca da demo.
   const bootstrap = { ...(modoDemo ? configDemo() : {}), ...valoresDoBootstrap(env) }
@@ -279,8 +280,8 @@ export async function montarContexto(
   const valores = await config.carregar()
   const auditoria = new AuditoriaBanco(env.DB, agora, novoId)
 
-  const usandoFakes = modoDemo || env.GOATLAS_USAR_FAKES === '1' || !env.ATLASSIAN_API_TOKEN
-  const somenteLeitura = env.GOATLAS_SOMENTE_LEITURA === '1'
+  const usandoFakes = modoDemo || valorDoApp(env, 'ATLAS_USAR_FAKES') === '1' || !env.ATLASSIAN_API_TOKEN
+  const somenteLeitura = valorDoApp(env, 'ATLAS_SOMENTE_LEITURA') === '1'
 
   /**
    * A coleta nasce **aqui**, e não no roteador — spec 009, `FR-10b`.
@@ -476,7 +477,7 @@ export async function montarContexto(
       return valores.email_endpoint
         ? new CanalEmail({
             endpoint: valores.email_endpoint,
-            remetente: valores.email_remetente ?? 'goatlas@gocase.com',
+            remetente: valores.email_remetente ?? 'atlas@gocase.com',
             apiKey: env.EMAIL_API_KEY ?? null,
           })
         : new CanalIndisponivel()
@@ -541,7 +542,7 @@ export async function montarContexto(
     notificador,
     canalPor,
     valoresNotificacao,
-    segredoWebhook: env.GOATLAS_WEBHOOK_SEGREDO,
+    segredoWebhook: valorDoApp(env, 'ATLAS_WEBHOOK_SEGREDO'),
     agora,
     novoId,
     usandoFakes,

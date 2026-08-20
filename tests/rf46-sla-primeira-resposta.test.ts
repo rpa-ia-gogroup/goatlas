@@ -182,11 +182,11 @@ describe('aderenciaSla — taxa sem dado é `null`, nunca 0%', () => {
 describe('RN-08 / R-05 — o texto diz "primeira resposta", e diz que é piso', () => {
   it('a mensagem de criação usa a expressão obrigatória', () => {
     const m = mensagemChamadoCriado({
-      issueKey: 'GOATLAS-1',
+      issueKey: 'ATLAS-1',
       titulo: 'Impressora',
       prioridade: 'normal',
       slaPrimeiraRespostaHoras: SLA_PRIMEIRA_RESPOSTA_HORAS.normal,
-      baseApp: 'https://goatlas.devgogroup.com',
+      baseApp: 'https://atlas.devgogroup.com',
     })
     expect(m.corpo).toMatch(/primeira resposta/i)
     // R-05: 24h é PISO GARANTIDO. Áreas que hoje respondem em 2h30 não podem ler isto
@@ -197,7 +197,7 @@ describe('RN-08 / R-05 — o texto diz "primeira resposta", e diz que é piso', 
 
   it('o alerta de SLA também diz de QUE prazo está falando', () => {
     const m = mensagemSlaEmRisco({
-      issueKey: 'GOATLAS-1',
+      issueKey: 'ATLAS-1',
       horasRestantes: 4,
       estourado: false,
       baseApp: null,
@@ -208,19 +208,19 @@ describe('RN-08 / R-05 — o texto diz "primeira resposta", e diz que é piso', 
 
   it('a mensagem linka para DENTRO do app, nunca para atlassian.net', () => {
     const m = mensagemChamadoCriado({
-      issueKey: 'GOATLAS-1',
+      issueKey: 'ATLAS-1',
       titulo: 'x',
       prioridade: 'alta',
       slaPrimeiraRespostaHoras: 12,
-      baseApp: 'https://goatlas.devgogroup.com/',
+      baseApp: 'https://atlas.devgogroup.com/',
     })
-    expect(m.link).toBe('https://goatlas.devgogroup.com/?chamado=GOATLAS-1')
+    expect(m.link).toBe('https://atlas.devgogroup.com/?chamado=ATLAS-1')
     expect(m.link).not.toMatch(/atlassian\.net/)
   })
 
   it('sem base pública configurada, a mensagem vai SEM link (não com link quebrado)', () => {
     const m = mensagemChamadoCriado({
-      issueKey: 'GOATLAS-1',
+      issueKey: 'ATLAS-1',
       titulo: 'x',
       prioridade: 'alta',
       slaPrimeiraRespostaHoras: 12,
@@ -246,7 +246,7 @@ let agora = '2026-08-06T12:00:00.000Z'
 
 async function montar() {
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => agora,
     () => `id-${++n}`,
     { atlassian },
@@ -279,7 +279,7 @@ function req(caminho: string, o: { metodo?: string; email?: string; headers?: Re
   const headers: Record<string, string> = { ...o.headers }
   if (o.email) headers[HEADER_EMAIL] = o.email
   if (o.corpo !== undefined) headers['content-type'] = 'application/json'
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: o.metodo ?? 'GET',
     headers,
     ...(o.corpo === undefined ? {} : { body: JSON.stringify(o.corpo) }),

@@ -84,11 +84,11 @@ describe('paraValoresDoJira — o tipo do campo decide a forma do valor', () => 
   it('seleção vira OBJETO com o id da opção; texto continua string', () => {
     expect(
       paraValoresDoJira(schema, {
-        customfield_10092: 'goatlas (staging)',
+        customfield_10092: 'atlas (staging)',
         customfield_10071: '10127',
       }),
     ).toEqual({
-      customfield_10092: 'goatlas (staging)',
+      customfield_10092: 'atlas (staging)',
       customfield_10071: { id: '10127' },
     })
   })
@@ -222,7 +222,7 @@ beforeEach(async () => {
   await config.definir('tipos_chamado_permitidos', ['70'], CHEFE, AGORA)
   await config.definir('service_desk_id', '4', CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -234,7 +234,7 @@ beforeEach(async () => {
 })
 
 function req(caminho: string, corpo: unknown): Request {
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: 'POST',
     headers: { [HEADER_EMAIL]: ANA },
     ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
