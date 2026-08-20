@@ -60,17 +60,17 @@ describe('o decorador recusa ESCRITA e deixa passar LEITURA', () => {
             chaveIdempotencia: 'k',
           }),
       ],
-      ['comentar', () => cliente.comentar('GOATLAS-1', 'oi', ANA)],
+      ['comentar', () => cliente.comentar('ATLAS-1', 'oi', ANA)],
       [
         'anexarArquivo',
         () =>
-          cliente.anexarArquivo('sd-1', 'GOATLAS-1', {
+          cliente.anexarArquivo('sd-1', 'ATLAS-1', {
             nome: 'a.png',
             tipo: 'image/png',
             bytes: new ArrayBuffer(1),
           }),
       ],
-      ['transicionar', () => cliente.transicionar('GOATLAS-1', 't1')],
+      ['transicionar', () => cliente.transicionar('ATLAS-1', 't1')],
     ]
 
     for (const [nome, chamada] of escritas) {
@@ -81,7 +81,7 @@ describe('o decorador recusa ESCRITA e deixa passar LEITURA', () => {
   it('⚠️ a recusa é DEFINITIVA — transitória faria o outbox retentar para sempre', async () => {
     const cliente = new ClienteAtlassianSomenteLeitura(fake())
     await cliente
-      .comentar('GOATLAS-1', 'oi', ANA)
+      .comentar('ATLAS-1', 'oi', ANA)
       .catch((e: unknown) => {
         expect(e).toBeInstanceOf(ErroAtlassian)
         expect((e as InstanceType<typeof ErroAtlassian>).detalhe.transitorio).toBe(false)
@@ -94,14 +94,14 @@ describe('o decorador recusa ESCRITA e deixa passar LEITURA', () => {
     expect((await cliente.listarTiposChamado()).length).toBe(1)
     expect((await cliente.obterEspaco('TECH')).nome).toBe('Tecnologia')
     expect(await cliente.buscarConfluence({ termo: 'x', espacosPermitidos: ['TECH'], labelsBloqueadas: [], limite: 5 })).toEqual([])
-    expect(await cliente.listarTransicoes('GOATLAS-1')).toEqual([])
+    expect(await cliente.listarTransicoes('ATLAS-1')).toEqual([])
   })
 
   it('`listarTransicoes` passa apesar do nome — ela só CONSULTA', async () => {
     // Quem executa é `transicionar`, que está bloqueada. Bloquear a consulta também
     // esconderia da tela que existem ações, o que é informação verdadeira.
     const cliente = new ClienteAtlassianSomenteLeitura(fake())
-    await expect(cliente.listarTransicoes('GOATLAS-1')).resolves.toEqual([])
+    await expect(cliente.listarTransicoes('ATLAS-1')).resolves.toEqual([])
   })
 
   it('o health DIZ que está travado — "ok" sozinho enganaria', async () => {
@@ -116,7 +116,7 @@ describe('pelas rotas, com a trava ligada por env', () => {
 
   async function montar() {
     return montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1', GOATLAS_SOMENTE_LEITURA: '1' },
+      { DB: db, ATLAS_USAR_FAKES: '1', ATLAS_SOMENTE_LEITURA: '1' },
       () => AGORA,
       () => `id-${++n}`,
     )
@@ -181,7 +181,7 @@ describe('pelas rotas, com a trava ligada por env', () => {
 
   it('sem a env, nada muda — a trava é opt-in', async () => {
     const ctx = await montarContexto(
-      { DB: db, GOATLAS_USAR_FAKES: '1' },
+      { DB: db, ATLAS_USAR_FAKES: '1' },
       () => AGORA,
       () => `id-${++n}`,
     )

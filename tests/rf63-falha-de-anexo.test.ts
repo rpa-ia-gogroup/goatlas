@@ -67,7 +67,7 @@ beforeEach(async () => {
   await config.definir('tipos_chamado_permitidos', ['rt-1'], CHEFE, AGORA)
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -84,7 +84,7 @@ async function subir(chave: string, nome = 'print.png'): Promise<void> {
   form.append('chaveIdempotencia', chave)
   form.append('arquivo', new File(['print do erro'], nome, { type: 'image/png' }))
   const r = await chamar(
-    new Request('https://goatlas.devgogroup.com/api/anexos-pendentes', {
+    new Request('https://atlas.devgogroup.com/api/anexos-pendentes', {
       method: 'POST',
       headers: { [HEADER_EMAIL]: ANA },
       body: form,
@@ -102,7 +102,7 @@ const BASE = {
 
 async function criar(chave: string) {
   return chamar(
-    new Request('https://goatlas.devgogroup.com/api/chamados', {
+    new Request('https://atlas.devgogroup.com/api/chamados', {
       method: 'POST',
       headers: { [HEADER_EMAIL]: ANA },
       body: JSON.stringify({ ...BASE, chaveIdempotencia: chave, declarouAnexo: true }),
@@ -330,7 +330,7 @@ describe('T-415 — expurgo com TTL próprio, e curto', () => {
       VALUES ('velha', ?, NULL, 'form:x:antiga', 'tmp-velho', 'antigo.png', ?)`, [ANA, velha])
 
     const r = await tratarRequisicao(
-      new Request('https://goatlas.devgogroup.com/api/cron/reprocessar-submissoes', {
+      new Request('https://atlas.devgogroup.com/api/cron/reprocessar-submissoes', {
         method: 'POST',
         // Rota idempotente sem identidade de usuário: aceita por presença do header, que
         // é o que distingue o gateway da plataforma de um funcionário logado forjando o

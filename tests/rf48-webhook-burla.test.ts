@@ -39,7 +39,7 @@ let n = 0
 
 async function montar(extra: Record<string, string> = {}) {
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1', GOATLAS_WEBHOOK_SEGREDO: SEGREDO, ...extra },
+    { DB: db, ATLAS_USAR_FAKES: '1', ATLAS_WEBHOOK_SEGREDO: SEGREDO, ...extra },
     () => AGORA,
     () => `id-${++n}`,
     { atlassian },
@@ -76,7 +76,7 @@ function req(
   const headers: Record<string, string> = { ...opcoes.headers }
   if (opcoes.email) headers[HEADER_EMAIL] = opcoes.email
   if (opcoes.corpo !== undefined) headers['content-type'] = 'application/json'
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: opcoes.metodo ?? 'GET',
     headers,
     ...(opcoes.corpo === undefined ? {} : { body: JSON.stringify(opcoes.corpo) }),
@@ -107,7 +107,7 @@ async function abrirChamadoDaAna(): Promise<string> {
 const webhook = (corpo: unknown, segredo: string | null, viaQuery = false) =>
   chamar(
     new Request(
-      `https://goatlas.devgogroup.com/api/webhook/jira${
+      `https://atlas.devgogroup.com/api/webhook/jira${
         viaQuery && segredo ? `?${PARAM_WEBHOOK}=${encodeURIComponent(segredo)}` : ''
       }`,
       {
@@ -169,7 +169,7 @@ describe('T-201 — o webhook não notifica ninguém sem segredo válido', () =>
   })
 
   it('a tentativa recusada fica na auditoria — SEM o segredo enviado', async () => {
-    await webhook({ issue: { key: 'GOATLAS-1' } }, 'segredo-chutado-pelo-atacante')
+    await webhook({ issue: { key: 'ATLAS-1' } }, 'segredo-chutado-pelo-atacante')
     const linhas = linhasComoObjetos<{ resultado: string; detalhe_json: string }>(
       await db.query(
         `SELECT resultado, detalhe_json FROM auditoria WHERE acao = 'webhook_recebido'`,
@@ -182,9 +182,9 @@ describe('T-201 — o webhook não notifica ninguém sem segredo válido', () =>
     expect(linhas[0]?.detalhe_json).not.toContain('segredo-chutado-pelo-atacante')
   })
 
-  it('sem `GOATLAS_WEBHOOK_SEGREDO` configurado, a rota NÃO funciona (fail-closed)', async () => {
-    await montar({ GOATLAS_WEBHOOK_SEGREDO: '' })
-    const r = await webhook({ issue: { key: 'GOATLAS-1' } }, SEGREDO)
+  it('sem `ATLAS_WEBHOOK_SEGREDO` configurado, a rota NÃO funciona (fail-closed)', async () => {
+    await montar({ ATLAS_WEBHOOK_SEGREDO: '' })
+    const r = await webhook({ issue: { key: 'ATLAS-1' } }, SEGREDO)
     expect(r.status).toBe(403)
     const linhas = linhasComoObjetos<{ detalhe_json: string }>(
       await db.query(
@@ -197,13 +197,13 @@ describe('T-201 — o webhook não notifica ninguém sem segredo válido', () =>
 
   it('evento FORJADO sobre chamado sem vínculo local não notifica ninguém', async () => {
     // Segredo correto (o cenário do insider, ou do segredo que vazou), mas o chamado
-    // não passou pelo goatlas: não existe a quem avisar.
+    // não passou pelo atlas: não existe a quem avisar.
     const r = await webhook({ issue: { key: 'TECH-9999' } }, SEGREDO)
     expect(r.status).toBe(202)
     expect(await todasAsNotificacoes()).toEqual([])
   })
 
-  it('a resposta é a MESMA com e sem vínculo — não é oráculo de "está no goatlas?"', async () => {
+  it('a resposta é a MESMA com e sem vínculo — não é oráculo de "está no atlas?"', async () => {
     const issueKey = await abrirChamadoDaAna()
     const nosso = await webhook({ issue: { key: issueKey } }, SEGREDO)
     const alheio = await webhook({ issue: { key: 'TECH-9999' } }, SEGREDO)
@@ -212,7 +212,7 @@ describe('T-201 — o webhook não notifica ninguém sem segredo válido', () =>
   })
 
   it('chave malformada no payload não vira consulta — e ainda responde 202', async () => {
-    for (const chave of ['../../etc/passwd', "GOATLAS-1' OR 1=1", '', 'sem-numero']) {
+    for (const chave of ['../../etc/passwd', "ATLAS-1' OR 1=1", '', 'sem-numero']) {
       const r = await webhook({ issue: { key: chave } }, SEGREDO)
       expect(r.status).toBe(202)
     }
@@ -253,7 +253,7 @@ describe('segredoConfere — comparação de tempo constante', () => {
 describe('chaveDoPayload — o corpo do webhook é ponteiro, não conteúdo', () => {
   it('aceita `issue.key` e `issueKey`, no formato de chave do Jira', () => {
     expect(chaveDoPayload({ issue: { key: 'TECH-12' } })).toBe('TECH-12')
-    expect(chaveDoPayload({ issueKey: 'GOATLAS-1' })).toBe('GOATLAS-1')
+    expect(chaveDoPayload({ issueKey: 'ATLAS-1' })).toBe('ATLAS-1')
   })
 
   it('recusa o que não tem forma de chave', () => {
@@ -307,8 +307,8 @@ describe('T-202 — webhook e polling para o MESMO fato geram UMA notificação'
   it('a chave de dedupe é a MESMA nas duas fontes — é isso que faz a dedupe funcionar', () => {
     // O webhook manda `Z`; o REST do Jira manda o mesmo instante com deslocamento. Sem
     // normalizar, as duas strings seriam chaves diferentes para o mesmo fato.
-    const doWebhook = chaveDedupe('GOATLAS-1', 'status_alterado', '2026-08-06T13:00:00.000Z')
-    const doRest = chaveDedupe('GOATLAS-1', 'status_alterado', '2026-08-06T10:00:00.000-0300')
+    const doWebhook = chaveDedupe('ATLAS-1', 'status_alterado', '2026-08-06T13:00:00.000Z')
+    const doRest = chaveDedupe('ATLAS-1', 'status_alterado', '2026-08-06T10:00:00.000-0300')
     expect(doWebhook).toBe(doRest)
   })
 
@@ -445,7 +445,7 @@ describe('T-203 — ninguém é notificado da própria ação', () => {
     })
     expect(
       await ctx.acoesProprias.ehAcaoPropria({
-        issueKey: 'GOATLAS-999',
+        issueKey: 'ATLAS-999',
         tipoEvento: 'comentario_publico',
         conteudo: 'qualquer coisa',
       }),

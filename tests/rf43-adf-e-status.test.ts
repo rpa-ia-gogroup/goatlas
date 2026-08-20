@@ -10,7 +10,7 @@
  *    mesmo painel com o título em português e logo abaixo em inglês. Quem vê conteúdo
  *    repetido conclui que o app quebrou, e quem conclui isso abre chamado — o oposto do
  *    que a aba existe para fazer.
- * 2. **A macro `status` virava "o goatlas ainda não sabe mostrar este bloco"** — acusando
+ * 2. **A macro `status` virava "o atlas ainda não sabe mostrar este bloco"** — acusando
  *    limitação nossa sobre um texto que estava no storage, num parâmetro, a uma linha de
  *    distância. É a macro que marca "Concluído"/"Em andamento" em página de processo.
  *

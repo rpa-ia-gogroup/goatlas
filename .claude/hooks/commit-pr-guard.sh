@@ -15,14 +15,14 @@ CWD="$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
 SESSION="$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -z "$CMD" ] && exit 0
 
-STATE_DIR="${TMPDIR:-/tmp}/goatlas-hooks"
+STATE_DIR="${TMPDIR:-/tmp}/atlas-hooks"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 MSG=""
 
 # ---------- gh pr create -------------------------------------------------------
 if echo "$CMD" | grep -qE '\bgh\s+pr\s+create\b'; then
-  MSG+="[goatlas] Antes de abrir o PR (constituição, Princípios IX e XIII):
+  MSG+="[atlas] Antes de abrir o PR (constituição, Princípios IX e XIII):
 - \`git fetch origin\` e incorpore \`origin/main\` — main anda por causa da regra de worktree.
 - \`npm run test\` passando, incluindo os testes de bypass das travas críticas (RF-08, RF-17, RF-30, RF-32).
 - Documentação atualizada NO MESMO PR: \`docs/REQUISITOS.md\` (requisito), \`docs/DECISOES.md\` (decisão/Q respondida), \`CLAUDE.md\` (regra operacional/gotcha), a \`spec.md\` da feature (escopo/cenário).
@@ -54,7 +54,7 @@ if echo "$CMD" | grep -qE '\bgit\b.*\bcommit\b'; then
     [ -n "$MSG" ] && MSG+="
 
 "
-    MSG+="[goatlas] Lembrete de commit (1x por sessão): documentação viva é gate, não cortesia
+    MSG+="[atlas] Lembrete de commit (1x por sessão): documentação viva é gate, não cortesia
 (Princípio XIII) — requisito → \`docs/REQUISITOS.md\`, decisão/Q respondida →
 \`docs/DECISOES.md\`, regra operacional ou gotcha → \`CLAUDE.md\`, escopo/cenário → a
 \`spec.md\`. E marque \`[x]\` no \`tasks.md\` as tarefas concluídas."

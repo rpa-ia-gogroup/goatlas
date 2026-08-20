@@ -13,7 +13,6 @@ import { Aviso } from './componentes'
 import { TelaConversa, TelaDetalhe, TelaFormulario, TelaMeusChamados } from './telas'
 import { TelaAdmin } from './admin'
 import { TelaInvestigador } from './investigador'
-import { TelaAvisos } from './avisos'
 import { entradaDaUrl, TelaDocumentacao, type EntradaDocumentacao } from './confluence'
 import {
   CAMINHO_CONVERSA,
@@ -30,10 +29,6 @@ const ABAS: readonly { nome: Tela['nome']; rotulo: string; soAdmin?: boolean }[]
   { nome: 'documentacao', rotulo: 'Documentação' },
   { nome: 'chamados', rotulo: 'Meus chamados' },
   { nome: 'formulario', rotulo: 'Abrir direto' },
-  // Depois de "Meus chamados" de propósito: a aba de avisos é ajuste de preferência,
-  // não caminho para resolver nada. Quem chega no app tem um problema, não uma
-  // configuração a mexer.
-  { nome: 'avisos', rotulo: 'Avisos' },
   // A aba só aparece para admin — mas quem garante o acesso é o gate do SERVIDOR
   // em cada rota `/api/admin/*`. Esconder no cliente é conveniência, não segurança.
   { nome: 'admin', rotulo: 'Administração', soAdmin: true },
@@ -133,8 +128,17 @@ export function App() {
   return (
     <div className="app">
       <header className="cabecalho">
+        {/*
+          ⚠️ **O acento marca a INICIAL, e isso não é o mesmo split de antes.** Até
+          19/08/2026 a marca era `go` em branco + `atlas` em lime, e o corte separava o
+          prefixo da família GoGroup do nome do app. Sem o `go`, esse corte não diz mais
+          nada — e `atlas` todo em lime contraria a identidade (§1 regra 3: lime é acento
+          pontual, ~10% da página, "mais poderoso quando escasso"). O `a` é a mesma letra
+          que o favicon recorta dentro do balão, então as duas marcas passam a apontar
+          para o mesmo lugar em vez de cada uma inventar o seu destaque.
+        */}
         <span className="marca">
-          go<span>atlas</span>
+          <span>a</span>tlas
         </span>
         {/*
           A identidade no canto existe só para a pessoa saber COM QUAL CONTA está
@@ -215,7 +219,6 @@ export function App() {
             {tela.nome === 'formulario' && eu && (
               <TelaFormulario eu={eu} aoAbrirChamado={() => navegar({ nome: 'chamados' })} />
             )}
-            {tela.nome === 'avisos' && <TelaAvisos />}
             {tela.nome === 'admin' && <TelaAdmin />}
             {/* Esconder no cliente é conveniência; quem garante é o gate de cada rota
                 `/api/investigador/*` no servidor. */}

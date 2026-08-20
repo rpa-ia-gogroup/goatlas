@@ -31,7 +31,7 @@ beforeEach(async () => {
   await migrar(db)
   n = 0
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -42,7 +42,7 @@ beforeEach(async () => {
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
   // Recarrega o contexto para pegar a config nova (ele lê uma vez no boot).
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -54,7 +54,7 @@ function req(
 ): Request {
   const headers: Record<string, string> = { ...opcoes.headers }
   if (opcoes.email) headers[HEADER_EMAIL] = opcoes.email
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: opcoes.metodo ?? 'GET',
     headers,
     ...(opcoes.corpo === undefined ? {} : { body: JSON.stringify(opcoes.corpo) }),
@@ -343,7 +343,7 @@ describe('RNF-11 — rate limit por usuário', () => {
   it('estourado o limite, POST é recusado com mensagem de negócio', async () => {
     const config = new Config(db)
     await config.definir('limite_requisicoes_por_minuto', 2, CHEFE, AGORA)
-    ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+    ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
 
     for (let i = 0; i < 3; i += 1) {
       await chamar(
@@ -364,7 +364,7 @@ describe('RNF-11 — rate limit por usuário', () => {
   it('o limite é POR USUÁRIO — um script não derruba os outros', async () => {
     const config = new Config(db)
     await config.definir('limite_requisicoes_por_minuto', 1, CHEFE, AGORA)
-    ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+    ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
 
     await chamar(req('/api/chamados', { metodo: 'POST', email: ANA, corpo: { ...PROPOSTA, chaveIdempotencia: 'a1' } }))
     await chamar(req('/api/chamados', { metodo: 'POST', email: ANA, corpo: { ...PROPOSTA, chaveIdempotencia: 'a2' } }))
@@ -472,7 +472,7 @@ describe('RNF-25 — sem service desk configurado, não se inventa um', () => {
     await config.definir('dominios_permitidos', ['gocase.com'], CHEFE, AGORA)
     await config.definir('tipos_chamado_permitidos', ['rt-1'], CHEFE, AGORA)
     const ctxSemSd = await montarContexto(
-      { DB: dbLimpo, GOATLAS_USAR_FAKES: '1' },
+      { DB: dbLimpo, ATLAS_USAR_FAKES: '1' },
       () => AGORA,
       () => `id-${++n}`,
     )

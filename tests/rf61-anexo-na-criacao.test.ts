@@ -68,7 +68,7 @@ beforeEach(async () => {
   await config.definir('tipos_chamado_permitidos', ['rt-1'], CHEFE, AGORA)
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -100,7 +100,7 @@ function envio(
       new File([corpo as BlobPart], arquivo.nome ?? 'print.png', { type: 'image/png' }),
     )
   }
-  return new Request('https://goatlas.devgogroup.com/api/anexos-pendentes', {
+  return new Request('https://atlas.devgogroup.com/api/anexos-pendentes', {
     method: 'POST',
     headers: { [HEADER_EMAIL]: email },
     body: form,
@@ -271,7 +271,7 @@ describe('T-410 — a rota herda os gates das rotas de criação', () => {
   it('quem está fora do piloto não sobe arquivo (R-06)', async () => {
     const config = new Config(db)
     await config.definir('emails_piloto', [BRUNO], CHEFE, AGORA)
-    ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+    ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
     fake = ctx.atlassian as ClienteAtlassianFake
 
     const r = await chamar(envio({ chaveIdempotencia: 'k10' }, null, ANA))
@@ -325,7 +325,7 @@ describe('T-406c — o campo de anexo SAI da lista que RF-27 renderiza', () => {
       CAMPO_ANEXO,
     ])
     const r = await chamar(
-      new Request('https://goatlas.devgogroup.com/api/tipos-chamado/rt-1/campos', {
+      new Request('https://atlas.devgogroup.com/api/tipos-chamado/rt-1/campos', {
         headers: { [HEADER_EMAIL]: ANA },
       }),
     )
@@ -343,7 +343,7 @@ describe('T-406c — o campo de anexo SAI da lista que RF-27 renderiza', () => {
   it('tipo sem anexo diz `aceitaAnexo: false` — é o que apaga a pergunta na tela', async () => {
     fake.estado.camposPorTipo.set('rt-1', [])
     const r = await chamar(
-      new Request('https://goatlas.devgogroup.com/api/tipos-chamado/rt-1/campos', {
+      new Request('https://atlas.devgogroup.com/api/tipos-chamado/rt-1/campos', {
         headers: { [HEADER_EMAIL]: ANA },
       }),
     )

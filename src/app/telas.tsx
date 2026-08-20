@@ -1,5 +1,5 @@
 /**
- * As telas do goatlas.
+ * As telas do atlas.
  *
  * Quatro superfícies, uma coluna, mobile-first (RNF-28): conversa com o agente,
  * meus chamados, detalhe do chamado e o formulário sem IA (D-04).
@@ -452,6 +452,7 @@ function ConversaEmCurso({
           prioridadeSugerida: r.prioridadeSugerida ?? null,
           recusasDeAjuste: r.recusasDeAjuste ?? [],
           assuntoMudou: r.assuntoMudou ?? false,
+          atualizacaoDoCartao: r.atualizacaoDoCartao ?? 'nao_havia',
         })
       }
       setFalas((f) => [...f, { de: 'agente', texto: r.texto }])
@@ -734,7 +735,7 @@ export function EntradaConversa({ fala }: { fala: Fala }) {
   if (fala.de === 'agente') {
     return (
       <div>
-        <span className="autor">goatlas</span>
+        <span className="autor">atlas</span>
         <TextoDoAgente texto={fala.texto} />
       </div>
     )
@@ -990,6 +991,14 @@ interface NegociacaoNaTela {
   readonly prioridadeSugerida: Prioridade | null
   readonly recusasDeAjuste: readonly RecusaNaTela[]
   readonly assuntoMudou: boolean
+  /**
+   * `FR-2`/`FR-3` (spec 012) — só `nao_conseguiu` fala na tela.
+   *
+   * ⚠️ **Opcional pelo mesmo motivo da interface inteira:** o formulário (`D-04`) e a rota
+   * de override montam este cartão sem ter passado por um turno de conversa, e ali não houve
+   * rederivação nenhuma sobre a qual avisar.
+   */
+  readonly atualizacaoDoCartao?: 'atualizado' | 'sem_mudanca' | 'nao_conseguiu' | 'nao_havia'
 }
 
 /** `FR-13`/`FR-14` — um ajuste pedido em texto que não coube, como a tela o recebe. */
@@ -1289,6 +1298,23 @@ export function ReciboConfirmacao({
         <Aviso>
           O assunto do chamado mudou, então o formulário abaixo é outro — os campos do
           assunto anterior não vieram junto.
+        </Aviso>
+      )}
+
+      {negociacao?.atualizacaoDoCartao === 'nao_conseguiu' && (
+        /**
+         * `FR-2` (spec 012) — o resumo **não** incorporou a última mensagem.
+         *
+         * 🚨 Medido em 20/08/2026: a pessoa explicou o motivo do pedido, a extração daquele
+         * turno devolveu `pronto: false`, o cartão ficou com o texto do turno anterior e a
+         * tela não disse nada. Ela leu um resumo velho como se fosse o atual.
+         *
+         * ⚠️ Só aqui, e **só** neste estado: `sem_mudanca` é silêncio de propósito — aviso
+         * que aparece em todo turno ninguém lê (o par de `anexosIndisponiveis`, `D-56`).
+         */
+        <Aviso atencao>
+          Não consegui atualizar o resumo com a sua última mensagem. Confira o que está aqui
+          e ajuste o que precisar antes de abrir o chamado.
         </Aviso>
       )}
 
@@ -2077,15 +2103,15 @@ function ArquivosDoChamado({
             // A origem é dita em **palavras**, nunca só por posição ou cor (regra 9): quem
             // mandou o arquivo precisa reconhecê-lo, e "o time respondeu com um anexo" é
             // outra notícia. Ausente = resposta antiga do servidor; aí não se afirma nada.
-            // ⚠️ `goatlas` **não** é uma das duas: a transcrição de `RF-23` não foi
+            // ⚠️ `atlas` **não** é uma das duas: a transcrição de `RF-23` não foi
             // enviada por ninguém, e chamá-la de "você enviou" ou "do time" seria a tela
             // afirmando autoria falsa — o defeito de `D-43`, na versão arquivo.
             a.origem === 'voce'
               ? 'você enviou'
               : a.origem === 'time'
                 ? 'do time'
-                : a.origem === 'goatlas'
-                  ? 'gerado pelo goatlas'
+                : a.origem === 'atlas'
+                  ? 'gerado pelo atlas'
                   : null,
             extensaoLegivel(a.nomeArquivo),
             tamanhoLegivel(a.tamanhoBytes),
@@ -2132,7 +2158,7 @@ function ArquivosDoChamado({
  * ## O que esta tela pode afirmar, e o que não pode
  *
  * Sob proxy total (`D-01`) o `autorNome` que volta do JSM é o da conta que
- * **registrou** o comentário, e para tudo que sai do goatlas essa conta é a de
+ * **registrou** o comentário, e para tudo que sai do atlas essa conta é a de
  * serviço. A tela imprimia esse nome como autor: o comentário da própria pessoa
  * aparecia assinado por um colega, com o prefixo de `D-13` logo abaixo dizendo
  * outro nome. A leitura natural — *alguém escreveu em meu nome* — é a pior possível.

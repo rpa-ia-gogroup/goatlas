@@ -64,7 +64,7 @@ async function montar(espacos: readonly string[] = ['TECH']): Promise<void> {
   await config.definir('espacos_confluence', [...espacos], ANA, AGORA)
   await config.definir('labels_bloqueadas', ['confidencial'], ANA, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -88,7 +88,7 @@ function buscar(query: string, email: string | null = ANA): Promise<Response> {
   const headers: Record<string, string> = {}
   if (email) headers[HEADER_EMAIL] = email
   return tratarRequisicao(
-    new Request(`https://goatlas.devgogroup.com/api/confluence/busca${query}`, { headers }),
+    new Request(`https://atlas.devgogroup.com/api/confluence/busca${query}`, { headers }),
     ctx,
     {},
   )
@@ -295,7 +295,7 @@ describe('RF-42 / RNF-18 — o que a busca REGISTRA', () => {
     // única (R-02) sem criar nada, o que faz parecer inofensivo.
     const config = new Config(db)
     await config.definir('limite_requisicoes_por_minuto', 2, ANA, AGORA)
-    ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+    ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
     fake = ctx.atlassian as ClienteAtlassianFake
     fake.estado.paginas = [pagina({ id: 'reprocessar' })]
 

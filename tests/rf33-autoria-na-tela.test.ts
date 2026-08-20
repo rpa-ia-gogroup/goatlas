@@ -52,7 +52,7 @@ beforeEach(async () => {
   await config.definir('dominios_permitidos', ['gocase.com'], CHEFE, AGORA)
   await config.definir('tipos_chamado_permitidos', ['rt-1'], CHEFE, AGORA)
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
-  ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+  ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
 })
 
 function req(
@@ -61,7 +61,7 @@ function req(
 ): Request {
   const headers: Record<string, string> = {}
   if (opcoes.email) headers[HEADER_EMAIL] = opcoes.email
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: opcoes.metodo ?? 'GET',
     headers,
     ...(opcoes.corpo === undefined ? {} : { body: JSON.stringify(opcoes.corpo) }),
@@ -127,7 +127,7 @@ describe('T-083 — o comentário do solicitante é identificado como dele', () 
         anexos: [],
       },
     ])
-    expect(exibido!.corpo).not.toMatch(/via goatlas/)
+    expect(exibido!.corpo).not.toMatch(/via atlas/)
     expect(exibido!.corpo).not.toMatch(/ana@gocase\.com/)
   })
 
@@ -244,7 +244,7 @@ describe('T-083 — estrutural: a tela não escreve uma segunda regra', () => {
         const texto = readFileSync(caminho, 'utf8')
         // O que se procura é a *regra* remontada na tela: o literal do prefixo ou o
         // nome do par de funções que só o servidor deve usar.
-        if (/via goatlas|prefixarAutoria|removerPrefixoAutoria|ehComentarioDoSolicitante/.test(texto)) {
+        if (/via atlas|prefixarAutoria|removerPrefixoAutoria|ehComentarioDoSolicitante/.test(texto)) {
           suspeitos.push(caminho)
         }
       }

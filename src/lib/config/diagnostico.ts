@@ -93,7 +93,7 @@ function diagnosticarEntrada(v: ConfigValores): Capacidade {
     return {
       ...base,
       estado: 'parcial',
-      // Quem está vendo esta frase entrou por `GOATLAS_ADMINS` do ambiente
+      // Quem está vendo esta frase entrou por `ATLAS_ADMINS` do ambiente
       // (bootstrap do primeiro boot). Dizer isso evita a conclusão errada de que a
       // aba está aberta para todo mundo.
       consequencia: `Entra quem tem e-mail de ${dominios}. Ninguém está na lista de administradores — esta aba só está aberta pelo ambiente.`,

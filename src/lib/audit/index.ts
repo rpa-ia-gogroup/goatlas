@@ -25,6 +25,18 @@ export type AcaoAuditada =
   | 'conversa_iniciada'
   | 'mensagem_enviada'
   | 'busca_confluence'
+  /**
+   * Termo descartado do mapa de lacunas (`RF-42`, `D-78`). Apaga linhas de `buscas`, então é
+   * irreversível e cruza o isolamento por e-mail — auditar é o que dá rastro de quem limpou o
+   * quê, já que o próprio dado apagado deixa de existir.
+   */
+  | 'lacuna_descartada'
+  /**
+   * Limpeza de dado de teste (`D-78`). Apaga linhas de uso em várias tabelas de uma vez, e é
+   * irreversível — o registro aqui é o **único** rastro que sobra, porque o dado apagado deixa
+   * de existir. É também por isso que `auditoria` nunca entra na própria limpeza (`D-17`).
+   */
+  | 'limpeza_executada'
   /** Leitura direta de página (RF-39) — toca a Atlassian, e a recusa é o registro de burla. */
   | 'pagina_confluence_lida'
   /** Anexo servido pelo proxy (RNF-02) — mesma razão. */

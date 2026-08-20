@@ -299,7 +299,7 @@ describe('RF-27 (T-130) — criarChamado inclui camposDinamicos em requestFieldV
       maxTentativas: 1,
       fetchImpl: (async (_url: string, init: { body?: string }) => {
         corpoEnviado = JSON.parse(init.body ?? '{}')
-        return new Response(JSON.stringify({ issueKey: 'GOATLAS-1', issueId: '1' }), { status: 200 })
+        return new Response(JSON.stringify({ issueKey: 'ATLAS-1', issueId: '1' }), { status: 200 })
       }) as unknown as typeof fetch,
     })
     await cliente.criarChamado({
@@ -326,7 +326,7 @@ describe('RF-27 (T-130) — criarChamado inclui camposDinamicos em requestFieldV
       maxTentativas: 1,
       fetchImpl: (async (_url: string, init: { body?: string }) => {
         corpoEnviado = JSON.parse(init.body ?? '{}')
-        return new Response(JSON.stringify({ issueKey: 'GOATLAS-1', issueId: '1' }), { status: 200 })
+        return new Response(JSON.stringify({ issueKey: 'ATLAS-1', issueId: '1' }), { status: 200 })
       }) as unknown as typeof fetch,
     })
     await cliente.criarChamado({

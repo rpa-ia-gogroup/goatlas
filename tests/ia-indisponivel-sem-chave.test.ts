@@ -34,7 +34,7 @@ let db: SqliteLocal
  * Atlassian completo, chave de IA ausente.
  */
 const ENV_ATLASSIAN_REAL = {
-  GOATLAS_DOMINIOS: 'gocase.com',
+  ATLAS_DOMINIOS: 'gocase.com',
   ATLASSIAN_API_TOKEN: 'token-de-servico',
   ATLASSIAN_EMAIL: 'servico@gocase.com',
   ATLASSIAN_BASE_URL: 'https://goengenharia.atlassian.net',
@@ -71,13 +71,13 @@ describe('escolha do cliente de IA', () => {
   })
 
   it('modo demonstração continua usando o fake — sem regressão', async () => {
-    const ctx = await contexto({ GOATLAS_MODO_DEMO: '1' })
+    const ctx = await contexto({ ATLAS_MODO_DEMO: '1' })
     expect(ctx.usandoFakes).toBe(true)
     expect(ctx.ia).toBeInstanceOf(ClienteIAFake)
   })
 
   it('sem token da Atlassian também segue no fake (dev sem credencial)', async () => {
-    const ctx = await montarContexto({ DB: db, GOATLAS_DOMINIOS: 'gocase.com' })
+    const ctx = await montarContexto({ DB: db, ATLAS_DOMINIOS: 'gocase.com' })
     expect(ctx.usandoFakes).toBe(true)
     expect(ctx.ia).toBeInstanceOf(ClienteIAFake)
   })
@@ -87,7 +87,7 @@ describe('degradação honesta', () => {
   async function chamar(caminho: string, metodo = 'GET', corpo?: unknown) {
     const ctx = await contexto()
     const r = await tratarRequisicao(
-      new Request(`https://goatlas.devgogroup.com${caminho}`, {
+      new Request(`https://atlas.devgogroup.com${caminho}`, {
         method: metodo,
         headers: { [HEADER_EMAIL]: ANA },
         ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),

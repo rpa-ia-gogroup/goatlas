@@ -117,6 +117,14 @@ export interface RespostaTurno {
   /** O assunto mudou neste turno — a tela diz, e os campos do anterior somem (`FR-10`). */
   readonly assuntoMudou?: boolean
   /**
+   * O que aconteceu com o cartão neste turno — `FR-2`/`FR-3` (spec 012).
+   *
+   * ⚠️ **Não é derivável de `alterados`**: lista vazia significa "a IA não mudou nada" **e**
+   * "a IA não conseguiu rederivar", e as duas frases são opostas. Só `nao_conseguiu` vira
+   * aviso na tela; `sem_mudanca` e `nao_havia` são silêncio.
+   */
+  readonly atualizacaoDoCartao?: 'atualizado' | 'sem_mudanca' | 'nao_conseguiu' | 'nao_havia'
+  /**
    * A frase de `FR-5`, pronta, quando o motivo não pôde ser exibido.
    *
    * ⚠️ Vem do servidor em vez de a tela inventá-la porque **a rota do override** mostra o
@@ -180,7 +188,7 @@ export interface ComentarioPublico {
   readonly autorNome: string
   readonly criadoEm: string
   /**
-   * `true` = a pessoa que está lendo escreveu este comentário, pelo goatlas.
+   * `true` = a pessoa que está lendo escreveu este comentário, pelo atlas.
    *
    * Vem do servidor, do **mesmo** predicado que o SLA de `RF-46` usa. A tela não
    * recalcula: condição escrita só aqui divergiria em silêncio da de lá.
@@ -231,12 +239,12 @@ export interface AnexoDoChamado {
    * `RF-31` — de onde veio a certeza de que este arquivo pode aparecer.
    *
    * `voce` = o app o enviou a pedido desta pessoa · `time` = veio da Atlassian e passou
-   * pela interseção de `D-45` · `goatlas` = o app o **gerou** (a transcrição de `RF-23`).
+   * pela interseção de `D-45` · `atlas` = o app o **gerou** (a transcrição de `RF-23`).
    * A tela **diz** isso em palavras: quem mandou o print precisa reconhecê-lo, "o time
    * respondeu com um arquivo" é outra notícia, e nenhuma das duas descreve um arquivo
    * que ninguém enviou.
    */
-  readonly origem?: 'voce' | 'time' | 'goatlas'
+  readonly origem?: 'voce' | 'time' | 'atlas'
 }
 
 export interface TipoChamado {

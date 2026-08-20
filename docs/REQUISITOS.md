@@ -1,10 +1,10 @@
-# goatlas — Documento de Requisitos
+# atlas — Documento de Requisitos
 
 **Projeto:** Porta de entrada interna para Atlassian — agente de IA para abertura de chamados, consulta ao Confluence e governança de assentos
 **Autor:** João Victor Esteves
 **Time:** Kaique Breno (dev principal), Luis Eduardo (apoio pontual)
 **Data:** 03/08/2026 · **Versão:** 2 (integra os documentos anteriores de Tickets Tech)
-**Infra:** GoDeploy · **Repositório:** `goatlas` (org de RPA no GitHub)
+**Infra:** GoDeploy · **Repositório:** `atlas` (org de RPA no GitHub)
 
 ---
 
@@ -117,7 +117,7 @@ Não há perfil intermediário na v1. Admin é definido por allowlist explícita
 └──────────────────────┬────────────────────────┘
                        │ HTTPS — sessão do app
 ┌──────────────────────▼────────────────────────┐
-│  goatlas  (GoDeploy)                          │
+│  atlas  (GoDeploy)                          │
 │                                               │
 │  ┌─────────────────────────────────────────┐  │
 │  │ AGENTE DE IA  (API de LLM)              │  │
@@ -316,7 +316,7 @@ Organizados pelas características de qualidade da ISO/IEC 25010:2023.
 | RNF-12 | ✂️ **CORTADO em 14/08/2026 (`D-72`).** ~~Busca no Confluence < 2s no p95. Primeira resposta do agente < 5s no p95.~~ O alvo de 5 s foi escrito antes de existir agente com modelo de raciocínio, e o turno medido em produção leva **25–40 s**. O dono do produto decidiu que a latência do turno não é problema a perseguir. ⚠️ **A linha fica, riscada, e não vira meta:** 34 referências em código, testes e specs apontam para este ID, e apagá-lo transformaria cada uma num ponteiro para o nada (Princípio VII). O que **permanece exigido** é a transparência na UI — a trilha das verificações e a espera que fala (`D-68`) —, que nunca esteve em disputa. |
 | RNF-13 | Cache de conteúdo do Confluence, de resultados de busca e de metadados de tipos de chamado, com TTL configurável (sugestão: 15 min metadados, 5 min conteúdo). Sem cache o app vira amplificador de chamadas. |
 | RNF-14 | Toda chamada à Atlassian respeita `Retry-After` e usa backoff exponencial com jitter (base 2s, teto ~30s, máx. ~4 tentativas). |
-| RNF-15 | **Sobre rate limits:** o regime de orçamento por pontos da Atlassian (65.000 pts/h no pool global; 100.000 + 10 por usuário/hora no Standard por tenant) aplica-se a apps **Forge, Connect e OAuth 2.0** — a documentação afirma que "API token-based traffic is not affected by this change, and will continue to be governed by existing burst rate limits". Como o goatlas usa API token, cai em **burst limits cujos valores não são publicados**, e os headers `X-RateLimit-*` só aparecem em respostas 429. Logo: não há telemetria contínua de orçamento; o controle é cache + backoff + **medição empírica da taxa de 429** (**RF-60**). Migrar para OAuth 2.0 é a alternativa se o limite virar problema. |
+| RNF-15 | **Sobre rate limits:** o regime de orçamento por pontos da Atlassian (65.000 pts/h no pool global; 100.000 + 10 por usuário/hora no Standard por tenant) aplica-se a apps **Forge, Connect e OAuth 2.0** — a documentação afirma que "API token-based traffic is not affected by this change, and will continue to be governed by existing burst rate limits". Como o atlas usa API token, cai em **burst limits cujos valores não são publicados**, e os headers `X-RateLimit-*` só aparecem em respostas 429. Logo: não há telemetria contínua de orçamento; o controle é cache + backoff + **medição empírica da taxa de 429** (**RF-60**). Migrar para OAuth 2.0 é a alternativa se o limite virar problema. |
 | RNF-16 | Custo da API de IA monitorado por conversa e no agregado, com teto configurável. O agente faz múltiplas chamadas por conversa (classificação da Regra 2 lê vários tickets) — o custo escala com o volume, não com o número de usuários. ⚠️ **`D-60b`:** o teto **continua valendo** em `orquestrador.ts` e continua em `ConfigValores`, mas **saiu do console** — sob o proxy de IA corporativo o dinheiro não é deste app, então "quanto pode gastar" não é decisão de quem abre a tela. O que a tela mostra é o **gasto**; a trava permanece como fim de conversa em laço. |
 | RNF-36 | **O custo FIXO por requisição é orçado, não emergente.** Toda requisição `/api/*` monta o contexto antes de a rota trabalhar; nesse caminho, nenhum trabalho proporcional ao tamanho do *schema*, da *configuração* ou do *catálogo* pode acontecer por requisição. Teto: **≤ 2 idas ao banco** no boot do contexto, e nenhuma chamada à Atlassian ou à IA. Medido em número de idas, não em milissegundos: no Worker o custo é de rede, e um teto em tempo de parede não é verificável sem rede. Origem: a migração idempotente do schema rodava **36 idas ao banco por requisição**, com piso medido de 442 ms no endpoint mais barato e ~6× isso para abrir o console de admin — ver `D-35`. |
 
@@ -558,12 +558,12 @@ deixou de ser condição de pronto.
 
 ## 14. Nome do repositório
 
-**Sugestão principal: `goatlas`**
+**Sugestão principal: `atlas`**
 
 Segue a convenção já estabelecida na casa (godeploy, godocs, godash, gorag, gohits, gowd) e "atlas" cobre toda a superfície do projeto — agente de tickets, Confluence e governança de assentos — com o trocadilho evidente com Atlassian.
 
 Alternativas: `godesk` (mais direto, mas sugere só help desk e envelhece mal com o Confluence e a governança dentro) · `goticket` (estreito demais, ignora metade do projeto) · `goportal` (genérico).
 
-- **Repositório:** `goatlas`, na organização de RPA
-- **App no GoDeploy:** `goatlas`
+- **Repositório:** `atlas`, na organização de RPA
+- **App no GoDeploy:** `atlas`
 - **Documentação:** `docs/REQUISITOS.md` (este arquivo)

@@ -55,7 +55,7 @@ beforeEach(async () => {
   await config.definir('dominios_permitidos', ['gocase.com'], CHEFE, AGORA)
   await config.definir('tipos_chamado_permitidos', ['rt-1'], CHEFE, AGORA)
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
-  ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+  ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
   fake = ctx.atlassian as ClienteAtlassianFake
   fake.estado.tiposChamado = [
     { id: 'rt-1', serviceDeskId: 'sd-1', nome: 'Relatar um problema (Sistema)', descricao: null },
@@ -66,7 +66,7 @@ beforeEach(async () => {
 const chamar = (r: Request) => tratarRequisicao(r, ctx, {})
 
 function req(caminho: string, corpo?: unknown, metodo = 'POST', quem = ANA): Request {
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, {
+  return new Request(`https://atlas.devgogroup.com${caminho}`, {
     method: metodo,
     headers: { [HEADER_EMAIL]: quem },
     ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
@@ -94,7 +94,7 @@ async function colarPrint(conversaId: string, nome = 'print.png') {
   form.set('arquivo', new File([new Uint8Array([1, 2, 3])], nome, { type: 'image/png' }))
   form.set('conversaId', conversaId)
   const r = await chamar(
-    new Request('https://goatlas.devgogroup.com/api/anexos-pendentes', {
+    new Request('https://atlas.devgogroup.com/api/anexos-pendentes', {
       method: 'POST',
       headers: { [HEADER_EMAIL]: ANA },
       body: form,

@@ -35,7 +35,7 @@ beforeEach(async () => {
   await config.definir('dominios_permitidos', ['gocase.com'], ANA, AGORA)
   await config.definir('service_desk_id', '4', ANA, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )

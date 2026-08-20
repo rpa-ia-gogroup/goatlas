@@ -29,7 +29,7 @@
  */
 
 import type { Banco } from '../db/tipos'
-import { linhasComoObjetos } from '../db/tipos'
+import { linhasComoObjetos, primeiraLinha } from '../db/tipos'
 
 export interface TermoComLacuna {
   /** Como a pessoa escreveu — a versão mais recente do termo agrupado. */
@@ -137,6 +137,38 @@ export class RegistroConhecimento {
         this.agora(),
       ],
     )
+  }
+
+  /**
+   * Descarta um termo do mapa de lacunas — `RF-42`, operação de limpeza.
+   *
+   * ⚠️ **Apaga as buscas, não "esconde o termo".** O mapa é derivado de `buscas`, e uma
+   * lista de exclusão à parte faria o mesmo termo voltar a contar na taxa de deflexão
+   * (`metricas.ts` lê `SELECT resultados FROM buscas`) enquanto desaparecia do backlog —
+   * dois números discordando sobre o mesmo fato, que é o defeito que `config/diagnostico.ts`
+   * existe para não repetir.
+   *
+   * ⚠️ **Casa por `termo_normalizado`**, que é a chave pela qual o mapa agrupa e exibe:
+   * casar pelo `termo` cru deixaria para trás as variações de caixa e acento que o
+   * agrupamento já tinha somado na mesma linha.
+   *
+   * ⚠️ **É irreversível e cruza o isolamento por e-mail** — daí o `_apenasAdmin` no nome,
+   * como em `agregarLacunas_apenasAdmin`. Existe porque o backlog de escrita nasceu sujo:
+   * os termos de teste do próprio desenvolvimento (`ap`, `tehc`, `aa`) ficam no topo da
+   * lista de "procuraram e não existe", e backlog cuja primeira linha é lixo é backlog que
+   * ninguém lê.
+   */
+  async descartarTermo_apenasAdmin(termo: string): Promise<number> {
+    const normalizado = normalizarTermo(termo)
+    if (normalizado === '') return 0
+    const antes = await this.db.query(
+      'SELECT COUNT(*) AS n FROM buscas WHERE termo_normalizado = ?',
+      [normalizado],
+    )
+    const quantas = Number(primeiraLinha<{ n: number }>(antes)?.n ?? 0)
+    if (quantas === 0) return 0
+    await this.db.exec('DELETE FROM buscas WHERE termo_normalizado = ?', [normalizado])
+    return quantas
   }
 
   /**

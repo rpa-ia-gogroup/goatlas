@@ -85,7 +85,7 @@ export async function analisarAnexo(
       // ⚠️ O tipo **não** aparece na frase: `Content-Type` vem do cliente e pode ser
       // qualquer string (`RNF-30`). O nome do arquivo, que a pessoa reconhece, é dito por
       // quem monta a tela.
-      descricao: 'este formato de arquivo não é lido pelo goatlas',
+      descricao: 'este formato de arquivo não é lido pelo atlas',
       custoUsd: 0,
     }
   }

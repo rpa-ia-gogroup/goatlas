@@ -2,7 +2,7 @@
  * **T-118** — a deflexão aponta para **dentro** do app.
  *
  * O furo que este arquivo fecha: a mensagem da Regra 1 linkava para
- * `goengenharia.atlassian.net`. Quem usa o goatlas **não tem assento Atlassian** —
+ * `goengenharia.atlassian.net`. Quem usa o atlas **não tem assento Atlassian** —
  * esse é o ponto do produto inteiro — então o link caía numa tela de login no momento
  * exato em que a pessoa havia sido convencida a ler antes de abrir chamado. A
  * deflexão funcionava até o clique.

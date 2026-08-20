@@ -12,7 +12,7 @@ import type { ItemInventario } from './inventario'
 /**
  * Chave do produto do papel "agent" no JSM. É ESTE acesso que tem custo; o papel
  * "customer" (abrir e acompanhar chamado) é gratuito e ilimitado — a própria razão
- * de existir de `goatlas` (dar isolamento de conta sem exigir assento).
+ * de existir de `atlas` (dar isolamento de conta sem exigir assento).
  */
 export const PRODUTO_SERVICE_DESK_AGENTE = 'jira-servicedesk'
 

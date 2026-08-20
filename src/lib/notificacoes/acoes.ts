@@ -38,7 +38,7 @@ import type { TipoEvento } from './tipos'
 export function normalizarParaImpressao(texto: string): string {
   // ⚠️ O prefixo de autoria sai PRIMEIRO. A impressão é gravada com o texto puro que a
   // pessoa digitou e conferida com o corpo que voltou da Atlassian — que já carrega
-  // `**Nome** (email) via goatlas:`. Sem remover, as duas pontas nunca casam.
+  // `**Nome** (email) via atlas:`. Sem remover, as duas pontas nunca casam.
   return removerPrefixoAutoria(texto)
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '') // marcas de acentuação separadas pelo NFD

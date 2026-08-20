@@ -14,7 +14,7 @@
 
 import type { CampoDoSchema } from './schema-diagnostico'
 
-/** Prioridade do goatlas com o SLA de PRIMEIRA RESPOSTA (RF-15, RN-08). */
+/** Prioridade do atlas com o SLA de PRIMEIRA RESPOSTA (RF-15, RN-08). */
 export type Prioridade = 'critica' | 'alta' | 'normal'
 
 /** SLA de primeira resposta em horas, por prioridade (RF-15). */
@@ -415,7 +415,7 @@ export interface ClienteAtlassian {
    * `autorNome` é o nome capturado no login corporativo Google (obrigatório —
    * `RF-01`/`RF-05`), então o prefixo é confiável mesmo partindo da conta de
    * serviço: quem vê o ticket no Jira nativo já sabe quem pediu, sem precisar do
-   * console do goatlas (decisão registrada em `docs/DECISOES.md`, D-13).
+   * console do atlas (decisão registrada em `docs/DECISOES.md`, D-13).
    */
   comentar(issueKey: string, corpo: string, autorEmail: string, autorNome?: string): Promise<void>
 

@@ -35,7 +35,7 @@ beforeEach(async () => {
   await config.definir('dominios_permitidos', ['gocase.com'], CHEFE, AGORA)
   await config.definir('admins', [CHEFE], CHEFE, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -44,7 +44,7 @@ beforeEach(async () => {
 function req(caminho: string, email: string | null): Request {
   const headers: Record<string, string> = {}
   if (email) headers[HEADER_EMAIL] = email
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, { headers })
+  return new Request(`https://atlas.devgogroup.com${caminho}`, { headers })
 }
 
 const chamar = (r: Request) => tratarRequisicao(r, ctx, {})
@@ -88,5 +88,70 @@ describe('RNF-30 — a recusa não vaza detalhe de infraestrutura', () => {
       expect(corpo.codigo).toBe('sem_permissao')
       expect(JSON.stringify(corpo)).not.toMatch(/\bstack\b|Error:/)
     }
+  })
+})
+
+/**
+ * `D-78` — o descarte de termo do mapa de lacunas (`RF-42`).
+ *
+ * É a única rota de admin que **apaga** dado, então tem dois deveres além do gate: casar por
+ * `termo_normalizado` (a chave pela qual o mapa agrupa, não o termo cru) e não fingir sucesso
+ * quando não havia nada para apagar.
+ *
+ * _Requirements: RF-42, RN-09_
+ */
+describe('D-78 — descartar termo do mapa de lacunas', () => {
+  const postar = (email: string | null, corpo: unknown) => {
+    const headers: Record<string, string> = { 'content-type': 'application/json' }
+    if (email) headers[HEADER_EMAIL] = email
+    return tratarRequisicao(
+      new Request('https://atlas.devgogroup.com/api/admin/lacunas/descartar', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(corpo),
+      }),
+      ctx,
+      {},
+    )
+  }
+
+  it('colaborador não descarta: 403 — e o dado continua no mapa', async () => {
+    await ctx.conhecimento.registrarBusca({ solicitanteEmail: ANA, termo: 'tehc', resultados: 0 })
+    const r = await postar(ANA, { termo: 'tehc' })
+    expect(r.status).toBe(403)
+    const mapa = await ctx.conhecimento.agregarLacunas_apenasAdmin()
+    expect(mapa.semResultado.map((t) => t.termo)).toContain('tehc')
+  })
+
+  it('admin descarta, e o termo sai do mapa — as OUTRAS buscas ficam', async () => {
+    // Duas variações de caixa do mesmo termo: o mapa as agrupa numa linha só, então o
+    // descarte tem de levar as duas. Casar pelo `termo` cru deixaria uma para trás.
+    await ctx.conhecimento.registrarBusca({ solicitanteEmail: ANA, termo: 'AP', resultados: 0 })
+    await ctx.conhecimento.registrarBusca({ solicitanteEmail: CHEFE, termo: 'ap', resultados: 0 })
+    await ctx.conhecimento.registrarBusca({ solicitanteEmail: ANA, termo: 'deploy', resultados: 0 })
+
+    const r = await postar(CHEFE, { termo: 'ap' })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toMatchObject({ ok: true, termo: 'ap', buscasApagadas: 2 })
+
+    const termos = (await ctx.conhecimento.agregarLacunas_apenasAdmin()).semResultado.map(
+      (t) => t.termo,
+    )
+    expect(termos).not.toContain('ap')
+    expect(termos).toContain('deploy')
+  })
+
+  it('termo que não existe NÃO é relatado como descarte feito', async () => {
+    // "Apaguei 0" e "apaguei" são frases diferentes: a primeira diz que o termo já não
+    // estava lá, e a auditoria registra `falha` para quem for procurar depois por que a
+    // lista não mudou.
+    const r = await postar(CHEFE, { termo: 'termo-que-ninguem-buscou' })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toMatchObject({ buscasApagadas: 0 })
+  })
+
+  it('termo vazio é recusado antes de qualquer efeito', async () => {
+    const r = await postar(CHEFE, { termo: '   ' })
+    expect(r.status).toBe(400)
   })
 })

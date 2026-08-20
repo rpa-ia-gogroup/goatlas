@@ -23,7 +23,7 @@ registrado**, de propósito (`RNF-01`, `RNF-30`) — então a prova por nome nã
 
 **Como medir sem risco:** uma rota de diagnóstico só-admin que tenta a criação **e devolve o
 corpo do erro redigido**. Tentativa que falha **não cria nada**; tentativa que dá certo cria
-um chamado real, e por isso o título vai com `[TESTE goatlas - ignorar]` e alguém do time de
+um chamado real, e por isso o título vai com `[TESTE atlas - ignorar]` e alguém do time de
 tech precisa apagá-lo (como o `GN-6894`).
 
 ### M-2 · A criação do JSM aceita anexo no corpo?

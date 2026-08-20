@@ -156,7 +156,7 @@ export function urlDeLeituraNoApp(idPagina: string): string {
  *   3. link da página — sempre na Regra 1, e na Regra 2 quando houver
  *
  * ⚠️ O link é o da **leitura no app**, não o do Confluence (`T-118`). Quem usa o
- * goatlas não tem assento Atlassian: linkar `atlassian.net` derrubava a deflexão
+ * atlas não tem assento Atlassian: linkar `atlassian.net` derrubava a deflexão
  * exatamente no clique, depois de a pessoa ter sido convencida a ler primeiro. A
  * rota interna já aplica as três condições de `RN-06`, então o link não amplia
  * exposição.

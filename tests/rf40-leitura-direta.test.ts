@@ -108,7 +108,7 @@ async function montar(espacos: readonly string[] = ['TECH']): Promise<void> {
   await config.definir('espacos_confluence', [...espacos], ANA, AGORA)
   await config.definir('labels_bloqueadas', ['confidencial'], ANA, AGORA)
   ctx = await montarContexto(
-    { DB: db, GOATLAS_USAR_FAKES: '1' },
+    { DB: db, ATLAS_USAR_FAKES: '1' },
     () => AGORA,
     () => `id-${++n}`,
   )
@@ -124,7 +124,7 @@ beforeEach(async () => {
 function req(caminho: string, email: string | null = ANA): Request {
   const headers: Record<string, string> = {}
   if (email) headers[HEADER_EMAIL] = email
-  return new Request(`https://goatlas.devgogroup.com${caminho}`, { headers })
+  return new Request(`https://atlas.devgogroup.com${caminho}`, { headers })
 }
 
 const ler = (id: string, email: string | null = ANA) =>

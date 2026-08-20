@@ -30,7 +30,7 @@ describe('schema', () => {
       db.exec(
         `INSERT INTO vinculos (issue_key, solicitante_email, via, criado_em)
          VALUES (?, ?, 'conversa', ?)`,
-        ['GOATLAS-1', email, AGORA],
+        ['ATLAS-1', email, AGORA],
       )
 
     await inserir('ana@gocase.com')

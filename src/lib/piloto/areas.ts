@@ -12,7 +12,7 @@
  *
  * ## O vazio significa o CONTRÁRIO do resto do projeto
  *
- * ⚠️ Em todo lugar do goatlas, allowlist vazia **nega** (`RNF-07`). Aqui, vazia significa
+ * ⚠️ Em todo lugar do atlas, allowlist vazia **nega** (`RNF-07`). Aqui, vazia significa
  * **piloto desligado — todo mundo entra**. A diferença é o que a lista governa: as
  * outras governam exposição de conteúdo, onde vazio-nega evita vazamento; esta governa
  * quem pode **pedir ajuda**. Vazio-nega aqui significaria que subir o app antes de
@@ -34,7 +34,7 @@ export type DecisaoPiloto =
  * negado") faz a pessoa achar que perdeu acesso a algo que tinha.
  */
 export const MENSAGEM_FORA_DO_PILOTO =
-  'O goatlas está em piloto e ainda não abrange a sua área. Enquanto isso, siga pedindo pelo canal que você já usa hoje com o time de tech — e a gente avisa quando chegar a sua vez. A consulta à documentação continua liberada para você aqui mesmo.'
+  'O atlas está em piloto e ainda não abrange a sua área. Enquanto isso, siga pedindo pelo canal que você já usa hoje com o time de tech — e a gente avisa quando chegar a sua vez. A consulta à documentação continua liberada para você aqui mesmo.'
 
 export function dentroDoPiloto(email: string, emailsPiloto: readonly string[]): DecisaoPiloto {
   // Piloto desligado: ninguém é barrado. Ver o aviso no topo do arquivo.

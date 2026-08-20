@@ -527,7 +527,7 @@ export function DadosDaSecao({
         </Quando>
         <BlocoDeDado
           titulo="Antes do projeto"
-          explicacao="Quantos assentos existiam antes de o goatlas entrar no ar. É a única comparação honesta: o app nasceu depois e não tem como derivar esse retrato sozinho."
+          explicacao="Quantos assentos existiam antes de o atlas entrar no ar. É a única comparação honesta: o app nasceu depois e não tem como derivar esse retrato sozinho."
         >
           <Quando carga={metricas} carregando="Buscando o retrato anterior…">
             {(m) => <PainelBaseline baseline={m.baselineAssentos} />}

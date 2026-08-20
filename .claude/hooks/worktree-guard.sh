@@ -6,12 +6,14 @@
 #
 # Libera sempre: artefatos de planejamento (docs/, specs/, .claude/, .specify/,
 # *.md da raiz) — é onde o próprio fluxo SDD vive.
-# Escape hatch: GOATLAS_ALLOW_MAIN_EDIT=1.
+# Escape hatch: ATLAS_ALLOW_MAIN_EDIT=1.
 #
 # Falha em silêncio (exit 0) em qualquer situação que não dê para avaliar.
 
 set -uo pipefail
 
+[ "${ATLAS_ALLOW_MAIN_EDIT:-}" = "1" ] && exit 0
+# O nome antigo continua valendo: quem tem o escape hatch decorado nao fica de fora.
 [ "${GOATLAS_ALLOW_MAIN_EDIT:-}" = "1" ] && exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 
@@ -68,7 +70,7 @@ BRANCH="$(git -C "$DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
 
 if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
   read -r -d '' REASON <<EOF || true
-Bloqueado pelo worktree-guard do goatlas (constituição, Princípio XII).
+Bloqueado pelo worktree-guard do atlas (constituição, Princípio XII).
 
 Você está editando código na ÁRVORE PRINCIPAL, na branch '$BRANCH':
   $REL
@@ -84,7 +86,7 @@ e refaça a edição em .claude/worktrees/<branch>/$REL
 
 Editando um artefato de planejamento (docs/, specs/, .claude/, .specify/, *.md da
 raiz)? Esses são liberados na principal — confira o caminho.
-Precisa mesmo editar aqui? GOATLAS_ALLOW_MAIN_EDIT=1 libera, mas registre o porquê.
+Precisa mesmo editar aqui? ATLAS_ALLOW_MAIN_EDIT=1 libera, mas registre o porquê.
 EOF
   jq -n --arg r "$REASON" '{
     hookSpecificOutput: {
@@ -100,6 +102,6 @@ fi
 jq -n --arg b "$BRANCH" --arg f "$REL" '{
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
-    additionalContext: ("[goatlas] Editando \($f) na ÁRVORE PRINCIPAL (branch \($b)), fora de worktree. Funciona, mas o padrão do projeto é worktree isolado por tarefa (constituição, Princípio XII) — outras sessões do Claude usam este repo. Se esta sessão vai continuar mexendo em código, mova o trabalho para .claude/worktrees/\($b).")
+    additionalContext: ("[atlas] Editando \($f) na ÁRVORE PRINCIPAL (branch \($b)), fora de worktree. Funciona, mas o padrão do projeto é worktree isolado por tarefa (constituição, Princípio XII) — outras sessões do Claude usam este repo. Se esta sessão vai continuar mexendo em código, mova o trabalho para .claude/worktrees/\($b).")
   }
 }'

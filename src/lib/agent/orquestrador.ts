@@ -62,13 +62,35 @@ export interface TurnoResultado {
   readonly camposSugeridos: Readonly<Record<string, string>>
   /** `FR-13`/`FR-14` — o que ela pediu e não coube, para a tela dizer ao lado do cartão. */
   readonly recusasDeAjuste: readonly RecusaDeAjuste[]
+  /** `FR-2`/`FR-3` (spec 012) — o que aconteceu com o cartão neste turno. */
+  readonly atualizacaoDoCartao: AtualizacaoDoCartao
 }
 
-/** Um turno sem nenhuma rederivação — o estado neutro dos três campos novos. */
+/**
+ * O que aconteceu com o cartão neste turno — `FR-3` (spec 012).
+ *
+ * 🚨 **Quatro estados, e não um booleano, porque a tela precisa de três frases e um
+ * silêncio.** Antes disto, "a IA rederivou e nada mudou" e "a IA não conseguiu rederivar"
+ * chegavam à tela como o mesmo `alterados: []` — e o segundo caso é o defeito medido em
+ * 20/08/2026: a pessoa contou o motivo do pedido, o cartão ficou com o texto do turno
+ * anterior, e nada disse que a mensagem dela não entrou. São frases opostas, como
+ * `anexosIndisponiveis` × `[]` (`D-45`).
+ *
+ * - `nao_havia` — não houve rederivação, ou ela não produziu proposta **e não havia
+ *   cartão**. Não há o que avisar: a tela fica calada.
+ * - `nao_conseguiu` — não produziu proposta **e existe cartão vigente**. O único caso que a
+ *   tela comenta.
+ * - `atualizado` / `sem_mudanca` — derivados de `alterados`, no mesmo lugar que produz o
+ *   diff (`RN-13`, um produtor só).
+ */
+export type AtualizacaoDoCartao = 'atualizado' | 'sem_mudanca' | 'nao_conseguiu' | 'nao_havia'
+
+/** Um turno sem nenhuma rederivação — o estado neutro dos campos de negociação. */
 const SEM_REDERIVACAO = {
   alterados: [] as readonly CampoAlterado[],
   camposSugeridos: {} as Readonly<Record<string, string>>,
   recusasDeAjuste: [] as readonly RecusaDeAjuste[],
+  atualizacaoDoCartao: 'nao_havia' as AtualizacaoDoCartao,
 }
 
 /**
@@ -92,6 +114,7 @@ interface Rederivacao {
   readonly alterados: readonly CampoAlterado[]
   readonly camposSugeridos: Readonly<Record<string, string>>
   readonly recusasDeAjuste: readonly RecusaDeAjuste[]
+  readonly atualizacaoDoCartao: AtualizacaoDoCartao
 }
 
 /** Quantas idas ao modelo por turno. Sem limite, uma conversa pode custar sozinha. */
@@ -471,6 +494,8 @@ export class Orquestrador {
       alterados: rederivacao?.alterados ?? SEM_REDERIVACAO.alterados,
       camposSugeridos: rederivacao?.camposSugeridos ?? SEM_REDERIVACAO.camposSugeridos,
       recusasDeAjuste: rederivacao?.recusasDeAjuste ?? SEM_REDERIVACAO.recusasDeAjuste,
+      atualizacaoDoCartao:
+        rederivacao?.atualizacaoDoCartao ?? SEM_REDERIVACAO.atualizacaoDoCartao,
     }
   }
 
@@ -545,11 +570,28 @@ export class Orquestrador {
     /** `RF-81` (spec 011) — a pessoa clicou em "montar o chamado agora". */
     opcoes: { readonly forcarFechamento?: boolean } = {},
   ): Promise<Rederivacao> {
+    /**
+     * `FR-1`/`FR-2` (spec 012) — existe cartão na tela desta pessoa **agora**?
+     *
+     * 🚨 Vive no topo do método, não dentro do `try`, porque as **duas** perguntas da spec
+     * dependem dele e uma delas é sobre falha: com cartão na tela, todo caminho que sai
+     * daqui sem proposta é um "não consegui atualizar" que a tela precisa dizer. Medido na
+     * staging em 20/08/2026 — a extração estourou o timeout de 25 s, o `catch` devolvia
+     * `nao_havia` e a tela ficava calada com o resumo velho: o defeito original de volta,
+     * por outra porta.
+     */
+    const cartaoVigente = Boolean(conversa.proposta)
+    /** Sem proposta neste turno: com cartão é recusa dita, sem cartão é silêncio. */
+    const semRederivacao = (custoUsd: number): Rederivacao => ({
+      custoUsd,
+      ...SEM_REDERIVACAO,
+      atualizacaoDoCartao: cartaoVigente ? 'nao_conseguiu' : 'nao_havia',
+    })
     if (config.tipos_chamado_permitidos.length === 0) {
       this.semProposta(conversa, 'allowlist_de_tipos_vazia', {
         detalhe: 'Nenhum tipo de chamado liberado na configuração (RF-28).',
       })
-      return { custoUsd: 0, ...SEM_REDERIVACAO }
+      return semRederivacao(0)
     }
     try {
       /**
@@ -578,7 +620,7 @@ export class Orquestrador {
           idsNaAllowlist: config.tipos_chamado_permitidos,
           serviceDeskId: config.service_desk_id,
         })
-        return { custoUsd: 0, ...SEM_REDERIVACAO }
+        return semRederivacao(0)
       }
 
       /**
@@ -588,11 +630,24 @@ export class Orquestrador {
        */
       const schema = await this.schemaDoAssuntoVigente(conversa, config)
 
+      /**
+       * `FR-1` (spec 012) — **cartão que existe não volta a "não estou pronto".**
+       *
+       * Com proposta vigente, a pergunta da extração deixa de ser "está pronto?" e passa a
+       * ser "o que muda?". Sem isto, o turno seguinte reavaliava a prontidão do zero contra
+       * um gabarito de incidente ("o que aconteceu, desde quando") — e num pedido de acesso
+       * ele nunca casa: medido em 20/08/2026, a pessoa contou o motivo do pedido e o cartão
+       * ficou com o texto do turno anterior, sem nada na tela.
+       *
+       * ⚠️ **O botão ganha** (`instrucaoDeFechamento`, em `ia/cliente.ts`): ele é pedido
+       * explícito daquele turno, e o texto que vai ao modelo é outro.
+       */
       const r = await this.ia.extrairProposta({
         mensagens: await this.conversas.listarMensagens(conversa.id),
         tiposPermitidos,
         camposDoAssunto: camposParaExtracao(schema),
         ...(opcoes.forcarFechamento ? { forcarFechamento: true } : {}),
+        ...(cartaoVigente ? { cartaoVigente: true } : {}),
       })
       /**
        * ⚠️ Segunda camada de `RN-07`, e ela passou a valer de verdade quando a extração
@@ -622,13 +677,24 @@ export class Orquestrador {
           tiposOferecidos: tiposPermitidos,
           camposDoAssunto: camposParaExtracao(schema),
         })
-        return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO }
+        /**
+         * `FR-2` — a vigente **permanece**, e a tela precisa poder dizer isso. "Não mudou
+         * nada" e "não consegui atualizar" são frases opostas; sem esta distinção, a
+         * segunda chegava à tela disfarçada de primeira e a mensagem da pessoa evaporava em
+         * silêncio.
+         */
+        return semRederivacao(r.custoEstimadoUsd)
       }
       if (await this.conversas.temBloqueioPendente(conversa.id)) {
         this.semProposta(conversa, 'bloqueio_pendente_na_gravacao', {
           detalhe:
             'A proposta veio pronta e foi descartada: nasceu um bloqueio enquanto a extração estava em voo (RN-07).',
         })
+        /**
+         * ⚠️ **`nao_havia` de propósito, mesmo com cartão.** Com bloqueio pendente o único
+         * caminho de saída é o override (`D-21`), e um aviso sobre o resumo ao lado dele
+         * disputa atenção com o que de fato destrava — o raciocínio de `podeNegociar`.
+         */
         return { custoUsd: r.custoEstimadoUsd, ...SEM_REDERIVACAO }
       }
 
@@ -685,6 +751,16 @@ export class Orquestrador {
           camposSugeridos: ajuste.valores,
           recusasDeAjuste: ajuste.recusas,
           baseAnterior: conversa.propostaDaIa ?? null,
+          /**
+           * `FR-7` — qual modo fechou este cartão. Sem ele, "fechou porque a pessoa clicou
+           * no botão" e "fechou porque já havia cartão" ficam indistinguíveis no registro,
+           * e a investigação volta a depender de adivinhação.
+           */
+          modo: opcoes.forcarFechamento
+            ? 'botao'
+            : cartaoVigente
+              ? 'cartao_vigente'
+              : 'primeiro_cartao',
         },
       })
       return {
@@ -692,6 +768,17 @@ export class Orquestrador {
         alterados,
         camposSugeridos: ajuste.valores,
         recusasDeAjuste: ajuste.recusas,
+        /**
+         * Derivado do MESMO `alterados` que a tela mescla e a auditoria conta (`RN-13`).
+         *
+         * ⚠️ **Base nula é `atualizado`, nunca `sem_mudanca`.** A primeira proposta chega com
+         * `alterados: []` — base nula não é "tudo mudou" (`diffDeProposta`) —, e chamar isso
+         * de "não mudou nada" descreveria o cartão que acabou de nascer como se ele já
+         * estivesse lá. Medido na staging em 20/08/2026. Na tela as duas são silêncio; no
+         * registro, uma delas é falsa.
+         */
+        atualizacaoDoCartao:
+          alterados.length > 0 || !conversa.propostaDaIa ? 'atualizado' : 'sem_mudanca',
       }
     } catch (e) {
       // ⚠️ Este `catch` engolia a exceção **inteira**, e era o buraco mais fundo: leitura de
@@ -702,7 +789,9 @@ export class Orquestrador {
         classe: e instanceof Error ? e.name : typeof e,
         mensagem: e instanceof Error ? e.message : String(e),
       })
-      return { custoUsd: 0, ...SEM_REDERIVACAO }
+      // `FR-2` — queda do provedor com cartão na tela é "não consegui atualizar", nunca
+      // silêncio: informar e seguir é o que `RNF-18` pede, e o cartão segue confirmável.
+      return semRederivacao(0)
     }
   }
 

@@ -28,9 +28,9 @@ const CHEFE = 'kaique.breno@gocase.com'
 let db: SqliteLocal
 
 const ENV_DEMO = {
-  GOATLAS_MODO_DEMO: '1',
-  GOATLAS_DOMINIOS: 'gocase.com',
-  GOATLAS_ADMINS: CHEFE,
+  ATLAS_MODO_DEMO: '1',
+  ATLAS_DOMINIOS: 'gocase.com',
+  ATLAS_ADMINS: CHEFE,
 } as const
 
 beforeEach(async () => {
@@ -45,7 +45,7 @@ async function chamar(
 ) {
   const ctx = await montarContexto({ DB: db, ...ENV_DEMO, ...opcoes.env })
   const r = await tratarRequisicao(
-    new Request(`https://goatlas.devgogroup.com${caminho}`, {
+    new Request(`https://atlas.devgogroup.com${caminho}`, {
       method: opcoes.metodo ?? 'GET',
       headers: { [HEADER_EMAIL]: opcoes.email ?? ANA },
       ...(opcoes.corpo === undefined ? {} : { body: JSON.stringify(opcoes.corpo) }),
@@ -95,19 +95,19 @@ describe('bootstrap por env', () => {
 
   it('lista do env é normalizada: espaços, maiúsculas e vazios', () => {
     expect(
-      valoresDoBootstrap({ GOATLAS_DOMINIOS: ' GoCase.com , ,gobeaute.com.br ' }),
+      valoresDoBootstrap({ ATLAS_DOMINIOS: ' GoCase.com , ,gobeaute.com.br ' }),
     ).toEqual({ dominios_permitidos: ['gocase.com', 'gobeaute.com.br'] })
   })
 
   it('env vazio não sobrescreve o padrão com lista vazia', () => {
-    expect(valoresDoBootstrap({ GOATLAS_DOMINIOS: '', GOATLAS_ADMINS: '  ' })).toEqual({})
+    expect(valoresDoBootstrap({ ATLAS_DOMINIOS: '', ATLAS_ADMINS: '  ' })).toEqual({})
   })
 })
 
 describe('modo demonstração', () => {
   it('a identidade carrega `modoDemo` — a UI precisa avisar de forma permanente', async () => {
     expect((await chamar('/api/auth/me')).corpo).toMatchObject({ modoDemo: true })
-    const semDemo = await chamar('/api/auth/me', { env: { GOATLAS_MODO_DEMO: '0' } })
+    const semDemo = await chamar('/api/auth/me', { env: { ATLAS_MODO_DEMO: '0' } })
     expect(semDemo.corpo).toMatchObject({ modoDemo: false })
   })
 
@@ -128,7 +128,7 @@ describe('modo demonstração', () => {
     // abriria o app para qualquer conta Google. Ela não mexe.
     const r = await chamar('/api/auth/me', {
       email: 'estranho@outraempresa.com',
-      env: { GOATLAS_DOMINIOS: 'gocase.com' },
+      env: { ATLAS_DOMINIOS: 'gocase.com' },
     })
     expect(r.status).toBe(403)
   })
@@ -249,7 +249,7 @@ describe('RNF-19 — Atlassian fora, a lista E o detalhe ainda mostram conteúdo
     fake.estado.chamados.clear()
     fake.estado.falhas.listarComentarios = 'indisponivel'
     const r = await tratarRequisicao(
-      new Request(`https://goatlas.devgogroup.com${caminho}`, {
+      new Request(`https://atlas.devgogroup.com${caminho}`, {
         headers: { [HEADER_EMAIL]: ANA },
       }),
       ctx,

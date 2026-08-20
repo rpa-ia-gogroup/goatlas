@@ -594,7 +594,7 @@ export class ClienteAtlassianHttp implements ClienteAtlassian {
     descricao: string
     camposExtra: Record<string, unknown>
   } {
-    const cabecalho = `**Solicitante:** ${dados.solicitanteEmail}\n**Aberto via:** goatlas\n**Ref:** ${dados.chaveIdempotencia}\n\n---\n\n`
+    const cabecalho = `**Solicitante:** ${dados.solicitanteEmail}\n**Aberto via:** atlas\n**Ref:** ${dados.chaveIdempotencia}\n\n---\n\n`
     return { descricao: cabecalho + dados.descricao, camposExtra: {} }
   }
 
