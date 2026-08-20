@@ -246,7 +246,12 @@
 .inv-evento {
   position: relative;
   display: grid;
+  min-width: 0;
   gap: var(--space-2);
+}
+.inv-cru,
+.inv-json {
+  min-width: 0;
 }
 /*
   O marcador. A FORMA é o que distingue a origem — a cor é a mesma nas seis.
@@ -307,17 +312,154 @@
   text-transform: uppercase;
   color: var(--go-text-heading);
 }
-.inv-tipo {
-  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
-  color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
-}
 .inv-medida {
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
 }
-.inv-resumo {
+/*
+  O título traduzido do evento — o que substituiu o `tipo` cru em snake_case e o `<pre>`
+  sempre aberto. É a primeira linha que se lê de cada item (spec 013, `FR-22`).
+*/
+.inv-evento-titulo {
   margin: 0;
   font-size: var(--fs-small);
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+}
+
+/* Os pares `rótulo → valor`. Grade de duas colunas, com o rótulo discreto. */
+.inv-evento-linhas {
+  display: grid;
+  grid-template-columns: minmax(8rem, max-content) 1fr;
+  gap: 2px var(--space-3);
+  margin: 0;
+  font-size: var(--fs-caption);
+}
+.inv-evento-linhas > div {
+  display: contents;
+}
+.inv-evento-linhas dt {
+  color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
+}
+.inv-evento-linhas dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+  Texto longo e registro cru: os dois são `<details>` fechados, e é isso que o `D-79`
+  conserta. O `summary` carrega o tamanho, que é o que faz a pessoa decidir se abre.
+*/
+.inv-bloco-texto > summary,
+.inv-cru > summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  color: var(--go-blue);
+}
+.inv-bloco-texto > pre {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  background: var(--go-white);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 15%, transparent);
+  max-height: 22rem;
+  overflow: auto;
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  /* Conversa e resultado de tool são prosa: quebram, não rolam na horizontal. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.inv-cru {
+  margin-top: var(--space-1);
+}
+.inv-cru > *:not(summary) {
+  margin-top: var(--space-2);
+}
+
+/* ---------- o turno ------------------------------------------------------ */
+/*
+  A unidade da tela. Antes a linha do tempo era plana e uma conversa de seis mensagens
+  virava ~80 itens em sequência; o agrupamento vem de `requisicao_id`, que já era gravado
+  em todo evento (spec 013, `FR-21`).
+*/
+
+.inv-turnos {
+  display: grid;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.inv-turno {
+  display: grid;
+  /*
+    🚨 `min-width: 0` NÃO é zelo — medido no navegador em 20/08/2026. Item de grade tem
+    `min-width: auto`, então o `<pre>` de `white-space: pre` do registro cru empurrava a
+    largura do turno e a **página inteira** ganhava barra horizontal, o defeito que `D-65`
+    corrigiu na tabela do Confluence. A rolagem tem de ficar dentro do `<pre>`.
+  */
+  min-width: 0;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--go-white);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+}
+.inv-turno-cabeca {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: baseline;
+  font-size: var(--fs-caption);
+}
+.inv-turno-numero {
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--go-text-heading);
+}
+/*
+  O desfecho fecha o cabeçalho, à direita. Palavra, nunca cor — o que o distingue é a
+  posição e o texto (regra 9).
+*/
+.inv-turno-desfecho {
+  margin-left: auto;
+  font-weight: var(--fw-bold);
+  color: var(--go-blue);
+}
+.inv-turno-rota {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-caption);
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
+}
+/* As idas para fora ficam agrupadas e fechadas — ver o comentário em `index.tsx`. */
+.inv-externas > summary {
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  color: var(--go-blue);
+}
+.inv-externas > .inv-tempo {
+  margin-top: var(--space-3);
+}
+
+/*
+  O lado. A mensagem da pessoa recua para a direita, como na conversa do app — é o único
+  sinal de autoria além da palavra, e ele some no celular, onde a coluna não comporta.
+*/
+@media (min-width: 40rem) {
+  .inv-evento[data-lado='direita'] {
+    margin-left: 12%;
+  }
 }
 
 /* ---------- JSON --------------------------------------------------------- */
@@ -338,6 +480,11 @@
   font-size: var(--fs-caption);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+/* O separador entre rótulo e tamanho vive no MARKUP (ver `index.tsx`), porque `gap` de
+   CSS não entra no nome acessível. Aqui é só o respiro. */
+.inv-json-topo .inv-medida {
+  margin-left: var(--space-1);
 }
 .inv-json-topo button {
   font: inherit;

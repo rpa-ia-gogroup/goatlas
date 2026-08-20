@@ -795,6 +795,47 @@ destes reabre um vazamento que já foi fechado.
   aparece como duas linhas de propósito** — `429 → espera → 200` é o que responde "por que o
   turno levou 40 s?" (`RNF-15`, `R-02`). ⚠️ E vai **caminho**, nunca a URL inteira: a query
   carrega CQL e JQL, e JQL pode nomear projeto que quem lê o console não deveria conhecer.
+- 🚨 **O turno vem de `requisicao_id`, e ele já estava gravado** (`D-79`,
+  `app/investigador/turnos.ts`). A linha do tempo era **plana** — ~80 itens para uma conversa
+  de seis mensagens — e o campo que a agrupa é escrito por `coleta.ts#gravar` em **todo**
+  evento desde a `D-73`: uma requisição `/api/*` é um turno, por construção (a coleta acumula
+  durante a requisição e grava de uma vez, `FR-10c`). Agrupar não custou consulta, coluna nem
+  byte no payload. ⚠️ **Evento sem requisição casada NÃO some** — vai para "fora de turno",
+  com a frase dizendo o que ele é; sumir seria a tela afirmar que o app não fez nada.
+  ⚠️ E as `chamada_externa` saem da narrativa e viram **agregado do turno**: seis idas à
+  Atlassian no meio da conversa eram o ruído que fazia a tela parecer log, e o total no
+  cabeçalho é o achado de `D-73` (~2,6 s só para nomear os assuntos) visível de relance.
+- ⚠️ **Branch aberto ANTES do rename encontra o `ATLAS_*` só no typecheck** (20/08/2026). A
+  spec 012 nasceu antes de `D-77` e seu teste montava o contexto com `GOATLAS_USAR_FAKES`; o
+  merge com a `main` já renomeada saiu **limpo** (arquivos diferentes) e o `tsc` quebrou
+  depois — `EnvGoDeploy` conhece **só** `ATLAS_*`, e a ponte para o nome antigo vive em
+  `env-do-app.ts`, em runtime. Quem mergear branch antigo roda `npm run build`, não só a
+  suíte: o `vitest` passa com o campo a mais, e o typecheck é o único que reprova.
+- 🚨 **Slug chega à tela pelo VALOR, não só pelo rótulo** (`D-79`, medido no navegador em
+  20/08/2026). Com a suíte verde e a varredura de `snake_case` passando, o título do evento
+  saía *"Bloqueio pela regra1_confluence"*: a varredura olhava **rótulos**, e o slug veio de
+  `dados.regra`. Existe `REGRAS` traduzindo os dois valores de `rules/index.ts#Regra`, e um
+  caso afirmando o par. ⚠️ **Nome de FERRAMENTA continua cru de propósito** — ali o
+  identificador é a coisa investigada (casa com `toolsPermitidas` em `agent/gate.ts`), e há um
+  contra-exemplo escrito para ninguém "consertar" isso.
+- 🚨 **Item de grade tem `min-width: auto`, e um `<pre>` dentro dele rola a PÁGINA** (`D-79`,
+  mesmo dia). O registro cru usa `white-space: pre`; sem `min-width: 0` no turno e no evento, a
+  largura vazava para fora e a página inteira ganhava barra horizontal — o defeito que `D-65`
+  corrigiu na tabela do Confluence, agora pela grade. ⚠️ E o separador entre rótulo e tamanho
+  vive no **markup**, nunca num `gap`: `gap` separa na tela e some no nome acessível
+  (`DADOS DO EVENTO750 BYTES`, medido).
+- 🚨 **Todo `TipoDeEvento` tem TRADUÇÃO, e o JSON cru mora dentro de um `<details>`**
+  (`D-79`, `app/investigador/eventos.ts`). Duas coisas que valem sozinhas. A primeira é
+  `Record<TipoDeEvento, Descritor>`: tipo novo sem tradução **não compila** (mesmo desenho de
+  `FAMILIA` e de `PAINEIS_DO_CONSOLE`) — e como um descritor que devolvesse o slug *compila*,
+  `tests/013-eventos-traduzidos.test.ts` varre os 21 tipos procurando `snake_case` em título e
+  rótulo. A segunda é o `<details>`: `BlocoJson` era renderizado **fora** de qualquer, sempre
+  aberto, em todos os eventos — com `ia_chat` carregando o histórico inteiro da conversa a cada
+  ciclo. ⚠️ **O cru não sumiu, mudou de lugar**: quem investiga não trabalha com resumo, e
+  `tests/013-turno-na-tela.test.ts` afirma que nenhum `<pre>` aparece antes do primeiro
+  `<details>`. ⚠️ **Tipo desconhecido cai no `resumo` gravado** (que já era português) e, sem
+  ele, no rótulo cru — dado escrito por versão anterior é o caso normal numa tabela com 30 dias
+  de retenção.
 - ⚠️ **`redigirSensiveis` roda ANTES do truncamento** (`investigador/coleta.ts#corpoSeguro`).
   Truncar primeiro deixaria um segredo intacto sempre que ele estivesse nos primeiros 16 mil
   caracteres — que é onde o começo do corpo costuma estar. A ordem inversa passa em todo teste de
@@ -1707,7 +1748,9 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 [007](specs/007-analise-de-anexo/tasks.md) ·
 [008](specs/008-cartao-negociavel/tasks.md) ·
 [009](specs/009-investigador/tasks.md) ·
-[012](specs/012-rederivacao-que-nao-regride/tasks.md).
+[010](specs/010-anexo-obrigatorio/tasks.md) ·
+[012](specs/012-rederivacao-que-nao-regride/tasks.md) ·
+[013](specs/013-investigador-legivel/tasks.md).
 
 🚨 **A spec 009 (Investigador) está completa em código** (`D-73`, 14/08/2026). Uma aba nova, só
 admin, que responde *"o que aconteceu com esta pessoa?"*: toda requisição `/api/*` vira uma linha
@@ -1915,7 +1958,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1692 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1752 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

@@ -71,7 +71,11 @@ beforeEach(async () => {
   await config.definir('service_desk_id', 'sd-1', CHEFE, AGORA)
   // Threshold alto: nenhum bloqueio da Regra 1 atravessa os casos que falam de proposta.
   await config.definir('regra1_threshold_score', 0.99, CHEFE, AGORA)
-  ctx = await montarContexto({ DB: db, GOATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
+  // ⚠️ `ATLAS_*`, não `GOATLAS_*`: o código conhece **só** o prefixo novo desde `D-77`, e a
+  // ponte para o nome antigo vive num lugar só (`env-do-app.ts`), com teste próprio. Este
+  // arquivo nasceu num branch anterior ao rename e o merge não tinha como ver — o typecheck
+  // da `main` quebrou no encontro dos dois, que é a única coisa que reprova este par.
+  ctx = await montarContexto({ DB: db, ATLAS_USAR_FAKES: '1' }, () => AGORA, () => `id-${++n}`)
   fake = ctx.atlassian as ClienteAtlassianFake
   ia = ctx.ia as ClienteIAFake
   fake.estado.tiposChamado = [
