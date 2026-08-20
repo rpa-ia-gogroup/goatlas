@@ -4906,6 +4906,58 @@ da varredura do Tailwind.
   quebraria o caminho das **51 worktrees** vivas; renomear o repo é ação de fora do código. Nenhum
   dos dois é visível para quem usa o app.
 
+### D-78 · A aba Avisos saiu da interface
+
+**20/08/2026.** Pedido do dono do produto, no dia seguinte ao anúncio do app para a empresa:
+*"remova rapidamente o que não funciona, se possível, essa aba toda"* — e, em seguida, a razão:
+*"não quero ninguém confuso sobre isso que não funciona"*.
+
+A aba oferecia **três coisas, e a única que funcionava não era dela**: a escolha de canal (que
+não entrega), o histórico de avisos (com data crua) e a promessa de que "os avisos vivem aqui"
+— que "Meus chamados" já cumpre melhor, com o estado atual em vez de um registro de eventos.
+
+#### 🚨 A escolha de canal era um beco sem saída, e salvava com sucesso
+
+Escolher "Google Chat" ou "E-mail" e clicar em salvar **gravava a preferência** e respondia
+`200`. Mas `canalPor` (`contexto.ts`) devolve `CanalGoogleChat` só se `chat_webhook_url`
+estiver configurado, e `CanalEmail` só com `email_endpoint`; sem eles vem
+`CanalIndisponivel`, que **recusa todo envio** com erro definitivo. Nenhum dos dois está
+configurado, e `Q11` está fechada em `nenhum` (`D-56`). Ou seja: a pessoa escolhia como quer
+ser avisada, o app confirmava, e nada seria enviado nunca — o aviso ficava `suprimida` e a
+tela dizia "Não enviado" para sempre.
+
+Isto é pior que a ausência do controle. `D-19` já dizia que `Q11` em aberto **não vira canal
+inventado**; oferecer a escolha era inventá-lo na superfície, com o agravante de a confirmação
+parecer sucesso.
+
+#### Os outros dois defeitos, que sozinhos seriam conserto e não remoção
+
+- **A data ia crua para a tela** — `{a.criadoEm}` sem formatação, então a lista mostrava
+  `2026-08-17T13:57:24.073Z`: ISO, em UTC, três horas atrás do horário de quem lê, num app
+  que é todo em português (regra 4).
+- **`GOATLAS-1` e `GOATLAS-2` aparecem na lista de produção.** São chaves do
+  `ClienteAtlassianFake` (`fake.ts`: `GOATLAS-${contador}`), sobra da fase de demonstração —
+  chamados que **não existem no Jira**. Eles seguem em `vinculos`, então continuam em "Meus
+  chamados": a remoção da aba **não** os apaga, e apagá-los é operação de banco que o app não
+  expõe.
+
+#### O que NÃO foi removido, e por que isso importa
+
+Só a **interface** saiu: `src/app/avisos.tsx`, a entrada na barra de abas e a linha
+`avisos: '/avisos'` da tabela de rotas. Todo o servidor fica de pé — webhook (`RF-48`),
+polling (`RF-47`), dedupe, a tabela `notificacoes` e a contagem de `suprimida` no console de
+admin. Duas consequências disso:
+
+- **`/avisos` não dá 404.** `telaDoCaminho` manda todo caminho desconhecido para a conversa
+  (`D-65`), então link salvo e link de notificação antigo chegam em lugar útil.
+- **`RF-45` (preferência de aviso por pessoa) perdeu a superfície, não a implementação.** O
+  dia em que houver canal configurado, devolver a tela é reabrir esta decisão — e devolvê-la
+  **antes** disso é repor o beco sem saída.
+
+⚠️ **O que a pessoa perde:** o registro de eventos por chamado ("chamado aberto", "status
+alterado"). O estado atual continua em "Meus chamados", que é o que ela abre para saber onde
+está o chamado dela; o histórico de eventos era instrumento de depuração numa tela de usuário.
+
 ---
 
 ---

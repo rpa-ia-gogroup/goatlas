@@ -27,7 +27,6 @@ const TELAS: readonly Tela[] = [
   { nome: 'documentacao' },
   { nome: 'chamados' },
   { nome: 'formulario' },
-  { nome: 'avisos' },
   { nome: 'admin' },
   { nome: 'detalhe', issueKey: 'GN-6903' },
 ]

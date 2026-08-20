@@ -34,7 +34,6 @@ export type Tela =
   | { readonly nome: 'documentacao' }
   | { readonly nome: 'chamados' }
   | { readonly nome: 'formulario' }
-  | { readonly nome: 'avisos' }
   | { readonly nome: 'admin' }
   /** spec 009 — o registro de depuração. Só admin, e o gate real é do servidor. */
   | { readonly nome: 'investigador' }
@@ -80,7 +79,6 @@ const CAMINHO_POR_TELA: Readonly<Record<NomeDeTela, string>> = {
   documentacao: CAMINHO_DOCUMENTACAO,
   chamados: '/meus-chamados',
   formulario: '/abrir-chamado',
-  avisos: '/avisos',
   admin: '/administracao',
   investigador: '/investigador',
   // O detalhe vive DENTRO de "meus chamados" na URL como vive na tela: o botão "voltar"
