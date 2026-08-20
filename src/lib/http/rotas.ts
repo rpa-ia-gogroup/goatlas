@@ -17,6 +17,11 @@
 import { resolverIdentidade, HEADER_EMAIL, MENSAGEM_NEGACAO, type Identidade } from '../auth'
 import type { Contexto } from '../contexto'
 import { ERROS, erro, json, lerJson } from './respostas'
+import { descartar, inventariar, type AlvoDeLimpeza } from '../governanca/limpeza'
+
+/** Filtro de entrada da limpeza (`D-78`): a lista vem do cliente, então só texto passa. */
+const ehTexto = (v: unknown): v is string => typeof v === 'string' && v.trim() !== ''
+
 import { verificarLimite } from './limite'
 import { CONCORRENCIA_ATLASSIAN, mapearComLimite } from '../paralelo'
 import { CriacaoRecusada, MENSAGEM_RECUSA } from '../agent/gate'
@@ -2202,6 +2207,86 @@ async function rotear(
   if (caminho === '/api/admin/lacunas' && req.method === 'GET') {
     if (!eu.isAdmin) return ERROS.semPermissao()
     return json(await ctx.conhecimento.agregarLacunas_apenasAdmin())
+  }
+
+  /**
+   * Descarta um termo do mapa de lacunas (`RF-42`).
+   *
+   * O backlog de escrita nasceu sujo: os termos de teste do próprio desenvolvimento ficavam
+   * no topo de "procuraram e não existe", e backlog cuja primeira linha é lixo é backlog que
+   * ninguém lê. Apaga as **buscas** daquele termo, nunca esconde o termo — ver
+   * `descartarTermo_apenasAdmin`.
+   *
+   * ⚠️ É **escrita** e é irreversível, então passa pelo decorador de somente leitura como
+   * qualquer outra: em modo de leitura ela recusa, em vez de responder "descartei" sem
+   * descartar.
+   */
+  /**
+   * Inventário para a limpeza de dado de teste (`D-78`) — **somente leitura**.
+   *
+   * Existe porque a lista de descarte tem de ser montada olhando dado, não memória: o banco de
+   * produção carrega duas semanas de desenvolvimento junto com gente de verdade, e apagar por
+   * heurística (data do anúncio, e-mail de quem desenvolveu) levaria dado real.
+   */
+  if (caminho === '/api/admin/limpeza' && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    return json(await inventariar(ctx.db))
+  }
+
+  /**
+   * Executa a limpeza (`D-78`). Apaga **só** o que a lista nomeia.
+   *
+   * ⚠️ É irreversível e é escrita: passa pelo decorador de somente leitura como qualquer
+   * outra. `auditoria` e `config` ficam fora por construção (ver `governanca/limpeza.ts`).
+   */
+  if (caminho === '/api/admin/limpeza' && req.method === 'POST') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    const corpo = (await lerJson(req)) as AlvoDeLimpeza | null
+    const alvo: AlvoDeLimpeza = {
+      issueKeys: Array.isArray(corpo?.issueKeys) ? corpo.issueKeys.filter(ehTexto) : [],
+      conversaIds: Array.isArray(corpo?.conversaIds) ? corpo.conversaIds.filter(ehTexto) : [],
+      termos: Array.isArray(corpo?.termos) ? corpo.termos.filter(ehTexto) : [],
+      overridesEm: Array.isArray(corpo?.overridesEm) ? corpo.overridesEm.filter(ehTexto) : [],
+    }
+    const vazio =
+      (alvo.issueKeys?.length ?? 0) +
+        (alvo.conversaIds?.length ?? 0) +
+        (alvo.termos?.length ?? 0) +
+        (alvo.overridesEm?.length ?? 0) ===
+      0
+    if (vazio) return ERROS.dadosInvalidos('Informe o que descartar.')
+
+    const apagadas = await descartar(ctx.db, alvo)
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'limpeza_executada',
+      recurso: [
+        ...(alvo.issueKeys ?? []),
+        ...(alvo.conversaIds ?? []),
+        ...(alvo.termos ?? []),
+      ]
+        .join(' ')
+        .slice(0, 300),
+      resultado: 'sucesso',
+      detalhe: { apagadas },
+    })
+    return json({ ok: true, apagadas })
+  }
+
+  if (caminho === '/api/admin/lacunas/descartar' && req.method === 'POST') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    const corpo = (await lerJson(req)) as { termo?: unknown } | null
+    const termo = typeof corpo?.termo === 'string' ? corpo.termo.trim() : ''
+    if (termo === '') return ERROS.dadosInvalidos('Informe o termo a descartar.')
+    const apagadas = await ctx.conhecimento.descartarTermo_apenasAdmin(termo)
+    await ctx.auditoria.registrar({
+      atorEmail: eu.email,
+      acao: 'lacuna_descartada',
+      recurso: termo,
+      resultado: apagadas > 0 ? 'sucesso' : 'falha',
+      detalhe: { buscas_apagadas: apagadas },
+    })
+    return json({ ok: true, termo, buscasApagadas: apagadas })
   }
 
   // T-095 / O1, R-04 — taxa de deflexão, taxa de override, via de abertura e
