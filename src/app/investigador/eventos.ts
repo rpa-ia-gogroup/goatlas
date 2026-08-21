@@ -515,3 +515,91 @@ export function descreverEvento(
 
 /** Exportado para a suíte afirmar que a união está coberta (`SC-2`). */
 export const TIPOS_TRADUZIDOS = Object.keys(DESCRITORES) as readonly TipoDeEvento[]
+
+// --- a gravidade -------------------------------------------------------------
+
+/**
+ * Quanto um evento pesa na leitura — spec 014, `FR-36`.
+ *
+ * ## Por que existe
+ *
+ * Medido na tela em 21/08/2026: **32 eventos com o mesmo desenho** e 3.311 px de página para
+ * uma conversa de seis mensagens. `Ferramenta executada: check_jira_history — e FALHOU` tinha
+ * exatamente o mesmo peso visual de `Ida ao modelo · ciclo 1`, e as linhas `falhou: não`
+ * repetidas em cinza faziam o `sim` que importava desaparecer entre os `não`. A informação
+ * estava toda lá, e nenhuma hierarquia dizia onde olhar.
+ *
+ * ## As quatro, e por que não são cinco nem oito
+ *
+ * A identidade GoGroup tem **duas** cores de acento, e `D-34` já recusou vermelho/verde
+ * inventados para o `status` do Confluence pelo mesmo motivo. Então o vocabulário é o que o
+ * app já usa: `--go-blue` (a pessoa, o sujeito da investigação) · `--go-lime` (a marca de
+ * *requer atenção* de `.aviso-atencao`, aqui para tudo que falhou ou interrompeu) ·
+ * `--go-light-blue` (desfecho) · fio azul de 18% (a máquina fazendo o trabalho dela).
+ *
+ * ⚠️ **Cor NUNCA sozinha** (regra 9). Toda gravidade aqui já tem a palavra no título que
+ * `DESCRITORES` produz — *"e FALHOU"*, *"Bloqueio · Regra 1…"*, *"A pessoa insistiu"*,
+ * *"Chamado criado: GN-…"*. A cor é reforço redundante, que é o único uso permitido dela.
+ *
+ * 🚨 **`Record<TipoDeEvento, Gravidade>`:** tipo novo sem gravidade **não compila** — mesma
+ * trava de `DESCRITORES`, de `FAMILIA` e de `PAINEIS_DO_CONSOLE` (`D-49`).
+ */
+export type Gravidade = 'pessoa' | 'atencao' | 'desfecho' | 'neutro'
+
+const GRAVIDADES: Readonly<Record<TipoDeEvento, Gravidade>> = {
+  // A pessoa — tudo que ela fez, inclusive a mensagem.
+  mensagem_usuario: 'pessoa',
+  proposta_editada: 'pessoa',
+  formulario_alterado: 'pessoa',
+  override: 'pessoa',
+  declaracao_anexo: 'pessoa',
+  anexo_recebido: 'pessoa',
+  confirmacao: 'pessoa',
+  // Interrompeu, recusou ou quebrou.
+  ia_extracao_recusada: 'atencao',
+  tool_recusada: 'atencao',
+  bloqueio: 'atencao',
+  erro_de_rota: 'atencao',
+  // A máquina trabalhando. `tool_executada` e `desfecho_criacao` são refinados pelos dados.
+  ia_chat: 'neutro',
+  ia_extracao: 'neutro',
+  ia_classificacao: 'neutro',
+  anexo_analisado: 'neutro',
+  resposta_agente: 'neutro',
+  tool_executada: 'neutro',
+  proposta_rederivada: 'neutro',
+  payload_final: 'neutro',
+  desfecho_criacao: 'desfecho',
+  chamada_externa: 'neutro',
+}
+
+/**
+ * A gravidade de um evento, refinada pelos dados quando o tipo sozinho não decide.
+ *
+ * ⚠️ **Os dois refinamentos existem porque o tipo mente sobre eles.** `tool_executada` é
+ * rotina quando roda e é o achado da investigação quando falha — e falha de tool não silencia
+ * a regra (`RNF-18`), então ela precisa saltar aos olhos. `desfecho_criacao` sem `issueKey` é
+ * o pior desfecho possível (definitivo = chamado perdido, `RNF-17`) e não pode dividir a cor
+ * com o chamado que nasceu.
+ *
+ * ⚠️ **Tipo desconhecido é `neutro`**, nunca ausência de estilo: dado gravado por versão
+ * anterior é o caso normal numa tabela com trinta dias de retenção (mesma escolha de
+ * `descreverEvento`).
+ */
+export function gravidadeDoEvento(tipo: string, dadosJson: string | null): Gravidade {
+  const base = GRAVIDADES[tipo as TipoDeEvento] ?? 'neutro'
+  if (tipo !== 'tool_executada' && tipo !== 'desfecho_criacao') return base
+  let dados: Dados = {}
+  if (dadosJson !== null) {
+    try {
+      dados = objeto(JSON.parse(dadosJson) as unknown) ?? {}
+    } catch {
+      return base
+    }
+  }
+  if (tipo === 'tool_executada') return dados.falhou === true ? 'atencao' : 'neutro'
+  return texto(dados.issueKey) === null ? 'atencao' : 'desfecho'
+}
+
+/** Exportado para a suíte afirmar que a união está coberta (`SC-8`). */
+export const TIPOS_COM_GRAVIDADE = Object.keys(GRAVIDADES) as readonly TipoDeEvento[]

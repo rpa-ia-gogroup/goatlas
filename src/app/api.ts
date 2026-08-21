@@ -1087,6 +1087,8 @@ export interface SessaoInvestigada {
   readonly bloqueios: number
   readonly overrides: number
   readonly temProposta: boolean
+  /** O título do cartão vigente — o que diz DE QUE a conversa trata (spec 014, `FR-33`). */
+  readonly tituloDoCartao: string | null
   readonly confirmadoEm: string | null
   readonly issueKey: string | null
   readonly requisicoes: number
@@ -1137,6 +1139,13 @@ export interface CorposDaRequisicao {
 }
 
 export interface DetalheDeSessao {
+  /**
+   * O resumo da sessão — spec 014, `FR-33`.
+   *
+   * ⚠️ `null` significa **expurgada pela retenção**, nunca falha de rede: a rota responde 200
+   * com este campo nulo, e a tela diz isso em palavras.
+   */
+  readonly sessao: SessaoInvestigada | null
   readonly eventos: EventoRegistrado[]
   readonly requisicoes: RequisicaoRegistrada[]
   readonly mensagens: {

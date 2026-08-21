@@ -27,6 +27,7 @@ const BASE: SessaoInvestigada = {
   bloqueios: 0,
   overrides: 0,
   temProposta: false,
+  tituloDoCartao: null,
   confirmadoEm: null,
   issueKey: null,
   requisicoes: 9,

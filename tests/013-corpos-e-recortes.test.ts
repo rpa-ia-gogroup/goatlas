@@ -122,6 +122,7 @@ function sessao(p: Partial<SessaoInvestigador>): SessaoInvestigador {
     bloqueios: 0,
     overrides: 0,
     temProposta: true,
+    tituloDoCartao: 'Acesso ao Nexus',
     confirmadoEm: null,
     issueKey: 'GN-1',
     requisicoes: 2,

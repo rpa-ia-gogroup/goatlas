@@ -39,7 +39,7 @@
  * evidência que se foi buscar; quem limpa é a retenção (`FR-19`).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   api,
   type CorposDaRequisicao,
@@ -51,7 +51,14 @@ import {
 } from '../api'
 import { Aviso, Vazio } from '../componentes'
 import { aplicarRecorte, PARADA_HA_MINUTOS } from '@/lib/investigador/leitura'
-import { contagem, descreverEvento, MOTIVOS_SEM_PROPOSTA, tamanho } from './eventos'
+import {
+  contagem,
+  descreverEvento,
+  gravidadeDoEvento,
+  MOTIVOS_SEM_PROPOSTA,
+  tamanho,
+} from './eventos'
+import { montarConversa, type ItemDaConversa } from './conversa'
 import { agruparEmTurnos, resumirChamadas, type Turno } from './turnos'
 import { compararPropostas, trilhaDoCartao, type MudancaDeCampo, type VersaoDoCartao } from './proposta'
 
@@ -420,6 +427,10 @@ function ListaDeSessoes({
  * ⚠️ **As marcas são PALAVRAS, e a mais importante é a ausência do cartão.** Uma conversa
  * longa sem cartão é o caso de 14/08/2026, e ele não tem sintoma nenhum — nenhum erro,
  * nenhum status 500. Aqui ele é a primeira coisa que se lê na linha.
+ *
+ * 🚨 **O ASSUNTO virou a primeira linha na spec 014 (`FR-33`).** A lista identificava a sessão
+ * por e-mail e data: com dez conversas da mesma pessoa, escolher qual abrir era abrir todas.
+ * O e-mail continua — desceu para a linha de baixo, onde ele é contexto e não identidade.
  */
 export function LinhaDeSessao({
   sessao: s,
@@ -433,9 +444,12 @@ export function LinhaDeSessao({
     <li className="inv-sessao">
       <button type="button" className="inv-sessao-alvo" onClick={aoAbrir}>
         <span className="inv-sessao-topo">
-          <strong>{s.solicitanteEmail}</strong>
+          {/* ⚠️ Sem cartão, o assunto **não é inventado** a partir da primeira mensagem: a
+              frase honesta é a ausência, e ela vem com o motivo logo abaixo. */}
+          <strong>{s.tituloDoCartao ?? 'Conversa sem cartão'}</strong>
           <time dateTime={s.criadoEm}>{formatarQuando(s.criadoEm)}</time>
         </span>
+        <span className="inv-sessao-quem">{s.solicitanteEmail}</span>
         <span className="inv-sessao-marcas">
           {/* ⚠️ Concordância, não capricho (regra 4): "1 mensagens" apareceu na staging em
               14/08 e é o tipo de erro que a suíte não pega e que todo leitor vê. */}
@@ -494,30 +508,304 @@ function Detalhe({ conversaId, aoVoltar }: { conversaId: string; aoVoltar: () =>
       </button>
 
       {falhou && <Aviso atencao>Não consegui carregar esta sessão.</Aviso>}
-      {!falhou && dados === null && <p className="carregando">Carregando a linha do tempo…</p>}
+      {!falhou && dados === null && <p className="carregando">Carregando a sessão…</p>}
 
-      {dados && <LinhaDoTempo dados={dados} conversaId={conversaId} />}
+      {dados && <SessaoAberta dados={dados} conversaId={conversaId} />}
     </section>
   )
 }
 
-/** A linha do tempo da sessão, turno a turno — `FR-21`. */
-export function LinhaDoTempo({
+/** As três visões de uma sessão. **Conversa é o padrão** — spec 014, `FR-34`/`SC-3`. */
+type VisaoDaSessao = 'conversa' | 'tempo' | 'chamadas'
+
+/**
+ * Uma sessão aberta — spec 014, `FR-33`/`FR-34`.
+ *
+ * 🚨 **A ordem desta tela É a correção.** Antes, abrir uma sessão dava direto na linha do
+ * tempo: 32 blocos de mesmo desenho, 3.311 px, e a conversa — o objeto da investigação —
+ * dentro de um `<details>` fechado no rodapé. Hoje entra pelo **cabeçalho** (de quem é, do
+ * que trata, no que deu) e a visão padrão é a **conversa**. A linha do tempo não perdeu nada:
+ * ela é a segunda aba, e continua sendo onde se lê o que a máquina fez.
+ *
+ * ⚠️ **Exportado por causa do teste**, como `LinhaDeSessao`: a suíte roda em
+ * `environment: 'node'` e não clica em aba.
+ */
+export function SessaoAberta({
   dados,
   conversaId,
 }: {
   dados: DetalheDeSessao
   conversaId?: string
 }) {
+  const [visao, setVisao] = useState<VisaoDaSessao>('conversa')
+  const turnos = agruparEmTurnos(dados.eventos, dados.requisicoes)
+  const itens = montarConversa(dados.mensagens, dados.eventos)
+  const abas: readonly { valor: VisaoDaSessao; rotulo: string; quantos: number }[] = [
+    { valor: 'conversa', rotulo: 'Conversa', quantos: itens.length },
+    { valor: 'tempo', rotulo: 'Linha do tempo', quantos: turnos.length },
+    { valor: 'chamadas', rotulo: 'Chamadas de API', quantos: dados.requisicoes.length },
+  ]
+  return (
+    <>
+      <CabecalhoDaSessao
+        sessao={dados.sessao}
+        conversaId={conversaId ?? ''}
+        acao={<BotaoExportar dados={dados} conversaId={conversaId ?? ''} turnos={turnos} />}
+      />
+
+      <div className="inv-abas" role="tablist" aria-label="O que ver desta sessão">
+        {abas.map((a) => (
+          <button
+            key={a.valor}
+            type="button"
+            role="tab"
+            aria-selected={visao === a.valor}
+            className="inv-aba"
+            data-ativa={visao === a.valor ? 'sim' : 'nao'}
+            onClick={() => setVisao(a.valor)}
+          >
+            {a.rotulo}
+            {/* O separador vive no markup: `gap` some do nome acessível (`D-79`). */}
+            <span className="inv-medida">{` · ${a.quantos}`}</span>
+          </button>
+        ))}
+      </div>
+
+      {visao === 'conversa' && <Conversa itens={itens} />}
+      {visao === 'tempo' && <LinhaDoTempo dados={dados} />}
+      {visao === 'chamadas' && <ListaCrua itens={dados.requisicoes} />}
+    </>
+  )
+}
+
+/**
+ * O cabeçalho da sessão — spec 014, `FR-33`.
+ *
+ * 🚨 **Ele não existia, e essa era a falha mais grave da tela.** `detalharSessao` devolvia só
+ * eventos, requisições e mensagens: quem abria uma sessão não sabia de quem era, do que
+ * tratava, se virou chamado, quanto custou nem por que morreu — e o dado existia desde a
+ * `T-124`, consumido apenas pela lista.
+ *
+ * ⚠️ **O título é o do cartão, e quando não há cartão a tela DIZ isso** — com a frase de
+ * `MOTIVOS_SEM_PROPOSTA`, a mesma que a lista usa. Inventar assunto a partir da primeira
+ * mensagem daria uma linha plausível e possivelmente falsa numa tela cujo produto é evidência.
+ *
+ * ⚠️ **`sessao: null` é expurgo pela retenção, não erro** (`FR-19`): a rota responde 200 e a
+ * tela distingue "o registro envelheceu" de "não carregou", como `corposDaRequisicao` já faz.
+ */
+function CabecalhoDaSessao({
+  sessao,
+  conversaId,
+  acao,
+}: {
+  sessao: SessaoInvestigada | null
+  conversaId: string
+  acao: ReactNode
+}) {
+  if (sessao === null) {
+    return (
+      <section className="inv-cabeca" data-tom="neutro">
+        <div className="inv-cabeca-topo">
+          <h2 className="inv-cabeca-titulo">Sessão sem resumo</h2>
+          {acao}
+        </div>
+        <p className="dica">
+          A conversa <code>{conversaId}</code> não está mais na tabela de conversas — os
+          eventos abaixo sobreviveram, o resumo não. Não é falha de carregamento: é a retenção
+          fazendo o que ela faz.
+        </p>
+      </section>
+    )
+  }
+  const motivo =
+    sessao.motivoSemProposta === null
+      ? null
+      : (MOTIVOS_SEM_PROPOSTA[sessao.motivoSemProposta] ?? sessao.motivoSemProposta)
+  /*
+    O tom do cabeçalho, na mesma escala de `gravidadeDoEvento`: chamado aberto é `desfecho`,
+    conversa que morreu sem cartão ou com erro de API pede `atencao`, o resto é `pessoa` —
+    porque uma conversa em andamento não é um problema. ⚠️ E o tom nunca é a única marca: as
+    três aparecem em palavra nos selos ao lado do título.
+  */
+  const tom =
+    sessao.issueKey !== null
+      ? 'desfecho'
+      : motivo !== null || sessao.errosDeApi > 0
+        ? 'atencao'
+        : 'pessoa'
+  return (
+    <section className="inv-cabeca" data-tom={tom}>
+      <div className="inv-cabeca-topo">
+        <h2 className="inv-cabeca-titulo">
+          {sessao.tituloDoCartao ?? 'Conversa sem cartão'}
+        </h2>
+        {acao}
+      </div>
+
+      <p className="inv-cabeca-selos">
+        <Marca>{sessao.estado}</Marca>
+        {sessao.issueKey !== null && <Marca>{`chamado ${sessao.issueKey}`}</Marca>}
+        {sessao.temProposta && sessao.issueKey === null && <Marca>cartão na tela</Marca>}
+        {!sessao.temProposta && <Marca destaque>sem cartão</Marca>}
+        {sessao.overrides > 0 && (
+          <Marca destaque>{contagem(sessao.overrides, 'override', 'overrides')}</Marca>
+        )}
+      </p>
+
+      <p className="inv-cabeca-quem">
+        {sessao.solicitanteEmail} · começou {formatarQuando(sessao.criadoEm)} · última
+        atividade {formatarQuando(sessao.ultimaAtividade)}
+      </p>
+
+      <dl className="inv-cabeca-numeros">
+        <Medida
+          rotulo="mensagens"
+          valor={`${sessao.mensagensDaPessoa}p / ${sessao.mensagensDoAgente}ag`}
+        />
+        <Medida rotulo="turnos" valor={String(sessao.requisicoes)} />
+        <Medida rotulo="bloqueios" valor={String(sessao.bloqueios)} />
+        <Medida rotulo="erros de API" valor={String(sessao.errosDeApi)} alerta={sessao.errosDeApi > 0} />
+        <Medida
+          rotulo="turno mais longo"
+          valor={sessao.duracaoMaximaMs === null ? '—' : formatarMs(sessao.duracaoMaximaMs)}
+        />
+        <Medida rotulo="custo de IA" valor={dinheiro(sessao.custoUsd)} />
+      </dl>
+
+      {/* 🚨 A frase que responde ao caso de 14/08/2026, no topo em vez de enterrada. */}
+      {motivo !== null && <p className="inv-cabeca-motivo">{motivo}</p>}
+    </section>
+  )
+}
+
+/** Um número do cabeçalho: valor em cima, o que ele é embaixo. */
+function Medida({
+  rotulo,
+  valor,
+  alerta,
+}: {
+  rotulo: string
+  valor: string
+  alerta?: boolean
+}) {
+  return (
+    <div className="inv-cabeca-numero" data-alerta={alerta === true ? 'sim' : 'nao'}>
+      <dt>{rotulo}</dt>
+      <dd>{valor}</dd>
+    </div>
+  )
+}
+
+/**
+ * A conversa como diálogo — spec 014, `FR-34`/`FR-35`.
+ *
+ * ⚠️ **A autoria é POSIÇÃO + palavra, nunca só posição.** O recuo diz de quem é a fala num
+ * relance; o rótulo (`Pessoa`/`Agente`) diz a mesma coisa para quem lê com leitor de tela, e
+ * é ele que sobrevive ao celular, onde a coluna não comporta recuo (`RNF-28`).
+ *
+ * ⚠️ **Exportada por causa do teste**, como `SessaoAberta`.
+ */
+export function Conversa({ itens }: { itens: readonly ItemDaConversa[] }) {
+  if (itens.length === 0) {
+    return (
+      <Vazio
+        titulo="Nenhuma mensagem nesta conversa"
+        texto="Ou ela foi criada e abandonada antes da primeira mensagem, ou o registro é anterior a esta tela."
+      />
+    )
+  }
+  return (
+    <ol className="inv-conversa">
+      {itens.map((i) =>
+        i.tipo === 'fala' ? (
+          <li key={i.id} className="inv-fala" data-papel={i.papel}>
+            <div className="inv-fala-cabeca">
+              <span className="inv-origem">{i.papel === 'pessoa' ? 'Pessoa' : 'Agente'}</span>
+              <time dateTime={i.quando}>{formatarHora(i.quando)}</time>
+            </div>
+            <p className="inv-fala-texto">{i.texto}</p>
+          </li>
+        ) : i.tipo === 'ferramenta' ? (
+          /*
+            ⚠️ Fechada, e subordinada — `SC-4`. Resultado de tool é evidência de máquina: numa
+            bolha de diálogo ele se leria como coisa que alguém disse, e o resultado do
+            Confluence sozinho passa de 3 kB. O `summary` carrega o tamanho, que é o que faz
+            alguém decidir se abre (`D-79`).
+          */
+          <li key={i.id} className="inv-ferramenta">
+            <details className="inv-bloco-texto">
+              <summary>
+                {`Resultado de ferramenta${i.nome === null ? '' : ` · ${i.nome}`}`}
+                <span className="inv-medida">{` · ${tamanho(i.texto.length) ?? ''}`}</span>
+              </summary>
+              <pre>{i.texto}</pre>
+            </details>
+          </li>
+        ) : (
+          <li key={i.id} className="inv-marco" data-autoria={i.autoria}>
+            <MarcoDaConversa item={i} />
+          </li>
+        ),
+      )}
+    </ol>
+  )
+}
+
+/**
+ * Um marco entre as falas — `FR-35`.
+ *
+ * ⚠️ **O rótulo diz de quem foi a ação, em palavra.** É o pedido literal do relato: *"determinar
+ * cada ponto que o usuário colocou manualmente de uma forma visível pra quem for ver o
+ * histórico depois"*. Sem ele, editar o cartão e rederivar o cartão são o mesmo cartãozinho
+ * cinza.
+ *
+ * ⚠️ **A tradução é a MESMA de `descreverEvento`** — nenhum texto novo aqui. Um vocabulário
+ * paralelo divergiria da linha do tempo na primeira correção, e as duas abas descrevem o mesmo
+ * evento.
+ */
+function MarcoDaConversa({ item }: { item: Extract<ItemDaConversa, { tipo: 'marco' }> }) {
+  const e = item.evento
+  const descrito = descreverEvento(e.tipo, e.dados_json, e.resumo)
+  const diff = e.tipo === 'proposta_editada' ? diffDeEdicao(e) : null
+  return (
+    <div className="inv-marco-caixa" data-tom={gravidadeDoEvento(e.tipo, e.dados_json)}>
+      <div className="inv-marco-cabeca">
+        <span className="inv-origem">
+          {item.autoria === 'pessoa' ? 'A pessoa fez' : 'O app decidiu'}
+        </span>
+        <time dateTime={e.criado_em}>{formatarHora(e.criado_em)}</time>
+      </div>
+      <p className="inv-evento-titulo">{descrito.titulo}</p>
+      {diff !== null ? (
+        <TabelaDeDiff mudancas={diff} />
+      ) : (
+        descrito.linhas.length > 0 && (
+          <dl className="inv-evento-linhas">
+            {descrito.linhas.map((l) => (
+              <div key={l.rotulo}>
+                <dt>{l.rotulo}</dt>
+                <dd>{l.valor}</dd>
+              </div>
+            ))}
+          </dl>
+        )
+      )}
+    </div>
+  )
+}
+
+/**
+ * A linha do tempo da sessão, turno a turno — `FR-21`.
+ *
+ * ⚠️ **Ela encolheu na spec 014, e não perdeu conteúdo:** a conversa e a lista de chamadas
+ * saíram daqui para abas próprias (`FR-34`), e o cabeçalho levou o botão de exportar. O que
+ * mora aqui é o que a máquina fez, que é a pergunta desta aba.
+ */
+export function LinhaDoTempo({ dados }: { dados: DetalheDeSessao; conversaId?: string }) {
   const turnos = agruparEmTurnos(dados.eventos, dados.requisicoes)
   const trilha = trilhaDoCartao(dados.eventos)
   return (
     <>
-      <div className="inv-detalhe-topo">
-        <h2 className="titulo-secao">Linha do tempo</h2>
-        <BotaoExportar dados={dados} conversaId={conversaId ?? ''} turnos={turnos} />
-      </div>
-
       {trilha.length > 0 && <TrilhaDoCartao trilha={trilha} />}
 
       {turnos.length === 0 ? (
@@ -532,33 +820,6 @@ export function LinhaDoTempo({
           ))}
         </ol>
       )}
-
-      {/*
-        ⚠️ A conversa vem da tabela **de produção**, não do registro — é a mesma que o
-        modelo lê e que a transcrição de `D-54` anexa ao chamado. Fica fechada porque a
-        linha do tempo acima já mostra o que a pessoa escreveu; o que só existe aqui é o
-        resultado das tools, do jeito que o modelo o recebeu.
-      */}
-      <details className="inv-bloco">
-        <summary>A conversa como o modelo a leu ({dados.mensagens.length} mensagens)</summary>
-        <ul className="inv-mensagens">
-          {dados.mensagens.map((m) => (
-            <li key={m.id}>
-              <span className="inv-papel">
-                {m.papel === 'user'
-                  ? 'pessoa'
-                  : m.papel === 'assistant'
-                    ? 'agente'
-                    : `ferramenta${m.tool_nome ? ` · ${m.tool_nome}` : ''}`}
-              </span>
-              <TextoLongo texto={m.conteudo} />
-            </li>
-          ))}
-        </ul>
-      </details>
-
-      <h2 className="titulo-secao">Chamadas de API desta sessão</h2>
-      <ListaCrua itens={dados.requisicoes} />
     </>
   )
 }
@@ -744,7 +1005,14 @@ function ItemDoTempo({ evento }: { evento: EventoRegistrado }) {
     <li
       className="inv-evento"
       data-forma={origem.forma}
-      data-lado={evento.origem === 'usuario' ? 'direita' : 'esquerda'}
+      /*
+        🚨 `data-lado` SAIU na spec 014 (`SC-9`). Ele recuava a mensagem da pessoa 12% e o
+        marcador ia com ela: medido em 21/08/2026, o ponto do primeiro evento de cada turno
+        ficava em x=500 com a espinha em x=387 — um círculo solto no branco, 113 px fora do
+        traço que ele deveria marcar. A autoria por posição existe agora onde ela importa, na
+        aba **Conversa**; aqui quem a diz é `.inv-origem`, em palavra.
+      */
+      data-tom={gravidadeDoEvento(evento.tipo, evento.dados_json)}
     >
       <div className="inv-evento-cabeca">
         <time dateTime={evento.criado_em}>{formatarHora(evento.criado_em)}</time>
@@ -795,6 +1063,29 @@ function ItemDoTempo({ evento }: { evento: EventoRegistrado }) {
       )}
     </li>
   )
+}
+
+/**
+ * O `antes → depois` de uma edição feita pela pessoa — spec 014, `FR-35`.
+ *
+ * ⚠️ **A mesma `compararPropostas` da rederivação**, com base e alvo trocados de lugar:
+ * `proposta_editada` grava `antes`/`depois` e `proposta_rederivada` grava
+ * `baseAnterior`/`proposta`. Uma segunda comparação escrita aqui diria "prioridade mudou" com
+ * um critério e a linha do tempo com outro, sobre o mesmo evento.
+ *
+ * ⚠️ Fora da tabela, as linhas do descritor já mostram `depois ·` e `antes ·` — feio, e nunca
+ * ausente. `null` aqui cai nelas.
+ */
+function diffDeEdicao(evento: EventoRegistrado): readonly MudancaDeCampo[] | null {
+  if (evento.dados_json === null) return null
+  try {
+    const d = JSON.parse(evento.dados_json) as Record<string, unknown>
+    if (d.antes === undefined || d.antes === null) return null
+    const mudancas = compararPropostas(d.antes, d.depois)
+    return mudancas.length === 0 ? null : mudancas
+  } catch {
+    return null
+  }
 }
 
 /** O diff de um evento de rederivação, ou `null` quando ele não carrega base. */
@@ -961,26 +1252,6 @@ export function LinhaDeChamada({ requisicao: r }: { requisicao: RequisicaoRegist
         </div>
       </details>
     </li>
-  )
-}
-
-/**
- * Texto longo com o tamanho declarado antes do conteúdo — `FR-24`.
- *
- * ⚠️ **Nunca `.slice()` silencioso.** O texto vai inteiro para dentro do `<details>`; o que
- * muda é ele não estar aberto. Cortar aqui apagaria a marca de truncamento de `FR-3`.
- */
-function TextoLongo({ texto }: { texto: string }) {
-  const CURTO = 400
-  if (texto.length <= CURTO) return <p>{texto}</p>
-  return (
-    <details className="inv-bloco-texto">
-      <summary>
-        {texto.slice(0, 120)}…
-        <span className="inv-medida">{` · ${tamanho(texto.length) ?? ''}`}</span>
-      </summary>
-      <pre>{texto}</pre>
-    </details>
   )
 }
 

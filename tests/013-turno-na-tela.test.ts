@@ -255,12 +255,9 @@ describe('a linha do tempo desenhada', () => {
     expect(html).toContain('não puderam ser casados')
   })
 
-  it('mensagem longa da conversa vira bloco com tamanho, não parede de texto', () => {
-    const html = desenhar({
-      mensagens: [
-        { id: 'm-1', papel: 'tool', conteudo: 'x'.repeat(5000), tool_nome: 'search_confluence', criado_em: '2026-08-20T12:00:00.000Z' },
-      ],
-    })
-    expect(html).toContain('4,9 kB')
-  })
+  /*
+    ⚠️ O caso "mensagem longa da conversa vira bloco com tamanho" MUDOU DE ARQUIVO na spec 014:
+    a conversa saiu deste componente para a aba própria (`FR-34`), e a asserção continua viva
+    em `tests/014-conversa-no-investigador.test.ts`. Ela não foi apagada — foi seguir o código.
+  */
 })
