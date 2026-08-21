@@ -1862,8 +1862,13 @@ de pares; altura média por evento de **122 px** contra **145** em produção.
 renderizador da conversa real. ⚠️ **A página da linha do tempo NÃO encolheu** (3.570 px com 34
 eventos × 3.311 px com 32): o que encolheu é o **evento**, e o ganho de leitura vem de a conversa
 ser a aba padrão — 1.601 px para a mesma sessão. Afirmar "a página encolheu" seria falso.
-⚠️ **Produção continua sem isto** (`T-1416`); o bundle validado é `index-DGJTiifI.js` ·
-`index-BnMV5SH5.css`.
+✅ **E MEDIDO EM PRODUÇÃO em 21/08/2026** (`9c47f42f`, `version 53`), na **sessão exata do
+relato** (`7d909d36`) — a comparação que vale, porque é o mesmo conteúdo de antes e depois:
+o título passou a existir (*"Solicitação de acesso ao Nexus"*, de `artur.guerin@gocase.com`),
+os **32 eventos** ficaram numa **única posição esquerda (`387`)** contra `387` **e** `500`,
+o bloco de pares caiu para **19 px**, a altura média por evento foi de **145 → 118 px**
+(−19%) e a página da linha do tempo de **3.311 → 3.054 px** com os mesmos 32 eventos.
+Bundle `index-DGJTiifI.js` · `index-BnMV5SH5.css`, o mesmo validado na staging.
 ⚠️ **E o CSS deu o MESMO hash no worktree e na árvore principal nesta rodada** — o defeito de
 21/08 não reproduziu. A regra de buildar da principal fica; uma não-reprodução não explica a
 causa.
@@ -1937,7 +1942,10 @@ salvo e endereço escrito em página do Confluence param de funcionar. ⚠️ **
 com o prefixo antigo** (`GOATLAS_*`); quem os lê é a ponte de `env-do-app.ts`, e recriá-los como
 `ATLAS_*` exige recolar o valor à mão, porque ninguém consegue lê-lo de volta.
 
-**No ar: https://atlas.devgogroup.com** (`appId 9c47f42f`, deploy de **14/08/2026** com a
+**No ar: https://atlas.devgogroup.com** (`appId 9c47f42f`, `version 53`, deploy de
+**21/08/2026** com a **spec 014** — staging `3936ca2d` (`version 46`) com o **mesmo bundle**
+(`index-DGJTiifI.js` · `index-BnMV5SH5.css`), validada **na tela** antes, conforme a regra 10.
+Histórico: deploy de **14/08/2026** com a
 spec 008 — staging `3936ca2d` com o **mesmo bundle** (`index-Ct4jtfSS.js`), deployada e validada
 **na tela** antes, conforme a regra 10). Login Google pelo edge, admin por allowlist.
 ⚠️ **`updateApp` MESCLA assets**: o manifesto acumula todos os bundles hasheados dos deploys

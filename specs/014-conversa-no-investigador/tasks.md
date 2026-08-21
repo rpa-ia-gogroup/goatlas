@@ -84,7 +84,15 @@ Cenários em [`spec.md`](./spec.md).
   o que encolheu é o **evento**, e o ganho de leitura vem de a conversa ser a aba padrão —
   1.601 px para a mesma sessão.
   ⚠️ A sessão `7d909d36` do relato é de **produção**; a staging tem dados próprios.
-- [ ] **T-1416** Deploy em produção com o **mesmo bundle** validado na staging
-  (`index-DGJTiifI.js` · `index-BnMV5SH5.css`) — e buildando da
-  **árvore principal**, porque o mesmo commit dá CSS de hash diferente num worktree (`CLAUDE.md`,
-  21/08/2026).
+- [x] **T-1416** ✅ **EM PRODUÇÃO** (`9c47f42f`, `version 53`, 21/08/2026), com o mesmo bundle
+  validado na staging (`index-DGJTiifI.js` · `index-BnMV5SH5.css`).
+  🚨 **Medido na sessão exata do relato** (`7d909d36`) — a única comparação honesta, porque é
+  o mesmo conteúdo antes e depois:
+  | | Antes | Agora |
+  |---|---|---|
+  | Posições esquerdas dos 32 eventos | `387` **e** `500` | **`387`**, zero `data-lado` |
+  | Bloco de pares `rótulo → valor` | 3 linhas, gap de 2 px | **19 px** |
+  | Altura média por evento | 145 px | **118 px** (−19%) |
+  | Página da linha do tempo | 3.311 px | **3.054 px** (mesmos 32 eventos) |
+  | Título da sessão | não existia | *"Solicitação de acesso ao Nexus"* |
+  Tons distribuídos: 2 `pessoa` · 28 `neutro` · 2 `atencao`. Sem barra horizontal.
