@@ -622,7 +622,8 @@
 */
 
 .inv-chip-conta {
-  margin-left: var(--space-2);
+  /* O espaço de verdade está no markup (ver `index.tsx`); aqui é só o respiro. */
+  margin-left: var(--space-1);
   font-variant-numeric: tabular-nums;
   opacity: 0.65;
 }
