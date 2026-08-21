@@ -811,6 +811,25 @@ destes reabre um vazamento que já foi fechado.
   depois — `EnvGoDeploy` conhece **só** `ATLAS_*`, e a ponte para o nome antigo vive em
   `env-do-app.ts`, em runtime. Quem mergear branch antigo roda `npm run build`, não só a
   suíte: o `vitest` passa com o campo a mais, e o typecheck é o único que reprova.
+- 🚨 **O predicado do recorte é UM SÓ, e a tela o importa** (`D-79`, `aplicarRecorte` em
+  `investigador/leitura.ts`). A aba precisa do número ao lado de cada recorte (`FR-32`), e
+  contar exige aplicar a condição no cliente — reescrevê-la lá produziria "3" ao lado de uma
+  lista de quatro, que é a segunda regra divergindo em silêncio (o defeito que
+  `config/diagnostico.ts` existe para não repetir). Por isso ele é **exportado**, e o servidor
+  continua aplicando o mesmo para quem chama a rota direto. ⚠️ **`parada` é o único recorte com
+  relógio** e é mais estreito que "sem chamado" de propósito: quem está conversando agora não é
+  quem desistiu. Sem `agoraIso` ele devolve **vazio**, nunca adivinha.
+- 🚨 **`SELECT *` mandava os dois CORPOS em toda listagem** (`D-79`, `FR-30`). Até 500 linhas
+  com `req_json` + `resp_json` de até 16 mil caracteres cada, para uma tela que lê **um par por
+  vez** — o custo que `RNF-36` existe para conter, na versão que ninguém vê. As duas leituras
+  usam `COLUNAS_SEM_CORPO` e há `GET /api/investigador/requisicoes/:id/corpos`. Medido no
+  navegador: 49 chamadas na lista, **zero** requisições de corpo antes de expandir.
+  ⚠️ **Linha expurgada responde os dois nulos, não 404** — um 404 viraria aviso de erro sobre
+  um registro que só envelheceu (`FR-19`).
+- ⚠️ **Falha de clipboard é DITA, nunca silenciosa** (`D-79`). Botão que não copia e não avisa
+  faz a pessoa colar o conteúdo **antigo** achando que copiou o novo — o pior desfecho numa
+  tela cujo produto é evidência. Vale para o JSON do evento e para a exportação da sessão, e as
+  duas passam pela mesma função `copiar`.
 - 🚨 **Slug chega à tela pelo VALOR, não só pelo rótulo** (`D-79`, medido no navegador em
   20/08/2026). Com a suíte verde e a varredura de `snake_case` passando, o título do evento
   saía *"Bloqueio pela regra1_confluence"*: a varredura olhava **rótulos**, e o slug veio de
@@ -1958,7 +1977,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1752 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1785 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

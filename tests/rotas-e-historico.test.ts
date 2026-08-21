@@ -28,6 +28,8 @@ const TELAS: readonly Tela[] = [
   { nome: 'chamados' },
   { nome: 'formulario' },
   { nome: 'admin' },
+  { nome: 'investigador' },
+  { nome: 'investigador', conversaId: '1c37b740-0b68-4786-913e-e876583d57b6' },
   { nome: 'detalhe', issueKey: 'GN-6903' },
 ]
 
@@ -43,6 +45,10 @@ describe('D-65 — caminho ↔ tela', () => {
   it('os caminhos são distintos, em português e fora de `/api`', () => {
     const caminhos = TELAS.map(caminhoDaTela)
     expect(new Set(caminhos).size).toBe(caminhos.length)
+    // ⚠️ A sessão do Investigador e o detalhe do chamado **prefixam** a lista de propósito
+    // (`/investigador/<id>`, `/meus-chamados/<chave>`): é o que faz o ← sair do item para a
+    // lista sem entrada extra nenhuma.
+    expect(caminhoDaTela({ nome: 'investigador', conversaId: 'c-1' })).toBe('/investigador/c-1')
     for (const c of caminhos) {
       expect(c.startsWith('/')).toBe(true)
       // `/api` é do Worker: um caminho de tela ali seria servido pelo servidor, nunca
@@ -145,5 +151,31 @@ describe('D-65 — o contrato do link de deflexão tem TRÊS pontas', () => {
     )
     expect(html).not.toContain('href=')
     expect(html).toContain('aqui')
+  })
+})
+
+/**
+ * `FR-29` (spec 013) — a sessão do Investigador tem endereço.
+ *
+ * 🚨 **Sem isto não existia como MANDAR uma sessão a alguém.** Quem achasse o caso descrevia
+ * o e-mail e o horário para o outro procurar de novo — numa tela cujo trabalho inteiro é
+ * achar um caso específico. Mesmo desenho de `detalhe`: o item prefixa a lista.
+ */
+describe('spec 013 — a sessão do Investigador tem endereço', () => {
+  it('`/investigador` é a lista e `/investigador/<id>` é a sessão', () => {
+    expect(telaDoCaminho('/investigador')).toEqual({ nome: 'investigador' })
+    expect(telaDoCaminho('/investigador/c-1')).toEqual({ nome: 'investigador', conversaId: 'c-1' })
+  })
+
+  it('o id volta decodificado — uuid com hífen, e o que mais vier', () => {
+    const id = '1c37b740-0b68-4786-913e-e876583d57b6'
+    expect(caminhoDaTela({ nome: 'investigador', conversaId: id })).toBe(`/investigador/${id}`)
+    expect(telaDoCaminho(`/investigador/${id}`)).toEqual({ nome: 'investigador', conversaId: id })
+  })
+
+  it('caminho parecido NÃO é o do Investigador — a leitura é por segmento', () => {
+    // O mesmo cuidado de `/documentacao-antiga`: `startsWith` abriria a aba errada em
+    // silêncio.
+    expect(telaDoCaminho('/investigador-antigo')).toEqual({ nome: 'conversa' })
   })
 })

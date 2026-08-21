@@ -5208,12 +5208,46 @@ intactos: todo dado que faltava na tela já estava no banco. Nada virou editáve
 Investigador continua separado da auditoria (`D-73`), e a latência do agente segue fora do
 escopo (`D-72`).
 
-#### Ainda em aberto (fases 2 a 4 da spec 013)
+#### As fases 2 a 4, fechadas em 21/08/2026
 
-Diff antes×depois do `proposta_rederivada` (o dado — `baseAnterior`, `alterados` — já está
-gravado desde `D-71`) · deep link `/investigador/<conversaId>` · `Promise.allSettled` com
-banner de falha · polling com guarda de requisição em voo · corpos de requisição **sob
-demanda** · exportar a sessão em JSON enxuto.
+**O cartão ganhou diff e trilha** (`proposta.ts`). O dado já estava gravado desde `D-71`:
+`proposta`, `baseAnterior` e `alterados`. 🚨 **A base é a última proposta DA IA, nunca a
+vigente** — é `SC-7` da spec 008 aplicado à tela: diffar contra a vigente faria a IA "mudar"
+a prioridade só por **repetir** a sugestão que a pessoa tinha rebaixado. Aqui isso é de graça,
+porque o evento já traz a base certa; o que este código **não** faz é escolher outra.
+⚠️ **Diff vazio é dito em palavras** (*"A IA não mudou nada nesta versão"*): tabela de diff
+vazia se lê como defeito de carregamento. ⚠️ E os `campos` do formulário são comparados **um a
+um** — tratá-los como um campo só faria a linha inteira aparecer alterada porque **um** mudou.
+
+**A página passou a sobreviver a si mesma.** `Promise.allSettled` com banner do que não
+carregou e o dado velho **na tela** (`all` zerava as duas fontes na rejeição de qualquer uma) ·
+polling de 10 s com **guarda de requisição em voo** (sem ela as chamadas se empilham sobre um
+endpoint já lento — a fila de `canceled` que o godocs mediu) · carimbo da última atualização ·
+e **endereço por sessão**, `/investigador/<conversaId>`, sem o qual não existia como *mandar*
+um caso a alguém.
+
+🚨 **Os corpos saíram da listagem** (`FR-30`). `SELECT *` mandava `req_json` e `resp_json` em
+**toda** listagem — até 500 linhas com dois corpos de até 16 mil caracteres cada — para uma
+tela que lê **um par por vez**. Medido no navegador: 49 chamadas na lista, **zero** requisições
+de corpo antes de expandir, **uma** depois. ⚠️ Linha já expurgada responde com os dois nulos,
+não 404: um 404 viraria aviso de erro sobre um registro que só envelheceu (`FR-19`).
+
+**E a lista aprendeu a contar** (`FR-32`). O número ao lado de cada recorte sai do **mesmo**
+predicado que filtra — `aplicarRecorte`, agora exportado de `leitura.ts` e usado pelas duas
+pontas. Contar de um jeito e filtrar de outro produz "3" ao lado de uma lista de quatro.
+⚠️ O recorte **`parada`** é o único com relógio, e ele é mais estreito que "sem chamado" de
+propósito: quem está conversando **agora** não é quem desistiu. Carimbo ilegível **não** entra
+— "parada" é afirmação, e afirmação precisa de medida (mesmo raciocínio de `diasParado: null`
+em `D-55`).
+
+⚠️ **A falha do clipboard é DITA.** Um botão de copiar que não faz nada e não avisa faz a
+pessoa colar o conteúdo **antigo** achando que copiou o novo — o pior desfecho possível numa
+tela cujo produto é evidência. Medido: com o clipboard recusando, o botão lê *"Não deu para
+copiar"*.
+
+✅ **As quatro fases medidas na tela**, e a exportação reaproveita a **mesma** tradução da
+linha do tempo (`descreverEvento`) — um serializador próprio seria o segundo vocabulário, que
+divergiria na primeira correção.
 
 ---
 

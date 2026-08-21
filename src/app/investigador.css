@@ -613,3 +613,180 @@
     align-items: stretch;
   }
 }
+
+/* ---------- filtros: contagem e o que está ligado ------------------------ */
+/*
+  O número ao lado do rótulo sai do MESMO predicado que filtra (`aplicarRecorte`), e os
+  chips de filtro ativo existem porque recorte e busca moram em controles diferentes: com a
+  lista curta, "não tem nada aqui" e "esqueci um filtro ligado" têm a mesma cara.
+*/
+
+.inv-chip-conta {
+  margin-left: var(--space-2);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}
+.inv-filtros-ativos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--fs-caption);
+}
+.inv-filtro-ativo {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  font: inherit;
+  padding: 2px var(--space-2);
+  color: var(--go-blue);
+  background: color-mix(in srgb, var(--go-blue) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 25%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+/* ---------- o topo do detalhe, e a exportação ---------------------------- */
+
+.inv-detalhe-topo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.inv-exportar,
+.inv-json-acoes button {
+  font: inherit;
+  font-size: var(--fs-caption);
+  color: var(--go-blue);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--go-blue) 30%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  cursor: pointer;
+}
+.inv-json-acoes {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ---------- a trilha do cartão ------------------------------------------- */
+/*
+  `v1 → v2 → v3` — lida dos EVENTOS, não da conversa: a tabela guarda só o último estado, e
+  "em que turno o assunto mudou?" só tem resposta no registro.
+*/
+
+.inv-trilha {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--go-white);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+}
+.inv-trilha h3 {
+  margin: 0;
+  font-size: var(--fs-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--go-text-heading);
+}
+.inv-trilha ol {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0 0 0 var(--space-5);
+  list-style: none;
+  border-left: 2px solid var(--go-lime);
+}
+.inv-trilha li {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.inv-trilha-cabeca {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: baseline;
+  font-size: var(--fs-caption);
+}
+.inv-trilha-versao {
+  font-weight: var(--fw-bold);
+  color: var(--go-text-heading);
+}
+.inv-trilha-titulo {
+  margin: 0;
+  font-size: var(--fs-small);
+}
+
+/* ---------- o antes × depois --------------------------------------------- */
+
+.inv-diff {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.inv-diff table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-caption);
+  /* A tabela rola dentro de si, nunca empurra a página (mesma regra de `D-65`). */
+  display: block;
+  overflow-x: auto;
+}
+.inv-diff th,
+.inv-diff td {
+  padding: var(--space-2);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, var(--go-blue) 10%, transparent);
+  overflow-wrap: anywhere;
+}
+.inv-diff thead th {
+  font-size: var(--fs-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
+}
+/* O estado vai em PALAVRA — nunca só em cor (regra 9). */
+.inv-diff-status {
+  display: block;
+  font-weight: var(--fw-regular);
+  font-size: var(--fs-caption);
+  color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
+}
+.inv-diff-longo {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+@media (min-width: 48rem) {
+  .inv-diff-longo {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.inv-diff-longo h4 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
+}
+.inv-diff-longo pre {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--go-cream);
+  border-radius: var(--radius-sm);
+  max-height: 18rem;
+  overflow: auto;
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

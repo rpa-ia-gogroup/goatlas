@@ -222,7 +222,21 @@ export function App() {
             {tela.nome === 'admin' && <TelaAdmin />}
             {/* Esconder no cliente é conveniência; quem garante é o gate de cada rota
                 `/api/investigador/*` no servidor. */}
-            {tela.nome === 'investigador' && <TelaInvestigador />}
+            {tela.nome === 'investigador' && (
+              /*
+                ⚠️ A sessão aberta vive na URL (`FR-29`), e por isso a tela **remonta** pela
+                `key` quando ela muda — mesmo mecanismo da Documentação, e pelo mesmo motivo
+                de `D-46`: uma sequência de `setState` funcionaria hoje e esqueceria um campo
+                no próximo estado que a tela ganhar.
+              */
+              <TelaInvestigador
+                key={tela.conversaId ?? 'lista'}
+                sessaoAberta={tela.conversaId ?? null}
+                aoAbrirSessao={(id) =>
+                  navegar(id === null ? { nome: 'investigador' } : { nome: 'investigador', conversaId: id })
+                }
+              />
+            )}
             {tela.nome === 'detalhe' && (
               <TelaDetalhe
                 issueKey={tela.issueKey}

@@ -35,8 +35,14 @@ export type Tela =
   | { readonly nome: 'chamados' }
   | { readonly nome: 'formulario' }
   | { readonly nome: 'admin' }
-  /** spec 009 — o registro de depuração. Só admin, e o gate real é do servidor. */
-  | { readonly nome: 'investigador' }
+  /**
+   * spec 009 — o registro de depuração. Só admin, e o gate real é do servidor.
+   *
+   * ⚠️ **`conversaId` opcional é a segunda tela com dado na URL** (`FR-29`, spec 013). Sem
+   * ele não existia como **mandar uma sessão a alguém**: quem achasse o caso descrevia o
+   * e-mail e o horário para o outro procurar de novo. Mesmo desenho de `detalhe`.
+   */
+  | { readonly nome: 'investigador'; readonly conversaId?: string }
   | { readonly nome: 'detalhe'; readonly issueKey: string }
 
 export type NomeDeTela = Tela['nome']
@@ -91,6 +97,9 @@ export function caminhoDaTela(tela: Tela): string {
   if (tela.nome === 'detalhe') {
     return `${CAMINHO_POR_TELA.detalhe}/${encodeURIComponent(tela.issueKey)}`
   }
+  if (tela.nome === 'investigador' && tela.conversaId !== undefined) {
+    return `${CAMINHO_POR_TELA.investigador}/${encodeURIComponent(tela.conversaId)}`
+  }
   return CAMINHO_POR_TELA[tela.nome]
 }
 
@@ -109,6 +118,15 @@ export function telaDoCaminho(caminho: string): Tela {
 
   const primeiro = `/${partes[0]}`
 
+  if (primeiro === CAMINHO_POR_TELA.investigador) {
+    const conversa = partes[1]
+    // Sem id é a lista de sessões; com id, aquela sessão aberta. O gate de admin continua
+    // sendo do servidor: um link colado por quem não é admin cai em 403 na rota, não aqui.
+    return conversa === undefined
+      ? { nome: 'investigador' }
+      : { nome: 'investigador', conversaId: decodeURIComponent(conversa) }
+  }
+
   if (primeiro === CAMINHO_POR_TELA.detalhe) {
     const chave = partes[1]
     // Sem chave é a lista; com chave é o detalhe daquele chamado. A rota do servidor
@@ -122,7 +140,7 @@ export function telaDoCaminho(caminho: string): Tela {
     // `detalhe` já foi tratado acima (ele compartilha o caminho da lista, com a chave depois).
     // ⚠️ `conversa` **não** é mais exceção aqui: desde que ela tem `/chat`, ela casa pela
     // tabela como qualquer outra — e continua sendo o destino do desconhecido, logo abaixo.
-    if (nome === 'detalhe') continue
+    if (nome === 'detalhe' || nome === 'investigador') continue
     if (primeiro === caminhoDaEntrada) return { nome: nome as NomeDeTela } as Tela
   }
 

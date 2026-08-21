@@ -101,32 +101,32 @@ created: "2026-08-20"
 
 ---
 
-## Phase 2 — o que o cartão virou  *(PR seguinte)*
+## Phase 2 — o que o cartão virou  ✅
 
-- [ ] **T-1320** `compararPropostas(base, nova)` — puro; alterado / adicionado / removido, com
+- [x] **T-1320** `compararPropostas(base, nova)` — puro; alterado / adicionado / removido, com
       os campos longos em antes×depois. Base é **`baseAnterior`**, nunca a vigente (`D-71`).
-- [ ] **T-1321** `proposta_rederivada` sem alterações **não** desenha tabela vazia.
-- [ ] **T-1322** Trilha "evolução do cartão" v1 → v2 → v3 no topo do detalhe.
-- [ ] **T-1323** Teste: a edição da pessoa pelo `PUT` não aparece como mudança da IA.
+- [x] **T-1321** `proposta_rederivada` sem alterações **não** desenha tabela vazia.
+- [x] **T-1322** Trilha "evolução do cartão" v1 → v2 → v3 no topo do detalhe.
+- [x] **T-1323** Teste: a edição da pessoa pelo `PUT` não aparece como mudança da IA.
   _Requirements: FR-25, FR-26, ScB-01..ScB-04_
 
-## Phase 3 — a página fica utilizável  *(PR seguinte)*
+## Phase 3 — a página fica utilizável  ✅
 
-- [ ] **T-1330** Deep link `/investigador/<conversaId>` em `app/rotas.ts` — `push`, com
+- [x] **T-1330** Deep link `/investigador/<conversaId>` em `app/rotas.ts` — `push`, com
       `popstate` (`D-65`).
-- [ ] **T-1331** `Promise.allSettled` + banner do que não carregou + manter o dado velho.
-- [ ] **T-1332** Polling de 10 s com guarda de requisição em voo + carimbo.
-- [ ] **T-1333** `GET /api/investigador/requisicoes/:id/corpos`; tirar `req_json`/`resp_json`
+- [x] **T-1331** `Promise.allSettled` + banner do que não carregou + manter o dado velho.
+- [x] **T-1332** Polling de 10 s com guarda de requisição em voo + carimbo.
+- [x] **T-1333** `GET /api/investigador/requisicoes/:id/corpos`; tirar `req_json`/`resp_json`
       da listagem.
-- [ ] **T-1334** `BlocoJson`: KB, nº de linhas, colapso acima do teto, copiar com aviso de
+- [x] **T-1334** `BlocoJson`: KB, nº de linhas, colapso acima do teto, copiar com aviso de
       falha.
   _Requirements: FR-27..FR-30, ScC-01..ScC-06, SC-5, SC-6_
 
-## Phase 4 — achar o caso  *(PR seguinte)*
+## Phase 4 — achar o caso  ✅
 
-- [ ] **T-1340** Exportar a sessão em JSON enxuto, um clique.
-- [ ] **T-1341** Contagem por recorte + chips de filtro ativo + período.
-- [ ] **T-1342** Recorte "parada há mais de 1 h".
+- [x] **T-1340** Exportar a sessão em JSON enxuto, um clique.
+- [x] **T-1341** Contagem por recorte + chips de filtro ativo + período.
+- [x] **T-1342** Recorte "parada há mais de 1 h".
   _Requirements: FR-31, FR-32, ScD-01, ScD-02_
 
 ---
@@ -151,3 +151,23 @@ created: "2026-08-20"
 | SC-4 | T-1114 |
 | SC-5 | T-1133 |
 | SC-6 | T-1131 |
+
+---
+
+## Fechamento (21/08/2026)
+
+**As quatro fases estão completas em código, e as quatro foram medidas no navegador.**
+`1785 testes · typecheck limpo · build limpo`. Decisão em `D-79`.
+
+O que a medição na tela provou, e que nenhum teste provava:
+
+| O quê | Medido |
+|---|---|
+| Corpos sob demanda (`FR-30`) | 49 chamadas na lista, **zero** requisições de corpo antes de expandir; **1** depois |
+| Colapso do JSON grande | abre em **2.003** caracteres, "Expandir tudo" leva a **17.891** |
+| Contagem por recorte (`FR-32`) | `Todas 2 · Sem cartão 1 · Com bloqueio 2 · Sem chamado 2 · Parada há +60 min 0` |
+| Chip de filtro ativo | liga o recorte (2 → 1 sessão) e o × devolve as duas |
+| Deep link (`FR-29`) | `/investigador/<conversaId>` abre a sessão direto |
+| Trilha do cartão (`FR-26`) | `v1 · v2 · v3`, com "A IA não mudou nada nesta versão" onde ela não mudou |
+| Falha do clipboard | o botão **diz** "Não deu para copiar" em vez de não fazer nada |
+| Higiene | zero `<pre>` fora de `<details>`, zero rolagem horizontal |
