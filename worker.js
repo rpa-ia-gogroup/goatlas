@@ -11205,6 +11205,14 @@ async function corpoDaResposta(r) {
 
 // src/lib/investigador/leitura.ts
 var LIMITE_PADRAO = 60;
+var COLUNAS_SEM_CORPO = "id, ator_email, conversa_id, metodo, caminho, status, duracao_ms, req_bytes, resp_bytes, erro, criado_em";
+async function corposDaRequisicao(db, id) {
+  const linhas = linhasComoObjetos(
+    await db.query(`SELECT req_json, resp_json FROM investigador_requisicoes WHERE id = ?`, [id])
+  );
+  const linha = linhas[0];
+  return linha === void 0 ? null : { req_json: linha.req_json, resp_json: linha.resp_json };
+}
 function inteiro(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -11315,9 +11323,10 @@ async function listarSessoes(db, filtro = {}) {
       motivoSemProposta: temProposta ? null : semProposta.get(c.id) ?? null
     };
   });
-  return aplicarRecorte(itens, filtro.recorte ?? null);
+  return aplicarRecorte(itens, filtro.recorte ?? null, filtro.agoraIso);
 }
-function aplicarRecorte(itens, recorte) {
+var PARADA_HA_MINUTOS = 60;
+function aplicarRecorte(itens, recorte, agoraIso) {
   switch (recorte) {
     case "sem_proposta":
       return itens.filter((s) => !s.temProposta);
@@ -11329,6 +11338,20 @@ function aplicarRecorte(itens, recorte) {
     // quem veio pedir ajuda e foi embora sem ela.
     case "abandonada":
       return itens.filter((s) => s.issueKey === null && s.mensagensDaPessoa > 0);
+    /*
+      "Parada" é a abandonada **com relógio**: sem chamado e sem atividade há mais de uma
+      hora. A distinção importa porque `abandonada` inclui a conversa que está acontecendo
+      agora — quem está no meio de uma frase aparece como quem desistiu.
+    */
+    case "parada": {
+      if (agoraIso === void 0) return [];
+      const corte = Date.parse(agoraIso) - PARADA_HA_MINUTOS * 6e4;
+      return itens.filter(
+        (s) => s.issueKey === null && s.mensagensDaPessoa > 0 && // Carimbo ilegível não entra: afirmar "parada" sobre o que não se conseguiu ler
+        // é a mesma invenção que `diasParado: null` recusa em `D-55`.
+        Number.isFinite(Date.parse(s.ultimaAtividade)) && Date.parse(s.ultimaAtividade) < corte
+      );
+    }
     default:
       return itens;
   }
@@ -11343,7 +11366,7 @@ async function detalharSessao(db, conversaId) {
   );
   const requisicoes = linhasComoObjetos(
     await db.query(
-      `SELECT * FROM investigador_requisicoes WHERE conversa_id = ?
+      `SELECT ${COLUNAS_SEM_CORPO} FROM investigador_requisicoes WHERE conversa_id = ?
         ORDER BY criado_em ASC LIMIT 500`,
       [conversaId]
     )
@@ -11378,7 +11401,7 @@ async function listarRequisicoes(db, filtro = {}) {
   params.push(limite2);
   return linhasComoObjetos(
     await db.query(
-      `SELECT * FROM investigador_requisicoes
+      `SELECT ${COLUNAS_SEM_CORPO} FROM investigador_requisicoes
         ${condicoes.length > 0 ? `WHERE ${condicoes.join(" AND ")}` : ""}
         ORDER BY criado_em DESC LIMIT ?`,
       params
@@ -13010,7 +13033,9 @@ async function rotear(req, ctx, eu, caminho, url) {
       itens: await listarSessoes(ctx.db, {
         email: url.searchParams.get("email"),
         recorte: url.searchParams.get("recorte"),
-        limite: Number(url.searchParams.get("limite")) || void 0
+        limite: Number(url.searchParams.get("limite")) || void 0,
+        // O recorte "parada" é o único com relógio, e o relógio é o do servidor.
+        agoraIso: ctx.agora()
       }),
       ligado: ctx.valores.investigador_ligado,
       retencaoDias: ctx.valores.investigador_retencao_dias
@@ -13031,6 +13056,12 @@ async function rotear(req, ctx, eu, caminho, url) {
         limite: Number(url.searchParams.get("limite")) || void 0
       })
     });
+  }
+  const corposInvestigador = caminho.match(/^\/api\/investigador\/requisicoes\/([^/]+)\/corpos$/);
+  if (corposInvestigador && req.method === "GET") {
+    if (!eu.isAdmin) return ERROS.semPermissao();
+    const corpos = await corposDaRequisicao(ctx.db, corposInvestigador[1]);
+    return json(corpos ?? { req_json: null, resp_json: null });
   }
   if (caminho === "/api/investigador/resumo" && req.method === "GET") {
     if (!eu.isAdmin) return ERROS.semPermissao();

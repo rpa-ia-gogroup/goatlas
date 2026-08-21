@@ -10,6 +10,11 @@ logs/
 # de funcionário, composição de grupo e valor de licença. O que vale do pacote está
 # destilado em `docs/DECISOES.md` (D-22); o original é insumo, não artefato do repo.
 atlas-kaique/
+# 🚨 O nome ANTIGO da pasta continua no disco (21/08/2026): o rename de `D-77` trocou a
+# entrada aqui e ninguém renomeou o diretório, então ele apareceu como **não ignorado** em
+# `git status` — um `git add -A` distraído commitaria nome de funcionário, composição de
+# grupo e valor de licença. As duas linhas ficam: apagar esta exige renomear a pasta antes.
+goatlas-kaique/
 
 # Worktrees das sessões do Claude (constituição, Princípio XII)
 .claude/worktrees/

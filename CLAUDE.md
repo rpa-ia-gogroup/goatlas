@@ -811,6 +811,21 @@ destes reabre um vazamento que já foi fechado.
   depois — `EnvGoDeploy` conhece **só** `ATLAS_*`, e a ponte para o nome antigo vive em
   `env-do-app.ts`, em runtime. Quem mergear branch antigo roda `npm run build`, não só a
   suíte: o `vitest` passa com o campo a mais, e o typecheck é o único que reprova.
+- 🚨 **O MESMO commit produz CSS diferente na árvore principal e num worktree** (medido em
+  21/08/2026: `64,49 kB` × `63,29 kB`, e o extra é o utilitário `filter` do Tailwind). Os
+  worktrees moram **dentro** do projeto (regra 1) e alguma coisa fora do `src/` entra na
+  varredura — `@source not "../../.claude"` e a forma em glob **não** resolveram, então a
+  causa exata continua desconhecida. ⚠️ **O sintoma não é o tamanho, é o HASH:** a regra 10
+  valida a staging e manda o **mesmo bundle** a produção, e dois builds do mesmo commit em
+  lugares diferentes deixam de ser comparáveis. Enquanto isso não for entendido, **builde
+  sempre do mesmo lugar** — a árvore principal — para os dois deploys.
+- 🚨 **A pasta de credenciais do João voltou a ser NÃO ignorada, e o rename foi a causa**
+  (21/08/2026). `D-77` trocou a entrada do `.gitignore` para `atlas-kaique/` e ninguém
+  renomeou o diretório no disco, que continua `goatlas-kaique/` — ele passou a aparecer em
+  `git status` como untracked, e um `git add -A` distraído commitaria `HANDOFF-GODEPLOY.md`
+  (nome de funcionário, composição de grupo, valor de licença). As **duas** linhas ficam no
+  `.gitignore`; apagar a antiga exige renomear a pasta antes. ⚠️ Mesma família das duas pontes
+  de `D-77`: renomear o que se lê é barato, renomear o que já existe no mundo não é.
 - 🚨 **O predicado do recorte é UM SÓ, e a tela o importa** (`D-79`, `aplicarRecorte` em
   `investigador/leitura.ts`). A aba precisa do número ao lado de cada recorte (`FR-32`), e
   contar exige aplicar a condição no cliente — reescrevê-la lá produziria "3" ao lado de uma

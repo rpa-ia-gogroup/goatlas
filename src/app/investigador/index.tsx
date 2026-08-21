@@ -336,7 +336,14 @@ function ListaDeSessoes({
                 onClick={() => aoTrocarRecorte(r.valor)}
               >
                 {r.rotulo}
-                <span className="inv-chip-conta">{quantas}</span>
+                {/*
+                  ⚠️ O espaço vive no MARKUP, não no `margin-left`. Medido na staging em
+                  21/08/2026: o nome acessível do chip saía **"Todas31"** — `textContent`
+                  concatena e a margem de CSS não entra nele. Terceira vez que este defeito
+                  aparece nesta tela (o topo do JSON e o `summary` do bloco de texto foram as
+                  outras duas), e a regra é sempre a mesma.
+                */}
+                <span className="inv-chip-conta">{` ${quantas}`}</span>
               </button>
             )
           })}
