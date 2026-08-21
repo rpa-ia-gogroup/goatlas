@@ -11217,18 +11217,34 @@ function inteiro(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
+function tituloDaProposta(json2) {
+  if (json2 === null) return null;
+  try {
+    const p = JSON.parse(json2);
+    if (typeof p !== "object" || p === null) return null;
+    const t = p.titulo;
+    if (typeof t !== "string") return null;
+    const limpo = t.trim();
+    return limpo === "" ? null : limpo;
+  } catch {
+    return null;
+  }
+}
 async function listarSessoes(db, filtro = {}) {
   const limite2 = Math.min(Math.max(filtro.limite ?? LIMITE_PADRAO, 1), 200);
   const porEmail = filtro.email?.trim().toLowerCase() || null;
+  const soEsta = filtro.conversaId?.trim() || null;
+  const eSoEsta = soEsta === null ? "" : " AND conversa_id = ?";
+  const argSoEsta = soEsta === null ? [] : [soEsta];
   const conversas = linhasComoObjetos(
     await db.query(
       `SELECT id, solicitante_email, estado, custo_usd, proposta_json, confirmado_em,
               criado_em, atualizado_em
          FROM conversas
-        ${porEmail ? "WHERE lower(solicitante_email) = ?" : ""}
+        ${soEsta !== null ? "WHERE id = ?" : porEmail !== null ? "WHERE lower(solicitante_email) = ?" : ""}
         ORDER BY criado_em DESC
         LIMIT ?`,
-      porEmail ? [porEmail, limite2] : [limite2]
+      soEsta !== null ? [soEsta, limite2] : porEmail !== null ? [porEmail, limite2] : [limite2]
     )
   );
   if (conversas.length === 0) return [];
@@ -11236,8 +11252,9 @@ async function listarSessoes(db, filtro = {}) {
   for (const m of linhasComoObjetos(
     await db.query(
       `SELECT conversa_id, papel, COUNT(*) AS total, MAX(criado_em) AS ultima
-         FROM mensagens GROUP BY conversa_id, papel`,
-      []
+         FROM mensagens ${soEsta === null ? "" : "WHERE conversa_id = ?"}
+        GROUP BY conversa_id, papel`,
+      argSoEsta
     )
   )) {
     const atual = mensagens.get(m.conversa_id) ?? { pessoa: 0, agente: 0, ultima: "" };
@@ -11250,8 +11267,9 @@ async function listarSessoes(db, filtro = {}) {
   for (const b of linhasComoObjetos(
     await db.query(
       `SELECT conversa_id, COUNT(*) AS total, SUM(houve_override) AS overrides
-         FROM bloqueios GROUP BY conversa_id`,
-      []
+         FROM bloqueios ${soEsta === null ? "" : "WHERE conversa_id = ?"}
+        GROUP BY conversa_id`,
+      argSoEsta
     )
   )) {
     bloqueios.set(b.conversa_id, { total: inteiro(b.total), overrides: inteiro(b.overrides) });
@@ -11263,9 +11281,9 @@ async function listarSessoes(db, filtro = {}) {
               SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS erros,
               MAX(duracao_ms) AS max_ms
          FROM investigador_requisicoes
-        WHERE conversa_id IS NOT NULL
+        WHERE conversa_id IS NOT NULL${eSoEsta}
         GROUP BY conversa_id`,
-      []
+      argSoEsta
     )
   )) {
     api.set(r.conversa_id, {
@@ -11278,8 +11296,8 @@ async function listarSessoes(db, filtro = {}) {
   for (const s of linhasComoObjetos(
     await db.query(
       `SELECT conversa_id, issue_key FROM submissoes
-        WHERE conversa_id IS NOT NULL AND issue_key IS NOT NULL`,
-      []
+        WHERE conversa_id IS NOT NULL AND issue_key IS NOT NULL${eSoEsta}`,
+      argSoEsta
     )
   )) {
     if (s.issue_key) chamados.set(s.conversa_id, s.issue_key);
@@ -11289,9 +11307,9 @@ async function listarSessoes(db, filtro = {}) {
     await db.query(
       `SELECT conversa_id, json_extract(dados_json, '$.motivo') AS motivo
          FROM investigador_eventos
-        WHERE tipo = 'ia_extracao_recusada' AND conversa_id IS NOT NULL
+        WHERE tipo = 'ia_extracao_recusada' AND conversa_id IS NOT NULL${eSoEsta}
         ORDER BY criado_em ASC, ordem ASC`,
-      []
+      argSoEsta
     )
   )) {
     if (e.motivo) semProposta.set(e.conversa_id, e.motivo);
@@ -11313,6 +11331,7 @@ async function listarSessoes(db, filtro = {}) {
       bloqueios: blo.total,
       overrides: blo.overrides,
       temProposta,
+      tituloDoCartao: tituloDaProposta(c.proposta_json),
       confirmadoEm: c.confirmado_em,
       issueKey: chamados.get(c.id) ?? null,
       requisicoes: req.total,
@@ -11378,7 +11397,8 @@ async function detalharSessao(db, conversaId) {
       [conversaId]
     )
   );
-  return { eventos, requisicoes, mensagens };
+  const sessoes = await listarSessoes(db, { conversaId, limite: 1 });
+  return { sessao: sessoes[0] ?? null, eventos, requisicoes, mensagens };
 }
 var LENTO_MS = 5e3;
 async function listarRequisicoes(db, filtro = {}) {

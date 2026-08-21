@@ -66,12 +66,25 @@ Cenários em [`spec.md`](./spec.md).
 
 ## O que falta, e não é código
 
-- [ ] **T-1415** 🚨 **Medir na staging**, com a sessão real que originou o relato
-  (`7d909d36-bb89-4d9e-9063-fff35016ff8c`). Confirmar na tela: o cabeçalho nomeando o assunto ·
-  a conversa em bolhas com a ordem certa · o marco de cada intervenção · o marcador **na**
-  espinha na aba Linha do tempo · e a altura da página, que era 3.311 px.
-  ⚠️ A regra 10 vale, e a lição de 20/08 é que o navegador achou três defeitos com a suíte
-  inteira verde.
-- [ ] **T-1416** Deploy em produção depois da staging, com o **mesmo bundle** — e buildando da
+- [x] **T-1415** ✅ **MEDIDO na staging em 21/08/2026** (`3936ca2d`, `version 46`,
+  conversa `1c37b740` — a mesma da spec 012, com **34 eventos reais**):
+  - a **lista** deixou de ser uma coluna de e-mails: *"Acesso ao Nexus para investigar
+    integração com Factory"*, *"Solicitação de acesso ao Nexus para acompanhamento da
+    integração Nexus x Factory"*;
+  - o **cabeçalho** com título, `coletando` + `cartão na tela`, quem, e os seis números
+    (`2p / 2ag` · 2 turnos · 0 bloqueios · 0 erros · 25,1 s · US$ 0,0000);
+  - a **conversa** em bolhas, com o markdown do agente renderizado e os dois resultados de
+    tool como tiras finas (`3,5 kB` e `146 bytes`);
+  - 🚨 **os 34 eventos numa única posição esquerda: `387`** — todos na espinha, **zero**
+    `data-lado`. Era exatamente aqui que o primeiro evento de cada turno ia para `500`;
+  - **todo bloco de pares em 19 px**, com qualquer número de pares;
+  - altura média por evento de **122 px**, contra **145** medidos em produção — queda de 16%;
+  - `scrollWidth === clientWidth`: nenhuma barra horizontal.
+  ⚠️ **A página da linha do tempo não encolheu** (3.570 px com 34 eventos × 3.311 px com 32):
+  o que encolheu é o **evento**, e o ganho de leitura vem de a conversa ser a aba padrão —
+  1.601 px para a mesma sessão.
+  ⚠️ A sessão `7d909d36` do relato é de **produção**; a staging tem dados próprios.
+- [ ] **T-1416** Deploy em produção com o **mesmo bundle** validado na staging
+  (`index-DGJTiifI.js` · `index-BnMV5SH5.css`) — e buildando da
   **árvore principal**, porque o mesmo commit dá CSS de hash diferente num worktree (`CLAUDE.md`,
   21/08/2026).

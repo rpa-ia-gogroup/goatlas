@@ -1851,8 +1851,22 @@ dizendo onde olhar. Hoje: cabeçalho com assunto, quem, estado, chamado e seis n
 com a **Conversa** como padrão, em bolhas; cada intervenção manual da pessoa marcada como dela,
 no instante em que aconteceu; e gravidade por tipo, dentro da paleta que o app já tem.
 **26 casos novos**, suíte em **1810 testes**, typecheck e build limpos.
-⚠️ **Falta medir na staging** — e a lição de 20/08 é que o navegador achou **três** defeitos com
-a suíte inteira verde. ⚠️ **Produção continua sem isto.**
+✅ **MEDIDO na staging em 21/08/2026** (`3936ca2d`, `version 46`, conversa `1c37b740` — a mesma
+da spec 012, com **34 eventos reais**): a lista deixou de ser uma coluna de e-mails · o cabeçalho
+com título, selos e os seis números · a conversa em bolhas com o markdown renderizado · e, o que
+mais importa, **os 34 eventos numa única posição esquerda (`387`), zero `data-lado`** — era ali
+que o primeiro evento de cada turno ia para `500`. Bloco de pares em **19 px** com qualquer número
+de pares; altura média por evento de **122 px** contra **145** em produção.
+🚨 **Um defeito apareceu só no navegador, com a suíte verde:** a fala do agente saía com o
+**markdown cru** (`**seu**`, `- [link](…)`) — corrigido reusando `TextoDoAgente`, o mesmo
+renderizador da conversa real. ⚠️ **A página da linha do tempo NÃO encolheu** (3.570 px com 34
+eventos × 3.311 px com 32): o que encolheu é o **evento**, e o ganho de leitura vem de a conversa
+ser a aba padrão — 1.601 px para a mesma sessão. Afirmar "a página encolheu" seria falso.
+⚠️ **Produção continua sem isto** (`T-1416`); o bundle validado é `index-DGJTiifI.js` ·
+`index-BnMV5SH5.css`.
+⚠️ **E o CSS deu o MESMO hash no worktree e na árvore principal nesta rodada** — o defeito de
+21/08 não reproduziu. A regra de buildar da principal fica; uma não-reprodução não explica a
+causa.
 
 🚨 **A spec 009 (Investigador) está completa em código** (`D-73`, 14/08/2026). Uma aba nova, só
 admin, que responde *"o que aconteceu com esta pessoa?"*: toda requisição `/api/*` vira uma linha
