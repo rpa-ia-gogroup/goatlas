@@ -805,6 +805,60 @@ destes reabre um vazamento que já foi fechado.
   ⚠️ E as `chamada_externa` saem da narrativa e viram **agregado do turno**: seis idas à
   Atlassian no meio da conversa eram o ruído que fazia a tela parecer log, e o total no
   cabeçalho é o achado de `D-73` (~2,6 s só para nomear os assuntos) visível de relance.
+- 🚨 **O cabeçalho da sessão vem de `listarSessoes`, nunca de um resumo próprio** (`D-80`,
+  `FiltroDeSessoes.conversaId`). `detalharSessao` devolvia `{ eventos, requisicoes, mensagens }`
+  e **nada mais** — quem abria uma sessão não sabia de quem era, do que tratava, se virou
+  chamado nem por que morreu, e o dado existia desde a `T-124` em `SessaoInvestigador`,
+  consumido **só pela lista**. Os treze números do cabeçalho são os mesmos treze da lista, e um
+  `resumirSessao` paralelo divergiria na primeira correção (o defeito que `config/diagnostico.ts`
+  existe para não repetir, e que `aplicarRecorte` já resolveu assim). ⚠️ O filtro **estreita as
+  cinco agregações** junto — sem isso, abrir uma sessão varre `mensagens`, `bloqueios` e
+  `investigador_requisicoes` inteiras para descartar tudo menos uma linha (`RNF-36`). ⚠️ E
+  `sessao: null` é **expurgo pela retenção**, dito em palavras: 404 ali viraria aviso de erro
+  sobre um registro que só envelheceu (`FR-19`).
+- 🚨 **O assunto da conversa é o título do CARTÃO, e sem cartão a tela DIZ isso** (`D-80`,
+  `tituloDaProposta`). Sai de `conversas.proposta_json`, que já era lido em `listarSessoes`.
+  ⚠️ **Nunca derivado da primeira mensagem:** daria uma linha plausível e possivelmente falsa
+  numa tela cujo produto é evidência — sem cartão, quem fala é `MOTIVOS_SEM_PROPOSTA`, a
+  **mesma** frase da lista. ⚠️ E `proposta_json` malformado devolve título `null` **com
+  `temProposta: true`**: a coluna está preenchida, o que falhou foi lê-la, e confundir as duas
+  afirmaria que a pessoa nunca viu cartão.
+- 🚨 **A autoria de um marco da conversa vem da ALLOWLIST, nunca de `origem`** (`D-80`,
+  `app/investigador/conversa.ts`). `origem: 'usuario'` é *quase* o mesmo conjunto, e "quase" é o
+  problema: `bloqueio` e `desfecho_criacao` têm origem `servidor` e **precisam** aparecer (é o
+  bloqueio que explica o silêncio do agente naquele turno — `D-21` descarta o texto do modelo),
+  enquanto `mensagem_usuario` tem origem `usuario` e **não** é marco, porque a fala já está na
+  conversa e entraria em dobro. ⚠️ E `proposta_rederivada` só é ação da pessoa com
+  `forcado: true` (o botão de `D-76`): a rederivação roda em **todo** turno e poria um cartão
+  entre cada par de falas. ⚠️ **Allowlist, nunca "tudo que não é fala"** — jogar os 21 tipos ali
+  devolve a parede que a spec 014 desfez.
+- 🚨 **`margin-left` no item move o `::before` com ele — e foi assim que o marcador se soltou da
+  espinha** (`D-80`, medido no navegador em 21/08/2026). O recuo de 12% da mensagem da pessoa
+  punha o marcador em `x=500` com a espinha em `x=387`: um círculo solto no branco, 113 px fora
+  do traço que ele existe para marcar, no **primeiro evento de todo turno**. Saiu; a autoria por
+  posição vive agora na aba **Conversa**, onde a pergunta é "quem falou?". ⚠️ Quem for recuar
+  item que carrega marcador posicionado precisa mover o marcador junto, ou tirá-lo do item.
+- 🚨 **`minmax(8rem, …)` numa grade de pares curtos é calha morta** (`D-80`,
+  `.inv-evento-linhas`). Rótulo de seis letras fixado em **128 px**, valor do outro lado do vão
+  (`falhou … … … não`), e `gap: 2px` entre linhas contra 12–20 px em todo o resto — os pares
+  ficavam empilhados num bloco cinza e o resto respirava. Hoje cada par é **inline** e eles
+  fluem numa linha só. ⚠️ **A informação não encolheu:** `falhou: não` continua na tela, porque
+  `false` é informação e a distinção entre *falhou* e *não rodou* é o que `RNF-18` sustenta.
+- ⚠️ **Gravidade de evento não trouxe cor nova, e isso é `D-34` outra vez** (`D-80`,
+  `gravidadeDoEvento`). Quatro tons — `pessoa`/`atencao`/`desfecho`/`neutro` —, todos dentro da
+  paleta que o app já tem: `--go-blue`, `--go-lime` (a marca de `.aviso-atencao`),
+  `--go-light-blue`, fio azul de 18%. O godocs usa `#16a34a`/`#dc2626`/`#ea580c` e **não** foi
+  copiado: a identidade GoGroup tem duas cores de acento (§1.3), e `D-34` já recusou
+  vermelho/verde inventados pelo mesmo motivo. ⚠️ **Cor nunca sozinha** (regra 9): cada tom tem
+  a palavra no título que `DESCRITORES` já produzia. ⚠️ `Record<TipoDeEvento, Gravidade>` — tipo
+  novo sem gravidade **não compila**; e como um valor errado *compila*,
+  `tests/014-conversa-no-investigador.test.ts` afirma os dois refinamentos por dado
+  (`tool_executada` que falhou · `desfecho_criacao` sem chave).
+- ⚠️ **Os 37 ícones do `lucide` do godocs ficaram FORA de propósito** (`D-80`). O
+  `investigador.tsx` de lá os usa e fica muito melhor por isso; acrescentar a dependência por
+  uma aba engorda um bundle que a regra 10 valida **byte a byte** entre staging e produção. O
+  que foi copiado é o que não custa nada: cabeçalho com selos e números, abas com contagem, e o
+  diálogo em bolhas.
 - ⚠️ **Branch aberto ANTES do rename encontra o `ATLAS_*` só no typecheck** (20/08/2026). A
   spec 012 nasceu antes de `D-77` e seu teste montava o contexto com `GOATLAS_USAR_FAKES`; o
   merge com a `main` já renomeada saiu **limpo** (arquivos diferentes) e o `tsc` quebrou
@@ -1784,7 +1838,21 @@ Progresso tarefa por tarefa nos quatro `tasks.md`:
 [009](specs/009-investigador/tasks.md) ·
 [010](specs/010-anexo-obrigatorio/tasks.md) ·
 [012](specs/012-rederivacao-que-nao-regride/tasks.md) ·
-[013](specs/013-investigador-legivel/tasks.md).
+[013](specs/013-investigador-legivel/tasks.md) ·
+[014](specs/014-conversa-no-investigador/tasks.md).
+
+🚨 **A spec 014 (a conversa no Investigador) está completa em código** (`D-80`, 21/08/2026).
+Três defeitos de um relato de uso, todos medidos no navegador em produção antes de existir
+código: a sessão aberta **sem cabeçalho** — `detalharSessao` devolvia eventos, requisições e
+mensagens e nada mais, então não havia como saber de quem era nem do que tratava · a **conversa**
+sepultada num `<details>` fechado no fim da página, como lista de `<pre>`, quando ela é o objeto
+da investigação · e **32 eventos com o mesmo desenho**, 3.311 px para 6 mensagens, sem nada
+dizendo onde olhar. Hoje: cabeçalho com assunto, quem, estado, chamado e seis números; três abas
+com a **Conversa** como padrão, em bolhas; cada intervenção manual da pessoa marcada como dela,
+no instante em que aconteceu; e gravidade por tipo, dentro da paleta que o app já tem.
+**26 casos novos**, suíte em **1810 testes**, typecheck e build limpos.
+⚠️ **Falta medir na staging** — e a lição de 20/08 é que o navegador achou **três** defeitos com
+a suíte inteira verde. ⚠️ **Produção continua sem isto.**
 
 🚨 **A spec 009 (Investigador) está completa em código** (`D-73`, 14/08/2026). Uma aba nova, só
 admin, que responde *"o que aconteceu com esta pessoa?"*: toda requisição `/api/*` vira uma linha
@@ -1992,7 +2060,7 @@ saiu como **`Relatar um problema (Sistema)`** (tipo 134), não mais o `92` de No
 medição que o parágrafo anterior desta linha dizia faltar. ⚠️ O chamado **não** foi confirmado:
 criaria um real numa fila real, e o `GN-6894` já espera alguém para apagá-lo.
 
-**1785 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
+**1810 testes · typecheck limpo · build limpo**, tudo sem credencial e sem rede.
 ⚠️ `tests/latencia.test.ts` tem **um** caso que afirma sobre tempo de parede ("8 itens de
 20 ms com teto 4") e falha de vez em quando em máquina carregada — visto em 12/08/2026, sem
 relação com o código sob teste. O outro caso desse tipo (metadados em paralelo) **saiu** em

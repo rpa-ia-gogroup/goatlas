@@ -328,22 +328,49 @@
 }
 
 /* Os pares `rótulo → valor`. Grade de duas colunas, com o rótulo discreto. */
+/*
+  🚨 **Era grade de duas colunas com `minmax(8rem, …)`, e a calha era o defeito** (spec 014).
+  Medido em 21/08/2026: coluna de rótulo fixada em **128 px** para rótulos de seis letras, com
+  o valor jogado do outro lado do vão — `falhou … … … não`. E `gap: 2px` entre linhas contra
+  12–20 px em todo o resto: os pares ficavam empilhados num bloco cinza e o resto respirava.
+
+  Agora cada par é **inline**, e eles fluem numa linha só até faltar largura. Três pares curtos
+  ("falhou: não · disparou bloqueio: não · argumentos: {…}") passaram de três linhas de 20 px
+  para uma — o que devolve à altura do evento a proporção que ela deveria ter.
+
+  ⚠️ **A informação NÃO encolheu.** `falhou: não` continua na tela, porque `false` é informação
+  e a distinção entre *falhou* e *não rodou* é o que `RNF-18` sustenta. O que mudou é ela
+  ocupar o espaço de um dado curto.
+*/
 .inv-evento-linhas {
-  display: grid;
-  grid-template-columns: minmax(8rem, max-content) 1fr;
-  gap: 2px var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
   margin: 0;
   font-size: var(--fs-caption);
+  min-width: 0;
 }
 .inv-evento-linhas > div {
-  display: contents;
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  min-width: 0;
+  max-width: 100%;
 }
 .inv-evento-linhas dt {
-  color: color-mix(in srgb, var(--go-text-primary) 60%, transparent);
+  color: color-mix(in srgb, var(--go-text-primary) 55%, transparent);
+  white-space: nowrap;
+}
+.inv-evento-linhas dt::after {
+  /* No markup o par é `<dt>`+`<dd>`; os dois-pontos são apresentação, e no nome acessível
+     eles não fazem falta (o `dt` já é o rótulo do `dd`). */
+  content: ':';
 }
 .inv-evento-linhas dd {
   margin: 0;
+  min-width: 0;
   overflow-wrap: anywhere;
+  font-weight: var(--fw-semibold);
 }
 
 /*
@@ -453,13 +480,53 @@
 }
 
 /*
-  O lado. A mensagem da pessoa recua para a direita, como na conversa do app — é o único
-  sinal de autoria além da palavra, e ele some no celular, onde a coluna não comporta.
+  🚨 **O recuo de 12% da mensagem da pessoa SAIU** — spec 014, `SC-9`.
+
+  Ele era o único sinal de autoria além da palavra, e o preço era alto: `margin-left` move o
+  item **e** o `::before` posicionado dentro dele, então o marcador ia junto. Medido no
+  navegador em 21/08/2026: o ponto do primeiro evento de cada turno em `x=500` com a espinha
+  em `x=387` — um círculo solto no branco, 113 px fora do traço que ele existe para marcar.
+
+  A autoria por posição não morreu, mudou de lugar: ela agora vive na aba **Conversa**
+  (`.inv-fala[data-papel]`), que é onde a pergunta é "quem falou?". Aqui a pergunta é "o que
+  o app fez?", e quem responde é `.inv-origem`, em palavra.
 */
-@media (min-width: 40rem) {
-  .inv-evento[data-lado='direita'] {
-    margin-left: 12%;
-  }
+
+/* ---------- gravidade: onde olhar primeiro ------------------------------- */
+/*
+  🚨 Spec 014, `FR-36`. Antes, os 32 eventos de uma sessão tinham desenho **idêntico**: a
+  ferramenta que falhou pesava o mesmo que a ida de rotina ao modelo. O tom vem de
+  `gravidadeDoEvento`, e a paleta é a que o app já tem — a identidade GoGroup tem duas cores
+  de acento, e `D-34` já recusou vermelho/verde inventados pelo mesmo motivo.
+
+  ⚠️ **Cor nunca sozinha** (regra 9): o título do evento já diz *"e FALHOU"*, *"Bloqueio ·
+  Regra 1…"*, *"A pessoa insistiu"*. Aqui ela é reforço redundante, que é o único uso legítimo.
+*/
+.inv-evento[data-tom='pessoa']::before {
+  background: var(--go-blue);
+  border-color: var(--go-blue);
+}
+.inv-evento[data-tom='atencao']::before {
+  background: var(--go-lime);
+  border-color: var(--go-lime);
+}
+.inv-evento[data-tom='desfecho']::before {
+  background: var(--go-light-blue);
+  border-color: var(--go-blue);
+}
+/* A máquina em rotina: o marcador recua para fio, e o título perde o negrito. */
+.inv-evento[data-tom='neutro']::before {
+  background: var(--go-cream);
+  border-color: color-mix(in srgb, var(--go-blue) 45%, transparent);
+}
+.inv-evento[data-tom='neutro'] .inv-evento-titulo {
+  font-weight: var(--fw-semibold);
+  color: color-mix(in srgb, var(--go-text-primary) 85%, transparent);
+}
+.inv-evento[data-tom='atencao'] .inv-evento-titulo {
+  /* Sem cor nova: o que muda é o peso e um traço lime à esquerda do título. */
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--go-lime);
 }
 
 /* ---------- JSON --------------------------------------------------------- */
@@ -579,29 +646,6 @@
   font-size: var(--fs-small);
   font-weight: var(--fw-semibold);
   color: var(--go-text-heading);
-}
-.inv-mensagens {
-  display: grid;
-  gap: var(--space-3);
-  list-style: none;
-  padding: var(--space-3) 0 0;
-  margin: 0;
-}
-.inv-mensagens li {
-  border-left: 2px solid color-mix(in srgb, var(--go-blue) 20%, transparent);
-  padding-left: var(--space-3);
-}
-.inv-papel {
-  display: block;
-  font-size: var(--fs-caption);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--go-text-heading);
-}
-.inv-mensagens p {
-  margin: var(--space-1) 0 0;
-  font-size: var(--fs-small);
-  white-space: pre-wrap;
 }
 
 @media (max-width: 640px) {
@@ -790,4 +834,295 @@
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* =========================================================================
+   spec 014 — o cabeçalho, as abas e a conversa
+   =========================================================================
+   O relato de 21/08/2026 foi de três coisas, e as três moram aqui:
+
+   1. "não dá nem pra saber do que se trata aquela conversa" — não havia cabeçalho.
+   2. "o godocs tem um histórico super estético igual um chat real" — a conversa morava
+      num `<details>` fechado no fim da página, como lista de `<pre>`.
+   3. "determinar cada ponto que o usuário colocou manualmente de forma visível" — editar
+      o cartão e rederivar o cartão tinham o mesmo desenho.
+   ========================================================================= */
+
+/* ---------- o cabeçalho da sessão --------------------------------------- */
+
+.inv-cabeca {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--go-white);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  /* A barra de tom, como em `.capacidade` do console: a cor mora na borda, não no fundo —
+     fundo colorido num cartão que carrega seis números reduz o contraste de todos eles. */
+  border-left: 4px solid color-mix(in srgb, var(--go-blue) 18%, transparent);
+  min-width: 0;
+}
+.inv-cabeca[data-tom='pessoa'] {
+  border-left-color: var(--go-blue);
+}
+.inv-cabeca[data-tom='atencao'] {
+  border-left-color: var(--go-lime);
+}
+.inv-cabeca[data-tom='desfecho'] {
+  border-left-color: var(--go-light-blue);
+}
+.inv-cabeca-topo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+/*
+  O assunto. `h2` de verdade, porque é o nome da coisa que se está investigando — e é a
+  primeira resposta que o cabeçalho existe para dar.
+*/
+.inv-cabeca-titulo {
+  margin: 0;
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-black);
+  color: var(--go-text-heading);
+  line-height: 1.25;
+  /* `min-width: 0` porque isto é item de flex e o título pode ser longo: sem ele, um título
+     de dez palavras empurra o botão de exportar para fora do cartão. */
+  min-width: 0;
+}
+.inv-cabeca-selos,
+.inv-cabeca-quem {
+  margin: 0;
+}
+.inv-cabeca-selos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.inv-cabeca-quem {
+  font-size: var(--fs-caption);
+  color: color-mix(in srgb, var(--go-text-primary) 70%, transparent);
+}
+/*
+  Os números. Valor em cima e o que ele é embaixo — a forma do godocs, e a razão é que se lê
+  em coluna: seis pares "rótulo: valor" em linha obrigam a ler o rótulo de cada um para achar
+  o que interessa.
+*/
+.inv-cabeca-numeros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  margin: var(--space-1) 0 0;
+}
+.inv-cabeca-numero {
+  display: flex;
+  flex-direction: column-reverse;
+}
+.inv-cabeca-numero dt {
+  font-size: var(--fs-caption);
+  color: color-mix(in srgb, var(--go-text-primary) 55%, transparent);
+}
+.inv-cabeca-numero dd {
+  margin: 0;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+  color: var(--go-text-heading);
+}
+/* Erro de API acima de zero: a marca é o traço lime, e o número já está ali em palavra. */
+.inv-cabeca-numero[data-alerta='sim'] dd {
+  padding-left: var(--space-2);
+  border-left: 3px solid var(--go-lime);
+}
+/*
+  🚨 A frase que responde ao caso de 14/08/2026 — por que não houve cartão. Ela existia só na
+  lista; no detalhe, quem abria a sessão tinha de ler 32 eventos para chegar nela.
+*/
+.inv-cabeca-motivo {
+  margin: 0;
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--go-lime);
+  font-size: var(--fs-small);
+  color: var(--go-text-primary);
+  max-width: 68ch;
+}
+
+/* ---------- as abas da sessão ------------------------------------------- */
+/*
+  Três visões, e a Conversa é a primeira (`SC-3`). Mesmo desenho de `.inv-visao`, que já
+  separa Sessões de Chamadas de API no topo da aba — dois vocabulários de aba na mesma tela
+  fariam a segunda parecer outra coisa.
+*/
+.inv-abas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.inv-aba {
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--go-blue);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--go-blue) 25%, transparent);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+.inv-aba[data-ativa='sim'] {
+  background: var(--go-blue);
+  border-color: var(--go-blue);
+  color: var(--go-text-on-blue);
+}
+.inv-aba[data-ativa='sim'] .inv-medida {
+  color: color-mix(in srgb, var(--go-text-on-blue) 70%, transparent);
+}
+
+/* ---------- a conversa -------------------------------------------------- */
+
+.inv-conversa {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+/*
+  A fala. 85% de largura máxima, como no godocs: bolha de 100% deixa de ser bolha, e a
+  faixa vazia do lado oposto é o que faz a autoria se ler sem ninguém procurar o rótulo.
+*/
+.inv-fala {
+  max-width: 85%;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+.inv-fala[data-papel='pessoa'] {
+  /* A pessoa à direita, em azul cheio — o gesto que todo app de conversa usa, inclusive o
+     nosso. Aqui ele diz "esta linha é dela", não "esta é minha". */
+  align-self: flex-end;
+  background: var(--go-blue);
+  color: var(--go-text-on-blue);
+  border-bottom-right-radius: var(--radius-sm);
+}
+.inv-fala[data-papel='agente'] {
+  align-self: flex-start;
+  background: var(--go-white);
+  border-left: 3px solid var(--go-lime);
+  border-bottom-left-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+.inv-fala-cabeca {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--fs-caption);
+  margin-bottom: var(--space-2);
+}
+.inv-fala[data-papel='pessoa'] .inv-origem,
+.inv-fala[data-papel='pessoa'] time {
+  color: color-mix(in srgb, var(--go-text-on-blue) 70%, transparent);
+}
+.inv-fala-cabeca time {
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--go-text-primary) 55%, transparent);
+}
+.inv-fala-texto {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  /* A quebra de linha que a pessoa escreveu é informação: sem isto, um relato em três
+     parágrafos vira um bloco só. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
+  ⚠️ Resultado de ferramenta: subordinado, fechado, e fora do fluxo das bolhas (`SC-4`).
+  Ele não é fala de ninguém — é o que o Confluence devolveu, e sozinho passa de 3 kB.
+*/
+.inv-ferramenta {
+  align-self: stretch;
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in srgb, var(--go-blue) 4%, transparent);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+/*
+  🚨 O marco. É o pedido literal do relato: cada intervenção manual visível para quem lê o
+  histórico depois. Centralizado e mais estreito que as bolhas, porque ele interrompe o
+  diálogo — alinhá-lo a um dos lados o faria parecer fala de alguém.
+*/
+.inv-marco {
+  align-self: center;
+  width: 100%;
+  max-width: 88%;
+  min-width: 0;
+}
+.inv-marco-caixa {
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  background: var(--go-cream);
+  border: 1px solid color-mix(in srgb, var(--go-blue) 12%, transparent);
+  border-left-width: 3px;
+  border-left-color: color-mix(in srgb, var(--go-blue) 25%, transparent);
+  min-width: 0;
+}
+.inv-marco-caixa[data-tom='pessoa'] {
+  border-left-color: var(--go-blue);
+}
+.inv-marco-caixa[data-tom='atencao'] {
+  border-left-color: var(--go-lime);
+}
+.inv-marco-caixa[data-tom='desfecho'] {
+  border-left-color: var(--go-light-blue);
+}
+.inv-marco-cabeca {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--fs-caption);
+  margin-bottom: var(--space-1);
+}
+.inv-marco-cabeca time {
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--go-text-primary) 55%, transparent);
+}
+/* Ação da pessoa: o rótulo ganha o azul da marca, e a palavra já diz de quem foi. */
+.inv-marco[data-autoria='pessoa'] .inv-origem {
+  color: var(--go-blue);
+}
+
+/* O e-mail na linha da lista, agora que o assunto ficou com a primeira linha. */
+.inv-sessao-quem {
+  display: block;
+  font-size: var(--fs-caption);
+  color: color-mix(in srgb, var(--go-text-primary) 65%, transparent);
+}
+
+/* No celular a coluna não comporta recuo: as três formas passam a ocupar a largura toda, e
+   a autoria fica só na palavra — que é por isso que ela nunca é só a posição. */
+@media (max-width: 640px) {
+  .inv-fala,
+  .inv-marco {
+    max-width: 100%;
+  }
+}
+
+/*
+  ⚠️ `TextoDoAgente` traz `.fala-agente`, que tem `max-width: 68ch` — a medida da prosa na
+  conversa de verdade, onde a fala ocupa a coluna inteira. Dentro de uma bolha de 85% ela
+  encolheria o texto duas vezes, então aqui a medida é a bolha.
+*/
+.inv-fala .fala-agente {
+  max-width: none;
+  font-size: var(--fs-small);
 }

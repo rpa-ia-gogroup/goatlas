@@ -5251,6 +5251,136 @@ divergiria na primeira correção.
 
 ---
 
+### D-80 · A conversa vira a tela do Investigador, e a sessão ganha cabeçalho
+
+**21/08/2026.** Spec `014` (`FR-33` a `FR-36`).
+
+#### O relato
+
+> *"nossa nova tela do investigador ficou uma porcaria visualmente. não dá pra ler isso como
+> um ser humano sem ficar confuso e perdido"*
+
+e, depois de olhar o Investigador do **godocs** lado a lado:
+
+> *"o investigador do godocs, dentro de cada projeto enviado, tem um histórico super estético
+> igual um chat real entre o usuário e a IA, além de determinar cada ponto que o usuário
+> colocou manualmente de uma forma visível pra quem for ver o histórico depois. além disso,
+> ele tem no começo do card aberto as informações dele, coisa que aqui não tem e por isso não
+> dá nem pra saber do que se trata aquela conversa"*
+
+#### A medição, antes de qualquer opinião
+
+Sessão `7d909d36` aberta em produção, no navegador:
+
+| Medida | Valor |
+|---|---|
+| Eventos na tela | **32**, todos com o mesmo conjunto de classes |
+| Altura da página | **3.311 px** para 6 mensagens e 2 turnos |
+| Altura média por evento | ~145 px |
+| Coluna de rótulo dos pares | **128 px fixos** para rótulos de 6 letras |
+| `gap` entre pares | **2 px**, contra 12–20 px em todo o resto |
+| Marcador do 1º evento de cada turno | `x=500`, com a espinha em `x=387` |
+| Cores semânticas | **zero** |
+| Onde estava a conversa | `<details>` **fechado**, no fim da página |
+| Onde estava "de que se trata" | **em lugar nenhum** |
+
+O `D-79` está certo no que fez — o turno, a tradução, o JSON atrás de um clique. O que ele
+não fez foi **hierarquia**: com 21 tipos traduzidos e nenhuma diferença de desenho entre eles,
+`Ferramenta executada — e FALHOU` pesa o mesmo que `Ida ao modelo · ciclo 1`, e as linhas
+`falhou: não` repetidas em cinza fazem o `sim` que importa desaparecer entre os `não`.
+
+#### As quatro decisões
+
+**1. `detalharSessao` devolve `sessao` (`FR-33`).** Ela devolvia `{ eventos, requisicoes,
+mensagens }` e nada mais — e o dado existia desde a `T-124`, em `SessaoInvestigador`, consumido
+**só pela lista**. 🚨 **Vem de `listarSessoes` com um filtro `conversaId`, nunca de um
+`resumirSessao` novo:** os treze números do cabeçalho são os mesmos treze da lista, e uma
+segunda implementação divergiria na primeira correção — é o defeito que `config/diagnostico.ts`
+existe para não repetir, e que `aplicarRecorte` já resolveu assim (`D-79`). ⚠️ O filtro
+**estreita as cinco agregações** junto: sem isso, abrir uma sessão varreria `mensagens`,
+`bloqueios` e `investigador_requisicoes` inteiras para descartar tudo menos uma linha
+(`RNF-36`). ⚠️ E `sessao: null` é **expurgo pela retenção**, dito em palavras — nunca 404, que
+viraria aviso de erro sobre um registro que só envelheceu (`FR-19`, mesma escolha de
+`corposDaRequisicao`).
+
+**2. O título do cartão é o assunto, e sem cartão a tela DIZ isso.** `tituloDoCartao` sai de
+`conversas.proposta_json`, que já era lido ali. ⚠️ **Nunca inventado a partir da primeira
+mensagem:** daria uma linha plausível e possivelmente falsa numa tela cujo produto é
+evidência. Sem cartão, quem fala é `MOTIVOS_SEM_PROPOSTA` — a **mesma** frase da lista, agora
+no topo do detalhe em vez de enterrada 32 eventos abaixo. Na lista, o assunto **subiu para a
+primeira linha** e o e-mail desceu: com dez conversas da mesma pessoa, escolher qual abrir era
+abrir todas.
+
+**3. A conversa é a visão padrão (`FR-34`).** Três abas — **Conversa** · Linha do tempo ·
+Chamadas de API —, e a primeira abre. A conversa vem de `mensagens`, a tabela **de produção**,
+a mesma que o modelo lê e que a transcrição de `D-54` anexa ao chamado. Pessoa à direita em
+azul cheio, agente à esquerda com o traço lime. ⚠️ **A autoria é posição + palavra**, nunca só
+posição: no celular (`RNF-28`) a coluna não comporta recuo e sobra a palavra, que é por isso
+que ela existe. ⚠️ **Resultado de tool é `<details>` fechado, fora do fluxo das bolhas**
+(`SC-4`): ele não é fala de ninguém, e o retorno do Confluence sozinho passa de 3 kB. ⚠️ A
+linha do tempo **não perdeu nada** — encolheu de propósito, e continua sendo onde se lê o que
+a máquina fez.
+
+**4. Toda intervenção manual é marcada como da pessoa (`FR-35`).** `proposta_editada`,
+`formulario_alterado`, `override`, `declaracao_anexo`, `anexo_recebido`, `confirmacao` — e
+`proposta_rederivada` **só quando `forcado`** (o botão de `D-76`; a rederivação normal roda em
+todo turno e poria um cartão entre cada par de falas). Junto vêm quatro marcos do **app**, sem
+os quais a conversa não se explica: `bloqueio` (com bloqueio de pé o texto do modelo é
+descartado, `D-21` — é ele que explica o silêncio do agente), `ia_extracao_recusada` (o
+silêncio de 14/08/2026), `desfecho_criacao` e `erro_de_rota`. 🚨 **A autoria vem do MARCO, não
+de `origem`:** `origem: 'usuario'` é *quase* o mesmo conjunto, e "quase" é o problema —
+`bloqueio` tem origem `servidor` e precisa aparecer, `mensagem_usuario` tem origem `usuario` e
+**não** é marco, porque a fala já está na conversa e entraria em dobro. ⚠️ **Allowlist, nunca
+"tudo que não é fala"**: jogar os 21 tipos ali devolveria a parede que esta spec desfaz.
+
+#### A gravidade, e por que ela não trouxe cores novas (`FR-36`)
+
+`Record<TipoDeEvento, Gravidade>` com quatro tons — `pessoa` · `atencao` · `desfecho` ·
+`neutro` —, e tipo novo **não compila** sem o seu (mesma trava de `DESCRITORES`, de `FAMILIA` e
+de `PAINEIS_DO_CONSOLE`). Dois são refinados pelos dados, porque o tipo mente sobre eles:
+`tool_executada` é rotina quando roda e é o achado quando falha; `desfecho_criacao` sem
+`issueKey` é chamado perdido e não pode dividir a cor com o chamado que nasceu.
+
+🚨 **Vermelho e verde foram recusados, e não é preciosismo:** `D-34` já os recusou para o
+`status` do Confluence pelo mesmo motivo — a identidade GoGroup tem **duas** cores de acento
+(§1.3). O vocabulário é o que o app já usa: `--go-blue` para a pessoa, `--go-lime` para o que
+pede atenção (a marca de `.aviso-atencao`), `--go-light-blue` para desfecho, fio azul de 18%
+para a máquina em rotina. ⚠️ **Cor nunca sozinha** (regra 9): cada tom tem a palavra no título
+que `DESCRITORES` já produzia.
+
+#### Os dois defeitos de layout, medidos
+
+🚨 **O recuo de 12% da mensagem da pessoa SAIU** (`SC-9`). `margin-left` move o item **e** o
+`::before` posicionado dentro dele, então o marcador ia junto: `x=500` contra a espinha em
+`x=387` — um círculo solto no branco, 113 px fora do traço que ele existe para marcar. Era o
+primeiro evento de **todo** turno, o que faz dele a primeira coisa que se lê. A autoria por
+posição não morreu: mudou para a aba Conversa, onde a pergunta é "quem falou?".
+
+🚨 **A grade de pares `rótulo → valor` virou linha.** Era `minmax(8rem, max-content) 1fr` com
+`gap: 2px`: rótulo de seis letras fixado em 128 px, valor do outro lado do vão
+(`falhou … … … não`), e os pares empilhados a 2 px enquanto todo o resto respirava 12–20 px.
+Agora cada par é inline e eles fluem numa linha só — três pares curtos passaram de três linhas
+de 20 px para uma. ⚠️ **A informação não encolheu:** `falhou: não` continua na tela, porque
+`false` é informação e a distinção entre *falhou* e *não rodou* é o que `RNF-18` sustenta. O
+que mudou é ela ocupar o espaço de um dado curto.
+
+#### O que foi olhado no godocs, e o que NÃO foi copiado
+
+O `investigador.tsx` do godocs importa **37 ícones do `lucide`** e usa `#16a34a`/`#dc2626`/
+`#ea580c`/`#f59e0b`/`#0d9488`. As duas coisas ficaram de fora, por razões diferentes: a
+paleta, por `D-34` acima; os ícones, porque acrescentar a dependência por uma aba engorda um
+bundle que a regra 10 valida byte a byte entre staging e produção. O que **foi** copiado é o
+que não custa nada: o cabeçalho com selos e números, as abas com contagem, e o diálogo em
+bolhas.
+
+⚠️ **Nada aqui tocou no que é gravado.** Nenhuma coluna, nenhum tipo de evento, nenhuma trava:
+o registro da `D-73` está certo, e o que mudou é o que se lê primeiro.
+
+⚠️ **Falta medir na staging.** `1810` testes, typecheck e build limpos — e a lição de 20/08 é
+que o navegador achou **três** defeitos com a suíte inteira verde.
+
+---
+
 ## Perguntas em aberto
 
 Cada uma bloqueia tarefas específicas. `Bloqueia` lista o que não pode ser

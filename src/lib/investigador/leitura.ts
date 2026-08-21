@@ -33,6 +33,17 @@ export interface SessaoInvestigador {
   readonly overrides: number
   /** `true` quando a conversa chegou a ter cartão — o que a pessoa precisa para confirmar. */
   readonly temProposta: boolean
+  /**
+   * O título do cartão vigente — spec 014, `FR-33`.
+   *
+   * 🚨 **É a única coisa na resposta que diz DE QUE a conversa trata.** A lista mostrava
+   * e-mail e contagens, e o detalhe não mostrava nada: abrir uma sessão era ler 32 eventos
+   * para descobrir o assunto. Sai de `conversas.proposta_json`, que já era lido aqui.
+   *
+   * ⚠️ `null` quando não houve cartão — e aí quem fala é `motivoSemProposta`. Nunca uma
+   * frase inventada a partir da primeira mensagem: o servidor não adivinha assunto.
+   */
+  readonly tituloDoCartao: string | null
   readonly confirmadoEm: string | null
   readonly issueKey: string | null
   readonly requisicoes: number
@@ -54,6 +65,17 @@ export interface FiltroDeSessoes {
   readonly limite?: number | undefined
   /** Só o recorte `parada` lê isto. Ausente, ele devolve lista vazia em vez de adivinhar. */
   readonly agoraIso?: string | undefined
+  /**
+   * Uma conversa só — o que o cabeçalho do detalhe precisa (spec 014, `FR-33`).
+   *
+   * 🚨 **É filtro deste leitor, e não um segundo leitor.** O cabeçalho mostra os mesmos
+   * treze números que a lista, e um `resumirSessao` próprio seria a segunda regra que
+   * diverge em silêncio — o defeito que `config/diagnostico.ts` existe para não repetir, e
+   * que `aplicarRecorte` já resolveu do mesmo jeito (`D-79`). Aqui ele também estreita as
+   * cinco agregações: sem isso, abrir uma sessão varreria `mensagens`, `bloqueios` e
+   * `investigador_requisicoes` inteiras para descartar tudo menos uma linha (`RNF-36`).
+   */
+  readonly conversaId?: string | null
 }
 
 /** Uma linha do log de API. */
@@ -115,6 +137,28 @@ function inteiro(v: unknown): number {
 }
 
 /**
+ * O título de dentro de `conversas.proposta_json` — spec 014, `FR-33`.
+ *
+ * ⚠️ **Nunca lança.** A coluna é escrita por `definirProposta` e lida por várias versões do
+ * app ao longo dos trinta dias de retenção; JSON que não parseia, ou proposta sem título,
+ * devolve `null` — que a tela já sabe dizer. Um `throw` aqui derrubaria a lista inteira de
+ * sessões por causa de uma linha malformada.
+ */
+function tituloDaProposta(json: string | null): string | null {
+  if (json === null) return null
+  try {
+    const p = JSON.parse(json) as unknown
+    if (typeof p !== 'object' || p === null) return null
+    const t = (p as { titulo?: unknown }).titulo
+    if (typeof t !== 'string') return null
+    const limpo = t.trim()
+    return limpo === '' ? null : limpo
+  } catch {
+    return null
+  }
+}
+
+/**
  * A lista de sessões — **seis** consultas, sempre, independentemente de quantas conversas
  * existirem. Nenhuma delas traz o texto das mensagens: a lista conta, o detalhe mostra.
  */
@@ -124,6 +168,15 @@ export async function listarSessoes(
 ): Promise<readonly SessaoInvestigador[]> {
   const limite = Math.min(Math.max(filtro.limite ?? LIMITE_PADRAO, 1), 200)
   const porEmail = filtro.email?.trim().toLowerCase() || null
+  const soEsta = filtro.conversaId?.trim() || null
+  /**
+   * O recorte das cinco agregações quando se pede uma conversa só.
+   *
+   * ⚠️ O `AND` extra, e o parâmetro, andam juntos: escrever a cláusula sem empurrar o
+   * `?` produz `Wrong number of parameter bindings`, e o inverso liga o valor a nada.
+   */
+  const eSoEsta = soEsta === null ? '' : ' AND conversa_id = ?'
+  const argSoEsta = soEsta === null ? [] : [soEsta]
 
   const conversas = linhasComoObjetos<{
     id: string
@@ -139,10 +192,16 @@ export async function listarSessoes(
       `SELECT id, solicitante_email, estado, custo_usd, proposta_json, confirmado_em,
               criado_em, atualizado_em
          FROM conversas
-        ${porEmail ? 'WHERE lower(solicitante_email) = ?' : ''}
+        ${
+          soEsta !== null
+            ? 'WHERE id = ?'
+            : porEmail !== null
+              ? 'WHERE lower(solicitante_email) = ?'
+              : ''
+        }
         ORDER BY criado_em DESC
         LIMIT ?`,
-      porEmail ? [porEmail, limite] : [limite],
+      soEsta !== null ? [soEsta, limite] : porEmail !== null ? [porEmail, limite] : [limite],
     ),
   )
   if (conversas.length === 0) return []
@@ -156,8 +215,9 @@ export async function listarSessoes(
   }>(
     await db.query(
       `SELECT conversa_id, papel, COUNT(*) AS total, MAX(criado_em) AS ultima
-         FROM mensagens GROUP BY conversa_id, papel`,
-      [],
+         FROM mensagens ${soEsta === null ? '' : 'WHERE conversa_id = ?'}
+        GROUP BY conversa_id, papel`,
+      argSoEsta,
     ),
   )) {
     const atual = mensagens.get(m.conversa_id) ?? { pessoa: 0, agente: 0, ultima: '' }
@@ -175,8 +235,9 @@ export async function listarSessoes(
   }>(
     await db.query(
       `SELECT conversa_id, COUNT(*) AS total, SUM(houve_override) AS overrides
-         FROM bloqueios GROUP BY conversa_id`,
-      [],
+         FROM bloqueios ${soEsta === null ? '' : 'WHERE conversa_id = ?'}
+        GROUP BY conversa_id`,
+      argSoEsta,
     ),
   )) {
     bloqueios.set(b.conversa_id, { total: inteiro(b.total), overrides: inteiro(b.overrides) })
@@ -194,9 +255,9 @@ export async function listarSessoes(
               SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS erros,
               MAX(duracao_ms) AS max_ms
          FROM investigador_requisicoes
-        WHERE conversa_id IS NOT NULL
+        WHERE conversa_id IS NOT NULL${eSoEsta}
         GROUP BY conversa_id`,
-      [],
+      argSoEsta,
     ),
   )) {
     api.set(r.conversa_id, {
@@ -210,8 +271,8 @@ export async function listarSessoes(
   for (const s of linhasComoObjetos<{ conversa_id: string; issue_key: string | null }>(
     await db.query(
       `SELECT conversa_id, issue_key FROM submissoes
-        WHERE conversa_id IS NOT NULL AND issue_key IS NOT NULL`,
-      [],
+        WHERE conversa_id IS NOT NULL AND issue_key IS NOT NULL${eSoEsta}`,
+      argSoEsta,
     ),
   )) {
     if (s.issue_key) chamados.set(s.conversa_id, s.issue_key)
@@ -229,9 +290,9 @@ export async function listarSessoes(
     await db.query(
       `SELECT conversa_id, json_extract(dados_json, '$.motivo') AS motivo
          FROM investigador_eventos
-        WHERE tipo = 'ia_extracao_recusada' AND conversa_id IS NOT NULL
+        WHERE tipo = 'ia_extracao_recusada' AND conversa_id IS NOT NULL${eSoEsta}
         ORDER BY criado_em ASC, ordem ASC`,
-      [],
+      argSoEsta,
     ),
   )) {
     if (e.motivo) semProposta.set(e.conversa_id, e.motivo)
@@ -254,6 +315,7 @@ export async function listarSessoes(
       bloqueios: blo.total,
       overrides: blo.overrides,
       temProposta,
+      tituloDoCartao: tituloDaProposta(c.proposta_json),
       confirmadoEm: c.confirmado_em,
       issueKey: chamados.get(c.id) ?? null,
       requisicoes: req.total,
@@ -321,11 +383,24 @@ export function aplicarRecorte(
   }
 }
 
-/** O detalhe: eventos e requisições daquela conversa, na ordem em que aconteceram. */
+/**
+ * O detalhe: eventos e requisições daquela conversa, na ordem em que aconteceram.
+ *
+ * 🚨 **`sessao` entrou na spec 014 (`FR-33`), e a ausência dela era o defeito.** Esta função
+ * devolvia `{ eventos, requisicoes, mensagens }` e nada mais: quem abria uma sessão não tinha
+ * como saber de quem ela era, do que tratava, se virou chamado nem por que morreu — o dado
+ * existia em `SessaoInvestigador` e só a **lista** o consumia. Vem de `listarSessoes` com
+ * `conversaId`, nunca de um resumo próprio (ver `FiltroDeSessoes.conversaId`).
+ *
+ * ⚠️ **`null` quando a conversa não existe mais.** A retenção expurga (`FR-19`), e a tela
+ * distingue "expirou" de "não carregou" — 404 aqui viraria aviso de erro sobre um registro
+ * que só envelheceu, o mesmo raciocínio de `corposDaRequisicao`.
+ */
 export async function detalharSessao(
   db: Banco,
   conversaId: string,
 ): Promise<{
+  readonly sessao: SessaoInvestigador | null
   readonly eventos: readonly EventoLido[]
   readonly requisicoes: readonly RequisicaoInvestigador[]
   readonly mensagens: readonly {
@@ -370,7 +445,13 @@ export async function detalharSessao(
       [conversaId],
     ),
   )
-  return { eventos, requisicoes, mensagens }
+  /*
+    ⚠️ Sem recorte, de propósito: os recortes de `FR-13` são a pergunta da LISTA ("quais
+    sessões merecem atenção?"). Aplicá-los aqui faria abrir uma sessão saudável devolver
+    cabeçalho vazio — a tela afirmando que a conversa não existe porque ela está bem.
+  */
+  const sessoes = await listarSessoes(db, { conversaId, limite: 1 })
+  return { sessao: sessoes[0] ?? null, eventos, requisicoes, mensagens }
 }
 
 export interface FiltroDeRequisicoes {
