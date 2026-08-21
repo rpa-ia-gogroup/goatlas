@@ -251,6 +251,26 @@ describe('a conversa como diálogo (FR-34)', () => {
     expect(html).not.toContain('data-papel')
   })
 
+  it('o markdown do agente é RENDERIZADO — a pessoa não leu asteriscos', () => {
+    // 🚨 Medido em 21/08/2026: cru, a fala do agente chegava como
+    // `- [Como reprocessar…](/documentacao?pagina=p1)` e `**seu**` literais. Esta aba mostra
+    // o que a pessoa leu; quem quer o texto exato do modelo tem `ia_chat` na linha do tempo.
+    const itens = montarConversa(
+      [fala('m-1', 'assistant', ['use o **seu** caso', '- [A pagina](/documentacao?pagina=p1)'].join(String.fromCharCode(10)), QUANDO)],
+      [],
+    )
+    const html = renderToStaticMarkup(createElement(Conversa, { itens }))
+    expect(html).toContain('<strong>seu</strong>')
+    expect(html).toContain('href="/documentacao?pagina=p1"')
+    expect(html).not.toContain('**seu**')
+  })
+
+  it('a fala DELA fica crua — ela escreveu texto, não markdown', () => {
+    const itens = montarConversa([fala('m-1', 'user', 'o **Protheus** caiu', QUANDO)], [])
+    const html = renderToStaticMarkup(createElement(Conversa, { itens }))
+    expect(html).toContain('o **Protheus** caiu')
+  })
+
   it('conversa vazia DIZ que está vazia — nunca um retângulo em branco', () => {
     const html = renderToStaticMarkup(createElement(Conversa, { itens: [] }))
     expect(html).toContain('Nenhuma mensagem nesta conversa')

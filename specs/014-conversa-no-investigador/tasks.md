@@ -40,9 +40,29 @@ Cenários em [`spec.md`](./spec.md).
 
 ## Fase 4 — a rede
 
-- [x] **T-1413** `tests/014-conversa-no-investigador.test.ts` — 26 casos: o payload da rota, a
+- [x] **T-1413** `tests/014-conversa-no-investigador.test.ts` — 28 casos: o payload da rota, a
   ordem da conversa, a allowlist de marcos, a gravidade e a ausência de `data-lado`.
 - [x] **T-1414** Documentação no mesmo PR: `D-80`, `CLAUDE.md` (padrões + estado), esta spec.
+
+## Fase 5 — o que só o navegador viu
+
+- [x] **T-1417** ✅ **MEDIDO no `npm run dev`** em 21/08/2026, com uma sessão real (bloqueio da
+  Regra 1 + override). O que confirmou:
+  - a **lista** mostra o assunto na primeira linha e o e-mail abaixo;
+  - o **cabeçalho** traz título, `coletando`/`cartão na tela`/`1 override` (lime) e os seis
+    números;
+  - a **conversa** lê-se como diálogo, com o bloqueio e o override como marcos rotulados
+    (`O APP DECIDIU` × `A PESSOA FEZ`);
+  - **os 8 eventos da linha do tempo em `esq: 91`** — todos na espinha, nenhum `data-lado`;
+  - **todo `.inv-evento-linhas` com 18 px**, com 1, 2 ou 3 pares — antes eram ~20 px por par;
+  - altura média por evento de **127 px** (era ~145 em produção, com pares de 3);
+  - `scrollWidth === clientWidth`: nenhuma barra horizontal.
+- [x] **T-1418** 🚨 **Defeito achado só no navegador:** a fala do agente saía com o **markdown
+  cru** — `- [Como reprocessar…](/documentacao?pagina=p1)` e `**seu**` literais. Corrigido
+  reusando `TextoDoAgente`, o mesmo renderizador da conversa que a pessoa viu (allowlist de
+  forma, `R-07`, nunca `dangerouslySetInnerHTML`). ⚠️ A fala **dela** fica crua de propósito:
+  ela escreveu texto, não markdown. Dois casos novos.
+  ⚠️ **A suíte estava verde com o defeito** — a terceira vez na semana.
 
 ## O que falta, e não é código
 

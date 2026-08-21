@@ -1116,3 +1116,13 @@
     max-width: 100%;
   }
 }
+
+/*
+  ⚠️ `TextoDoAgente` traz `.fala-agente`, que tem `max-width: 68ch` — a medida da prosa na
+  conversa de verdade, onde a fala ocupa a coluna inteira. Dentro de uma bolha de 85% ela
+  encolheria o texto duas vezes, então aqui a medida é a bolha.
+*/
+.inv-fala .fala-agente {
+  max-width: none;
+  font-size: var(--fs-small);
+}

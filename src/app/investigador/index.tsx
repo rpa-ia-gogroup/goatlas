@@ -49,7 +49,7 @@ import {
   type ResumoInvestigador,
   type SessaoInvestigada,
 } from '../api'
-import { Aviso, Vazio } from '../componentes'
+import { Aviso, TextoDoAgente, Vazio } from '../componentes'
 import { aplicarRecorte, PARADA_HA_MINUTOS } from '@/lib/investigador/leitura'
 import {
   contagem,
@@ -723,7 +723,20 @@ export function Conversa({ itens }: { itens: readonly ItemDaConversa[] }) {
               <span className="inv-origem">{i.papel === 'pessoa' ? 'Pessoa' : 'Agente'}</span>
               <time dateTime={i.quando}>{formatarHora(i.quando)}</time>
             </div>
-            <p className="inv-fala-texto">{i.texto}</p>
+            {/*
+              ⚠️ O texto do agente passa por `TextoDoAgente`, o MESMO renderizador da
+              conversa que a pessoa viu — medido em 21/08/2026: cru, ele chegava como
+              `- [Como reprocessar…](/documentacao?pagina=p1)` e `**seu**` literais. Esta aba
+              existe para mostrar *o que a pessoa leu*; markdown cru é outra coisa, e quem
+              quer o texto exato do modelo tem a linha do tempo (`ia_chat`). E é ele porque
+              o link é allowlist de forma (`R-07`), nunca `dangerouslySetInnerHTML`.
+              A fala **dela** fica crua de propósito: ela escreveu texto, não markdown.
+            */}
+            {i.papel === 'agente' ? (
+              <TextoDoAgente texto={i.texto} />
+            ) : (
+              <p className="inv-fala-texto">{i.texto}</p>
+            )}
           </li>
         ) : i.tipo === 'ferramenta' ? (
           /*
