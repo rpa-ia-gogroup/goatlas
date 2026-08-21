@@ -49,9 +49,11 @@ export interface SessaoInvestigador {
 
 export interface FiltroDeSessoes {
   readonly email?: string | null
-  /** `sem_proposta` · `com_bloqueio` · `com_erro` · `abandonada` — ver `FR-13`. */
+  /** `sem_proposta` · `com_bloqueio` · `com_erro` · `abandonada` · `parada` — ver `FR-13`. */
   readonly recorte?: string | null
   readonly limite?: number | undefined
+  /** Só o recorte `parada` lê isto. Ausente, ele devolve lista vazia em vez de adivinhar. */
+  readonly agoraIso?: string | undefined
 }
 
 /** Uma linha do log de API. */
@@ -65,10 +67,31 @@ export interface RequisicaoInvestigador {
   readonly duracao_ms: number
   readonly req_bytes: number | null
   readonly resp_bytes: number | null
-  readonly req_json: string | null
-  readonly resp_json: string | null
   readonly erro: string | null
   readonly criado_em: string
+}
+
+/**
+ * As colunas de uma linha de log **sem os dois corpos** — spec 013, `FR-30`.
+ *
+ * 🚨 **`SELECT *` mandava `req_json` e `resp_json` em toda listagem**, até 500 linhas com dois
+ * corpos de até 16 mil caracteres cada, e a tela só lê um par quando alguém **expande** uma
+ * linha. Era o oposto do orçamento de `RNF-36`, na parte que ninguém vê até a conta chegar.
+ * Os corpos vêm por `corposDaRequisicao`, um por vez.
+ */
+const COLUNAS_SEM_CORPO =
+  'id, ator_email, conversa_id, metodo, caminho, status, duracao_ms, req_bytes, resp_bytes, erro, criado_em'
+
+/** Os dois corpos de UMA requisição — `FR-30`. `null` quando a linha não existe (ou expirou). */
+export async function corposDaRequisicao(
+  db: Banco,
+  id: string,
+): Promise<{ readonly req_json: string | null; readonly resp_json: string | null } | null> {
+  const linhas = linhasComoObjetos<{ req_json: string | null; resp_json: string | null }>(
+    await db.query(`SELECT req_json, resp_json FROM investigador_requisicoes WHERE id = ?`, [id]),
+  )
+  const linha = linhas[0]
+  return linha === undefined ? null : { req_json: linha.req_json, resp_json: linha.resp_json }
 }
 
 export interface EventoLido {
@@ -242,13 +265,27 @@ export async function listarSessoes(
     }
   })
 
-  return aplicarRecorte(itens, filtro.recorte ?? null)
+  return aplicarRecorte(itens, filtro.recorte ?? null, filtro.agoraIso)
 }
 
-/** `FR-13` — os quatro recortes que respondem às perguntas caras. */
-function aplicarRecorte(
+/** Acima disto, conversa sem chamado entra no recorte "parada" (spec 013, `FR-32`). */
+export const PARADA_HA_MINUTOS = 60
+
+/**
+ * `FR-13` — os recortes que respondem às perguntas caras.
+ *
+ * 🚨 **Exportado, e a tela usa ESTE.** A aba precisa contar quantas sessões há em cada
+ * recorte para escrever o número ao lado do rótulo (`FR-32`), e contar exige aplicar o
+ * predicado no cliente. Reescrevê-lo lá seria a segunda regra que diverge em silêncio — o
+ * defeito que `config/diagnostico.ts` existe para não repetir. O servidor continua aplicando
+ * o mesmo, para quem chama a rota direto.
+ *
+ * ⚠️ `agoraIso` só é lido pelo recorte `parada`; os outros não têm relógio de propósito.
+ */
+export function aplicarRecorte(
   itens: readonly SessaoInvestigador[],
   recorte: string | null,
+  agoraIso?: string,
 ): readonly SessaoInvestigador[] {
   switch (recorte) {
     case 'sem_proposta':
@@ -261,6 +298,24 @@ function aplicarRecorte(
     // quem veio pedir ajuda e foi embora sem ela.
     case 'abandonada':
       return itens.filter((s) => s.issueKey === null && s.mensagensDaPessoa > 0)
+    /*
+      "Parada" é a abandonada **com relógio**: sem chamado e sem atividade há mais de uma
+      hora. A distinção importa porque `abandonada` inclui a conversa que está acontecendo
+      agora — quem está no meio de uma frase aparece como quem desistiu.
+    */
+    case 'parada': {
+      if (agoraIso === undefined) return []
+      const corte = Date.parse(agoraIso) - PARADA_HA_MINUTOS * 60_000
+      return itens.filter(
+        (s) =>
+          s.issueKey === null &&
+          s.mensagensDaPessoa > 0 &&
+          // Carimbo ilegível não entra: afirmar "parada" sobre o que não se conseguiu ler
+          // é a mesma invenção que `diasParado: null` recusa em `D-55`.
+          Number.isFinite(Date.parse(s.ultimaAtividade)) &&
+          Date.parse(s.ultimaAtividade) < corte,
+      )
+    }
     default:
       return itens
   }
@@ -290,7 +345,7 @@ export async function detalharSessao(
   )
   const requisicoes = linhasComoObjetos<RequisicaoInvestigador>(
     await db.query(
-      `SELECT * FROM investigador_requisicoes WHERE conversa_id = ?
+      `SELECT ${COLUNAS_SEM_CORPO} FROM investigador_requisicoes WHERE conversa_id = ?
         ORDER BY criado_em ASC LIMIT 500`,
       [conversaId],
     ),
@@ -352,7 +407,7 @@ export async function listarRequisicoes(
   params.push(limite)
   return linhasComoObjetos<RequisicaoInvestigador>(
     await db.query(
-      `SELECT * FROM investigador_requisicoes
+      `SELECT ${COLUNAS_SEM_CORPO} FROM investigador_requisicoes
         ${condicoes.length > 0 ? `WHERE ${condicoes.join(' AND ')}` : ''}
         ORDER BY criado_em DESC LIMIT ?`,
       params,

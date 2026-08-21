@@ -119,6 +119,7 @@ import {
   listarRequisicoes,
   listarSessoes,
   resumoInvestigador,
+  corposDaRequisicao,
 } from '../investigador/leitura'
 
 export interface EnvCron {
@@ -2513,6 +2514,8 @@ async function rotear(
         email: url.searchParams.get('email'),
         recorte: url.searchParams.get('recorte'),
         limite: Number(url.searchParams.get('limite')) || undefined,
+        // O recorte "parada" é o único com relógio, e o relógio é o do servidor.
+        agoraIso: ctx.agora(),
       }),
       ligado: ctx.valores.investigador_ligado,
       retencaoDias: ctx.valores.investigador_retencao_dias,
@@ -2535,6 +2538,23 @@ async function rotear(
         limite: Number(url.searchParams.get('limite')) || undefined,
       }),
     })
+  }
+
+  /**
+   * Os dois corpos de UMA requisição — `FR-30`.
+   *
+   * ⚠️ **Rota própria de propósito.** A listagem devolve até 500 linhas e a tela lê um par de
+   * corpos por vez, quando alguém expande; mandá-los junto era carregar megabytes que ninguém
+   * abre. Mesmo gate de admin de todo o resto deste bloco.
+   */
+  const corposInvestigador = caminho.match(/^\/api\/investigador\/requisicoes\/([^/]+)\/corpos$/)
+  if (corposInvestigador && req.method === 'GET') {
+    if (!eu.isAdmin) return ERROS.semPermissao()
+    const corpos = await corposDaRequisicao(ctx.db, corposInvestigador[1]!)
+    // Linha inexistente (ou já expurgada por `FR-19`) responde com os dois nulos, não 404: a
+    // tela distingue "não registrado" de "vazio" pela frase, e um 404 aqui viraria um aviso
+    // de erro sobre um registro que simplesmente envelheceu.
+    return json(corpos ?? { req_json: null, resp_json: null })
   }
 
   if (caminho === '/api/investigador/resumo' && req.method === 'GET') {

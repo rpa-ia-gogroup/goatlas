@@ -1048,6 +1048,14 @@ export const api = {
   investigadorResumo: () => chamar<ResumoInvestigador>('/api/investigador/resumo'),
 
   /**
+   * Os dois corpos de uma chamada — `FR-30`.
+   *
+   * ⚠️ Sob demanda de propósito: a listagem traz até 500 linhas e a tela lê um par por vez.
+   */
+  investigadorCorpos: (id: string) =>
+    chamar<CorposDaRequisicao>(`/api/investigador/requisicoes/${encodeURIComponent(id)}/corpos`),
+
+  /**
    * `FR-8` — a tela declara que um campo mudou.
    *
    * ⚠️ **Nunca lança para quem chamou.** É registro de depuração: derrubar o preenchimento
@@ -1118,10 +1126,14 @@ export interface RequisicaoRegistrada {
   readonly duracao_ms: number
   readonly req_bytes: number | null
   readonly resp_bytes: number | null
-  readonly req_json: string | null
-  readonly resp_json: string | null
   readonly erro: string | null
   readonly criado_em: string
+}
+
+/** Os dois corpos, buscados só quando alguém expande a linha — spec 013, `FR-30`. */
+export interface CorposDaRequisicao {
+  readonly req_json: string | null
+  readonly resp_json: string | null
 }
 
 export interface DetalheDeSessao {

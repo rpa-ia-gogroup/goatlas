@@ -56,8 +56,6 @@ function requisicao(p: Partial<RequisicaoRegistrada>): RequisicaoRegistrada {
     duracao_ms: 24_300,
     req_bytes: null,
     resp_bytes: null,
-    req_json: null,
-    resp_json: null,
     erro: null,
     criado_em: '2026-08-20T12:00:30.000Z',
     ...p,
